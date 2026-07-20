@@ -194,3 +194,140 @@ object Delta:
           val vcs = ValidatedChangeSet(l.digest, module.digest, change, result.digest)
           (result.sorted, vcs) }
     }
+
+  /** Accept either a `changeset` node or a single bare change term (same
+    * tolerance as [[apply]]) and return its flat list of change items.
+    */
+  private def changeItems(l: ComposedLanguage, c: Cst): Either[String, List[Cst]] = c match
+    case Cst.Node(t, List(Cst.Node("list", xs))) if t == tag(l, "changeset") => Right(xs)
+    case Cst.Node(t, xs) if t == tag(l, "changeset")                        => Right(xs)
+    case single @ Cst.Node(t, _) if t.startsWith("add:") || t.startsWith("replace:") ||
+        t.startsWith("remove:") || t.startsWith("rename:") || t.startsWith("edit:") => Right(List(single))
+    case other => Left(s"not a ΔL changeset: ${other.render}")
+
+  private def moduleDefs(cst: Cst): Either[String, List[Cst]] = cst match
+    case Cst.Node("moduleFile", List(Cst.Node("list", defs))) => Right(defs)
+    case other => Left(s"not a module file: ${other.render}")
+
+  private def findDef(defs: List[Cst], name: String): Option[Cst] =
+    defs.find {
+      case Cst.Node("moduleDef", List(Cst.Leaf(n), _)) => n == name
+      case _ => false
+    }
+
+  /** Format-preserving ΔL apply (grammar-as-lens, part b): reprints only the
+    * bytes an edit actually touches, splicing into the ORIGINAL source text
+    * instead of [[apply]] + `Printer.print`'s whole-module canonical reprint.
+    * Built entirely on the existing, independently-tested `Concrete.splice`
+    * (M7, `Grammar.scala`) — no kernel or parser changes.
+    *
+    * Handles `replace` / `edit` (both are 1:1 subtree substitution — exactly
+    * what `Concrete.splice` already does) and `add` (pure insertion, no
+    * existing span to touch). `remove` and `rename` are NOT supported here,
+    * on purpose, and fail with an explicit `Left` rather than a silent
+    * fallback to canonical reprint:
+    *   - `remove` needs a design decision for the blank-line trivia left
+    *     around a deleted def that shouldn't be made unilaterally here.
+    *   - `rename` needs the parser to also record spans for bare `Cst.Leaf`
+    *     name tokens — today `spanned(...)` only wraps `Cst.Node`
+    *     construction, never `Elem.NameLeaf`'s result, so a def's own name
+    *     token has no span to splice against yet.
+    */
+  def applyPreservingFormat(l: ComposedLanguage, moduleGrammar: GrammarSpec,
+                            source: String, change: Cst): Either[String, String] =
+    changeItems(l, change).flatMap { chs =>
+      chs.foldLeft[Either[String, String]](Right(source)) { (acc, ch) =>
+        acc.flatMap(applyOnePreserving(l, moduleGrammar, _, ch))
+      }
+    }
+
+  private def applyOnePreserving(l: ComposedLanguage, mg: GrammarSpec, source: String, ch: Cst): Either[String, String] =
+    Parser.parseFull(mg, source).flatMap { out =>
+      moduleDefs(out.cst).flatMap { defs =>
+        ch match
+          case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "replace") =>
+            findDef(defs, name) match
+              case Some(Cst.Node(_, List(_, termInstance))) =>
+                Concrete.splice(mg, source, out, termInstance, term)
+              case _ => Left(s"ΔL replace (format-preserving): '$name' not defined")
+
+          case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
+            findDef(defs, name) match
+              case Some(Cst.Node(_, List(_, termInstance))) =>
+                subtreeAt(termInstance, pathOf(pathCst)).flatMap { target =>
+                  Concrete.splice(mg, source, out, target, term)
+                }
+              case _ => Left(s"ΔL edit (format-preserving): '$name' not defined")
+
+          case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>
+            if findDef(defs, name).isDefined then
+              Left(s"ΔL add (format-preserving): '$name' already defined (use replace)")
+            else
+              Printer.print(mg, Cst.node("moduleDef", Cst.Leaf(name), term)).map { printedDef =>
+                val real = out.tokens.filter(_.kind != TokKind.Eof)
+                val insertAt = real.lastOption.fold(0)(t => t.offset + t.rawLen)
+                val prefix = source.substring(0, insertAt)
+                val sep = if prefix.isEmpty || prefix.endsWith("\n") then "" else "\n"
+                prefix + sep + printedDef + "\n" + source.substring(insertAt)
+              }
+
+          case Cst.Node(t, _) if t == tag(l, "remove") =>
+            Left("format-preserving apply not yet supported for 'remove' — see Delta.applyPreservingFormat doc comment")
+          case Cst.Node(t, _) if t == tag(l, "rename") =>
+            Left("format-preserving apply not yet supported for 'rename' — see Delta.applyPreservingFormat doc comment")
+
+          case other => Left(s"not a ΔL change term: ${other.render}")
+      }
+    }
+
+  /** Compose two changesets by sequencing `cs2` after `cs1` — list
+    * concatenation, so `{}` is the identity and composition is associative
+    * for free. This alone is always correct: [[apply]]'s fold already gives
+    * any sequence (including e.g. `remove x ; add x = t`, or two renames
+    * chained through an intermediate name) the right semantics one step at a
+    * time. See [[collapseAdjacent]] for the separate, optional canonicalization
+    * pass that compresses a few adjacent pairs into one equivalent op.
+    */
+  def compose(l: ComposedLanguage, cs1: Cst, cs2: Cst): Either[String, Cst] =
+    for
+      xs1 <- changeItems(l, cs1)
+      xs2 <- changeItems(l, cs2)
+    yield Cst.node(tag(l, "changeset"), Cst.Node("list", xs1 ++ xs2))
+
+  private def footprintNames(fp: Cst): Set[String] = fp match
+    case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }.toSet
+    case Cst.Node("list", items)                         => items.collect { case Cst.Leaf(n) => n }.toSet
+    case _                                                => Set.empty
+
+  /** `SepBy1` requires at least one item — an empty footprint prints as
+    * `none`, never `some([])`, or it wouldn't round-trip under Δ's own grammar.
+    */
+  private def footprintCst(names: Set[String]): Cst =
+    val sorted = names.toList.sorted
+    if sorted.isEmpty then Cst.node("none")
+    else Cst.node("some", Cst.Node("list", sorted.map(Cst.Leaf(_))))
+
+  /** Optional canonicalization pass over a flat change list: collapses two
+    * adjacent, purely-cosmetic-to-compress patterns into a single equivalent
+    * op. Neither collapse changes what applying the changeset does — both
+    * exist so published/rebased changesets read as intent rather than as a
+    * derivation trace:
+    *   - `rename x→y ; rename y→z`  ⇒  `rename x→z` (footprints unioned, `y` dropped)
+    *   - `remove x   ; add x = t`   ⇒  `replace x = t`
+    * Anything else is left exactly as sequenced.
+    */
+  def collapseAdjacent(l: ComposedLanguage, chs: List[Cst]): List[Cst] = chs match
+    case Cst.Node(rt1, List(Cst.Leaf(x), Cst.Leaf(y1), fp1)) ::
+         Cst.Node(rt2, List(Cst.Leaf(y2), Cst.Leaf(z), fp2)) :: rest
+        if rt1 == tag(l, "rename") && rt2 == tag(l, "rename") && y1 == y2 && x != z =>
+      val merged = footprintCst((footprintNames(fp1) ++ footprintNames(fp2)) - y1)
+      collapseAdjacent(l, Cst.node(tag(l, "rename"), Cst.Leaf(x), Cst.Leaf(z), merged) :: rest)
+    case Cst.Node(rt, List(Cst.Leaf(x))) :: Cst.Node(at, List(Cst.Leaf(x2), term)) :: rest
+        if rt == tag(l, "remove") && at == tag(l, "add") && x == x2 =>
+      collapseAdjacent(l, Cst.node(tag(l, "replace"), Cst.Leaf(x), term) :: rest)
+    case head :: rest => head :: collapseAdjacent(l, rest)
+    case Nil => Nil
+
+  /** [[collapseAdjacent]] applied to a full changeset term. */
+  def collapse(l: ComposedLanguage, cs: Cst): Either[String, Cst] =
+    changeItems(l, cs).map(xs => Cst.node(tag(l, "changeset"), Cst.Node("list", collapseAdjacent(l, xs))))

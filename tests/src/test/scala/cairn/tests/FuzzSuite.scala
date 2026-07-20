@@ -97,6 +97,29 @@ class FuzzSuite extends munit.FunSuite:
         case None => ()
     generated
 
+  /** Law 2 (RoundTrip.fixpoint, see its object doc): canonicalization
+    * idempotence, string-first. `fuzz` above only checks Law 1 (retraction,
+    * term-first: parse(print(t)) == t) — this checks the complementary law
+    * starting from text, the shape an arbitrary hand-written or foreign
+    * input actually takes: print(parse(print(parse(s)))) == print(parse(s)).
+    */
+  private def fuzzFixpoint(g0: GrammarSpec, top: String, count: Int, seed: Long, depth: Int): Int =
+    val g = if g0.top == top then g0 else g0.copy(top = top)
+    val rnd = new scala.util.Random(seed)
+    var generated = 0
+    var attempts = 0
+    while generated < count && attempts < count * 4 do
+      attempts += 1
+      GrammarFuzz.gen(g, rnd, top, depth) match
+        case Some(t) =>
+          generated += 1
+          val text = Printer.print(g, t).fold(e => fail(s"[${g.name}] seed=$seed n=$generated: $e"), identity)
+          RoundTrip.fixpoint(g, text) match
+            case Right(()) => ()
+            case Left(err) => fail(s"[${g.name}] seed=$seed n=$generated\n$err")
+        case None => ()
+    generated
+
   test("M50: 10^5 fuzzed terms round-trip with zero failures"):
     var total = 0
     total += fuzz(Stlc.language.grammar, "term", 60_000, seed = 1L, depth = 4)
@@ -106,6 +129,34 @@ class FuzzSuite extends munit.FunSuite:
     total += fuzz(cairn.ledger.PolicyLang.language.grammar, "policyTerm", 5_000, seed = 5L, depth = 3)
     total += fuzz(JsonSurface.grammar, "json", 10_000, seed = 6L, depth = 4)
     assert(total >= 100_000, s"only $total terms generated")
+
+  test("M50: exemplar packs (PKI/Law/SDS/Riemann/Search) fuzz round-trip clean"):
+    // These packs only ever had hand-written golden-example round-trips before
+    // this test; nothing had exercised them under random generation.
+    var total = 0
+    total += fuzz(cairn.examples.pki.Pki.language.grammar, "registryItem", 5_000, seed = 10L, depth = 3)
+    total += fuzz(cairn.examples.law.Law.language.grammar, "lawObj", 5_000, seed = 11L, depth = 3)
+    total += fuzz(cairn.examples.sds.Sds.language.grammar, "sdsObj", 5_000, seed = 12L, depth = 3)
+    total += fuzz(cairn.examples.riemann.Riemann.language.grammar, "prop", 5_000, seed = 13L, depth = 4)
+    total += fuzz(cairn.examples.riemann.Riemann.LeanPort.grammar, "prop", 5_000, seed = 14L, depth = 4)
+    total += fuzz(cairn.examples.search.Search.language.grammar, "searchObj", 5_000, seed = 15L, depth = 3)
+    assert(total >= 25_000, s"only $total terms generated")
+
+  test("Law 2: canonicalization idempotence holds string-first across every shipped grammar"):
+    // Complements the term-first `fuzz` tests above with the other law that
+    // actually applies to this (parse, print) retraction pair (see
+    // RoundTrip's object doc) — starting from text, not from a term.
+    var total = 0
+    total += fuzzFixpoint(Stlc.language.grammar, "term", 5_000, seed = 20L, depth = 4)
+    total += fuzzFixpoint(cairn.examples.pki.Pki.language.grammar, "registryItem", 2_000, seed = 21L, depth = 3)
+    total += fuzzFixpoint(cairn.examples.law.Law.language.grammar, "lawObj", 2_000, seed = 22L, depth = 3)
+    total += fuzzFixpoint(cairn.examples.sds.Sds.language.grammar, "sdsObj", 2_000, seed = 23L, depth = 3)
+    total += fuzzFixpoint(cairn.examples.riemann.Riemann.language.grammar, "prop", 2_000, seed = 24L, depth = 4)
+    total += fuzzFixpoint(cairn.examples.riemann.Riemann.LeanPort.grammar, "prop", 2_000, seed = 25L, depth = 4)
+    total += fuzzFixpoint(cairn.examples.search.Search.language.grammar, "searchObj", 2_000, seed = 26L, depth = 3)
+    total += fuzzFixpoint(Query.language.grammar, "query", 2_000, seed = 27L, depth = 4)
+    total += fuzzFixpoint(cairn.ledger.PolicyLang.language.grammar, "policyTerm", 2_000, seed = 28L, depth = 3)
+    assert(total >= 15_000, s"only $total terms generated")
 
   test("M50: fuzzed JSON also survives the value-level encode/decode"):
     val rnd = new scala.util.Random(7L)

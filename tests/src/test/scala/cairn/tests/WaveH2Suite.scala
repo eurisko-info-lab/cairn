@@ -29,6 +29,29 @@ class WaveH2Suite extends munit.FunSuite:
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows - "traces")).isLeft)
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows + ("bogus" -> Capabilities.Row.Deferred("x")))).isLeft)
 
+  test("M43: Riemann/Search manifests build; obligations row can cite a real Claim"):
+    val riemannM = Capabilities.build(cairn.examples.riemann.Riemann.language, Map.empty)
+      .fold(e => fail(e), identity)
+    assertEquals(Capabilities.requiredRows.toSet, riemannM.rows.keySet)
+    // The default "obligations" row is a decorative per-language marker — Capabilities
+    // lives in L1 and can't see example-layer Claims (rule 11 layering). `extra`
+    // exists precisely so a pack with a real Claim can cite its actual digest.
+    val riemannClaim = cairn.examples.riemann.Riemann.riemannHypothesisClaim
+    val riemannClaimM = Capabilities.build(cairn.examples.riemann.Riemann.language,
+      Map("obligations" -> Capabilities.Row.Present(riemannClaim.artifact.digest)))
+      .fold(e => fail(e), identity)
+    assertEquals(riemannClaimM.rows("obligations"), Capabilities.Row.Present(riemannClaim.artifact.digest))
+    assert(riemannClaimM.rows("obligations") != riemannM.rows("obligations"),
+      "override must actually change which digest 'obligations' points at")
+
+    val searchClaim = cairn.examples.search.Search.goalMetClaim(cairn.examples.search.Search.seedBoard)
+    val searchM = Capabilities.build(cairn.examples.search.Search.language,
+      Map("obligations" -> Capabilities.Row.Present(searchClaim.artifact.digest)))
+      .fold(e => fail(e), identity)
+    assertEquals(Capabilities.requiredRows.toSet, searchM.rows.keySet)
+    assert(searchM.rows("judgments").isInstanceOf[Capabilities.Row.Present],
+      "search.cairn declares wellFormed/goalMet judgments")
+
   test("M43: interpreters/judgments present for stlc, deferred honestly elsewhere"):
     val m = Capabilities.build(Stlc.language, Map.empty).toOption.get
     assert(m.rows("interpreters").isInstanceOf[Capabilities.Row.Present])

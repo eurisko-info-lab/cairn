@@ -483,8 +483,31 @@ object Printer:
 
     go(cst, 0).map(_ => sb.result())
 
-/** Round-trip law suite hooks (S11, M31). */
+/** Round-trip law suite hooks (S11, M31).
+  *
+  * `(parse, print)` is a **retraction/section pair over `Term`**, not a
+  * classical asymmetric lens: [[Printer.print]] takes no source string, so
+  * there is no `put(a, s)` that could thread an *existing* string's
+  * unrepresented details (whitespace, comments) back through an edit — only
+  * `print(a)`, which always regenerates canonical text from scratch. Given
+  * that signature, exactly two laws type-check (and are load-bearing here);
+  * a third law asking for byte-exact reproduction of arbitrary hand-written
+  * input (`print(parse(s)) == s`) does not apply and is not claimed — see
+  * `§2` "Bidirectional grammar... modulo holes/whitespace policy".
+  *
+  *   1. **Retraction** ([[check]]): `parse(print(t)) == t` for every term —
+  *      printing then reparsing never loses or alters structure.
+  *   2. **Canonicalization idempotence** ([[fixpoint]]):
+  *      `print(parse(print(parse(s)))) == print(parse(s))` for every parseable
+  *      string `s` — `print∘parse` is a retraction onto a canonical-text
+  *      fixpoint, so re-running it never moves the text again.
+  *
+  * A true lens (`put: A × S → S` preserving what an edit didn't touch) is a
+  * separate, currently-absent capability — format-preserving structural
+  * editing — not a restatement of these two.
+  */
 object RoundTrip:
+  /** Law 1: retraction (see object doc) — `parse(print(t)) == t`. */
   def check(g: GrammarSpec, term: Cst): Either[String, Unit] =
     for
       printed <- Printer.print(g, term)
@@ -493,7 +516,9 @@ object RoundTrip:
            else Left(s"round-trip mismatch:\n  original: ${term.render}\n  printed:  $printed\n  reparsed: ${reparsed.render}")
     yield ()
 
-  /** print∘parse∘print byte fixpoint on emitted text (whole-file discipline). */
+  /** Law 2: canonicalization idempotence (see object doc) — print∘parse∘print
+    * byte fixpoint on emitted text (whole-file discipline).
+    */
   def fixpoint(g: GrammarSpec, text: String): Either[String, Unit] =
     for
       t <- Parser.parse(g, text)
