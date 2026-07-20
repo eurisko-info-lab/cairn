@@ -121,9 +121,11 @@ object Stlc:
         InferRule("l-here", Nil,
           n("lookup", n("ctxCons", mv("x"), mv("T"), mv("r")), mv("x"), mv("T"))),
         InferRule("l-there", List(n("lookup", mv("r"), mv("x"), mv("T"))),
-          n("lookup", n("ctxCons", mv("y"), mv("S"), mv("r")), mv("x"), mv("T"))))),
+          n("lookup", n("ctxCons", mv("y"), mv("S"), mv("r")), mv("x"), mv("T")),
+          // M19: without this side condition a shadowed binding could be typed
+          conditions = List(n("$neq", mv("x"), mv("y")))))),
       JudgmentDef("hasType", List(
-        InferRule("t-var", List(n("lookup", mv("ctx"), mv("x"), mv("T"))),
+        InferRule("t-var", List(n("$ctx-lookup", mv("ctx"), mv("x"), mv("T"))),
           n("hasType", mv("ctx"), n("var", mv("x")), mv("T"))),
         InferRule("t-abs", List(n("hasType", n("ctxCons", mv("x"), mv("T"), mv("ctx")), mv("b"), mv("U"))),
           n("hasType", mv("ctx"), n("lam", mv("x"), mv("T"), mv("b")), n("arrow", mv("T"), mv("U")))),

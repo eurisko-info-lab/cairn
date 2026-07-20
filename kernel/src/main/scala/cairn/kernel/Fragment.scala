@@ -28,8 +28,13 @@ final case class RewriteRule(name: String, pattern: Cst, template: Cst)
 
 /** Declarative inference rule for judgments (typing, well-formedness):
   * premises and conclusion are Cst patterns over judgment forms.
+  * `conditions` (M19) are side conditions evaluated after matching, encoded as
+  * Cst: `$neq(a,b)` disequality, `$fresh(x,t)` freshness, `$le(a,b)`/`$lt(a,b)`
+  * numeric comparison — plus checker-registered extensions (e.g. signature
+  * verification for PKI).
   */
-final case class InferRule(name: String, premises: List[Cst], conclusion: Cst)
+final case class InferRule(name: String, premises: List[Cst], conclusion: Cst,
+                           conditions: List[Cst] = Nil)
 final case class JudgmentDef(name: String, rules: List[InferRule])
 
 final case class GrammarPart(
@@ -200,7 +205,8 @@ object FragmentCodec:
       "rules" -> CList(j.rules.map(r => Canon.cmap(
         "name" -> CStr(r.name),
         "premises" -> CList(r.premises.map(Cst.toCanon)),
-        "conclusion" -> Cst.toCanon(r.conclusion))))))),
+        "conclusion" -> Cst.toCanon(r.conclusion),
+        "conditions" -> CList(r.conditions.map(Cst.toCanon)))))))),
     "varCtor" -> f.varCtor.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))))
 
   def fromCanon(c: Canon): Fragment =
@@ -231,7 +237,8 @@ object FragmentCodec:
         j.field("rules").asList.map(r => InferRule(
           r.field("name").asStr,
           r.field("premises").asList.map(Cst.fromCanon),
-          Cst.fromCanon(r.field("conclusion")))))),
+          Cst.fromCanon(r.field("conclusion")),
+          r.field("conditions").asList.map(Cst.fromCanon))))),
       varCtor = c.field("varCtor") match
         case CTag("some", CStr(s)) => Some(s)
         case _                     => None)

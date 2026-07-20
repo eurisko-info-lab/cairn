@@ -22,11 +22,10 @@ object Claims:
       Derivation("t-abs",
         n("hasType", ctxNil, idTerm, n("arrow", n("tyBool"), n("tyBool"))),
         List(
+          // t-var's lookup premise is computational ($ctx-lookup): no sub-derivation
           Derivation("t-var",
             n("hasType", n("ctxCons", Cst.Leaf("x"), n("tyBool"), ctxNil), Stlc.v("x"), n("tyBool")),
-            List(Derivation("l-here",
-              n("lookup", n("ctxCons", Cst.Leaf("x"), n("tyBool"), ctxNil), Cst.Leaf("x"), n("tyBool")),
-              Nil))))),
+            Nil))),
       Derivation("t-true", n("hasType", ctxNil, n("true"), n("tyBool")), Nil)))
 
   def typingJudgments: List[JudgmentDef] =
