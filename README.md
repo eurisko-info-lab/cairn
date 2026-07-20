@@ -34,8 +34,9 @@ The sbt module graph enforces the import DAG:
 
 ```bash
 sbt test                                                          # all acceptance suites + 100k fuzz corpus
-sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"   # end-to-end MVP
-sbt "examples/runMain cairn.examples.Main transcript transcripts/max.cairn"   # maximal: 3 nodes, gossip, ports, queries
+sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"   # seed $CAIRN_HOME (default ./.cas)
+sbt "examples/runMain cairn.examples.Main home"                      # print CAIRN_HOME / ui root
+sbt "examples/runMain cairn.examples.Main ui"                        # Web explorer → http://127.0.0.1:8765
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
 sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest
 sbt "examples/runMain cairn.examples.Bench"                       # benchmarks
@@ -62,4 +63,4 @@ fixpoint in [languages/meta.cairn](languages/meta.cairn)). Exemplar apps
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),
   [docs/distribution.md](docs/distribution.md), [docs/exemplars.md](docs/exemplars.md),
-  [docs/assumptions.md](docs/assumptions.md)
+  [docs/assumptions.md](docs/assumptions.md), [docs/explorer.md](docs/explorer.md)

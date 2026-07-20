@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cairn Explorer</title>
+  <link rel="stylesheet" href="/ui/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <h1>Cairn Explorer</h1>
+        <p class="sub">Local ledger &amp; CAS — typed viewers</p>
+      </div>
+    </div>
+    <nav class="tabs" id="nav">
+      <button data-route="overview" class="active">Overview</button>
+      <button data-route="chain">Chain</button>
+      <button data-route="cas">CAS</button>
+      <button data-route="languages">Languages</button>
+    </nav>
+  </header>
+
+  <main>
+    <aside id="list" class="panel"></aside>
+    <section id="detail" class="panel detail">
+      <p class="muted">Select a block, artifact, or language.</p>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

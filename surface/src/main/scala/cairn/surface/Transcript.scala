@@ -90,8 +90,28 @@ object Transcript:
         PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
 
-  final case class Report(name: String, steps: List[String]):
-    def render: String = (s"transcript '$name':" :: steps.map("  ✓ " + _)).mkString("\n")
+  final case class Report(name: String, steps: List[String], workDir: Path, nodes: List[(String, Path)] = Nil):
+    def render: String =
+      val body = (s"transcript '$name':" :: steps.map("  ✓ " + _)).mkString("\n")
+      val nodeLines =
+        if nodes.isEmpty then Nil
+        else
+          "" :: "blockchain nodes:" :: nodes.sortBy(_._1).map { (n, p) =>
+            val abs = p.toAbsolutePath.normalize
+            val tip = if Files.exists(abs.resolve("chain")) then " (has chain)" else ""
+            s"  $n = $abs$tip"
+          }
+      val browse =
+        nodes.find(_._1 == "nodeA").orElse(nodes.headOption) match
+          case Some((_, p)) =>
+            val abs = p.toAbsolutePath.normalize
+            List(
+              "",
+              s"explorer: sbt \"examples/runMain cairn.examples.Main ui $abs\"",
+              s"         → http://127.0.0.1:8765  (serving $abs)")
+          case None =>
+            List("", s"workDir: ${workDir.toAbsolutePath.normalize}")
+      (body :: nodeLines ++ browse).mkString("\n")
 
   /** Interpret a transcript against a working directory. `packs` is the
     * language registry (domain packs stay out of the surface layer — they are
@@ -113,9 +133,15 @@ object Transcript:
     var module = Module(Nil)
     val authority = Keypair.dev("dev-authority")
     def authorities = Map(authority.name -> authority.publicBytes)
-    val nodes = scala.collection.mutable.Map[String, Node]()
-    def nodeOf(n: String): Node = nodes.getOrElseUpdate(n, Node(workDir.resolve(n)))
     val log = List.newBuilder[String]
+    val nodes = scala.collection.mutable.LinkedHashMap[String, Node]()
+    def nodeOf(n: String): Node =
+      nodes.getOrElseUpdate(n, {
+        val path = workDir.resolve(n).toAbsolutePath.normalize
+        Files.createDirectories(path)
+        log += s"node $n at $path"
+        Node(path)
+      })
 
     def need: Either[String, ComposedLanguage] = lang.toRight("no language selected (use `lang NAME ;` first)")
     def parseIn(l: ComposedLanguage, s: String): Either[String, Cst] = Parser.parse(l.grammar, s)
@@ -133,7 +159,10 @@ object Transcript:
             authority.signTx(Tx.PublishArtifact(module.artifact.key)),
             authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
         node.append(authority, authorities, txs)
-          .map(b => log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}")
+          .map { b =>
+            log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}"
+            log += s"blockchain node: ${node.root.toAbsolutePath.normalize}"
+          }
       }
 
     def fetchBetween(branch: String, fromN: String, toN: String): Either[String, Unit] =
@@ -157,7 +186,7 @@ object Transcript:
             packs = packs + (l.name -> l)
             log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
         case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
-          nodeOf(n); log += s"node $n ready"; Right(())
+          nodeOf(n); Right(())
         case Cst.Node("roundtrip", List(Cst.Leaf(s))) =>
           for
             l <- need
@@ -249,7 +278,11 @@ object Transcript:
 
     val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
       acc.flatMap(_ => runStep(step)) }
-    result.map(_ => Report(name, log.result()))
+    result.map(_ => Report(
+      name,
+      log.result(),
+      workDir.toAbsolutePath.normalize,
+      nodes.toList.map((n, node) => (n, node.root.toAbsolutePath.normalize))))
 
 /** Generic CLI (S6, M40, M42, M43, M44): hash / put / get / canon over a disk
   * CAS, transcripts, provenance walking, capability manifests, REPL, and LSP.
@@ -262,11 +295,39 @@ object Cli:
 
   def main(args: List[String], packsIn: Map[String, ComposedLanguage],
            portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, String] =
-    val casDir = Path.of(sys.env.getOrElse("CAIRN_HOME", ".cas"))
+    /** Durable store root. Override with env `CAIRN_HOME`.
+      * Default: `./.cas`. Each transcript writes a fresh run under
+      * `$CAIRN_HOME/runs/<timestamp>/{nodeA,nodeB,…}` and prints those paths.
+      * `ui` opens the latest run's `nodeA` (via `$CAIRN_HOME/LATEST`).
+      */
+    val home = Path.of(sys.env.getOrElse("CAIRN_HOME", ".cas")).toAbsolutePath.normalize
+    val casDir = home
     def cas = DiskCas(casDir)
-    // PackLoader closes PKI→Law→SDS via fragment requires; self-contained packs compose alone.
+    def defaultUiRoot: Path =
+      val latestFile = home.resolve("LATEST")
+      val fromLatest =
+        if Files.isRegularFile(latestFile) then
+          val nodeA = Path.of(Files.readString(latestFile).trim).resolve("nodeA")
+          if Files.exists(nodeA.resolve("chain")) then Some(nodeA) else None
+        else None
+      fromLatest.getOrElse {
+        val nodeA = home.resolve("nodeA")
+        if Files.exists(nodeA.resolve("chain")) then nodeA
+        else if Files.exists(home.resolve("chain")) then home
+        else nodeA
+      }
     val packs = packsIn ++ PackLoader.loadClosed() ++ loadLanguages(Path.of("languages"))
     args match
+      case List("home") =>
+        val latest = Option.when(Files.isRegularFile(home.resolve("LATEST")))(
+          Files.readString(home.resolve("LATEST")).trim)
+        Right(
+          s"""CAIRN_HOME=$home
+             |env=${sys.env.getOrElse("CAIRN_HOME", "<unset> (default ./.cas)")}
+             |latest-run=${latest.getOrElse("<none>")}
+             |ui-default=$defaultUiRoot
+             |ui-has-chain=${Files.exists(defaultUiRoot.resolve("chain"))}
+             |""".stripMargin.trim)
       case List("hash", file) =>
         Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)
       case List("put", file) =>
@@ -279,8 +340,16 @@ object Cli:
         Canon.decode(bs).map(c => Digest.of(c).hex)
       case List("transcript", file) =>
         val src = Files.readString(Path.of(file))
-        val work = Files.createTempDirectory("cairn-transcript")
-        Transcript.run(src, packs, work, portModules).map(_.render)
+        val runId = java.time.LocalDateTime.now()
+          .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val runDir = home.resolve("runs").resolve(runId).toAbsolutePath.normalize
+        Files.createDirectories(runDir)
+        Transcript.run(src, packs, runDir, portModules).map { r =>
+          // Remember latest publisher for bare `ui`
+          val latest = home.resolve("LATEST")
+          Files.writeString(latest, runDir.toString + "\n")
+          r.render
+        }
       case List("why", hex) =>
         Digest.parse(hex).map { d =>
           val hops = cairn.ledger.Provenance.why(casDir, d)
@@ -304,5 +373,26 @@ object Cli:
       case List("lsp", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'").map { l =>
           Lsp.serve(LspConfig(l), System.in, System.out); "lsp session ended" }
+      case "ui" :: rest =>
+        val portOpt = rest.lastOption.filter(s => s.forall(_.isDigit) && s.nonEmpty).map(_.toInt)
+        val rootArg = rest match
+          case Nil => None
+          case ps if portOpt.isDefined && ps.length >= 2 => Some(Path.of(ps.dropRight(1).mkString("/")))
+          case ps if portOpt.isDefined => None
+          case ps => Some(Path.of(ps.mkString("/")))
+        val root = rootArg.map(_.toAbsolutePath.normalize).getOrElse(defaultUiRoot)
+        val port = portOpt.getOrElse(8765)
+        Files.createDirectories(root)
+        val bound = BrowserServer.serve(root, packs, port)
+        System.out.println(s"Cairn Explorer at http://127.0.0.1:$bound")
+        System.out.println(s"CAIRN_HOME=$home")
+        System.out.println(s"serving root=$root")
+        if !Files.exists(root.resolve("chain")) then
+          System.out.println("NOTE: empty node (no chain file). Seed then reopen ui:")
+          System.out.println("""  sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"""")
+          System.out.println(s"  (writes $home/nodeA)")
+        System.out.println("Press Enter to stop.")
+        scala.io.StdIn.readLine()
+        Right("ui stopped")
       case _ =>
-        Left("usage: cairn [hash|put|get|canon|transcript|why|capabilities|languages|repl|lsp] <arg>")
+        Left("usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repl|lsp|ui] <arg>")
