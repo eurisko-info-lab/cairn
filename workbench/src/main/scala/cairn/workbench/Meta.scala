@@ -474,3 +474,134 @@ object Meta:
   /** Render a whole language as meta-surface text. */
   def printLanguage(name: String, fragments: List[Fragment]): Either[String, String] =
     Printer.print(grammar, encodeLanguage(name, fragments))
+
+  /** Format-preserving regeneration: reprints ONLY the declarations that
+    * actually changed, splicing original source bytes — comments included,
+    * via each item's leading trivia (same primitive as `Concrete.put`) —
+    * for every declaration whose canonical content is unchanged from
+    * `currentText`. Scoped to the one shape every checked-in exemplar
+    * (`languages/{pki,law,sds,search}.cairn`) actually has: one `language`
+    * block, one `fragment` block. Falls back to a full canonical reprint
+    * (identical to [[printLanguage]]) whenever that shape doesn't hold, or
+    * a fragment's declaration COUNT changed (an add/remove) — an honest
+    * degradation: preserving trivia across an insertion needs knowing which
+    * comment belongs to which SURVIVING declaration, which is genuinely
+    * ambiguous, not a case worth guessing at.
+    */
+  def printLanguagePreservingFormat(name: String, fragments: List[Fragment], currentText: String): Either[String, String] =
+    def fullReprint: Either[String, String] = printLanguage(name, fragments)
+    if fragments.length != 1 then fullReprint
+    else
+      Parser.parseFull(grammar, currentText) match
+        case Left(_) => fullReprint
+        case Right(out) =>
+          (out.cst, encodeLanguage(name, fragments)) match
+            case (Cst.Node("file", List(Cst.Leaf(n2), Cst.Node("list", List(origFragCst)))),
+                  Cst.Node("file", List(_, Cst.Node("list", List(canonFragCst))))) if n2 == name =>
+              (origFragCst, canonFragCst) match
+                case (Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", origItems))),
+                      Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", canonItems))))
+                    if origItems.length == canonItems.length =>
+                  spliceItems(out, currentText, origItems, canonItems) match
+                    case Left(_) => fullReprint
+                    case Right(itemsText) =>
+                      val f = fragments.head
+                      val prov = if f.provides.isEmpty then "" else s" provides ${f.provides.mkString(", ")}"
+                      val req = if f.requires.isEmpty then "" else s" requires ${f.requires.mkString(", ")}"
+                      val leading = out.tokens.headOption.map(_.leading).getOrElse("")
+                      // no trailing newline after the final "}" — matches printLanguage's
+                      // own file PrintRule, whose last segment is a bare Lit("}")
+                      Right(s"$leading" + s"language $name {\n  fragment ${f.name}$prov$req {" +
+                        itemsText + "\n  }\n}")
+                case _ => fullReprint
+            case _ => fullReprint
+
+  /** One spliced-or-freshly-printed piece per item, each carrying its own
+    * leading separator (spliced pieces bring their original "\n" + indent +
+    * any comment verbatim; fresh pieces get a matching "\n    " manually) —
+    * concatenating them needs no join separator of its own. Splices from
+    * `out`/`source` (only that side has real spans — `canonItems` is
+    * freshly constructed by `encode`, never parsed from anything); prints
+    * the OTHER side (`canonItems`) when an item differs, since that's the
+    * intended new content.
+    */
+  private def spliceItems(out: ParseOut, source: String, origItems: List[Cst], canonItems: List[Cst]): Either[String, String] =
+    seq(origItems.zip(canonItems).map { (oi, ci) =>
+      if oi == ci then
+        out.spans.get(oi).toRight("spliceItems: item has no recorded span").map { (startTok, endTok) =>
+          val prev = out.tokens(startTok - 1) // always > 0: items are never the file's first token
+          val startOff = prev.offset + prev.rawLen
+          val endOff = if endTok == 0 then startOff else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+          source.substring(startOff, endOff)
+        }
+      else
+        Printer.print(grammar, ci).map(t => "\n    " + t.replace("\n", "\n    "))
+    }).map(_.mkString)
+
+  /** Same idea as [[spliceItems]], but for comparing two PARSED texts rather
+    * than fragments-vs-text: `workOut`/`workingText` is both the comparison
+    * target AND the only side with real spans to splice from; `refItems`
+    * (from a separate baseline parse, e.g. git HEAD) is comparison-only.
+    * When an item differs, the WORK item is printed (canonically — printing
+    * a Cst is always canonical regardless of how it was typed), since work
+    * is the intended new content here, not ref.
+    */
+  private def spliceItemsVsReference(workOut: ParseOut, workingText: String,
+                                     refItems: List[Cst], workItems: List[Cst]): Either[String, String] =
+    seq(refItems.zip(workItems).map { (ref, work) =>
+      if ref == work then
+        workOut.spans.get(work).toRight("spliceItemsVsReference: item has no recorded span").map { (startTok, endTok) =>
+          val prev = workOut.tokens(startTok - 1)
+          val startOff = prev.offset + prev.rawLen
+          val endOff = if endTok == 0 then startOff else { val last = workOut.tokens(endTok - 1); last.offset + last.rawLen }
+          workingText.substring(startOff, endOff)
+        }
+      else
+        Printer.print(grammar, work).map(t => "\n    " + t.replace("\n", "\n    "))
+    }).map(_.mkString)
+
+  private def optClauseNames(c: Cst): List[String] = c match
+    case Cst.Node("some", List(Cst.Node(_, List(Cst.Node("list", items))))) =>
+      items.collect { case Cst.Leaf(n) => n }
+    case _ => Nil
+
+  /** Format-preserving regeneration against a SEPARATE baseline text (e.g.
+    * git HEAD's checked-in version), for the case where the working text
+    * itself — not an independent Scala source — already carries whatever
+    * edits (and any newly-added comments) should be kept: only declarations
+    * that differ from `referenceText` get canonically reprinted; everything
+    * identical to the reference is spliced verbatim from `workingText`,
+    * comments included. This is what keeps it sound as a companion to CI's
+    * canonical-form check: a declaration being edited always gets a fresh
+    * canonical reprint no matter how it's typed, so only content that
+    * ALREADY passed that check at the reference commit gets to keep its
+    * formatting — nothing new can sneak through non-canonical.
+    *
+    * Same scoping and fallback rules as [[printLanguagePreservingFormat]]
+    * (single fragment, matching declaration counts; full reprint of
+    * `workingText`'s own content otherwise).
+    */
+  def printLanguagePreservingFormatVsReference(name: String, workingText: String, referenceText: String): Either[String, String] =
+    def fullReprint: Either[String, String] =
+      parseLanguageAst(workingText).flatMap((n2, fs) => printLanguage(n2, fs))
+    (Parser.parseFull(grammar, workingText), Parser.parseFull(grammar, referenceText)) match
+      case (Right(workOut), Right(refOut)) =>
+        (workOut.cst, refOut.cst) match
+          case (Cst.Node("file", List(Cst.Leaf(n2), Cst.Node("list", List(workFragCst)))),
+                Cst.Node("file", List(Cst.Leaf(n3), Cst.Node("list", List(refFragCst))))) if n2 == name && n3 == name =>
+            (workFragCst, refFragCst) match
+              case (Cst.Node("fragmentDecl", List(Cst.Leaf(fname), provCst, reqCst, Cst.Node("list", workItems))),
+                    Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", refItems))))
+                  if workItems.length == refItems.length =>
+                spliceItemsVsReference(workOut, workingText, refItems, workItems) match
+                  case Left(_) => fullReprint
+                  case Right(itemsText) =>
+                    val provides = optClauseNames(provCst)
+                    val requires = optClauseNames(reqCst)
+                    val prov = if provides.isEmpty then "" else s" provides ${provides.mkString(", ")}"
+                    val req = if requires.isEmpty then "" else s" requires ${requires.mkString(", ")}"
+                    val leading = workOut.tokens.headOption.map(_.leading).getOrElse("")
+                    Right(s"$leading" + s"language $name {\n  fragment $fname$prov$req {" + itemsText + "\n  }\n}")
+              case _ => fullReprint
+          case _ => fullReprint
+      case _ => fullReprint
