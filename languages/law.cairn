@@ -1,5 +1,4 @@
 language law {
-  -- Statute objects. Free ΔL duals via Delta.deltaOf(law) only (not checked in).
   fragment statutes provides law requires cert {
     sort LawObj tree;
     ctor section : LawObj(Number, Heading, Text);

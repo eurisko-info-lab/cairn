@@ -1,7 +1,4 @@
 language search {
-  -- Fact–Intent–Hint board (oritera-style search spine as object language).
-  -- Free ΔL duals via Delta.deltaOf(search) only — never materialized.
-  -- Standalone (no requires); workers/LLM/dispatcher stay in host surface.
   fragment board provides search {
     sort Fact tree;
     sort Intent tree;
@@ -44,8 +41,6 @@ language search {
     print supports : lit "supports" sp field 0 sp field 1;
     print spawns : lit "spawns" sp field 0 sp field 1;
     print board : lit "board (" field 0 lit ")";
-    -- Open stubs: host Search.wellFormed / goalMet + Claim certificates gate
-    -- edges; language-file rules stay proof-free placeholders (§2 Claim vs Theorem).
     judgment wellFormed {
       rule wf-any :  |- wellFormed($x);
     }

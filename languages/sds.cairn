@@ -1,6 +1,4 @@
 language sds {
-  -- Safety Data Sheet objects. Free ΔL duals via Delta.deltaOf(sds) only
-  -- (not checked in).
   fragment sds-objects provides sds requires law {
     sort SdsObj tree;
     ctor substance : SdsObj(Cas, Label);

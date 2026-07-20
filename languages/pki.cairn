@@ -1,6 +1,4 @@
 language pki {
-  -- Certificate registry object language. Free ΔL (add/remove/…) is derived
-  -- by Delta.deltaOf(pki) only — never materialized as a .cairn file.
   fragment certs provides cert {
     sort RegistryItem tree;
     ctor cert : RegistryItem(Name, Hex, Name, Hex, Instant, Instant);
