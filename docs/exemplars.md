@@ -67,10 +67,78 @@ Cairn ships a real thin surface because nets are real.
 
 Remaining: numbers/recursion primitives; HVM strict/lazy modes.
 
-## Unison — ideas pack (intentional)
+## Unison Core — a real domain language on Cairn's substrate (§2c)
 
-α-invariant digests + name aliases + patch-as-ΔL. Not a Unison fork.
-Remaining: hash-linked call graphs; type-preserving edit propagation.
+`languages/unisoncore.cairn` + `examples/unison` (`UnisonCore` glue +
+`Unison` store/codebase). Was an "ideas pack" (α-invariant digests + name
+aliases + patch-as-ΔL over *borrowed* STLC terms); §2c/§5b's amendment
+sanctioned a real term language for that store, not a Unison fork — Unison
+still informs L0/L1/L5 more than any one domain ADT (§5b).
+
+- Closed built-in ADTs — `List`/`cons`/`nil`, `Option`/`some`/`none` — plus
+  general application/lambda (STLC's own shape) and pattern matching as a
+  small fixed family of match forms (`matchList`/`matchOption`, two- and
+  one-binder respectively), not a general user-declarable-ADT mechanism —
+  same honest, closed-set limitation as MiniTT's hardcoded `Nat`.
+- One minimal ability, `Abort` (`abort`/`handle ... with ...`),
+  non-resumptive (REffectV2's "unit-typed ops" simplicity, not general
+  algebraic effects). `handle`'s reduction is one rule per closed value
+  shape rather than one generic passthrough rule: `compute.TreeEngine`'s
+  normal-order rewriting tries root rules before recursing into children,
+  so a generic `handle($v,$h) => $v` would fire on an unreduced body
+  immediately, discarding it before it ever gets the chance to reduce to
+  `abort()`.
+- Simply typed (`arrow`/`List`/`Option`/`Unit`); types are never reduced,
+  so unlike MiniTT there is no `$defeq`/`t-conv` — `hasType` needs zero
+  `CheckerCfg` extensions.
+- `Unison.Store`/`Codebase`/`applyPatch` (M48) are unchanged in shape —
+  they already demonstrated the substrate properties (content-addressed
+  dedup, patch-as-ΔL) — only the *stored* term language changed, from
+  borrowed STLC to real UnisonCore terms. `Store`'s `BinderSpec` now reads
+  from `UnisonCore.language` directly instead of a hand-hardcoded `lam`-only
+  map, so `Alpha.digest`/`normalize` see `matchList`/`matchOption`'s pattern
+  binders too.
+- Not Unison-surface-compatible (prefix `(f a)` application, not `f a`
+  juxtaposition) — a Cairn-native calculus in Unison's lineage, not a port.
+
+Remaining: hash-linked call graphs; type-preserving edit propagation;
+user-declarable ADTs/abilities.
+
+## MiniTT — the formal-methods IR ladder's dependent-types rung (§8b)
+
+`languages/minitt.cairn` + `examples/minitt` (`MiniTT` glue). A minimal,
+closed dependent type core — Π types, a 2-level non-cumulative universe
+hierarchy (`Type : Type1`, `Type1` itself untyped), and one hardcoded `Nat`
+inductive with a dependent-motive recursor — checked by the *same* generic
+kernel `Checker`/`Search` as STLC/PKI/Search's judgments. NOT full CIC (§8
+anti-goal): no universe polymorphism, no user-declarable inductives, no
+tactics/elaboration. NOT Lean-surface-compatible: Lean stays a Rosetta
+*projection* target only (§4.10) — this is a genuinely different,
+Cairn-native calculus merely inspired by the same lineage.
+
+- The one judgment shape STLC never needed: type **conversion**. `t-app`
+  and the recursor's result type are true substitutions/reductions, not
+  values `Checker.matchPat`'s syntactic matching can produce on its own —
+  checked via a `$defeq` side condition (PKI's `$sig-ok`/`$anchor` extension
+  shape), normalizing both sides (`compute.TreeEngine`, unmodified/generic)
+  and comparing up to alpha (`kernel.Alpha.normalize`, unmodified/generic,
+  already existed from M2).
+- `t-lam` vs `t-lam-conv`: checking a lambda against an expected Π type
+  needs its own domain annotation and the Π's domain slot to unify — fine
+  when the expected domain is unbound (synthesis) or written identically,
+  too strict when it's merely defeq (an unreduced `app(motive, k)` standing
+  for `Nat`, e.g. inside the `Nat` recursor's step-function premise).
+  `Search.infer` commits to the first fully-successful rule per goal with
+  no cross-premise backtracking, so the bridge is a second rule — tried
+  only once the stricter `t-lam` fails — rather than a retry inside it.
+- Checking mode only (documented limitation, matching MiniTT's own doc
+  comment): `$defeq` needs both sides already ground, so synthesizing a
+  type through it isn't supported — every `MiniTT.check` call site
+  supplies a concrete target type.
+
+Remaining: universe polymorphism; user-declarable inductives; a tactic
+layer (M22's `Tactics.replay` machinery already exists generically —
+MiniTT doesn't yet use it).
 
 ## Rosetta QuickSort — on par with ROSETTA entrypoints
 
