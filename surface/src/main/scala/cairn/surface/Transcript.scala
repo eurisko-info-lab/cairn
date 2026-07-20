@@ -258,20 +258,14 @@ object Transcript:
   */
 object Cli:
   def loadLanguages(dir: Path): Map[String, ComposedLanguage] =
-    if !Files.exists(dir) then Map.empty
-    else
-      import scala.jdk.CollectionConverters.*
-      Files.list(dir).iterator.asScala
-        .filter(_.toString.endsWith(".cairn"))
-        .flatMap(p => Meta.parseFile(Files.readString(p)).toOption)
-        .map(l => l.name -> l)
-        .toMap
+    PackLoader.loadClosed(dir)
 
   def main(args: List[String], packsIn: Map[String, ComposedLanguage],
            portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, String] =
     val casDir = Path.of(sys.env.getOrElse("CAIRN_HOME", ".cas"))
     def cas = DiskCas(casDir)
-    val packs = packsIn ++ loadLanguages(Path.of("languages"))
+    // PackLoader closes PKI→Law→SDS via fragment requires; self-contained packs compose alone.
+    val packs = packsIn ++ PackLoader.loadClosed() ++ loadLanguages(Path.of("languages"))
     args match
       case List("hash", file) =>
         Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)

@@ -189,6 +189,7 @@ Distilled from the family of prior prompts; treat violations as bugs.
 13. **Tests before features.** Each phase lands with an acceptance suite; do not skip phases.
 14. **Primordial bootstrap.** Start from a meta-language and a grammar-language (defined using the meta-language); define every other language from those; derive or language-define tooling. See §2b.
 15. **Uniform capability model.** Grammar/surfaces, interpreters, ΔL, projections, judgments, obligations, traces, migrations, queries, laws, provenance, trust, effects, workflows, and import/export are one coherent per-language model (§2b) — not ad-hoc one-offs.
+16. **Parity with summarized projects’ top-level.** For each major source Cairn claims to distill (§13), match that project’s README-advertised / flagship surface (packs, CLIs, demos) — not every deep experiment. Thin name-drop stubs are not parity. Track the matrix in [STATUS-2.md](STATUS-2.md).
 
 ---
 

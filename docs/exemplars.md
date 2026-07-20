@@ -1,52 +1,80 @@
 # Exemplars (§5b)
 
-Status of the four exemplar case studies after PLAN-2. All four are now
-implemented packs (thin but honest slices); remaining gaps are listed inline.
+Status of exemplar case studies after PLAN-2 **and** the top-level parity pass
+(see [STATUS-2.md](../STATUS-2.md) parity matrix). Packs are real code + tests,
+not name-drops.
 
-## PKI — implemented (maximal, M46)
+**Expression:** PKI, Law, and SDS object languages live in checked-in `.cairn`
+files under [languages/](../languages/) (same meta+grammar surface as
+`stlc.cairn` / `meta.cairn`). Scala under `examples/` is host glue (crypto,
+domain gates, tutorials) — not the language definition.
 
-`examples/pki` (`Pki` + `PkiMax`):
+**Changes:** free ΔL only — `Delta.deltaOf(L)` derives `add` / `remove` / …
+on demand. It is **never materialized** as checked-in `.cairn` (no `dpki` /
+`dlaw` / `dsds` packs, no `docs/delta/`).
 
-- **Registry object language** with a round-tripping surface, plus validity
-  windows (`notBefore`/`notAfter`) on certificates.
-- **ΔPKI is the generic ΔL**: issue = `add`, revoke = `remove`.
-- **Chain validation as declarative inference-rule DATA** (`chainOk`), checked
-  by the SAME kernel checker as STLC typing; Ed25519 verification and anchor
-  membership are injected side-condition evaluators (M19) — the checker stays
-  the sole certifier. Expiry enforced via `$le` side conditions.
-- **CRLs as signed artifacts** applied to registries; **ledger trust-anchor
-  publish** via `RecordCertificate`.
+**Dependency DAG:** `PKI → Law → SDS`, encoded as fragment
+`provides`/`requires` and closed by `PackLoader`:
 
-Remaining gaps: revocation *reason codes*, CRL freshness/next-update windows.
+| Pack | File | Provides | Requires |
+|---|---|---|---|
+| PKI | `languages/pki.cairn` | `cert` | — |
+| Law | `languages/law.cairn` | `law` | `cert` |
+| SDS | `languages/sds.cairn` | `sds` | `law` (⇒ PKI) |
 
-## SDS — implemented (thin slice, M47)
+Compose of Law without PKI, or SDS without Law/PKI, fails. Closed SDS
+amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 
-`examples/sds`: typed objects (`substance`, `mixture`, `phrase`, `product`,
-`shadow`) as a language pack whose **rendered document is a compiled view**
-(and itself a bidirectional surface — renders re-parse). ΔSDS = the generic ΔL
-plus a domain gate (mixture percentages ≤ 100, no broken references). The
-acetone tutorial with a shadow-overridden hazard phrase and a ledger publish
-lives in `WaveH2Suite`.
+## PKI — on par with GRANITE top-level
 
-Remaining gaps vs GRANITE's flagship: multilingual phrase fallback chains,
-regulatory section numbering, the SDS studio UI.
+`languages/pki.cairn` + `examples/pki` (`Pki` glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
 
-## Bend — implemented (surface profile, M29)
+- Registry object language: `cert` and optional soft `revocation` entries.
+- ΔPKI = generic free ΔL (`add` issues, `remove` hard-revokes; soft revoke =
+  `add` of a `revocation` term).
+- Chain validation + Ed25519; tutorial: issue → validate → revoke → tamper → publish.
+- X25519 encryption certificates for SDS composition sealing.
 
-`examples/bend`: a Bend/Kind-flavored functional surface (juxtaposition
-application via the `Run` layout combinator, `@x (…)` lambdas) lowered to FULL
-interaction combinators (`examples/icnet`: γδε with commutation and labelled-
-constant duplication), reduced, and read back. It exists only because
-replicators became real — the honesty rule held.
+## Law — middle link (PKI → Law → SDS)
 
-Remaining gaps: numbers/recursion primitives, HVM-style strict/lazy modes.
+`languages/law.cairn` + `examples/law` (`Law` glue + `LawTutorial`):
 
-## Unison — implemented (ideas pack, M48)
+- Statute sections + `enactedBy` citing a PKI cert name as authority.
+- Citation judgment; repeal via free ΔL `remove`; closed language includes PKI `cert`.
+- Model Chemical Safety Act slice only — full statute corpora deferred.
 
-`examples/unison`: a name-independent definition store over ALPHA-INVARIANT
-digests (M2); names are aliases in a tiny `names` language whose ΔL is the
-patch language. The "no builds" demo: rename everything, definition digests
-unchanged, store untouched.
+## SDS — on par with GRANITE flagship *spine* (not Studio)
 
-Remaining gaps: term dependencies (hash-linked call graphs), Unison-style
-propagation of type-preserving edits.
+`languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` + `SdsTutorial`):
+
+- Typed objects (substance / mixture / phrase / product / shadow / `basis`);
+  rendered document is a compiled bidirectional view.
+- `basis` cites a Law section number (SDS → Law at the object level).
+- ΔSDS = generic free ΔL + domain gate; multilingual phrase fallback; domain-aware
+  shadow rebase with semantic conflict on overridden phrases.
+- Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
+  certs — confidential ingredients recoverable only with matching private key.
+- Acetone tutorial publishes industrial shadow to the ledger.
+
+Remaining gaps vs GRANITE: full chemicals corpus, regulatory section numbering,
+phrase-corpus staleness machine, SDS Studio UI (deferred).
+
+## Bend — on par with GRANITE computation *intent* (surface profile)
+
+`examples/bend` + `examples/icnet`: Bend-flavored surface lowered to full
+interaction combinators. GRANITE itself defers Bend as a pack (spec-only);
+Cairn ships a real thin surface because nets are real.
+
+Remaining: numbers/recursion primitives; HVM strict/lazy modes.
+
+## Unison — ideas pack (intentional)
+
+α-invariant digests + name aliases + patch-as-ΔL. Not a Unison fork.
+Remaining: hash-linked call graphs; type-preserving edit propagation.
+
+## Rosetta QuickSort — on par with ROSETTA entrypoints
+
+`QuickSort2` (Ord + effects + four ports) plus `QuickSortApp` (`Peano`,
+`sortNatWithTrace`, `runSample`). Full Lean proof bodies from
+`QuickSortOrdEffects.rosetta` remain host obligations (`sorry` / tests), not
+re-proved in Cairn — by design (§4.10).

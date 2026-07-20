@@ -378,14 +378,20 @@ object Meta:
   def parseFragment(src: String): Either[String, Fragment] =
     Parser.parse(grammar.copy(top = "fragmentDecl"), src).flatMap(elaborateFragment)
 
-  /** Parse a `language NAME { fragment* }` file into a composed language. */
-  def parseFile(src: String): Either[String, ComposedLanguage] =
+  /** Parse a `language NAME { fragment* }` file into name + fragments (no compose).
+    * Use [[PackLoader.close]] when fragments may `requires` interfaces from other packs.
+    */
+  def parseLanguageAst(src: String): Either[String, (String, List[Fragment])] =
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("file", List(Cst.Leaf(name), Cst.Node("list", frags))) =>
-        seq(frags.map(elaborateFragment)).flatMap { fs =>
-          Compose.compose(name, fs).left.map(_.map(_.render).mkString("\n")) }
+        seq(frags.map(elaborateFragment)).map(name -> _)
       case other => Left(s"not a language file: ${other.render}")
     }
+
+  /** Parse a self-contained `language NAME { fragment* }` file into a composed language. */
+  def parseFile(src: String): Either[String, ComposedLanguage] =
+    parseLanguageAst(src).flatMap { (name, fs) =>
+      Compose.compose(name, fs).left.map(_.map(_.render).mkString("\n")) }
 
   // ======================= encoding (Fragment -> Cst) =======================
 

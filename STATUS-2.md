@@ -1,8 +1,11 @@
 # STATUS-2 — end of the maximalization plan (PLAN-2)
 
 Date: 2026-07-20. All 50 stories M1–M50 of [PLAN-2.md](PLAN-2.md) landed on top of
-the S1–S50 base. Full suite: **199 tests green** (`sbt test`), including a
-100 000-term fuzz corpus with zero round-trip failures.
+the S1–S50 base, plus a **top-level parity pass** (constitution §4.16) and an
+**exemplar elevation** (PKI/Law/SDS as `.cairn` languages with a real
+`PKI → Law → SDS` `requires`/`provides` DAG). Full suite: **206 tests green**
+(`tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
+round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 
 ## Story scorecard
 
@@ -21,17 +24,18 @@ the S1–S50 base. Full suite: **199 tests green** (`sbt test`), including a
 ## Golden digests (`sbt "examples/runMain cairn.examples.Main digests"`)
 
 ```text
+language law    91111fabc095765019c0997bbd37f49b633735599f9045bc0e39814cfe58c8da
 language pki    6e5be96d864104f9b04a3a91e106cdcbec0d56d560fae2b46f5b2b81555de8ad
 language policy 542f97a889a5081d314248d8ef6c36fe757d5ddb7921c3b085fe1d30871f4e1b
 language query  33b0c2e1bc6ac50c372d572e4131f9c0d1bc5a24a922eaae3edcb34c97c3d601
-language sds    00893102b8eaaf7df9d3a5c970f3bd589287f3be563d960d05c8c936c1a8f8bd
+language sds    67b7472010dc18c8a35042ea30e98c8d4f81feabd4e66f8af926903ee6913134
 language stlc   c505555940893bf55221aeef05586479991104c4a5066c197f9b9fc0b2ff9954
-rosetta quicksort2 c2de9525e314f240a4dea977e9ad3992e31d1789b03bce8d5e70ce87dc9d04fb
+rosetta quicksort2   c2de9525e314f240a4dea977e9ad3992e31d1789b03bce8d5e70ce87dc9d04fb
+rosetta quicksortApp f86cc325dd7b736b642893561d555aed3a725624dc2ab912251e5a0a4aa29e9f
 ```
 
-(Digests changed vs [STATUS.md](STATUS.md): the fragment canonical form gained
-side conditions (M19) and the grammar vocabulary gained layout elems (M6) —
-deliberate, versioned breaks.)
+Closed Law/SDS digests include demoted dependency fragments (`PackLoader`); PKI
+unchanged. See [docs/exemplars.md](docs/exemplars.md).
 
 ## Benchmarks (`sbt "examples/runMain cairn.examples.Bench"`, this machine)
 
@@ -72,3 +76,44 @@ readback (5), four host ports with byte fixpoints (6), Merkle-proof-verifiable
 publication with governed authorities and policies (7), and a self-describing
 meta language loaded from text at runtime (11 — the §2b bootstrap is no longer
 staged: the fixpoint test passes).
+
+## Parity vs sources (constitution §4.16)
+
+Date: 2026-07-20. Compared each §13 source’s **top-level** surface (README /
+flagship demos / primary packs) to Cairn. “On par” = real code + tests matching
+that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
+
+| Source | Top-level capability | Was | Now | Evidence |
+|---|---|---|---|---|
+| GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | parity | parity | Waves A–C, H1; `languages/meta.cairn` fixpoint |
+| GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | partial | **parity** | `languages/pki.cairn` + glue; `PkiMax`/`DemoPki`/`PkiTutorial`; ParitySuite |
+| GRANITE | Sharing encryption (X25519 hybrid seal) | missing | **parity** | `ledger/Encryption.scala`; seal/open tests |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law); `CompositionSealing`/`SdsTutorial`; ExemplarPackSuite |
+| GRANITE | Law pack (PKI→Law→SDS) | missing | **parity** (thin) | `languages/law.cairn` (requires cert); `enactedBy`; LawTutorial |
+| GRANITE | Computation / Bend profile | partial | parity | `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
+| GRANITE | SDS Studio UI / auth web app | N/A | **N/A deferred** | §8 anti-goal (full IDE/studio) |
+| ROSETTA | QuickSort Ord + effects + multi-host ports + sample entrypoints | partial | **parity** | `QuickSort2` + `QuickSortApp`; WaveF + ParitySuite |
+| granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | parity (Scala shape) | parity | L0–L6 engines; Unison pack; CLI/transcript |
+| marblego | Grammar VM + artifact/branch/store crates | parity (absorbed) | parity | Same L0–L1 story in Scala |
+| MetaLego / Kiwi | Composable fragments + STLC | parity | parity | STLC fragments + pushout |
+| Eurisko / HVM | Lattice meta / IC lineage | N/A deferred | N/A deferred | Absorbed as residue (§8b); Bend/IcNet cover compute intent |
+
+### What closed this pass
+
+- L5 `Encryption` (GRANITE hybrid envelope).
+- PKI demo hierarchy + end-to-end tutorial + encryption cert wiring.
+- SDS multilingual fallback, shadow rebase/conflict, composition sealing, acetone tutorial.
+- Thin Law pack with citation judgment.
+- Rosetta `QuickSortApp` (`Peano`, `sortNatWithTrace`, `runSample`).
+- Exemplars elevated to `.cairn` languages; `PackLoader` closes `PKI → Law → SDS`
+  via fragment `requires`/`provides` (compose without deps fails).
+
+### Remaining honest gaps
+
+- GRANITE SDS depth beyond the spine: full chemicals corpus, section numbering,
+  phrase-staleness machine, Studio UI.
+- ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
+  proofs — §4.10).
+- BFT / gossip daemon / public ledger (explicitly deferred).
+- Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
+  separate packs — absorbed as platform capability, not forked catalogs.

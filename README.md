@@ -24,7 +24,7 @@ Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 | `rosetta/` | L4 | interchange artifacts + round-trip-verified Scala and Lean port emitters |
 | `ledger/` | L5 | Ed25519 identities, PoA node, publication, pull sync, divergence surfacing |
 | `surface/` | L6 | CLI (`hash/put/get/canon/transcript`), transcript DSL (defined in the grammar engine itself) |
-| `examples/` | — | STLC, Claims, AffineNet, RosettaQuickSort, PKI (never imported by L0–L2) |
+| `examples/` | — | STLC, Claims, AffineNet, RosettaQuickSort(+App), PKI, SDS, Law, Bend, Unison (never imported by L0–L2) |
 | `tests/` | — | per-phase acceptance suites |
 
 The sbt module graph enforces the import DAG:
@@ -49,13 +49,15 @@ The MAX transcript additionally loads STLC **from checked-in text**
 asserts expected failures, runs queries, gossips over three nodes, and verifies a
 host port. Languages in [languages/](languages/) load at runtime — adding one
 requires no recompilation (the meta surface is self-describing: see the bootstrap
-fixpoint in [languages/meta.cairn](languages/meta.cairn)).
+fixpoint in [languages/meta.cairn](languages/meta.cairn)). Exemplar apps
+**PKI → Law → SDS** are `.cairn` languages with fragment `requires`/`provides`
+([docs/exemplars.md](docs/exemplars.md)); Scala under `examples/` is host glue.
 
 ## Documents
 
 - [PLAN.md](PLAN.md) — the original 50-story plan (S1–S50, all landed)
 - [PLAN-2.md](PLAN-2.md) — the 50-story maximalization plan (M1–M50, all landed)
-- [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations
+- [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations, **parity vs sources**
 - [docs/bootstrap.md](docs/bootstrap.md) — empty CAS → published STLC in one sitting
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),

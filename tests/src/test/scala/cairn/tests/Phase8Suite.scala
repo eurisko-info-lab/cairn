@@ -49,19 +49,17 @@ class Phase8Suite extends munit.FunSuite:
     val printed = cairn.workbench.Printer.print(Pki.language.grammar, term).toOption.get
     assertEquals(Parser.parse(Pki.language.grammar, printed), Right(term))
 
-  test("ΔPKI is the generic ΔL: issue = add, revoke = remove (S47)"):
+  test("ΔPKI free duals: issue≈add, revoke≈remove (S47)"):
     val lang = Pki.language
     val dl = Delta.deltaOf(lang).toOption.get
     assertEquals(dl.name, "Δpki")
     val rootT = Pki.rootTerm(root)
     val aliceT = Pki.certTerm("alice", alice, root)
-    // issue via parsed ΔL surface
     val rootSrc = cairn.workbench.Printer.print(lang.grammar, rootT).toOption.get
     val aliceSrc = cairn.workbench.Printer.print(lang.grammar, aliceT).toOption.get
     val change = Parser.parse(dl.grammar, s"{ add root = $rootSrc ; add alice = $aliceSrc ; }").toOption.get
     val Right((registry, _)) = Delta.apply(lang, Module(Nil), change): @unchecked
     assertEquals(registry.get("alice"), Some(aliceT))
-    // revoke
     val revoke = Parser.parse(dl.grammar, "{ remove alice ; }").toOption.get
     val Right((r2, _)) = Delta.apply(lang, registry, revoke): @unchecked
     assertEquals(r2.get("alice"), None)
@@ -82,11 +80,23 @@ class Phase8Suite extends munit.FunSuite:
       .swap.exists(_.reason.contains("does not verify")))
 
   test("chain validation rejects revoked issuer (S47 acceptance)"):
-    val registry = registryWith(
+    // Absent issuer (never issued)
+    val missing = registryWith(
       "root" -> Pki.rootTerm(root),
-      "bob" -> Pki.certTerm("bob", bob, alice)) // alice revoked/absent
-    assert(Pki.validateChain(registry, "bob", Set("root"))
-      .swap.exists(_.reason.contains("revoked or never issued")))
+      "bob" -> Pki.certTerm("bob", bob, alice))
+    assert(Pki.validateChain(missing, "bob", Set("root"))
+      .swap.exists(_.reason.contains("never issued")))
+    // Soft revoke via free ΔL `add` of a revocation object
+    val full = registryWith(
+      "root" -> Pki.rootTerm(root),
+      "alice" -> Pki.certTerm("alice", alice, root),
+      "bob" -> Pki.certTerm("bob", bob, alice))
+    val dl = Delta.deltaOf(Pki.language).toOption.get
+    val rev = Parser.parse(dl.grammar,
+      """{ add revAlice = revoked alice reason "key compromise" at "1" ; }""").toOption.get
+    val Right((revoked, _)) = Delta.apply(Pki.language, full, rev): @unchecked
+    assert(Pki.validateChain(revoked, "bob", Set("root"))
+      .swap.exists(_.reason.contains("revoked")))
 
   test("self-signed non-anchor rejected (S47)"):
     val registry = registryWith("mallory" -> Pki.rootTerm(mallory))

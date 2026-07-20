@@ -1,4 +1,9 @@
-# STATUS — end of 50-story plan
+# STATUS — end of 50-story plan (PLAN.md)
+
+> **Superseded for current scorecard.** After PLAN-2 maximalization and the
+> top-level parity pass, use **[STATUS-2.md](STATUS-2.md)** (golden digests,
+> honest deviations, **parity vs sources** matrix). Digests below are the
+> Phase 0–8 baseline and are intentionally stale relative to M19/M6 breaks.
 
 Date: 2026-07-20. All phases 0–8 of [PLAN.md](PLAN.md) landed; `sbt test` green
 (see per-phase suites under [tests/src/test/scala/cairn/tests](tests/src/test/scala/cairn/tests)).

@@ -1,0 +1,24 @@
+language pki {
+  -- Certificate registry object language. Free ΔL (add/remove/…) is derived
+  -- by Delta.deltaOf(pki) only — never materialized as a .cairn file.
+  fragment certs provides cert {
+    sort RegistryItem tree;
+    ctor cert : RegistryItem(Name, Hex, Name, Hex, Instant, Instant);
+    ctor revocation : RegistryItem(Name, Reason, Instant);
+    varctor issuerRef;
+    keyword cert;
+    keyword key;
+    keyword issuer;
+    keyword sig;
+    keyword from;
+    keyword until;
+    keyword revoked;
+    keyword reason;
+    keyword at;
+    syntax registryItem += cert : tok "cert" name tok "key" str tok "issuer" name tok "sig" str tok "from" str tok "until" str;
+    syntax registryItem += revocation : tok "revoked" name tok "reason" str tok "at" str;
+    print cert : lit "cert" sp field 0 sp lit "key" sp strfield 1 sp lit "issuer" sp field 2 sp lit "sig" sp strfield 3 sp lit "from" sp strfield 4 sp lit "until" sp strfield 5;
+    print revocation : lit "revoked" sp field 0 sp lit "reason" sp strfield 1 sp lit "at" sp strfield 2;
+    top registryItem;
+  }
+}
