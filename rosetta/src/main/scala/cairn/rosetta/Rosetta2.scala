@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.kernel.*
-import cairn.workbench.{Parser, Printer, RoundTrip}
+import cairn.workbench.RoundTrip
 
 /** Rosetta v2 (M30–M34): richer declaration vocabulary — polymorphic defs with
   * `Ord`-style constraints, ADT declarations, list pattern matching, effect

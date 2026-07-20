@@ -1,7 +1,6 @@
 package cairn.examples.pki
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.proof.{CheckerCfg, Checker, Search, Derivation}
 import cairn.ledger.{Ed25519, Keypair}
 

@@ -25,6 +25,7 @@ object Merkle:
         level = level.grouped(2).map {
           case List(a, b) => combine(a, b)
           case List(a)    => a
+          case g          => sys.error(s"grouped(2) yielded ${g.size}")
         }.toList
       level.head
 
@@ -43,6 +44,7 @@ object Merkle:
         level = level.grouped(2).map {
           case List(a, b) => combine(a, b)
           case List(a)    => a
+          case g          => sys.error(s"grouped(2) yielded ${g.size}")
         }.toList
         pos = pos / 2
       Right(Proof(key, sorted(idx)._2, steps.result()))

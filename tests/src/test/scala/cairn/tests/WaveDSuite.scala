@@ -1,7 +1,6 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.Module
 import cairn.compute.*
 import cairn.proof.*
 import cairn.examples.stlc.Stlc

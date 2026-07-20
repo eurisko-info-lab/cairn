@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.kernel.*
-import cairn.workbench.{Parser, Printer, RoundTrip}
+import cairn.workbench.{Printer, RoundTrip}
 
 /** Rosetta interchange layer (S30–S33, §2 Rosetta, §4.10).
   *

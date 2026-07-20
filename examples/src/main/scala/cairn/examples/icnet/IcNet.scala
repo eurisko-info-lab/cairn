@@ -116,14 +116,15 @@ object IcNet:
           binders.get(p) match
             case Some(x) => Right(Cst.node("var", Cst.Leaf(x)))
             case None =>
-              val agent = net.agents.get(p.agent).toRight(s"missing agent ${p.agent}").fold(e => return Left(e), identity)
-              (agent.kind, p.port) match
-                case ("konst", 0) => Right(Cst.node(agent.label))
-                case ("fan", 0) =>
-                  fresh += 1
-                  val x = s"r$fresh"
-                  val binderPort = PortRef(agent.id, 1)
-                  go(PortRef(agent.id, 2), binders + (binderPort -> x))
-                    .map(body => Cst.node("lam", Cst.Leaf(x), Cst.node("tyBool"), body))
-                case (kind, portIdx) => Left(s"cannot read back $kind agent via port $portIdx")
+              net.agents.get(p.agent).toRight(s"missing agent ${p.agent}").flatMap { agent =>
+                (agent.kind, p.port) match
+                  case ("konst", 0) => Right(Cst.node(agent.label))
+                  case ("fan", 0) =>
+                    fresh += 1
+                    val x = s"r$fresh"
+                    val binderPort = PortRef(agent.id, 1)
+                    go(PortRef(agent.id, 2), binders + (binderPort -> x))
+                      .map(body => Cst.node("lam", Cst.Leaf(x), Cst.node("tyBool"), body))
+                  case (kind, portIdx) => Left(s"cannot read back $kind agent via port $portIdx")
+              }
     go(PortRef(root, 0), Map.empty)

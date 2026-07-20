@@ -68,7 +68,7 @@ object AffineNet:
             if !innerUsed.contains(x) then
               val e = b.agent("era")
               b.wire(PortRef(e, 0), binderPort)
-            used ++= (innerUsed - x)
+            used ++= innerUsed.diff(Set(x))
           }
         case Cst.Node("app", List(f, a)) =>
           val g = b.agent("fan")

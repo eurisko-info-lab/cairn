@@ -365,10 +365,11 @@ object Cli:
           val repl = Repl(l)
           val in = scala.io.Source.stdin.getLines()
           val out = StringBuilder()
-          while in.hasNext do
+          var done = false
+          while in.hasNext && !done do
             val line = in.next()
-            if line.trim == ":quit" then return Right(out.result())
-            out ++= repl.eval(line) + "\n"
+            if line.trim == ":quit" then done = true
+            else out ++= repl.eval(line) + "\n"
           out.result() }
       case List("lsp", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'").map { l =>

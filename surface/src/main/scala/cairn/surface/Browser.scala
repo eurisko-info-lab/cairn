@@ -33,9 +33,9 @@ final class BrowserServer(
   def start(): Int =
     val s = HttpServer.create(InetSocketAddress(port), 0)
     // Longest-prefix wins: register /api and /ui before /
-    s.createContext("/api", handleApi)
-    s.createContext("/ui", handleUi)
-    s.createContext("/", handleIndex)
+    s.createContext("/api", ex => handleApi(ex))
+    s.createContext("/ui", ex => handleUi(ex))
+    s.createContext("/", ex => handleIndex(ex))
     s.setExecutor(java.util.concurrent.Executors.newCachedThreadPool())
     s.start()
     server = s

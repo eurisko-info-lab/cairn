@@ -1,6 +1,8 @@
 package cairn.workbench
 
 import cairn.kernel.*
+import scala.util.boundary
+import scala.util.boundary.break
 
 /** One generic lexer (S9, M6, M7) driven entirely by TokenSpec — knows
   * character classes only. Tokens carry their char offset, raw length, and
@@ -209,28 +211,30 @@ object Parser:
       }
 
     def tryCtors(cat: CategorySpec): Either[ParseError, Cst] =
-      val start = pos
-      var best: ParseError = fail(s"one of '${cat.name}'")
-      for ctor <- cat.ctors do
+      boundary:
+        val start = pos
+        var best: ParseError = fail(s"one of '${cat.name}'")
+        for ctor <- cat.ctors do
+          pos = start
+          parseFields(ctor.elems) match
+            case Right(fields) =>
+              if ctor.tag == "$group" && fields.sizeIs == 1 then break(Right(fields.head))
+              else break(Right(spanned(Cst.Node(ctor.tag, fields), start)))
+            case Left(e) =>
+              // keep the FURTHEST failure — the alternative that made the most
+              // progress explains the input best (M8/M11)
+              if e.token.offset >= best.token.offset then best = e
         pos = start
-        parseFields(ctor.elems) match
-          case Right(fields) =>
-            if ctor.tag == "$group" && fields.sizeIs == 1 then return Right(fields.head)
-            else return Right(spanned(Cst.Node(ctor.tag, fields), start))
-          case Left(e) =>
-            // keep the FURTHEST failure — the alternative that made the most
-            // progress explains the input best (M8/M11)
-            if e.token.offset >= best.token.offset then best = e
-      pos = start
-      Left(best)
+        Left(best)
 
     def parseFields(elems: List[Elem]): Either[ParseError, List[Cst]] =
-      val fields = List.newBuilder[Cst]
-      for e <- elems do
-        parseElem(e) match
-          case Right(fs) => fields ++= fs
-          case Left(err) => return Left(err)
-      Right(fields.result())
+      boundary:
+        val fields = List.newBuilder[Cst]
+        for e <- elems do
+          parseElem(e) match
+            case Right(fs) => fields ++= fs
+            case Left(err) => break(Left(err))
+        Right(fields.result())
 
     def lastConsumedLine: Int = if pos == 0 then 1 else toks(pos - 1).line
 
