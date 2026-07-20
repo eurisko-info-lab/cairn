@@ -32,6 +32,8 @@ object Capabilities:
   /** Rows every language gets automatically from the platform. */
   def auto(l: ComposedLanguage): Map[String, Row] =
     val deltaDigest = Delta.deltaOf(l).toOption.map(_.digest)
+    def marker(kind: String): Digest =
+      Digest.of(Canon.cmap("capability" -> Canon.CStr(kind), "language" -> Canon.CStr(l.digest.hex)))
     Map(
       "grammar" -> Row.Present(GrammarSpec.artifact(l.grammar).digest),
       "surfaces" -> Row.Present(Digest.of(Canon.cstrs(Surfaces.forLanguage(l).keys.toList.sorted))),
@@ -39,6 +41,19 @@ object Capabilities:
       "changes" -> deltaDigest.fold(Row.Deferred("ΔL underivable"))(Row.Present.apply),
       "judgments" -> (if l.judgments.nonEmpty then
         Row.Present(Digest.of(Canon.cstrs(l.judgments.keys.toList.sorted))) else Row.Deferred("none declared")),
+      // generic platform mechanisms that apply to ANY language:
+      "traces" -> (if l.rewriteRules.nonEmpty then Row.Present(marker("eval-trace")) // TreeEngine.normalizeTraced + TraceChecker
+                   else Row.Deferred("no rewrite rules to trace")),
+      "migrations" -> Row.Present(marker("lang-migration")),   // Migrate.module/changeset
+      "queries" -> Row.Present(Query.language.digest),          // Query.run over any module
+      "laws" -> Row.Present(marker("parse-print-roundtrip")),   // RoundTrip.check law suite
+      "provenance" -> Row.Present(marker("provenance-record")), // ledger Provenance records
+      "obligations" -> Row.Present(marker("claims-certificates")), // proof-layer claims/certs
+      // genuinely per-language, not yet uniform:
+      "projections" -> Row.Deferred("rosetta ports project rosetta artifacts; net lowering is per-pack"),
+      "trust" -> Row.Deferred("policies gate ledger branches, not languages"),
+      "effects" -> Row.Deferred("effect vocabulary exists only in rosetta modules"),
+      "workflows" -> Row.Deferred("transcripts are global, not language-scoped"),
       "import-export" -> Row.Present(Digest.of(Canon.cstrs(List("text", "json", "canon")))))
 
   def build(l: ComposedLanguage, extra: Map[String, Row]): Either[String, Manifest] =

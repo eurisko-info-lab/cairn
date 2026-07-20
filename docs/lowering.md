@@ -1,39 +1,38 @@
 # Lowering: tree terms to interaction nets
 
-Which surface terms become nets (§6 Phase 3), and how.
+Which surface terms become nets, and how. Two net languages ship:
 
-## Scope
+## AffineNet (fan/era — the replicator-free fragment)
 
-`examples.affinenet.AffineNet.lower` lowers the **affine λ-subset** of STLC terms:
+`examples/affinenet` lowers the **affine λ-subset** (each variable used at most
+once; unused binders get ε). Replicators are structurally absent — the kind
+table has none — which is itself a checkable property.
 
-- `var x` — a wire to the binder's port; **at most one occurrence** per binder
-  (a second occurrence is a structured error: nets here have no replicator).
-- `lam x . b` — a `fan` (γ) agent: principal = the term's port, aux1 = binder wire,
-  aux2 = body. Unused binders get an `era` (ε) agent.
-- `app f a` — a `fan` agent: principal at the function (so β becomes a γγ active
-  pair), aux1 = argument, aux2 = result.
-- `true` / `false` / `konst c` — inert `konst` agents (opaque constants).
+## IcNet (full interaction combinators, M25/M26)
 
-Types are erased during lowering. `if/then/else` does **not** lower (it would need
-either dedicated agent kinds or replicators); it stays on the tree engine.
+`examples/icnet` adds δ (duplicators) with the classic table: γγ/δδ annihilate,
+γδ COMMUTE (each copies past the other), ε erases, and δ copies labelled
+constants (`@left`/`@right` rule agents inherit kind AND label).
 
-## Correctness
-
-β-reduction on the tree side corresponds to γγ annihilation on the net side:
-`(λx.x) true` normalizes to `true` on both engines (`Phase3Suite`,
-"lowered affine term reduces to same value as tree eval"). Erasure of an unused
-argument corresponds to ε-propagation.
+- **General lowering**: full STLC λ-terms (var/lam/app + boolean constants);
+  variables used n ≥ 2 times get a δ-tree off the binder port.
+  `if/then/else` still does not lower (it stays on the tree engine).
+- **Readback** (M26): normal-form nets decode to λ-terms; results are
+  alpha-equivalent (M2) to the tree evaluator's on the whole corpus, including
+  duplication (`(λd. d d)(λy. y)` and Church-two application).
+- **Parallel reduction** (M27): all agent-disjoint active pairs fire per sweep;
+  confluence makes results order-independent (asserted in `WaveESuite`).
+- **Bend profile** (M29): `examples/bend` parses a Bend-flavored surface,
+  inlines defs, lowers to IcNet, reduces, reads back.
 
 ## Engine
 
-`compute.NetEngine` is generic: agent kinds and interaction rules are data
-(`NetLanguage`). Rewrites happen only at principal–principal pairs **that have a
-rule**; pairs without rules (e.g. a `free` interface anchor against anything) are
-part of the normal form. Rewiring is by port fusion, so wires internal to the
-consumed pair (binder-to-body) resolve correctly. Well-formedness (declared kinds,
-arity bounds, every port wired exactly once) is a checkable judgment.
+`compute.NetEngine` is generic: kinds and rules are data (`NetLanguage`);
+rewiring is port fusion (internal binder–body wires resolve correctly);
+pairs without rules (interface anchors) are part of the normal form.
+Well-formedness (declared kinds, arities, exactly-once wiring) is checkable.
 
-## Deferred
+## Still deferred
 
-Replicators/duplication (non-affine λ), Bend/Kind/HVM surface profiles — see
-[exemplars.md](exemplars.md).
+Call-by-need boxes/levels for exponentials; lowering for `if`; net-level
+benchmarking against the compiled tree engine beyond the Bench harness.
