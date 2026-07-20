@@ -41,18 +41,12 @@ language search {
     print supports : lit "supports" sp field 0 sp field 1;
     print spawns : lit "spawns" sp field 0 sp field 1;
     print board : lit "board (" field 0 lit ")";
-    -- Real declarative judgments (same generic kernel Checker as PKI's chain
-    -- judgment / STLC's typing): a board is a ctxCons/ctxNil context, and
-    -- wellFormed(ctx, term) / goalMet(ctx, g, f) check one term (or witness
-    -- pair) against it. board(list)'s variable-arity list field has no
-    -- fixed-arity pat shape to match against, so board membership stays a
-    -- host-Scala check (Search.wellFormed) — not expressible here.
     judgment wellFormed {
-      rule wf-origin : |- wellFormed($ctx, origin($t)) where $neq($t, "");
-      rule wf-fact : |- wellFormed($ctx, fact($t)) where $neq($t, "");
-      rule wf-goal : |- wellFormed($ctx, goal($t)) where $neq($t, "");
-      rule wf-intent : |- wellFormed($ctx, intent($t)) where $neq($t, "");
-      rule wf-hint : |- wellFormed($ctx, hint($t)) where $neq($t, "");
+      rule wf-origin :  |- wellFormed($ctx, origin($t)) where $neq($t, "");
+      rule wf-fact :  |- wellFormed($ctx, fact($t)) where $neq($t, "");
+      rule wf-goal :  |- wellFormed($ctx, goal($t)) where $neq($t, "");
+      rule wf-intent :  |- wellFormed($ctx, intent($t)) where $neq($t, "");
+      rule wf-hint :  |- wellFormed($ctx, hint($t)) where $neq($t, "");
       rule wf-supports : $ctx-lookup($ctx, $a, $va), $ctx-lookup($ctx, $b, $vb) |- wellFormed($ctx, supports($a, $b));
       rule wf-spawns : $ctx-lookup($ctx, $a, $va), $ctx-lookup($ctx, $b, $vb) |- wellFormed($ctx, spawns($a, $b));
     }
