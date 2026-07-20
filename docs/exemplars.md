@@ -78,3 +78,28 @@ Remaining: hash-linked call graphs; type-preserving edit propagation.
 `sortNatWithTrace`, `runSample`). Full Lean proof bodies from
 `QuickSortOrdEffects.rosetta` remain host obligations (`sorry` / tests), not
 re-proved in Cairn — by design (§4.10).
+
+## Riemann — an open claim, not a parity item
+
+Not a §13 source — no summarized prior project claims the Riemann Hypothesis,
+so this pack is exploratory, outside the parity matrix, and does not appear
+in [STATUS-2.md](STATUS-2.md)'s scorecard. It exists to demonstrate the
+`Claim` vs `Theorem` vocabulary (§2) at its honest limit: RH is unproved (an
+open problem in mathematics) and undecidable by Cairn's kernel (a decidable
+syntactic term checker, §2b/L2, with no business in continuous complex
+analysis).
+
+`languages/riemann.cairn` is a small standalone (no `requires`) grammar for
+analytic propositions (`Term`/`RExpr`/`Prop` sorts). `examples/riemann/Riemann.scala`
+builds the standard critical-strip formalization — "∀s, (ζ(s)=0 ∧ 0<Re(s)<1)
+→ Re(s)=1/2" — as a `cairn.proof.Claim`, and projects it to Lean, referencing
+mathlib's real `riemannZeta`, as `def riemann_hypothesis : Prop := ...`
+(never `theorem ... := by sorry`, since a bare `def` asserts nothing — the
+honest rendering of a proof-free claim). **No `Theorem` or `Certificate` is
+ever constructed for this claim anywhere in the pack**; the obligations
+manifest records `kind: "claim"`, `status: "open"`. Lean is the only
+projection target (no Scala/Haskell/Rust ports — only Lean/mathlib has real
+analytic-continuation machinery); the generated file is not built against
+real mathlib in this repo's tests (no network, multi-GB dependency) — only
+round-trip verified through Cairn's own grammar engine, same discipline as
+the Haskell/Rust ports skipping when `runghc`/`cargo` are unavailable.
