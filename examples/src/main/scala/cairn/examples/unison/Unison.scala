@@ -3,16 +3,21 @@ package cairn.examples.unison
 import cairn.kernel.*
 import cairn.workbench.*
 
-/** Unison-inspired pack (M48, §5b): a name-independent definition store over
-  * ALPHA-INVARIANT digests (M2). Definitions are identified by content;
+/** Unison-inspired pack (M48, §5b, §2c): a name-independent definition store
+  * over ALPHA-INVARIANT digests (M2). Definitions are identified by content;
   * names are aliases in a tiny `names` language whose ΔL is the patch
   * language (alias moves). "No builds": rename everything — the underlying
   * definition digests never change, so nothing downstream is invalidated.
+  *
+  * Stored terms are real `UnisonCore` terms (Π §2c: this pack is a domain
+  * language built on Cairn's repository substrate, not a Unison fork) — the
+  * binding discipline is read from `UnisonCore.language` itself rather than
+  * hardcoded, so `Alpha.digest`/`normalize` see ALL of its binders (`lam`
+  * plus `matchList`/`matchOption`'s pattern binders), not just `lam`.
   */
 object Unison:
-  /** the binding discipline of stored terms (λ-shaped) */
-  private val spec = BinderSpec(Map("lam" -> List((0, List(2)))))
-  private val varCtor = "var"
+  private val spec = UnisonCore.language.binderSpec
+  private val varCtor = UnisonCore.language.varCtor.getOrElse("var")
 
   final case class Store(byHash: Map[String, Cst]):
     def add(term: Cst): (Digest, Store) =
