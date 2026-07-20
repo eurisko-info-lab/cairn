@@ -17,7 +17,19 @@ class CanonSuite extends munit.FunSuite:
     val b = Canon.cmap("y" -> CInt(2), "x" -> CInt(1))
     assert(Canon.encode(a).sameElements(Canon.encode(b)))
 
-  test("duplicate map keys rejected"):
+  test("cmap is the quotient map for permutations: every shuffle of the same entries encodes identically"):
+    val rnd = new scala.util.Random(42)
+    for trial <- 1 to 200 do
+      val n = 1 + rnd.nextInt(8)
+      val keys = (0 until n).map(i => s"k$i-${rnd.nextInt(1000)}").distinct
+      val entries = keys.map(k => k -> (CInt(rnd.nextLong()): Canon))
+      val baseline = Canon.encode(Canon.cmap(entries*))
+      for shuffleTrial <- 1 to 3 do
+        val shuffled = rnd.shuffle(entries)
+        assert(Canon.encode(Canon.cmap(shuffled*)).sameElements(baseline),
+          s"trial $trial.$shuffleTrial: permutation changed canonical bytes for $entries")
+
+  test("duplicate map keys rejected — no last-write-wins merge (§4.3, conflicts are errors)"):
     intercept[IllegalArgumentException](Canon.cmap("x" -> CInt(1), "x" -> CInt(2)))
 
   test("golden digest is stable (S2/S3 acceptance)"):

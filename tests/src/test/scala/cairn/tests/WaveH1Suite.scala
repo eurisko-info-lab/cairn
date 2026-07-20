@@ -15,6 +15,32 @@ class WaveH1Suite extends munit.FunSuite:
     assertEquals(fromText.rewriteRules, Stlc.language.rewriteRules)
     assertEquals(fromText.judgments.keySet, Stlc.language.judgments.keySet)
 
+  test("M41: reconstructed judgments agree with the original — check, not just digest"):
+    // Digest/grammar/rule equality (above) is structural. This is the
+    // behavioral half of the bootstrap fixpoint: one real typing derivation,
+    // checked under BOTH judgment sets, must agree — including on rejection.
+    // (Cairn's self-description is a single-engine FIXPOINT — the meta
+    // language reproduces itself byte-for-byte — not a second, separately
+    // implemented kernel to bisimulate against; this is the "check" analogue
+    // of that same fixpoint, on the one language here with real judgments.)
+    import cairn.proof.Checker
+    import cairn.examples.claims.Claims
+    val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)
+    val fromText = Meta.parseFile(text).fold(e => fail(e), identity)
+    assertEquals(fromText.canon, Stlc.language.canon)
+
+    val derivation = Claims.idAppliedDerivation
+    assertEquals(Checker.check(Stlc.language.judgments.values.toList, derivation), Right(()))
+    assertEquals(Checker.check(fromText.judgments.values.toList, derivation), Right(()))
+
+    // a tampered conclusion (claims the wrong type) must be rejected by BOTH
+    val tampered = derivation.copy(conclusion = derivation.conclusion match
+      case Cst.Node(t, List(ctx, term, _)) =>
+        Cst.Node(t, List(ctx, term, Cst.node("arrow", Cst.node("tyBool"), Cst.node("tyBool"))))
+      case other => fail(s"unexpected conclusion shape: ${other.render}"))
+    assert(Checker.check(Stlc.language.judgments.values.toList, tampered).isLeft)
+    assert(Checker.check(fromText.judgments.values.toList, tampered).isLeft)
+
   test("M41: grammar productions, print rules, infix, rules, judgments all round-trip encode/elaborate"):
     for f <- Stlc.fragments do
       val cst = Meta.encode(f)

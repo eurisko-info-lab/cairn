@@ -129,49 +129,73 @@ object Delta:
       case Cst.Node(c, cs) => Left(s"path index $i out of range for '$c' (${cs.length} children)")
       case Cst.Leaf(x)     => Left(s"path descends into leaf '$x'")
 
-  /** Validate + apply a ΔL change-set term to a module. Structured errors;
-    * no silent overwrites; renames must carry an exact footprint.
+  /** Typed rejection reasons for [[apply]] (scoped to this one gate, not a
+    * kernel-wide error-type migration): every `Left` site in `applyTyped`
+    * constructs one of these instead of an ad-hoc string. `render` produces
+    * the EXACT text `apply`'s public `Either[String, _]` contract has always
+    * returned — this is a refactor of the single source of truth, not a
+    * parallel, driftable reimplementation of the same checks.
     */
-  def apply(l: ComposedLanguage, module: Module, change: Cst): Either[String, (Module, ValidatedChangeSet)] =
+  enum Rejection:
+    case AlreadyDefined(op: String, name: String)
+    case NotDefined(op: String, name: String)
+    case StillReferenced(name: String, by: Set[String])
+    case FootprintMismatch(name: String, declared: Set[String], actual: Set[String])
+    case PathError(name: String, detail: String)
+    case Malformed(detail: String)
+
+    def render: String = this match
+      case AlreadyDefined("add", name)            => s"ΔL add: '$name' already defined (use replace)"
+      case AlreadyDefined("rename-target", name)  => s"ΔL rename: target '$name' already defined"
+      case AlreadyDefined(op, name)               => s"ΔL $op: '$name' already defined"
+      case NotDefined(op, name)                   => s"ΔL $op: '$name' not defined"
+      case StillReferenced(name, by)              => s"ΔL remove: '$name' still referenced by ${by.toList.sorted.mkString(", ")}"
+      case FootprintMismatch(name, declared, actual) =>
+        s"ΔL rename footprint mismatch for '$name': declared {${declared.toList.sorted.mkString(",")}}, actual {${actual.toList.sorted.mkString(",")}}"
+      case PathError(name, detail) => s"ΔL edit '$name': $detail"
+      case Malformed(detail)       => detail
+
+  /** [[apply]], but with [[Rejection]] left unstringified — the typed view. */
+  def applyTyped(l: ComposedLanguage, module: Module, change: Cst): Either[Rejection, (Module, ValidatedChangeSet)] =
     def referencing(m: Module, name: String): Set[String] =
       val spec = l.binderSpec
       val vc = l.varCtor.getOrElse("var")
       m.defs.collect { case (n, t) if n != name && Binding.freeVars(spec, vc)(t).contains(name) => n }.toSet
 
-    def applyOne(m: Module, ch: Cst): Either[String, Module] = ch match
+    def applyOne(m: Module, ch: Cst): Either[Rejection, Module] = ch match
       case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>
-        if m.get(name).isDefined then Left(s"ΔL add: '$name' already defined (use replace)")
+        if m.get(name).isDefined then Left(Rejection.AlreadyDefined("add", name))
         else Right(Module(m.defs :+ (name, term)))
       case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "replace") =>
-        if m.get(name).isEmpty then Left(s"ΔL replace: '$name' not defined")
+        if m.get(name).isEmpty then Left(Rejection.NotDefined("replace", name))
         else Right(Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))))
       case Cst.Node(t, List(Cst.Leaf(name))) if t == tag(l, "remove") =>
-        if m.get(name).isEmpty then Left(s"ΔL remove: '$name' not defined")
+        if m.get(name).isEmpty then Left(Rejection.NotDefined("remove", name))
         else
           val refs = referencing(m, name)
-          if refs.nonEmpty then Left(s"ΔL remove: '$name' still referenced by ${refs.toList.sorted.mkString(", ")}")
+          if refs.nonEmpty then Left(Rejection.StillReferenced(name, refs))
           else Right(Module(m.defs.filterNot(_._1 == name)))
       case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
         // M15: structural path edit — replace the subtree at child-index path
         val path = pathOf(pathCst)
         m.get(name) match
-          case None => Left(s"ΔL edit: '$name' not defined")
+          case None => Left(Rejection.NotDefined("edit", name))
           case Some(old) =>
             replaceAt(old, path, term) match
               case Right(updated) => Right(Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0))))
-              case Left(err)      => Left(s"ΔL edit '$name': $err")
+              case Left(err)      => Left(Rejection.PathError(name, err))
       case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
         val declared: Set[String] = fp match
           case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }.toSet
           case Cst.Node("none", _) => Set.empty
           case Cst.Node("list", items) => items.collect { case Cst.Leaf(n) => n }.toSet
           case other => Set.empty
-        if m.get(from).isEmpty then Left(s"ΔL rename: '$from' not defined")
-        else if m.get(to).isDefined then Left(s"ΔL rename: target '$to' already defined")
+        if m.get(from).isEmpty then Left(Rejection.NotDefined("rename", from))
+        else if m.get(to).isDefined then Left(Rejection.AlreadyDefined("rename-target", to))
         else
           val actual = referencing(m, from)
           if declared != actual then
-            Left(s"ΔL rename footprint mismatch for '$from': declared {${declared.toList.sorted.mkString(",")}}, actual {${actual.toList.sorted.mkString(",")}}")
+            Left(Rejection.FootprintMismatch(from, declared, actual))
           else
             val spec = l.binderSpec
             val vc = l.varCtor.getOrElse("var")
@@ -179,21 +203,28 @@ object Delta:
               val n2 = if n == from then to else n
               val t2 = if actual.contains(n) then Binding.rename(spec, vc)(t0, from, to) else t0
               (n2, t2) }))
-      case other => Left(s"not a ΔL change term: ${other.render}")
+      case other => Left(Rejection.Malformed(s"not a ΔL change term: ${other.render}"))
 
     val changes = change match
       case Cst.Node(t, List(Cst.Node("list", items))) if t == tag(l, "changeset") => Right(items)
       case Cst.Node(t, items) if t == tag(l, "changeset") => Right(items)
       case single @ Cst.Node(t, _) if t.startsWith("add:") || t.startsWith("replace:") ||
           t.startsWith("remove:") || t.startsWith("rename:") || t.startsWith("edit:") => Right(List(single))
-      case other => Left(s"not a ΔL changeset: ${other.render}")
+      case other => Left(Rejection.Malformed(s"not a ΔL changeset: ${other.render}"))
 
     changes.flatMap { chs =>
-      chs.foldLeft[Either[String, Module]](Right(module)) { (acc, ch) => acc.flatMap(applyOne(_, ch)) }
+      chs.foldLeft[Either[Rejection, Module]](Right(module)) { (acc, ch) => acc.flatMap(applyOne(_, ch)) }
         .map { result =>
           val vcs = ValidatedChangeSet(l.digest, module.digest, change, result.digest)
           (result.sorted, vcs) }
     }
+
+  /** Validate + apply a ΔL change-set term to a module. Structured errors;
+    * no silent overwrites; renames must carry an exact footprint. See
+    * [[applyTyped]] for the same check with [[Rejection]] left unstringified.
+    */
+  def apply(l: ComposedLanguage, module: Module, change: Cst): Either[String, (Module, ValidatedChangeSet)] =
+    applyTyped(l, module, change).left.map(_.render)
 
   /** Accept either a `changeset` node or a single bare change term (same
     * tolerance as [[apply]]) and return its flat list of change items.
@@ -407,3 +438,18 @@ object Delta:
   /** [[collapseAdjacent]] applied to a full changeset term. */
   def collapse(l: ComposedLanguage, cs: Cst): Either[String, Cst] =
     changeItems(l, cs).map(xs => Cst.node(tag(l, "changeset"), Cst.Node("list", collapseAdjacent(l, xs))))
+
+  /** flatten: Δ(ΔL) → ΔL — the monad multiplication μ for the recursive
+    * closure `deltaOf(deltaOf(L))` forced by §2b. `deltaOf`/`apply` are
+    * already fully generic over ANY `ComposedLanguage`, so applying an edit
+    * to `ΔL` itself needs no new machinery to BUILD: a Δ(ΔL) `Module` is
+    * just named ΔL changesets (`Delta.apply(deltaOf(L), patches, ddlEdit)`
+    * already works, unmodified), and its result is already ΔL-shaped —
+    * there is nothing left to "multiply" except extracting the (possibly
+    * edited) changeset back out by name. That near-triviality — not a
+    * missing primitive — was the actual gap: `deltaOf(deltaOf(L))` was
+    * asserted in this doc comment but never exercised anywhere; see
+    * `DeltaFlattenSuite` for the closed loop L ← ΔL ← Δ(ΔL).
+    */
+  def flatten(patched: Module, name: String): Either[String, Cst] =
+    patched.get(name).toRight(s"flatten: '$name' not present in the Δ(ΔL)-patched module")

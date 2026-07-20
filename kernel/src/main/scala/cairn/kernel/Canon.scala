@@ -34,7 +34,22 @@ object Canon:
       i += 1
     x.length < y.length
 
-  /** Smart constructor: sorts entries, rejects duplicate keys. */
+  /** Smart constructor: sorts entries, rejects duplicate keys.
+    *
+    * This is the canonicalization **quotient map** for map-shaped values
+    * (§4.12 "same semantic artifact ⇒ same bytes"): construction order is
+    * not part of a map's meaning, so `cmap` is a surjection from
+    * "sequence of entries" onto "canonical bytes" that identifies every
+    * permutation of the same entry set —
+    *   `∀ es, π. encode(cmap(es)) == encode(cmap(π(es)))` for any
+    *   permutation `π` of `es` — tested as a property below (`CanonSuite`),
+    *   not just the one fixed example.
+    * Deliberately NOT a quotient over duplicate keys, i.e. no
+    * last-write-wins merge: `require` rejects them outright. A silently
+    * resolved conflict is exactly what §4.3 "conflicts are errors, not
+    * silent overwrites" rules out — two entries for the same key are a
+    * malformed proposal, not two representations of one canonical value.
+    */
   def cmap(entries: (String, Canon)*): Canon =
     val ks = entries.map(_._1)
     require(ks.distinct.sizeIs == ks.size, s"duplicate map keys: ${ks.diff(ks.distinct).mkString(",")}")
