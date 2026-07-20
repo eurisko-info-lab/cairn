@@ -73,8 +73,9 @@ class Phase7Suite extends munit.FunSuite:
 
   test("self-description: meta surface round-trips (S44 + S11 law)"):
     val src = "fragment tiny provides tiny { sort T tree ; ctor unit : T ; }"
-    val cst = Parser.parse(Meta.grammar, src).toOption.get
-    RoundTrip.check(Meta.grammar, cst).fold(e => fail(e), identity)
+    val g = Meta.grammar.copy(top = "fragmentDecl")
+    val cst = Parser.parse(g, src).toOption.get
+    RoundTrip.check(g, cst).fold(e => fail(e), identity)
 
   test("self-description: surface fragment composes with host fragments (S44)"):
     val src = """

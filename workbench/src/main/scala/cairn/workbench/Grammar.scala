@@ -361,7 +361,13 @@ object Parser:
       case Right(cst) =>
         if peek.kind == TokKind.Eof then
           Right(ParseOut(cst, toks, spans, diags.result(), steps, memo.hits - memoHits0))
-        else Left(ParseError("trailing input after top-level parse", peek).renderRich(source))
+        else
+          // trailing input: the furthest failure explains WHY the parse stopped
+          val err =
+            if furthestPos > pos then
+              ParseError(s"expected ${furthestExpected.toList.sorted.mkString(" | ")}", toks(furthestPos))
+            else ParseError("trailing input after top-level parse", peek)
+          Left(err.renderRich(source))
 
 /** M10: incremental reparse — retain the memo table across edits, invalidating
   * only entries at or crossing the first changed token.

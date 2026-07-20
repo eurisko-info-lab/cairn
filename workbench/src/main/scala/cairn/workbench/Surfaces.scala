@@ -12,14 +12,19 @@ object JsonSurface:
     */
   val grammar: GrammarSpec = GrammarSpec(
     name = "json-cst",
-    tokens = TokenSpec(Nil, List("{", "}", "[", "]", ",", ":"), None),
+    tokens = TokenSpec(List("true", "false", "null"), List("{", "}", "[", "]", ",", ":", "-"), None),
     categories = List(
       CategorySpec("json", List(
         ConstructorSpec("obj", List(
           Elem.Tok("{"), Elem.Opt(Elem.SepBy1(Elem.Cat("pair"), ",")), Elem.Tok("}"))),
         ConstructorSpec("arr", List(
           Elem.Tok("["), Elem.Opt(Elem.SepBy1(Elem.Cat("json"), ",")), Elem.Tok("]"))),
-        ConstructorSpec("jstr", List(Elem.StrLeaf)))),
+        ConstructorSpec("jstr", List(Elem.StrLeaf)),
+        ConstructorSpec("jneg", List(Elem.Tok("-"), Elem.NumLeaf)),
+        ConstructorSpec("jnum", List(Elem.NumLeaf)),
+        ConstructorSpec("jtrue", List(Elem.Tok("true"))),
+        ConstructorSpec("jfalse", List(Elem.Tok("false"))),
+        ConstructorSpec("jnull", List(Elem.Tok("null"))))),
       CategorySpec("pair", List(
         ConstructorSpec("pair", List(Elem.StrLeaf, Elem.Tok(":"), Elem.Cat("json")))))),
     precCategories = Nil,
@@ -27,6 +32,11 @@ object JsonSurface:
       PrintRule("obj", List(PrintSeg.Lit("{"), PrintSeg.Field(0), PrintSeg.Lit("}"))),
       PrintRule("arr", List(PrintSeg.Lit("["), PrintSeg.Field(0), PrintSeg.Lit("]"))),
       PrintRule("jstr", List(PrintSeg.StrField(0))),
+      PrintRule("jneg", List(PrintSeg.Lit("-"), PrintSeg.Field(0))),
+      PrintRule("jnum", List(PrintSeg.Field(0))),
+      PrintRule("jtrue", List(PrintSeg.Lit("true"))),
+      PrintRule("jfalse", List(PrintSeg.Lit("false"))),
+      PrintRule("jnull", List(PrintSeg.Lit("null"))),
       PrintRule("pair", List(PrintSeg.StrField(0), PrintSeg.Lit(": "), PrintSeg.Field(1)))),
     top = "json")
 
@@ -66,6 +76,8 @@ object JsonSurface:
 
   def encode(term: Cst): Either[String, String] = Printer.print(grammar, toJsonCst(term))
   def decode(json: String): Either[String, Cst] = Parser.parse(grammar, json).flatMap(fromJsonCst)
+  /** Parse arbitrary JSON text to the raw json Cst (no Cst-encoding decode). */
+  def decodeRaw(json: String): Either[String, Cst] = Parser.parse(grammar, json)
 
 /** Per-language surface/encoding registry (M12, §2b capability row
   * "import/export formats"): text (the bidirectional grammar), json, canon.

@@ -26,9 +26,11 @@ object Transcript:
     name = "cairn-transcript",
     tokens = TokenSpec(
       keywords = List("transcript", "lang", "roundtrip", "eval", "expect",
-        "delta", "claim", "publish", "fetch"),
-      puncts = List("{", "}", ";"),
-      lineComment = Some("--")),
+        "delta", "claim", "publish", "fetch", "node", "on", "from", "to",
+        "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language"),
+      puncts = List("{", "}", ";", ","),
+      lineComment = Some("--"),
+      identContExtra = "_'-"),
     categories = List(
       CategorySpec("transcript", List(
         ConstructorSpec("transcript", List(
@@ -36,12 +38,21 @@ object Transcript:
           Elem.Star(Elem.Cat("step")), Elem.Tok("}"))))),
       CategorySpec("step", List(
         ConstructorSpec("lang", List(Elem.Tok("lang"), Elem.NameLeaf, Elem.Tok(";"))),
+        ConstructorSpec("loadLang", List(Elem.Tok("load-language"), Elem.StrLeaf, Elem.Tok(";"))),
+        ConstructorSpec("nodeD", List(Elem.Tok("node"), Elem.NameLeaf, Elem.Tok(";"))),
         ConstructorSpec("roundtrip", List(Elem.Tok("roundtrip"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("eval", List(Elem.Tok("eval"), Elem.StrLeaf, Elem.Tok("expect"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("delta", List(Elem.Tok("delta"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("claim", List(Elem.Tok("claim"), Elem.NameLeaf, Elem.StrLeaf, Elem.Tok("expect"), Elem.StrLeaf, Elem.Tok(";"))),
+        ConstructorSpec("publishOn", List(Elem.Tok("publish"), Elem.NameLeaf, Elem.Tok("on"), Elem.NameLeaf, Elem.Tok(";"))),
         ConstructorSpec("publish", List(Elem.Tok("publish"), Elem.NameLeaf, Elem.Tok(";"))),
-        ConstructorSpec("fetch", List(Elem.Tok("fetch"), Elem.NameLeaf, Elem.Tok(";")))))),
+        ConstructorSpec("fetchBetween", List(
+          Elem.Tok("fetch"), Elem.NameLeaf, Elem.Tok("from"), Elem.NameLeaf, Elem.Tok("to"), Elem.NameLeaf, Elem.Tok(";"))),
+        ConstructorSpec("fetch", List(Elem.Tok("fetch"), Elem.NameLeaf, Elem.Tok(";"))),
+        ConstructorSpec("gossip", List(Elem.Tok("gossip"), Elem.SepBy1(Elem.NameLeaf, ","), Elem.Tok(";"))),
+        ConstructorSpec("port", List(Elem.Tok("port"), Elem.NameLeaf, Elem.Tok("expect-tests-pass"), Elem.Tok(";"))),
+        ConstructorSpec("query", List(Elem.Tok("query"), Elem.StrLeaf, Elem.Tok("expect"), Elem.NumLeaf, Elem.Tok(";"))),
+        ConstructorSpec("expectfail", List(Elem.Tok("expectfail"), Elem.StrLeaf, Elem.Cat("step")))))),
     precCategories = Nil,
     printRules = List(
       PrintRule("transcript", List(
@@ -49,6 +60,8 @@ object Transcript:
         PrintSeg.Lit("{"), PrintSeg.Newline, PrintSeg.IndentIn,
         PrintSeg.SepFields(1, "\n"), PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
       PrintRule("lang", List(PrintSeg.Lit("lang"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("loadLang", List(PrintSeg.Lit("load-language"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("nodeD", List(PrintSeg.Lit("node"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("roundtrip", List(PrintSeg.Lit("roundtrip"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("eval", List(
         PrintSeg.Lit("eval"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space,
@@ -57,8 +70,24 @@ object Transcript:
       PrintRule("claim", List(
         PrintSeg.Lit("claim"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.StrField(1),
         PrintSeg.Space, PrintSeg.Lit("expect"), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("publishOn", List(
+        PrintSeg.Lit("publish"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("on"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("publish", List(PrintSeg.Lit("publish"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
-      PrintRule("fetch", List(PrintSeg.Lit("fetch"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";")))),
+      PrintRule("fetchBetween", List(
+        PrintSeg.Lit("fetch"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("from"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
+        PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("fetch", List(PrintSeg.Lit("fetch"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("gossip", List(PrintSeg.Lit("gossip"), PrintSeg.Space, PrintSeg.SepFields(0, ", "), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("port", List(
+        PrintSeg.Lit("port"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("expect-tests-pass"), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("query", List(
+        PrintSeg.Lit("query"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space,
+        PrintSeg.Lit("expect"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("expectfail", List(
+        PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
 
   final case class Report(name: String, steps: List[String]):
@@ -68,100 +97,181 @@ object Transcript:
     * language registry (domain packs stay out of the surface layer — they are
     * injected by callers, §4.11).
     */
-  def run(src: String, packs: Map[String, ComposedLanguage], workDir: Path): Either[String, Report] =
+  def run(src: String, packs: Map[String, ComposedLanguage], workDir: Path,
+          portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, Report] =
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("transcript", List(Cst.Leaf(name), Cst.Node("list", steps))) =>
-        runSteps(name, steps, packs, workDir)
+        runSteps(name, steps, packs, workDir, portModules)
       case other => Left(s"not a transcript: ${other.render}")
     }
 
   private def runSteps(name: String, steps: List[Cst],
-                       packs: Map[String, ComposedLanguage], workDir: Path): Either[String, Report] =
+                       packsIn: Map[String, ComposedLanguage], workDir: Path,
+                       portModules: Map[String, cairn.rosetta.RosettaModule2]): Either[String, Report] =
+    var packs = packsIn
     var lang: Option[ComposedLanguage] = None
     var module = Module(Nil)
     val authority = Keypair.dev("dev-authority")
     def authorities = Map(authority.name -> authority.publicBytes)
+    val nodes = scala.collection.mutable.Map[String, Node]()
+    def nodeOf(n: String): Node = nodes.getOrElseUpdate(n, Node(workDir.resolve(n)))
     val log = List.newBuilder[String]
 
     def need: Either[String, ComposedLanguage] = lang.toRight("no language selected (use `lang NAME ;` first)")
     def parseIn(l: ComposedLanguage, s: String): Either[String, Cst] = Parser.parse(l.grammar, s)
 
-    val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
-      acc.flatMap { _ =>
-        step match
-          case Cst.Node("lang", List(Cst.Leaf(n))) =>
-            packs.get(n).toRight(s"unknown language pack '$n' (registered: ${packs.keys.mkString(", ")})")
-              .map { l => lang = Some(l); module = Module(Nil); log += s"lang $n (${l.digest.short})" }
-          case Cst.Node("roundtrip", List(Cst.Leaf(s))) =>
-            for
-              l <- need
-              t <- parseIn(l, s)
-              _ <- RoundTrip.check(l.grammar, t)
-            yield log += s"roundtrip ok: $s"
-          case Cst.Node("eval", List(Cst.Leaf(src), Cst.Leaf(expected))) =>
-            for
-              l <- need
-              t <- parseIn(l, src)
-              e <- parseIn(l, expected)
-              v <- TreeEngine.normalize(l, t)
-              _ <- if v == e then Right(()) else Left(s"eval mismatch: $src ~> ${v.render}, expected ${e.render}")
-            yield log += s"eval $src => $expected"
-          case Cst.Node("delta", List(Cst.Leaf(src))) =>
-            for
-              l <- need
-              dl <- Delta.deltaOf(l).left.map(_.map(_.render).mkString("; "))
-              ch <- Parser.parse(dl.grammar, src)
-              res <- Delta.apply(l, module, ch)
-            yield
-              module = res._1
-              log += s"delta applied: module ${res._2.base.short} -> ${res._2.result.short}"
-          case Cst.Node("claim", List(Cst.Leaf(cn), Cst.Leaf(input), Cst.Leaf(expected))) =>
-            for
-              l <- need
-              i <- parseIn(l, input)
-              e <- parseIn(l, expected)
-              claim = cairn.proof.Claim(cn, Cst.node("claimEval", i, e), module.digest)
-              suite = cairn.proof.TestSuite(s"$cn-tests", module.digest,
-                List(cairn.proof.TestCase(cn, i, e)))
-              cert <- cairn.proof.Certify.byTests(claim, suite, t => TreeEngine.normalize(l, t))
-            yield log += s"claim $cn certified (${cert.artifact.digest.short})"
-          case Cst.Node("publish", List(Cst.Leaf(branch))) =>
-            need.flatMap { l =>
-              val node = Node(workDir.resolve("nodeA"))
-              l.fragments.foreach(f => node.cas.put(f.artifact))
-              node.cas.put(l.artifact)
-              node.cas.put(module.artifact)
-              val txs =
-                List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))) ++
-                l.fragments.map(f => authority.signTx(Tx.PublishArtifact(f.artifact.key))) ++
-                List(
-                  authority.signTx(Tx.PublishArtifact(l.artifact.key)),
-                  authority.signTx(Tx.PublishArtifact(module.artifact.key)),
-                  authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
-              node.append(authority, authorities, txs)
-                .map(b => log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}")
-            }
-          case Cst.Node("fetch", List(Cst.Leaf(branch))) =>
-            val a = Node(workDir.resolve("nodeA"))
-            val b = Node(workDir.resolve("nodeB"))
-            for
-              _ <- Sync.pull(a, b, authorities)
-              st <- b.state(authorities)
-              head <- st.heads.get(branch).toRight(s"branch '$branch' not on ledger")
-              art <- b.cas.get(head)
-            yield log += s"fetched $branch head ${art.digest.short} on second node"
-          case other => Left(s"unknown transcript step: ${other.render}")
+    def publishTo(node: Node, branch: String): Either[String, Unit] =
+      need.flatMap { l =>
+        l.fragments.foreach(f => node.cas.put(f.artifact))
+        node.cas.put(l.artifact)
+        node.cas.put(module.artifact)
+        val txs =
+          List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))) ++
+          l.fragments.map(f => authority.signTx(Tx.PublishArtifact(f.artifact.key))) ++
+          List(
+            authority.signTx(Tx.PublishArtifact(l.artifact.key)),
+            authority.signTx(Tx.PublishArtifact(module.artifact.key)),
+            authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
+        node.append(authority, authorities, txs)
+          .map(b => log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}")
       }
-    }
+
+    def fetchBetween(branch: String, fromN: String, toN: String): Either[String, Unit] =
+      for
+        _ <- Sync.pull(nodeOf(fromN), nodeOf(toN), authorities)
+        st <- nodeOf(toN).state(authorities)
+        head <- st.heads.get(branch).toRight(s"branch '$branch' not on ledger")
+        art <- nodeOf(toN).cas.get(head)
+      yield log += s"fetched $branch head ${art.digest.short} on $toN"
+
+    def runStep(step: Cst): Either[String, Unit] =
+      step match
+        case Cst.Node("lang", List(Cst.Leaf(n))) =>
+          packs.get(n).toRight(s"unknown language pack '$n' (registered: ${packs.keys.mkString(", ")})")
+            .map { l => lang = Some(l); module = Module(Nil); log += s"lang $n (${l.digest.short})" }
+        case Cst.Node("loadLang", List(Cst.Leaf(file))) =>
+          val p = Path.of(file)
+          val src = if Files.exists(p) then Right(Files.readString(p))
+                    else Left(s"no such language file: $file")
+          src.flatMap(Meta.parseFile).map { l =>
+            packs = packs + (l.name -> l)
+            log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
+        case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
+          nodeOf(n); log += s"node $n ready"; Right(())
+        case Cst.Node("roundtrip", List(Cst.Leaf(s))) =>
+          for
+            l <- need
+            t <- parseIn(l, s)
+            _ <- RoundTrip.check(l.grammar, t)
+          yield log += s"roundtrip ok: $s"
+        case Cst.Node("eval", List(Cst.Leaf(src), Cst.Leaf(expected))) =>
+          for
+            l <- need
+            t <- parseIn(l, src)
+            e <- parseIn(l, expected)
+            v <- TreeEngine.normalize(l, t)
+            _ <- if v == e then Right(()) else Left(s"eval mismatch: $src ~> ${v.render}, expected ${e.render}")
+          yield log += s"eval $src => $expected"
+        case Cst.Node("delta", List(Cst.Leaf(src))) =>
+          for
+            l <- need
+            dl <- Delta.deltaOf(l).left.map(_.map(_.render).mkString("; "))
+            ch <- Parser.parse(dl.grammar, src)
+            res <- Delta.apply(l, module, ch)
+          yield
+            module = res._1
+            log += s"delta applied: module ${res._2.base.short} -> ${res._2.result.short}"
+        case Cst.Node("claim", List(Cst.Leaf(cn), Cst.Leaf(input), Cst.Leaf(expected))) =>
+          for
+            l <- need
+            i <- parseIn(l, input)
+            e <- parseIn(l, expected)
+            claim = cairn.proof.Claim(cn, Cst.node("claimEval", i, e), module.digest)
+            suite = cairn.proof.TestSuite(s"$cn-tests", module.digest,
+              List(cairn.proof.TestCase(cn, i, e)))
+            cert <- cairn.proof.Certify.byTests(claim, suite, t => TreeEngine.normalize(l, t))
+          yield log += s"claim $cn certified (${cert.artifact.digest.short})"
+        case Cst.Node("publishOn", List(Cst.Leaf(branch), Cst.Leaf(nodeName))) =>
+          publishTo(nodeOf(nodeName), branch)
+        case Cst.Node("publish", List(Cst.Leaf(branch))) =>
+          publishTo(nodeOf("nodeA"), branch)
+        case Cst.Node("fetchBetween", List(Cst.Leaf(branch), Cst.Leaf(f), Cst.Leaf(t))) =>
+          fetchBetween(branch, f, t)
+        case Cst.Node("fetch", List(Cst.Leaf(branch))) =>
+          fetchBetween(branch, "nodeA", "nodeB")
+        case Cst.Node("gossip", List(Cst.Node("list", names))) =>
+          val peers = names.collect { case Cst.Leaf(n) => Gossip.Peer(n, nodeOf(n)) }
+          Gossip.converge(peers, authorities).map { reorgs =>
+            log += s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)" }
+        case Cst.Node("port", List(Cst.Leaf(host))) =>
+          portModules.values.headOption.toRight("no rosetta module registered for port steps").flatMap { m =>
+            val port: Option[cairn.rosetta.PortV2] = host match
+              case "scala"   => Some(cairn.rosetta.Ports2.ScalaPort2)
+              case "lean"    => Some(cairn.rosetta.Ports2.LeanPort2)
+              case "haskell" => Some(cairn.rosetta.Ports2.HaskellPort2)
+              case "rust"    => Some(cairn.rosetta.Ports2.RustPort2)
+              case _          => None
+            port.toRight(s"unknown port host '$host'").flatMap { p =>
+              cairn.rosetta.PortV2.verified(p, m).flatMap { out =>
+                if host == "scala" then
+                  val scalaCli = sys.env.getOrElse("PATH", "").split(":")
+                    .map(java.nio.file.Paths.get(_, "scala-cli")).find(Files.isExecutable(_))
+                  scalaCli match
+                    case None => Right(log += s"port $host verified (host toolchain absent, fixpoint only)")
+                    case Some(cli) =>
+                      val f = Files.createTempDirectory(workDir, "port").resolve(out.fileName)
+                      Files.writeString(f, out.text)
+                      val pb = new ProcessBuilder(cli.toString, "run", "--server=false", f.toString)
+                      pb.redirectErrorStream(true)
+                      val proc = pb.start()
+                      val output = new String(proc.getInputStream.readAllBytes())
+                      if proc.waitFor() == 0 && output.contains("ALL TESTS PASS") then
+                        Right(log += s"port $host tests pass in host")
+                      else Left(s"port $host host run failed:\n$output")
+                else Right(log += s"port $host verified (byte fixpoint)")
+              }
+            }
+          }.map(_ => ())
+        case Cst.Node("query", List(Cst.Leaf(qsrc), Cst.Leaf(expected))) =>
+          for
+            q <- Query.parse(qsrc)
+            res <- Query.run(q, module)
+            _ <- if res.hits.length == expected.toInt then Right(())
+                 else Left(s"query '$qsrc' returned ${res.hits.length} hits, expected $expected")
+          yield log += s"query ok: $qsrc => ${res.hits.length}"
+        case Cst.Node("expectfail", List(Cst.Leaf(substring), inner)) =>
+          runStep(inner) match
+            case Left(err) if err.contains(substring) =>
+              log += s"expected failure: ...${substring}..."; Right(())
+            case Left(err) => Left(s"failed with wrong message: $err (wanted ...$substring...)")
+            case Right(_)  => Left(s"step succeeded but was expected to fail with ...$substring...")
+        case other => Left(s"unknown transcript step: ${other.render}")
+
+    val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
+      acc.flatMap(_ => runStep(step)) }
     result.map(_ => Report(name, log.result()))
 
-/** Generic CLI (S6): hash / put / get / canon over a disk CAS, plus
-  * transcript running with an injected pack registry.
+/** Generic CLI (S6, M40, M42, M43, M44): hash / put / get / canon over a disk
+  * CAS, transcripts, provenance walking, capability manifests, REPL, and LSP.
+  * Language packs come from the caller AND from `.cairn` files (M42: adding a
+  * language requires no recompilation).
   */
 object Cli:
-  def main(args: List[String], packs: Map[String, ComposedLanguage]): Either[String, String] =
+  def loadLanguages(dir: Path): Map[String, ComposedLanguage] =
+    if !Files.exists(dir) then Map.empty
+    else
+      import scala.jdk.CollectionConverters.*
+      Files.list(dir).iterator.asScala
+        .filter(_.toString.endsWith(".cairn"))
+        .flatMap(p => Meta.parseFile(Files.readString(p)).toOption)
+        .map(l => l.name -> l)
+        .toMap
+
+  def main(args: List[String], packsIn: Map[String, ComposedLanguage],
+           portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, String] =
     val casDir = Path.of(sys.env.getOrElse("CAIRN_HOME", ".cas"))
     def cas = DiskCas(casDir)
+    val packs = packsIn ++ loadLanguages(Path.of("languages"))
     args match
       case List("hash", file) =>
         Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)
@@ -171,12 +281,34 @@ object Cli:
       case List("get", hex) =>
         Digest.parse(hex).flatMap(d => cas.getBytes(d)).map(bs => new String(bs, "UTF-8"))
       case List("canon", file) =>
-        // normalize a stored artifact: decode + re-encode canonical bytes
         val bs = Files.readAllBytes(Path.of(file))
         Canon.decode(bs).map(c => Digest.of(c).hex)
       case List("transcript", file) =>
         val src = Files.readString(Path.of(file))
         val work = Files.createTempDirectory("cairn-transcript")
-        Transcript.run(src, packs, work).map(_.render)
+        Transcript.run(src, packs, work, portModules).map(_.render)
+      case List("why", hex) =>
+        Digest.parse(hex).map { d =>
+          val hops = cairn.ledger.Provenance.why(casDir, d)
+          if hops.isEmpty then s"no provenance recorded for ${d.short}"
+          else hops.map(h => s"${"  " * h.depth}${h.record.output.short} <- ${h.record.tool}(${h.record.inputs.map(_.short).mkString(", ")})").mkString("\n") }
+      case List("capabilities", langName) =>
+        packs.get(langName).toRight(s"unknown language '$langName'")
+          .flatMap(l => Capabilities.build(l, Map.empty)).map(_.render)
+      case List("languages") =>
+        Right(packs.toList.sortBy(_._1).map((n, l) => s"$n ${l.digest.hex}").mkString("\n"))
+      case List("repl", langName) =>
+        packs.get(langName).toRight(s"unknown language '$langName'").map { l =>
+          val repl = Repl(l)
+          val in = scala.io.Source.stdin.getLines()
+          val out = StringBuilder()
+          while in.hasNext do
+            val line = in.next()
+            if line.trim == ":quit" then return Right(out.result())
+            out ++= repl.eval(line) + "\n"
+          out.result() }
+      case List("lsp", langName) =>
+        packs.get(langName).toRight(s"unknown language '$langName'").map { l =>
+          Lsp.serve(LspConfig(l), System.in, System.out); "lsp session ended" }
       case _ =>
-        Left("usage: cairn [hash|put|get|canon|transcript] <arg>")
+        Left("usage: cairn [hash|put|get|canon|transcript|why|capabilities|languages|repl|lsp] <arg>")

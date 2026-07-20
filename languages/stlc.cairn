@@ -1,0 +1,70 @@
+language stlc {
+  fragment base provides term {
+    sort Term tree;
+    ctor var : Term(Name);
+    ctor app : Term(Term, Term);
+    varctor var;
+    punct "(";
+    punct ")";
+    syntax term += app : tok "(" cat term cat term tok ")";
+    syntax term += group : tok "(" cat term tok ")";
+    syntax term += var : name;
+    print app : lit "(" field 0 sp field 1 lit ")";
+    print var : field 0;
+    top term;
+  }
+  fragment types provides type {
+    sort Type tree;
+    ctor tyBool : Type;
+    ctor arrow : Type(Type, Type);
+    keyword Bool;
+    punct "->";
+    punct "(";
+    punct ")";
+    syntax typeAtom += tyBool : tok "Bool";
+    syntax typeAtom += group : tok "(" cat type tok ")";
+    infix type over typeAtom : "->" tag arrow prec 1 right;
+    print tyBool : lit "Bool";
+  }
+  fragment lambda provides lambda requires term, type {
+    ctor lam : Term(Name, Type, Term) binds 0 in 2;
+    keyword fun;
+    punct ":";
+    punct ".";
+    syntax term += lam : tok "fun" name tok ":" cat type tok "." cat term;
+    print lam : lit "fun" sp field 0 sp lit ":" sp field 1 sp lit "." sp field 2;
+    rule beta : app(lam($x, $T, $b), $v) => $subst($b, $x, $v);
+  }
+  fragment booleans provides booleans requires term, type {
+    ctor true : Term;
+    ctor false : Term;
+    ctor if : Term(Term, Term, Term);
+    keyword true;
+    keyword false;
+    keyword if;
+    keyword then;
+    keyword else;
+    syntax term += true : tok "true";
+    syntax term += false : tok "false";
+    syntax term += if : tok "if" cat term tok "then" cat term tok "else" cat term;
+    print true : lit "true";
+    print false : lit "false";
+    print if : lit "if" sp field 0 sp lit "then" sp field 1 sp lit "else" sp field 2;
+    rule if-true : if(true(), $a, $b) => $a;
+    rule if-false : if(false(), $a, $b) => $b;
+  }
+  fragment typing provides typing requires term, type, lambda, booleans {
+    judgment lookup {
+      rule l-here :  |- lookup(ctxCons($x, $T, $r), $x, $T);
+      rule l-there : lookup($r, $x, $T) |- lookup(ctxCons($y, $S, $r), $x, $T) where $neq($x, $y);
+    }
+    judgment hasType {
+      rule t-var : $ctx-lookup($ctx, $x, $T) |- hasType($ctx, var($x), $T);
+      rule t-abs : hasType(ctxCons($x, $T, $ctx), $b, $U) |- hasType($ctx, lam($x, $T, $b), arrow($T, $U));
+      rule t-app : hasType($ctx, $f, arrow($T, $U)), hasType($ctx, $a, $T) |- hasType($ctx, app($f, $a), $U);
+      rule t-true :  |- hasType($ctx, true(), tyBool());
+      rule t-false :  |- hasType($ctx, false(), tyBool());
+      rule t-if : hasType($ctx, $c, tyBool()), hasType($ctx, $a, $T), hasType($ctx, $b, $T) |- hasType($ctx, if($c, $a, $b), $T);
+    }
+  }
+}

@@ -1,0 +1,23 @@
+-- Cairn MAX transcript (PLAN-2 M49): languages from text, structural edits,
+-- expected failures, queries, three nodes, gossip, host ports.
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/max.cairn"
+transcript max {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  node c ;
+  roundtrip "fun x : Bool . x" ;
+  eval "((fun x : Bool . x) true)" expect "true" ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  delta "{ edit id at [2] = true ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+  expectfail "not defined" delta "{ replace missing = true ; }" ;
+  query "defs matching lam($x, $T, $b)" expect 1 ;
+  query "defs matching true()" expect 2 ;
+  claim id_true "((fun x : Bool . x) true)" expect "true" ;
+  publish main on a ;
+  fetch main from a to b ;
+  gossip a, b, c ;
+  port scala expect-tests-pass ;
+}

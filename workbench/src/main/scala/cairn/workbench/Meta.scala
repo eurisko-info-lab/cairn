@@ -2,90 +2,301 @@ package cairn.workbench
 
 import cairn.kernel.*
 
-/** Self-description bootstrap (S44, §2b, §6 Phase 7).
+/** M41/M42: the FULL meta surface — Cairn's fragment IR as a Cairn language.
   *
-  * Cairn's own fragment IR expressed as a Cairn language: a grammar (in the
-  * generic grammar engine) for fragment declarations, plus an elaborator from
-  * the parsed Cst to the kernel [[Fragment]] value. A fragment defined in this
-  * surface composes identically (same digest) to one constructed in host code.
+  * Every component of a [[Fragment]] is expressible as text: interfaces,
+  * sorts, constructors (with binders), variable ctor, grammar keywords/puncts,
+  * syntax alternatives (the whole Elem vocabulary), print rules (the whole
+  * PrintSeg vocabulary), infix tables, rewrite rules, judgments (premises,
+  * conclusion, side conditions), and the top category.
   *
-  * Staging note (docs/bootstrap.md): this meta surface covers sorts,
-  * constructors (with binder positions), interfaces, and the variable
-  * constructor. Grammar productions, rewrite rules, and judgments are still
-  * seeded from host code — the remaining staged step of the primordial
-  * meta-language/grammar-language pair (§2b); no fake stubs pretend otherwise.
+  * [[Meta.encode]] is the mechanical inverse of [[Meta.elaborateFragment]]:
+  * `elaborate(parse(print(encode(f)))) == f` — so a fragment written in this
+  * surface composes DIGEST-IDENTICALLY to the host-constructed value, and the
+  * meta fragment can describe itself (the M42 bootstrap fixpoint).
   */
 object Meta:
-  val grammar: GrammarSpec = GrammarSpec(
-    name = "cairn-meta",
-    tokens = TokenSpec(
-      keywords = List("fragment", "provides", "requires", "excludes", "sort",
-        "ctor", "tree", "graph", "varctor", "binds", "in"),
-      puncts = List("{", "}", "(", ")", ":", ";", ","),
-      lineComment = Some("--")),
-    categories = List(
-      CategorySpec("fragmentDecl", List(
-        ConstructorSpec("fragmentDecl", List(
-          Elem.Tok("fragment"), Elem.NameLeaf,
-          Elem.Opt(Elem.Cat("providesClause")),
-          Elem.Opt(Elem.Cat("requiresClause")),
-          Elem.Tok("{"), Elem.Star(Elem.Cat("item")), Elem.Tok("}"))))),
-      CategorySpec("providesClause", List(
-        ConstructorSpec("provides", List(Elem.Tok("provides"), Elem.SepBy1(Elem.NameLeaf, ","))))),
-      CategorySpec("requiresClause", List(
-        ConstructorSpec("requires", List(Elem.Tok("requires"), Elem.SepBy1(Elem.NameLeaf, ","))))),
-      CategorySpec("item", List(
-        ConstructorSpec("sortTree", List(Elem.Tok("sort"), Elem.NameLeaf, Elem.Tok("tree"), Elem.Tok(";"))),
-        ConstructorSpec("sortGraph", List(Elem.Tok("sort"), Elem.NameLeaf, Elem.Tok("graph"), Elem.Tok(";"))),
-        ConstructorSpec("ctorDecl", List(
-          Elem.Tok("ctor"), Elem.NameLeaf, Elem.Tok(":"), Elem.NameLeaf,
-          Elem.Opt(Elem.Cat("argList")),
-          Elem.Star(Elem.Cat("bindsClause")),
-          Elem.Tok(";"))),
-        ConstructorSpec("varCtorDecl", List(Elem.Tok("varctor"), Elem.NameLeaf, Elem.Tok(";"))))),
-      CategorySpec("argList", List(
-        ConstructorSpec("argList", List(
-          Elem.Tok("("), Elem.SepBy1(Elem.NameLeaf, ","), Elem.Tok(")"))))),
-      CategorySpec("bindsClause", List(
-        ConstructorSpec("binds", List(
-          Elem.Tok("binds"), Elem.NumLeaf, Elem.Tok("in"), Elem.SepBy1(Elem.NumLeaf, ",")))))),
-    precCategories = Nil,
-    printRules = List(
-      PrintRule("fragmentDecl", List(
-        PrintSeg.Lit("fragment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Field(1),
-        PrintSeg.Field(2), PrintSeg.Space, PrintSeg.Lit("{"), PrintSeg.Newline, PrintSeg.IndentIn,
-        PrintSeg.SepFields(3, "\n"), PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
-      PrintRule("provides", List(PrintSeg.Space, PrintSeg.Lit("provides"), PrintSeg.Space, PrintSeg.SepFields(0, ", "))),
-      PrintRule("requires", List(PrintSeg.Space, PrintSeg.Lit("requires"), PrintSeg.Space, PrintSeg.SepFields(0, ", "))),
-      PrintRule("sortTree", List(PrintSeg.Lit("sort"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("tree"), PrintSeg.Lit(";"))),
-      PrintRule("sortGraph", List(PrintSeg.Lit("sort"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("graph"), PrintSeg.Lit(";"))),
-      PrintRule("ctorDecl", List(
-        PrintSeg.Lit("ctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-        PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Field(2), PrintSeg.SepFields(3, ""), PrintSeg.Lit(";"))),
-      PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
-      PrintRule("binds", List(
-        PrintSeg.Space, PrintSeg.Lit("binds"), PrintSeg.Space, PrintSeg.Field(0),
-        PrintSeg.Space, PrintSeg.Lit("in"), PrintSeg.Space, PrintSeg.SepFields(1, ", "))),
-      PrintRule("varCtorDecl", List(PrintSeg.Lit("varctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";")))),
-    top = "fragmentDecl")
+  private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
+  private def leaf(s: String): Cst = Cst.Leaf(s)
+  private def lst(items: List[Cst]): Cst = Cst.Node("list", items)
+  private def opt(o: Option[Cst]): Cst = o.fold(n("none"))(c => n("some", c))
+  private def optList(items: List[Cst]): Cst =
+    if items.isEmpty then n("none") else n("some", lst(items))
+
+  /** The meta surface's own definition — a Fragment like any other. */
+  val fragment: Fragment = Fragment(
+    name = "meta",
+    provides = List("meta"),
+    requires = Nil,
+    sorts = List(SortDef("FragmentD", SortMode.Tree)),
+    grammar = GrammarPart(
+      keywords = List("language", "fragment", "provides", "requires", "sort", "tree", "graph",
+        "ctor", "binds", "in", "varctor", "keyword", "punct", "identcont", "syntax", "print",
+        "infix", "over", "tag", "prec", "left", "right", "rule", "judgment", "top",
+        "tok", "tokfield", "name", "anyident", "num", "str", "restofline", "cat", "opt",
+        "star", "sepby1", "block", "run", "adjacent1",
+        "lit", "sp", "nl", "indent", "dedent", "field", "strfield", "sep", "where"),
+      puncts = List("{", "}", "(", ")", ":", ";", ",", "+=", "=>", "|-", "$"),
+      identContExtra = "-",
+      categories = List(
+        CategorySpec("file", List(
+          ConstructorSpec("file", List(
+            Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok("{"),
+            Elem.Star(Elem.Cat("fragmentDecl")), Elem.Tok("}"))))),
+        CategorySpec("fragmentDecl", List(
+          ConstructorSpec("fragmentDecl", List(
+            Elem.Tok("fragment"), Elem.AnyIdentLeaf,
+            Elem.Opt(Elem.Cat("providesClause")),
+            Elem.Opt(Elem.Cat("requiresClause")),
+            Elem.Tok("{"), Elem.Star(Elem.Cat("item")), Elem.Tok("}"))))),
+        CategorySpec("providesClause", List(
+          ConstructorSpec("provides", List(Elem.Tok("provides"), Elem.SepBy1(Elem.AnyIdentLeaf, ","))))),
+        CategorySpec("requiresClause", List(
+          ConstructorSpec("requires", List(Elem.Tok("requires"), Elem.SepBy1(Elem.AnyIdentLeaf, ","))))),
+        CategorySpec("item", List(
+          ConstructorSpec("sortTree", List(Elem.Tok("sort"), Elem.AnyIdentLeaf, Elem.Tok("tree"), Elem.Tok(";"))),
+          ConstructorSpec("sortGraph", List(Elem.Tok("sort"), Elem.AnyIdentLeaf, Elem.Tok("graph"), Elem.Tok(";"))),
+          ConstructorSpec("ctorDecl", List(
+            Elem.Tok("ctor"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.AnyIdentLeaf,
+            Elem.Opt(Elem.Cat("argList")), Elem.Star(Elem.Cat("bindsClause")), Elem.Tok(";"))),
+          ConstructorSpec("varCtorDecl", List(Elem.Tok("varctor"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("keywordDecl", List(Elem.Tok("keyword"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("punctDecl", List(Elem.Tok("punct"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("identContDecl", List(Elem.Tok("identcont"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("syntaxDecl", List(
+            Elem.Tok("syntax"), Elem.AnyIdentLeaf, Elem.Tok("+="), Elem.AnyIdentLeaf, Elem.Tok(":"),
+            Elem.Star(Elem.Cat("elem")), Elem.Tok(";"))),
+          ConstructorSpec("printDecl", List(
+            Elem.Tok("print"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Star(Elem.Cat("seg")), Elem.Tok(";"))),
+          ConstructorSpec("infixDecl", List(
+            Elem.Tok("infix"), Elem.AnyIdentLeaf, Elem.Tok("over"), Elem.AnyIdentLeaf, Elem.Tok(":"),
+            Elem.StrLeaf, Elem.Tok("tag"), Elem.AnyIdentLeaf, Elem.Tok("prec"), Elem.NumLeaf,
+            Elem.Cat("assoc"), Elem.Tok(";"))),
+          ConstructorSpec("ruleDecl", List(
+            Elem.Tok("rule"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Cat("pat"), Elem.Tok("=>"),
+            Elem.Cat("pat"), Elem.Tok(";"))),
+          ConstructorSpec("judgmentDecl", List(
+            Elem.Tok("judgment"), Elem.AnyIdentLeaf, Elem.Tok("{"), Elem.Star(Elem.Cat("judgRule")), Elem.Tok("}"))),
+          ConstructorSpec("topDecl", List(Elem.Tok("top"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
+        CategorySpec("argList", List(
+          ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.AnyIdentLeaf, ","), Elem.Tok(")"))))),
+        CategorySpec("bindsClause", List(
+          ConstructorSpec("binds", List(
+            Elem.Tok("binds"), Elem.NumLeaf, Elem.Tok("in"), Elem.SepBy1(Elem.NumLeaf, ","))))),
+        CategorySpec("assoc", List(
+          ConstructorSpec("assocLeft", List(Elem.Tok("left"))),
+          ConstructorSpec("assocRight", List(Elem.Tok("right"))))),
+        CategorySpec("elem", List(
+          ConstructorSpec("elemTok", List(Elem.Tok("tok"), Elem.StrLeaf)),
+          ConstructorSpec("elemTokField", List(Elem.Tok("tokfield"), Elem.StrLeaf)),
+          ConstructorSpec("elemName", List(Elem.Tok("name"))),
+          ConstructorSpec("elemAnyIdent", List(Elem.Tok("anyident"))),
+          ConstructorSpec("elemNum", List(Elem.Tok("num"))),
+          ConstructorSpec("elemStr", List(Elem.Tok("str"))),
+          ConstructorSpec("elemRest", List(Elem.Tok("restofline"))),
+          ConstructorSpec("elemCat", List(Elem.Tok("cat"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemOpt", List(Elem.Tok("opt"), Elem.Cat("elem"))),
+          ConstructorSpec("elemStar", List(Elem.Tok("star"), Elem.Cat("elem"))),
+          ConstructorSpec("elemSepBy1", List(Elem.Tok("sepby1"), Elem.Cat("elem"), Elem.StrLeaf)),
+          ConstructorSpec("elemBlock", List(Elem.Tok("block"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemRun", List(Elem.Tok("run"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemAdj", List(Elem.Tok("adjacent1"), Elem.Cat("elem"))))),
+        CategorySpec("seg", List(
+          ConstructorSpec("segLit", List(Elem.Tok("lit"), Elem.StrLeaf)),
+          ConstructorSpec("segSp", List(Elem.Tok("sp"))),
+          ConstructorSpec("segNl", List(Elem.Tok("nl"))),
+          ConstructorSpec("segIn", List(Elem.Tok("indent"))),
+          ConstructorSpec("segOut", List(Elem.Tok("dedent"))),
+          ConstructorSpec("segField", List(Elem.Tok("field"), Elem.NumLeaf)),
+          ConstructorSpec("segStrField", List(Elem.Tok("strfield"), Elem.NumLeaf)),
+          ConstructorSpec("segSep", List(Elem.Tok("sep"), Elem.NumLeaf, Elem.StrLeaf)))),
+        CategorySpec("pat", List(
+          ConstructorSpec("patMetaNode", List(
+            Elem.Tok("$"), Elem.AnyIdentLeaf, Elem.Tok("("),
+            Elem.Opt(Elem.SepBy1(Elem.Cat("pat"), ",")), Elem.Tok(")"))),
+          ConstructorSpec("patMeta", List(Elem.Tok("$"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("patNode", List(
+            Elem.AnyIdentLeaf, Elem.Tok("("),
+            Elem.Opt(Elem.SepBy1(Elem.Cat("pat"), ",")), Elem.Tok(")"))),
+          ConstructorSpec("patLeaf", List(Elem.AnyIdentLeaf)),
+          ConstructorSpec("patStr", List(Elem.StrLeaf)))),
+        CategorySpec("judgRule", List(
+          ConstructorSpec("judgRule", List(
+            Elem.Tok("rule"), Elem.AnyIdentLeaf, Elem.Tok(":"),
+            Elem.Opt(Elem.SepBy1(Elem.Cat("pat"), ",")), Elem.Tok("|-"), Elem.Cat("pat"),
+            Elem.Opt(Elem.Cat("whereClause")), Elem.Tok(";"))))),
+        CategorySpec("whereClause", List(
+          ConstructorSpec("whereC", List(Elem.Tok("where"), Elem.SepBy1(Elem.Cat("pat"), ",")))))),
+      printRules = List(
+        PrintRule("file", List(
+          PrintSeg.Lit("language"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("{"),
+          PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
+          PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
+        PrintRule("fragmentDecl", List(
+          PrintSeg.Lit("fragment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Field(1), PrintSeg.Field(2),
+          PrintSeg.Space, PrintSeg.Lit("{"), PrintSeg.Newline, PrintSeg.IndentIn,
+          PrintSeg.SepFields(3, "\n"), PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
+        PrintRule("provides", List(PrintSeg.Space, PrintSeg.Lit("provides"), PrintSeg.Space, PrintSeg.SepFields(0, ", "))),
+        PrintRule("requires", List(PrintSeg.Space, PrintSeg.Lit("requires"), PrintSeg.Space, PrintSeg.SepFields(0, ", "))),
+        PrintRule("sortTree", List(PrintSeg.Lit("sort"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("tree"), PrintSeg.Lit(";"))),
+        PrintRule("sortGraph", List(PrintSeg.Lit("sort"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("graph"), PrintSeg.Lit(";"))),
+        PrintRule("ctorDecl", List(
+          PrintSeg.Lit("ctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Field(2), PrintSeg.SepFields(3, ""), PrintSeg.Lit(";"))),
+        PrintRule("varCtorDecl", List(PrintSeg.Lit("varctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("keywordDecl", List(PrintSeg.Lit("keyword"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("punctDecl", List(PrintSeg.Lit("punct"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Lit(";"))),
+        PrintRule("identContDecl", List(PrintSeg.Lit("identcont"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Lit(";"))),
+        PrintRule("syntaxDecl", List(
+          PrintSeg.Lit("syntax"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("+="),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(":"), PrintSeg.Space,
+          PrintSeg.SepFields(2, " "), PrintSeg.Lit(";"))),
+        PrintRule("printDecl", List(
+          PrintSeg.Lit("print"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.SepFields(1, " "), PrintSeg.Lit(";"))),
+        PrintRule("infixDecl", List(
+          PrintSeg.Lit("infix"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("over"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(":"), PrintSeg.Space,
+          PrintSeg.StrField(2), PrintSeg.Space, PrintSeg.Lit("tag"), PrintSeg.Space, PrintSeg.Field(3),
+          PrintSeg.Space, PrintSeg.Lit("prec"), PrintSeg.Space, PrintSeg.Field(4), PrintSeg.Space,
+          PrintSeg.Field(5), PrintSeg.Lit(";"))),
+        PrintRule("ruleDecl", List(
+          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("=>"), PrintSeg.Space,
+          PrintSeg.Field(2), PrintSeg.Lit(";"))),
+        PrintRule("judgmentDecl", List(
+          PrintSeg.Lit("judgment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("{"),
+          PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
+          PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
+        PrintRule("topDecl", List(PrintSeg.Lit("top"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
+        PrintRule("binds", List(
+          PrintSeg.Space, PrintSeg.Lit("binds"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+          PrintSeg.Lit("in"), PrintSeg.Space, PrintSeg.SepFields(1, ", "))),
+        PrintRule("assocLeft", List(PrintSeg.Lit("left"))),
+        PrintRule("assocRight", List(PrintSeg.Lit("right"))),
+        PrintRule("elemTok", List(PrintSeg.Lit("tok"), PrintSeg.Space, PrintSeg.StrField(0))),
+        PrintRule("elemTokField", List(PrintSeg.Lit("tokfield"), PrintSeg.Space, PrintSeg.StrField(0))),
+        PrintRule("elemName", List(PrintSeg.Lit("name"))),
+        PrintRule("elemAnyIdent", List(PrintSeg.Lit("anyident"))),
+        PrintRule("elemNum", List(PrintSeg.Lit("num"))),
+        PrintRule("elemStr", List(PrintSeg.Lit("str"))),
+        PrintRule("elemRest", List(PrintSeg.Lit("restofline"))),
+        PrintRule("elemCat", List(PrintSeg.Lit("cat"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("elemOpt", List(PrintSeg.Lit("opt"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("elemStar", List(PrintSeg.Lit("star"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("elemSepBy1", List(PrintSeg.Lit("sepby1"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.StrField(1))),
+        PrintRule("elemBlock", List(PrintSeg.Lit("block"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("elemRun", List(PrintSeg.Lit("run"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("elemAdj", List(PrintSeg.Lit("adjacent1"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("segLit", List(PrintSeg.Lit("lit"), PrintSeg.Space, PrintSeg.StrField(0))),
+        PrintRule("segSp", List(PrintSeg.Lit("sp"))),
+        PrintRule("segNl", List(PrintSeg.Lit("nl"))),
+        PrintRule("segIn", List(PrintSeg.Lit("indent"))),
+        PrintRule("segOut", List(PrintSeg.Lit("dedent"))),
+        PrintRule("segField", List(PrintSeg.Lit("field"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("segStrField", List(PrintSeg.Lit("strfield"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("segSep", List(PrintSeg.Lit("sep"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.StrField(1))),
+        PrintRule("patMetaNode", List(
+          PrintSeg.Lit("$"), PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
+        PrintRule("patMeta", List(PrintSeg.Lit("$"), PrintSeg.Field(0))),
+        PrintRule("patNode", List(PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
+        PrintRule("patLeaf", List(PrintSeg.Field(0))),
+        PrintRule("patStr", List(PrintSeg.StrField(0))),
+        PrintRule("judgRule", List(
+          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("|-"), PrintSeg.Space,
+          PrintSeg.Field(2), PrintSeg.Field(3), PrintSeg.Lit(";"))),
+        PrintRule("whereC", List(
+          PrintSeg.Space, PrintSeg.Lit("where"), PrintSeg.Space, PrintSeg.SepFields(0, ", ")))),
+      top = Some("file")))
+
+  lazy val language: ComposedLanguage =
+    Compose.compose("meta", List(fragment)).fold(
+      e => throw RuntimeException(e.map(_.render).mkString("\n")), identity)
+
+  lazy val grammar: GrammarSpec = language.grammar
+
+  // ======================= elaboration (Cst -> Fragment) =======================
 
   private def names(c: Cst): List[String] = c match
-    case Cst.Node("list", items) => items.collect { case Cst.Leaf(n) => n }
+    case Cst.Node("list", items) => items.collect { case Cst.Leaf(x) => x }
     case Cst.Node("some", List(inner)) => names(inner)
     case Cst.Node("none", _) => Nil
-    case Cst.Leaf(n) => List(n)
+    case Cst.Leaf(x) => List(x)
     case _ => Nil
 
-  /** Elaborate a parsed fragment declaration into a kernel Fragment. */
-  def elaborate(cst: Cst): Either[String, Fragment] = cst match
+  private def optItems(c: Cst): List[Cst] = c match
+    case Cst.Node("some", List(Cst.Node("list", items))) => items
+    case Cst.Node("some", List(single)) => List(single)
+    case _ => Nil
+
+  def patToCst(p: Cst): Either[String, Cst] = p match
+    case Cst.Node("patMeta", List(Cst.Leaf(x)))     => Right(leaf(s"$$$x"))
+    case Cst.Node("patLeaf", List(Cst.Leaf(x)))     => Right(leaf(x))
+    case Cst.Node("patStr", List(Cst.Leaf(x)))      => Right(leaf(x))
+    case Cst.Node("patNode", List(Cst.Leaf(t), args)) =>
+      seq(optItems(args).map(patToCst)).map(Cst.Node(t, _))
+    case Cst.Node("patMetaNode", List(Cst.Leaf(t), args)) =>
+      seq(optItems(args).map(patToCst)).map(Cst.Node(s"$$$t", _))
+    case other => Left(s"not a pattern: ${other.render}")
+
+  private def seq[A](xs: List[Either[String, A]]): Either[String, List[A]] =
+    xs.foldLeft[Either[String, List[A]]](Right(Nil)) { (acc, x) =>
+      for as <- acc; a <- x yield as :+ a }
+
+  def elemToKernel(e: Cst): Either[String, Elem] = e match
+    case Cst.Node("elemTok", List(Cst.Leaf(s)))      => Right(Elem.Tok(s))
+    case Cst.Node("elemTokField", List(Cst.Leaf(s))) => Right(Elem.TokField(s))
+    case Cst.Node("elemName", _)      => Right(Elem.NameLeaf)
+    case Cst.Node("elemAnyIdent", _)  => Right(Elem.AnyIdentLeaf)
+    case Cst.Node("elemNum", _)       => Right(Elem.NumLeaf)
+    case Cst.Node("elemStr", _)       => Right(Elem.StrLeaf)
+    case Cst.Node("elemRest", _)      => Right(Elem.RestOfLine)
+    case Cst.Node("elemCat", List(Cst.Leaf(c)))   => Right(Elem.Cat(c))
+    case Cst.Node("elemOpt", List(inner))         => elemToKernel(inner).map(Elem.Opt.apply)
+    case Cst.Node("elemStar", List(inner))        => elemToKernel(inner).map(Elem.Star.apply)
+    case Cst.Node("elemSepBy1", List(inner, Cst.Leaf(sep))) => elemToKernel(inner).map(Elem.SepBy1(_, sep))
+    case Cst.Node("elemBlock", List(Cst.Leaf(c))) => Right(Elem.Block(c))
+    case Cst.Node("elemRun", List(Cst.Leaf(c)))   => Right(Elem.Run(c))
+    case Cst.Node("elemAdj", List(inner))         => elemToKernel(inner).map(Elem.Adjacent1.apply)
+    case other => Left(s"not an elem: ${other.render}")
+
+  def segToKernel(s: Cst): Either[String, PrintSeg] = s match
+    case Cst.Node("segLit", List(Cst.Leaf(t)))      => Right(PrintSeg.Lit(t))
+    case Cst.Node("segSp", _)                       => Right(PrintSeg.Space)
+    case Cst.Node("segNl", _)                       => Right(PrintSeg.Newline)
+    case Cst.Node("segIn", _)                       => Right(PrintSeg.IndentIn)
+    case Cst.Node("segOut", _)                      => Right(PrintSeg.IndentOut)
+    case Cst.Node("segField", List(Cst.Leaf(i)))    => Right(PrintSeg.Field(i.toInt))
+    case Cst.Node("segStrField", List(Cst.Leaf(i))) => Right(PrintSeg.StrField(i.toInt))
+    case Cst.Node("segSep", List(Cst.Leaf(i), Cst.Leaf(sep))) => Right(PrintSeg.SepFields(i.toInt, sep))
+    case other => Left(s"not a print seg: ${other.render}")
+
+  private def tagOf(t: String): String = if t == "group" then "$group" else t
+
+  def elaborateFragment(cst: Cst): Either[String, Fragment] = cst match
     case Cst.Node("fragmentDecl", List(Cst.Leaf(name), providesOpt, requiresOpt, Cst.Node("list", items))) =>
-      def clause(opt: Cst, tag: String): List[String] = opt match
+      def clause(o: Cst, tag: String): List[String] = o match
         case Cst.Node("some", List(Cst.Node(`tag`, List(ns)))) => names(ns)
         case _ => Nil
-      var sorts = List.newBuilder[SortDef]
-      var ctors = List.newBuilder[CtorDef]
+      val sorts = List.newBuilder[SortDef]
+      val ctors = List.newBuilder[CtorDef]
       var varCtor: Option[String] = None
-      val errs = List.newBuilder[String]
+      val keywords = List.newBuilder[String]
+      val puncts = List.newBuilder[String]
+      var identCont = ""
+      // categories in first-encounter order, alternatives in decl order
+      val catOrder = List.newBuilder[String]
+      val catAlts = scala.collection.mutable.Map[String, List[ConstructorSpec]]()
+      val printRules = List.newBuilder[PrintRule]
+      val infixOrder = List.newBuilder[(String, String)]
+      val infixOps = scala.collection.mutable.Map[(String, String), List[InfixOp]]()
+      val rules = List.newBuilder[RewriteRule]
+      val judgments = List.newBuilder[JudgmentDef]
+      var top: Option[String] = None
+      val err = new StringBuilder
+
       for item <- items do item match
         case Cst.Node("sortTree", List(Cst.Leaf(s)))  => sorts += SortDef(s, SortMode.Tree)
         case Cst.Node("sortGraph", List(Cst.Leaf(s))) => sorts += SortDef(s, SortMode.Graph)
@@ -95,24 +306,165 @@ object Meta:
             case _ => Nil
           val binders = bindsList match
             case Cst.Node("list", bs) => bs.collect {
-              case Cst.Node("binds", List(Cst.Leaf(bi), scope)) =>
-                (bi.toInt, names(scope).map(_.toInt)) }
+              case Cst.Node("binds", List(Cst.Leaf(bi), scope)) => (bi.toInt, names(scope).map(_.toInt)) }
             case _ => Nil
           ctors += CtorDef(c, sort, args, binders)
-        case Cst.Node("varCtorDecl", List(Cst.Leaf(v))) =>
-          if varCtor.isDefined then errs += s"duplicate varctor in fragment '$name'"
-          varCtor = Some(v)
-        case other => errs += s"unknown fragment item: ${other.render}"
-      val es = errs.result()
-      if es.nonEmpty then Left(es.mkString("; "))
+        case Cst.Node("varCtorDecl", List(Cst.Leaf(v)))  => varCtor = Some(v)
+        case Cst.Node("keywordDecl", List(Cst.Leaf(k)))  => keywords += k
+        case Cst.Node("punctDecl", List(Cst.Leaf(p)))    => puncts += p
+        case Cst.Node("identContDecl", List(Cst.Leaf(s))) => identCont += s
+        case Cst.Node("syntaxDecl", List(Cst.Leaf(cat), Cst.Leaf(tag), Cst.Node("list", elems))) =>
+          seq(elems.map(elemToKernel)) match
+            case Right(es) =>
+              if !catAlts.contains(cat) then catOrder += cat
+              catAlts(cat) = catAlts.getOrElse(cat, Nil) :+ ConstructorSpec(tagOf(tag), es)
+            case Left(e) => err ++= e
+        case Cst.Node("printDecl", List(Cst.Leaf(tag), Cst.Node("list", segs))) =>
+          seq(segs.map(segToKernel)) match
+            case Right(ss) => printRules += PrintRule(tagOf(tag), ss)
+            case Left(e)   => err ++= e
+        case Cst.Node("infixDecl", List(Cst.Leaf(cat), Cst.Leaf(base), Cst.Leaf(text), Cst.Leaf(tag), Cst.Leaf(prec), assocN)) =>
+          val rightAssoc = assocN match
+            case Cst.Node("assocRight", _) => true
+            case _                          => false
+          val key = (cat, base)
+          if !infixOps.contains(key) then infixOrder += key
+          infixOps(key) = infixOps.getOrElse(key, Nil) :+ InfixOp(text, tag, prec.toInt, rightAssoc)
+        case Cst.Node("ruleDecl", List(Cst.Leaf(rn), patP, tmplP)) =>
+          (for p <- patToCst(patP); t <- patToCst(tmplP) yield RewriteRule(rn, p, t)) match
+            case Right(r) => rules += r
+            case Left(e)  => err ++= e
+        case Cst.Node("judgmentDecl", List(Cst.Leaf(jn), Cst.Node("list", rs))) =>
+          val inferRules = seq(rs.map {
+            case Cst.Node("judgRule", List(Cst.Leaf(rn), premsOpt, concP, whereOpt)) =>
+              for
+                prems <- seq(optItems(premsOpt).map(patToCst))
+                conc <- patToCst(concP)
+                conds <- whereOpt match
+                  case Cst.Node("some", List(Cst.Node("whereC", List(ws)))) =>
+                    seq((ws match
+                      case Cst.Node("list", items) => items
+                      case single                  => List(single)).map(patToCst))
+                  case _ => Right(Nil)
+              yield InferRule(rn, prems, conc, conds)
+            case other => Left(s"not a judgment rule: ${other.render}")
+          })
+          inferRules match
+            case Right(irs) => judgments += JudgmentDef(jn, irs)
+            case Left(e)    => err ++= e
+        case Cst.Node("topDecl", List(Cst.Leaf(t))) => top = Some(t)
+        case other => err ++= s"unknown item: ${other.render}; "
+
+      if err.nonEmpty then Left(err.result())
       else Right(Fragment(
         name = name,
         provides = clause(providesOpt, "provides"),
         requires = clause(requiresOpt, "requires"),
         sorts = sorts.result(),
         constructors = ctors.result(),
+        grammar = GrammarPart(
+          keywords = keywords.result(),
+          puncts = puncts.result(),
+          categories = catOrder.result().map(c => CategorySpec(c, catAlts(c))),
+          precCategories = infixOrder.result().map((c, b) => PrecCategory(c, b, infixOps((c, b)))),
+          printRules = printRules.result(),
+          top = top,
+          identContExtra = identCont),
+        rewriteRules = rules.result(),
+        judgments = judgments.result(),
         varCtor = varCtor))
     case other => Left(s"not a fragment declaration: ${other.render}")
 
   def parseFragment(src: String): Either[String, Fragment] =
-    Parser.parse(grammar, src).flatMap(elaborate)
+    Parser.parse(grammar.copy(top = "fragmentDecl"), src).flatMap(elaborateFragment)
+
+  /** Parse a `language NAME { fragment* }` file into a composed language. */
+  def parseFile(src: String): Either[String, ComposedLanguage] =
+    Parser.parse(grammar, src).flatMap {
+      case Cst.Node("file", List(Cst.Leaf(name), Cst.Node("list", frags))) =>
+        seq(frags.map(elaborateFragment)).flatMap { fs =>
+          Compose.compose(name, fs).left.map(_.map(_.render).mkString("\n")) }
+      case other => Left(s"not a language file: ${other.render}")
+    }
+
+  // ======================= encoding (Fragment -> Cst) =======================
+
+  def cstToPat(t: Cst): Cst = t match
+    case Cst.Leaf(x) if x.startsWith("$") => n("patMeta", leaf(x.drop(1)))
+    case Cst.Leaf(x) if x.nonEmpty && x.forall(ch => ch.isLetterOrDigit || "_'-".contains(ch)) && !x.head.isDigit =>
+      n("patLeaf", leaf(x))
+    case Cst.Leaf(x) => n("patStr", leaf(x))
+    case Cst.Node(tag, cs) if tag.startsWith("$") =>
+      n("patMetaNode", leaf(tag.drop(1)), optList(cs.map(cstToPat)))
+    case Cst.Node(tag, cs) =>
+      n("patNode", leaf(tag), optList(cs.map(cstToPat)))
+
+  def elemToCst(e: Elem): Cst = e match
+    case Elem.Tok(s)       => n("elemTok", leaf(s))
+    case Elem.TokField(s)  => n("elemTokField", leaf(s))
+    case Elem.NameLeaf     => n("elemName")
+    case Elem.AnyIdentLeaf => n("elemAnyIdent")
+    case Elem.NumLeaf      => n("elemNum")
+    case Elem.StrLeaf      => n("elemStr")
+    case Elem.RestOfLine   => n("elemRest")
+    case Elem.Cat(c)       => n("elemCat", leaf(c))
+    case Elem.Opt(i)       => n("elemOpt", elemToCst(i))
+    case Elem.Star(i)      => n("elemStar", elemToCst(i))
+    case Elem.SepBy1(i, s) => n("elemSepBy1", elemToCst(i), leaf(s))
+    case Elem.Block(c)     => n("elemBlock", leaf(c))
+    case Elem.Run(c)       => n("elemRun", leaf(c))
+    case Elem.Adjacent1(i) => n("elemAdj", elemToCst(i))
+
+  def segToCst(s: PrintSeg): Cst = s match
+    case PrintSeg.Lit(t)          => n("segLit", leaf(t))
+    case PrintSeg.Space           => n("segSp")
+    case PrintSeg.Newline         => n("segNl")
+    case PrintSeg.IndentIn        => n("segIn")
+    case PrintSeg.IndentOut       => n("segOut")
+    case PrintSeg.Field(i)        => n("segField", leaf(i.toString))
+    case PrintSeg.StrField(i)     => n("segStrField", leaf(i.toString))
+    case PrintSeg.SepFields(i, s) => n("segSep", leaf(i.toString), leaf(s))
+
+  private def untag(t: String): String = if t == "$group" then "group" else t
+
+  /** Encode a Fragment as a meta-surface Cst (inverse of elaborateFragment). */
+  def encode(f: Fragment): Cst =
+    val items = List.newBuilder[Cst]
+    for s <- f.sorts do
+      items += (if s.mode == SortMode.Tree then n("sortTree", leaf(s.name)) else n("sortGraph", leaf(s.name)))
+    for c <- f.constructors do
+      items += n("ctorDecl", leaf(c.name), leaf(c.sort),
+        if c.argSorts.isEmpty then n("none") else n("some", n("argList", lst(c.argSorts.map(leaf)))),
+        lst(c.binders.map((bi, scope) => n("binds", leaf(bi.toString), lst(scope.map(i => leaf(i.toString)))))))
+    for v <- f.varCtor do items += n("varCtorDecl", leaf(v))
+    for k <- f.grammar.keywords do items += n("keywordDecl", leaf(k))
+    for p <- f.grammar.puncts do items += n("punctDecl", leaf(p))
+    if f.grammar.identContExtra.nonEmpty then items += n("identContDecl", leaf(f.grammar.identContExtra))
+    for cat <- f.grammar.categories; alt <- cat.ctors do
+      items += n("syntaxDecl", leaf(cat.name), leaf(untag(alt.tag)), lst(alt.elems.map(elemToCst)))
+    for pc <- f.grammar.precCategories; op <- pc.ops do
+      items += n("infixDecl", leaf(pc.name), leaf(pc.base), leaf(op.text), leaf(op.tag),
+        leaf(op.prec.toString), if op.rightAssoc then n("assocRight") else n("assocLeft"))
+    for pr <- f.grammar.printRules do
+      items += n("printDecl", leaf(untag(pr.tag)), lst(pr.segs.map(segToCst)))
+    for r <- f.rewriteRules do
+      items += n("ruleDecl", leaf(r.name), cstToPat(r.pattern), cstToPat(r.template))
+    for j <- f.judgments do
+      items += n("judgmentDecl", leaf(j.name), lst(j.rules.map { ir =>
+        n("judgRule", leaf(ir.name),
+          optList(ir.premises.map(cstToPat)),
+          cstToPat(ir.conclusion),
+          if ir.conditions.isEmpty then n("none")
+          else n("some", n("whereC", lst(ir.conditions.map(cstToPat))))) }))
+    for t <- f.grammar.top do items += n("topDecl", leaf(t))
+    n("fragmentDecl", leaf(f.name),
+      if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
+      if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),
+      lst(items.result()))
+
+  def encodeLanguage(name: String, fragments: List[Fragment]): Cst =
+    n("file", leaf(name), lst(fragments.map(encode)))
+
+  /** Render a whole language as meta-surface text. */
+  def printLanguage(name: String, fragments: List[Fragment]): Either[String, String] =
+    Printer.print(grammar, encodeLanguage(name, fragments))

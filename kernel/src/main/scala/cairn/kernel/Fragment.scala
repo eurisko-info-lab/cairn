@@ -44,6 +44,8 @@ final case class GrammarPart(
     precCategories: List[PrecCategory] = Nil,
     printRules: List[PrintRule] = Nil,
     top: Option[String] = None,
+    /** extra identifier-continuation characters this fragment's surface needs */
+    identContExtra: String = "",
 )
 
 final case class Fragment(
@@ -157,7 +159,8 @@ object Compose:
       val tokens = TokenSpec(
         keywords = fragments.flatMap(_.grammar.keywords).distinct.sorted,
         puncts = fragments.flatMap(_.grammar.puncts).distinct.sortBy(p => (-p.length, p)),
-        lineComment = Some("--"))
+        lineComment = Some("--"),
+        identContExtra = "_'" + fragments.flatMap(_.grammar.identContExtra).distinct.sorted.mkString)
       val grammar = GrammarSpec(
         name = name,
         tokens = tokens,
@@ -196,6 +199,7 @@ object FragmentCodec:
     "grammar" -> Canon.cmap(
       "keywords" -> Canon.cstrs(f.grammar.keywords),
       "puncts" -> Canon.cstrs(f.grammar.puncts),
+      "identContExtra" -> CStr(f.grammar.identContExtra),
       "spec" -> GrammarSpec.toCanon(GrammarSpec("", TokenSpec(Nil, Nil, None),
         f.grammar.categories, f.grammar.precCategories, f.grammar.printRules,
         f.grammar.top.getOrElse("")))),
@@ -230,7 +234,8 @@ object FragmentCodec:
         categories = spec.categories,
         precCategories = spec.precCategories,
         printRules = spec.printRules,
-        top = Option(spec.top).filter(_.nonEmpty)),
+        top = Option(spec.top).filter(_.nonEmpty),
+        identContExtra = g.field("identContExtra").asStr),
       rewriteRules = c.field("rewriteRules").asList.map(ruleFromCanon),
       judgments = c.field("judgments").asList.map(j => JudgmentDef(
         j.field("name").asStr,
