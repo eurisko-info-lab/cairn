@@ -91,3 +91,42 @@ object Binding:
   /** Rename free occurrences of `from` to `to`. */
   def rename(spec: BinderSpec, varCtor: String)(t: Cst, from: String, to: String): Cst =
     subst(spec, varCtor)(t, from, Cst.Node(varCtor, List(Cst.Leaf(to))))
+
+/** M2: alpha-invariant canonical form. Binder names are replaced by de Bruijn
+  * LEVEL names (`_0`, `_1`, ...: number of binders enclosing the binding site),
+  * driven entirely by the binder-spec table. Two α-equivalent terms normalize
+  * to the identical tree, so `Alpha.digest` is a name-independent identity.
+  * Surfaces keep user names; identity does not.
+  */
+object Alpha:
+  def normalize(spec: BinderSpec, varCtor: String)(t: Cst): Cst =
+    def go(t: Cst, env: Map[String, String], depth: Int): Cst = t match
+      case Cst.Leaf(_) => t
+      case Cst.Node(c, List(Cst.Leaf(x))) if c == varCtor =>
+        Cst.Node(c, List(Cst.Leaf(env.getOrElse(x, x))))
+      case Cst.Node(c, cs) =>
+        val binders = spec.bindersOf(c)
+        if binders.isEmpty then Cst.Node(c, cs.map(go(_, env, depth)))
+        else
+          // assign level names in binder-position order
+          val assignments: List[(Int, List[Int], String, String)] =
+            binders.zipWithIndex.flatMap { case ((bi, scope), k) =>
+              cs(bi) match
+                case Cst.Leaf(old) => List((bi, scope, old, s"_${depth + k}"))
+                case _             => Nil }
+          val newDepth = depth + assignments.length
+          Cst.Node(c, cs.zipWithIndex.map { (ch, i) =>
+            assignments.find(_._1 == i) match
+              case Some((_, _, _, fresh)) => Cst.Leaf(fresh)
+              case None =>
+                val envHere = assignments.foldLeft(env) { case (e, (_, scope, old, fresh)) =>
+                  if scope.contains(i) then e + (old -> fresh) else e }
+                go(ch, envHere, newDepth) })
+    go(t, Map.empty, 0)
+
+  /** Name-independent content identity of a term in a given binding discipline. */
+  def digest(spec: BinderSpec, varCtor: String)(t: Cst): Digest =
+    Artifact(ArtifactKind.Term, Cst.toCanon(normalize(spec, varCtor)(t))).digest
+
+  def equivalent(spec: BinderSpec, varCtor: String)(a: Cst, b: Cst): Boolean =
+    normalize(spec, varCtor)(a) == normalize(spec, varCtor)(b)

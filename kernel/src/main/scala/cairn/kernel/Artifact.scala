@@ -45,6 +45,14 @@ enum ArtifactKind(val name: String):
   case RosettaDecl    extends ArtifactKind("rosetta-decl")
   case Transaction    extends ArtifactKind("transaction")
   case Identity       extends ArtifactKind("identity")
+  case TacticScript   extends ArtifactKind("tactic-script")
+  case Trace          extends ArtifactKind("trace")
+  case Provenance     extends ArtifactKind("provenance")
+  case Migration      extends ArtifactKind("migration")
+  case ChunkedBlob    extends ArtifactKind("chunked-blob")
+  case Capability     extends ArtifactKind("capability-manifest")
+  case Policy         extends ArtifactKind("policy")
+  case QueryResult    extends ArtifactKind("query-result")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =
@@ -66,13 +74,33 @@ object TypedKey:
 final case class Artifact(kind: ArtifactKind, body: Canon):
   def canon: Canon = Canon.cmap("kind" -> Canon.CStr(kind.name), "body" -> body)
   def digest: Digest = Digest.of(canon)
-  /** typeHash: digest of the kind marker + structural tag of the body head. */
+  /** typeHash (M1): digest of the kind marker + full recursive structural
+    * fingerprint of the body — any two artifact schemas that differ anywhere
+    * in shape get distinct type hashes.
+    */
   def typeHash: Digest = Digest.of(Canon.cmap(
     "kind" -> Canon.CStr(kind.name),
-    "shape" -> Canon.CStr(body match
-      case Canon.CTag(t, _) => t
-      case other            => other.getClass.getSimpleName)))
+    "shape" -> TypeFingerprint.shape(body)))
   def key: TypedKey = TypedKey(kind, digest, typeHash)
+
+/** M1: structural shape signature of a canonical value. Values collapse to
+  * their type skeleton: primitives to names, lists to the set of distinct
+  * member shapes, maps to their sorted field-name/shape table, tags to a
+  * tagged shape. Same schema ⇒ same fingerprint; any structural difference
+  * (extra field, changed tag, different nesting) ⇒ different fingerprint.
+  */
+object TypeFingerprint:
+  import Canon.*
+  def shape(c: Canon): Canon = c match
+    case CInt(_)    => CStr("int")
+    case CStr(_)    => CStr("str")
+    case CBytes(_)  => CStr("bytes")
+    case CList(xs)  =>
+      val shapes = xs.map(shape).distinct.sortBy(s => new String(Canon.encode(s).map(_.toChar)))
+      CTag("list", CList(shapes))
+    case CMap(es)   => CTag("map", Canon.cmap(es.map((k, v) => k -> shape(v))*))
+    case CTag(t, v) => CTag("tag:" + t, shape(v))
+  def of(c: Canon): Digest = Digest.of(shape(c))
 
 object Artifact:
   def fromCanon(c: Canon): Either[String, Artifact] =

@@ -50,6 +50,29 @@ final class DiskCas(root: Path) extends Cas:
       else Left(s"CAS corruption: blob ${d.short} hashes to ${actual.short}")
   def contains(d: Digest): Boolean = Files.exists(pathOf(d))
 
+  // -- digest agility (M4): non-default algorithms live in sibling stores --
+  private def pathOfAlgo(algo: String, hex: String): Path =
+    root.resolve(s"objects-$algo").resolve(hex.take(2)).resolve(hex.drop(2))
+  /** Store under an explicit algorithm; returns the self-describing key. */
+  def putBytesAlgo(algo: String, bs: Array[Byte]): String =
+    if algo == "sha256" then HashAlgo.render(algo, putBytes(bs).hex)
+    else
+      val hex = HashAlgo.hash(algo, bs)
+      val p = pathOfAlgo(algo, hex)
+      if !Files.exists(p) then { Files.createDirectories(p.getParent); Files.write(p, bs) }
+      HashAlgo.render(algo, hex)
+  /** Read by self-describing key (`algo:hex`), verifying under that algorithm. */
+  def getBytesKey(key: String): Either[String, Array[Byte]] =
+    HashAlgo.parse(key).flatMap { (algo, hex) =>
+      if algo == "sha256" then Digest.parse(hex).flatMap(getBytes)
+      else
+        val p = pathOfAlgo(algo, hex)
+        if !Files.exists(p) then Left(s"blob $key not in CAS at $root")
+        else
+          val bs = Files.readAllBytes(p)
+          if HashAlgo.hash(algo, bs) == hex then Right(bs)
+          else Left(s"CAS corruption on $key") }
+
 /** Branch manifests + append-only history (S18). Heads are stable typed keys
   * stored as named refs; every head update appends, never overwrites history.
   */
