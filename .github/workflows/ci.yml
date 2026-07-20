@@ -1,0 +1,35 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [17, 21]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - uses: coursier/setup-action@v1
+        with:
+          apps: scala-cli
+      - name: Full test suite (incl. fuzz corpus + host-run ports)
+        run: sbt -batch test
+      - name: MVP transcript (fresh-checkout reproducibility)
+        run: sbt -batch "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"
+      - name: MAX transcript (3 nodes, gossip, ports, queries)
+        run: sbt -batch "examples/runMain cairn.examples.Main transcript transcripts/max.cairn"
+      - name: Language files are in sync with the meta surface
+        run: |
+          sbt -batch "examples/runMain cairn.examples.Main emit-languages"
+          git diff --exit-code languages/
+      - name: Benchmarks (informational)
+        run: sbt -batch "examples/runMain cairn.examples.Bench"

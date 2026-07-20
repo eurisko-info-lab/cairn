@@ -33,19 +33,29 @@ The sbt module graph enforces the import DAG:
 ## Quick start
 
 ```bash
-sbt test                                                          # all acceptance suites
+sbt test                                                          # all acceptance suites + 100k fuzz corpus
 sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"   # end-to-end MVP
+sbt "examples/runMain cairn.examples.Main transcript transcripts/max.cairn"   # maximal: 3 nodes, gossip, ports, queries
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
+sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest
+sbt "examples/runMain cairn.examples.Bench"                       # benchmarks
 ```
 
 The MVP transcript composes STLC from fragments, round-trips its surface, evaluates
 Church booleans, applies ΔL edits (add + rename-with-footprint), certifies a claim by
 tests, publishes to a local PoA ledger, and fetches the head on a second node by hash.
+The MAX transcript additionally loads STLC **from checked-in text**
+([languages/stlc.cairn](languages/stlc.cairn)), applies structural path edits,
+asserts expected failures, runs queries, gossips over three nodes, and verifies a
+host port. Languages in [languages/](languages/) load at runtime — adding one
+requires no recompilation (the meta surface is self-describing: see the bootstrap
+fixpoint in [languages/meta.cairn](languages/meta.cairn)).
 
 ## Documents
 
-- [PLAN.md](PLAN.md) — the 50-story implementation plan (all stories S1–S50 landed)
-- [STATUS.md](STATUS.md) — golden digests, transcript results, §9 success criteria
+- [PLAN.md](PLAN.md) — the original 50-story plan (S1–S50, all landed)
+- [PLAN-2.md](PLAN-2.md) — the 50-story maximalization plan (M1–M50, all landed)
+- [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations
 - [docs/bootstrap.md](docs/bootstrap.md) — empty CAS → published STLC in one sitting
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),
