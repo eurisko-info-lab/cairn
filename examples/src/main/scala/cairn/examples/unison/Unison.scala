@@ -9,25 +9,35 @@ import cairn.workbench.*
   * language (alias moves). "No builds": rename everything — the underlying
   * definition digests never change, so nothing downstream is invalidated.
   *
-  * Stored terms are real `UnisonCore` terms (Π §2c: this pack is a domain
-  * language built on Cairn's repository substrate, not a Unison fork) — the
-  * binding discipline is read from `UnisonCore.language` itself rather than
-  * hardcoded, so `Alpha.digest`/`normalize` see ALL of its binders (`lam`
-  * plus `matchList`/`matchOption`'s pattern binders), not just `lam`.
+  * Stored terms are real `UnisonCore` terms (§2c: this pack is a general-
+  * purpose hosted language, peer to STLC/MiniTT — not a domain ADT, not a
+  * Unison fork) — the binding discipline is read from `UnisonCore.language`
+  * itself rather than hardcoded, so `Alpha.digest`/`normalize` see ALL of
+  * its binders (`lam` plus `matchList`/`matchOption`'s pattern binders), not
+  * just `lam`.
+  *
+  * `Store` bodies live in `workbench.Cas` (the SAME generic content-store
+  * PKI/Law's `Module`-backed registries and Search's `putTerm` already use,
+  * §2c: no language reimplements its own storage) — `digests` is just a
+  * local index of which of THIS store's alpha-normalized terms have been
+  * added, not a second copy of the term bytes.
   */
 object Unison:
   private val spec = UnisonCore.language.binderSpec
   private val varCtor = UnisonCore.language.varCtor.getOrElse("var")
 
-  final case class Store(byHash: Map[String, Cst]):
+  final case class Store(cas: Cas, digests: Set[Digest]):
     def add(term: Cst): (Digest, Store) =
-      val d = Alpha.digest(spec, varCtor)(term)
-      (d, Store(byHash + (d.hex -> Alpha.normalize(spec, varCtor)(term))))
-    def get(d: Digest): Option[Cst] = byHash.get(d.hex)
-    def size: Int = byHash.size
+      val normalized = Alpha.normalize(spec, varCtor)(term)
+      val d = cas.put(Artifact(ArtifactKind.Term, Cst.toCanon(normalized))).valueHash
+      (d, Store(cas, digests + d))
+    def get(d: Digest): Option[Cst] =
+      if !digests.contains(d) then None
+      else cas.getByDigest(d).toOption.map(a => Cst.fromCanon(a.body))
+    def size: Int = digests.size
 
   object Store:
-    val empty: Store = Store(Map.empty)
+    def empty: Store = Store(MemCas(), Set.empty)
 
   /** The names language: name -> ref <digest>. Its ΔL is the patch language. */
   val namesFragment: Fragment = Fragment(
@@ -63,7 +73,7 @@ object Unison:
       names.get(name).collect { case Cst.Node("ref", List(Cst.Leaf(hex))) => Digest(hex) }
 
   object Codebase:
-    val empty: Codebase = Codebase(Store.empty, Module(Nil))
+    def empty: Codebase = Codebase(Store.empty, Module(Nil))
 
   /** A patch is a ΔL change-set over the names module — alias moves as data. */
   def applyPatch(cb: Codebase, patchSrc: String): Either[String, (Codebase, Delta.ValidatedChangeSet)] =
