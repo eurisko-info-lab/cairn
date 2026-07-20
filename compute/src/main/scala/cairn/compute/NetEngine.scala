@@ -82,51 +82,62 @@ object NetEngine:
     val es = errs.result()
     if es.isEmpty then Right(()) else Left(es)
 
-  /** Find an active pair: two agents wired principal-to-principal. */
-  def activePair(net: Net): Option[(Int, Int)] =
-    net.wires.collectFirst {
-      case (PortRef(a, 0), PortRef(b, 0)) => (a, b)
-    }
+  /** Find an active pair (principal-to-principal wire) that has a rule.
+    * Pairs without rules (interface/inert agents) are part of the normal form.
+    */
+  def activePairs(net: Net): List[(Int, Int)] =
+    net.wires.toList.collect { case (PortRef(a, 0), PortRef(b, 0)) => (a, b) }.sorted
 
   def step(lang: NetLanguage, net: Net): Either[String, Option[Net]] =
-    activePair(net) match
+    val candidates = activePairs(net).flatMap { (la, ra) =>
+      val lk = net.agents(la).kind
+      val rk = net.agents(ra).kind
+      lang.rules.find(r => r.left == lk && r.right == rk).map((_, la, ra))
+        .orElse(lang.rules.find(r => r.left == rk && r.right == lk).map((_, ra, la)))
+    }
+    candidates.headOption match
       case None => Right(None)
-      case Some((la, ra)) =>
-        val lk = net.agents(la).kind
-        val rk = net.agents(ra).kind
-        val ruleOpt = lang.rules.find(r => r.left == lk && r.right == rk).map((_, la, ra))
-          .orElse(lang.rules.find(r => r.left == rk && r.right == lk).map((_, ra, la)))
-        ruleOpt match
-          case None => Left(s"no interaction rule for principal pair ($lk, $rk)")
-          case Some((rule, leftId, rightId)) =>
-            var nextId = if net.agents.isEmpty then 0 else net.agents.keys.max + 1
-            val created = rule.newAgents.map { kind =>
-              val a = Agent(nextId, kind); nextId += 1; a }
-            def resolve(rp: RulePort): PortRef = rp match
-              case RulePort.New(k, p)   => PortRef(created(k).id, p)
-              case RulePort.Ext(0, aux) => PortRef(leftId, aux + 1)
-              case RulePort.Ext(_, aux) => PortRef(rightId, aux + 1)
-            // Rewire: connections may point at Ext ports, meaning "whatever was
-            // attached to that aux port of the deleted agent".
-            def externalPeer(p: PortRef): Either[String, PortRef] =
-              net.peer(p).toRight(s"rule '${rule.name}': external port $p unwired")
-            val newWiresE: Either[String, List[(PortRef, PortRef)]] =
-              rule.connections.foldLeft[Either[String, List[(PortRef, PortRef)]]](Right(Nil)) {
-                case (acc, (x, y)) =>
-                  acc.flatMap { ws =>
-                    def endpoint(rp: RulePort): Either[String, PortRef] = rp match
-                      case RulePort.New(_, _) => Right(resolve(rp))
-                      case ext                => externalPeer(resolve(ext))
-                    for a <- endpoint(x); b <- endpoint(y) yield ws :+ (a, b)
-                  }
-              }
-            newWiresE.map { newWires =>
-              val deadPorts = (p: PortRef) => p.agent == leftId || p.agent == rightId
-              val keptWires = net.wires.filterNot((a, b) => deadPorts(a) || deadPorts(b))
-              Some(Net(
-                agents = net.agents - leftId - rightId ++ created.map(a => a.id -> a).toMap,
-                wires = keptWires ++ newWires))
-            }
+      case Some((rule, leftId, rightId)) =>
+        var nextId = if net.agents.isEmpty then 0 else net.agents.keys.max + 1
+        val created = rule.newAgents.map { kind =>
+          val a = Agent(nextId, kind); nextId += 1; a }
+        // Rule connections address dead aux ports symbolically; resolve them to
+        // the dead ports themselves, then eliminate all dead ports by fusion.
+        def resolve(rp: RulePort): PortRef = rp match
+          case RulePort.New(k, p)   => PortRef(created(k).id, p)
+          case RulePort.Ext(0, aux) => PortRef(leftId, aux + 1)
+          case RulePort.Ext(_, aux) => PortRef(rightId, aux + 1)
+        val isDead = (p: PortRef) => p.agent == leftId || p.agent == rightId
+        val activeWire = (a: PortRef, b: PortRef) =>
+          Set(a, b) == Set(PortRef(leftId, 0), PortRef(rightId, 0))
+        var wires: List[(PortRef, PortRef)] =
+          net.wires.toList.filterNot(activeWire.tupled) ++
+            rule.connections.map((x, y) => (resolve(x), resolve(y)))
+        // Port fusion: each dead aux port occurs exactly twice (old wiring +
+        // rule wiring); merge its two incident wires until no dead port remains.
+        var guard = wires.length * 4 + 8
+        def deadIn(w: (PortRef, PortRef)): Option[PortRef] =
+          if isDead(w._1) then Some(w._1) else if isDead(w._2) then Some(w._2) else None
+        while wires.exists(w => deadIn(w).isDefined) && guard > 0 do
+          guard -= 1
+          val w = wires.find(w => deadIn(w).isDefined).get
+          val p = deadIn(w).get
+          if w._1 == p && w._2 == p then
+            wires = wires.filterNot(_ == w) // closed loop: drop
+          else
+            val liveEndOfW = if w._1 == p then w._2 else w._1
+            val rest = wires.diff(List(w))
+            rest.find(w2 => w2._1 == p || w2._2 == p) match
+              case Some(w2) =>
+                val otherEnd = if w2._1 == p then w2._2 else w2._1
+                wires = rest.diff(List(w2)) :+ (liveEndOfW, otherEnd)
+              case None =>
+                return Left(s"rule '${rule.name}': dead port $p has no fusion partner (non-linear rule)")
+        if guard <= 0 then Left(s"rule '${rule.name}': port fusion did not terminate")
+        else
+          Right(Some(Net(
+            agents = net.agents - leftId - rightId ++ created.map(a => a.id -> a).toMap,
+            wires = wires.toSet)))
 
   def normalize(lang: NetLanguage, net: Net, fuel: Int = 10_000): Either[String, Net] =
     if fuel <= 0 then Left("out of fuel reducing net")
