@@ -90,3 +90,31 @@ class SearchSuite extends munit.FunSuite:
     val board = Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
     val graph = Search.graphOf(board)
     assert(graph.edges.exists(e => e.kind == "supports" && e.from == "i" && e.to == "f"))
+
+  test("certifyEdge: why walks Intent→Fact→Certificate; dangling edge rejected"):
+    val dir = Files.createTempDirectory("search-edge-dag")
+    val cas = DiskCas(dir.resolve("cas"))
+    val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val ch = Parser.parse(dl.grammar,
+      """{ add explore = intent "work" ; add finding = fact "done" ; add link = supports explore finding ; }"""
+    ).fold(e => fail(e), identity)
+    val board = Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+    val intentDig = Search.putTerm(cas, board.get("explore").get)
+    val factDig = Search.putFact(cas, board.get("finding").get, intentDig)
+    val edge = Search.certifyEdge(cas, board, "link", factDig).fold(e => fail(e), identity)
+    assertEquals(edge.certificate.method, "test-suite")
+    assertEquals(edge.certificate.claim, edge.claim.artifact.digest)
+    val hops = Provenance.why(dir.resolve("cas"), edge.certDigest)
+    assert(hops.exists(_.record.inputs.exists(_ == factDig)), hops.toString)
+    assert(hops.exists(_.record.inputs.exists(_ == intentDig)) ||
+      hops.exists(h => h.record.output == factDig && h.record.inputs.exists(_ == intentDig)),
+      hops.toString)
+    // full chain: Certificate ← Fact ← Intent
+    val factHop = hops.find(_.record.output == factDig)
+    assert(factHop.exists(_.record.inputs.exists(_ == intentDig)), hops.toString)
+    val certHop = hops.find(_.record.output == edge.certDigest)
+    assert(certHop.exists(_.record.inputs.exists(_ == factDig)), hops.toString)
+
+    val dangling = Module(board.defs :+ ("bad" -> Cst.node("supports", Cst.Leaf("phantom"), Cst.Leaf("finding"))))
+    assert(Search.wellFormed(dangling).swap.exists(_.contains("unknown")))
+    assert(Search.certifyEdge(cas, dangling, "bad", factDig).swap.exists(_.contains("unknown")))

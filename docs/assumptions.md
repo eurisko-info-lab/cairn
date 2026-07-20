@@ -17,9 +17,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    (block/run/adjacent1/restOfLine/anyident/tokfield) is implemented; the
    shipped surfaces use layout combinators where natural (Bend, demo grammars).
 5. **Whitespace policy**: the tree-level law `parse(print(t)) == t` plus
-   byte-exact concrete printing for UNEDITED files and span-precise splicing
-   (M7). General dirty-subtree re-association is not implemented; `splice` is
-   the API.
+   byte-exact concrete printing for UNEDITED files and span-precise splicing /
+   `RoundTrip.put` / `Concrete.put` (M7) for format-preserving subtree edits.
+   General dirty-subtree re-association is not implemented; `put`/`splice` only
+   replace one recorded span. Format-preserving ΔL `remove`/`rename` are still
+   absent (rename needs leaf-name spans).
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
    are name-reference sets via the language's variable constructor. Change
    composition/inverses/commutation exist (M16); `Branches` refs are not yet

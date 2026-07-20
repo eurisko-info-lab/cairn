@@ -26,7 +26,9 @@ citing both fragment names. Order of composition does not change the language di
 The composed `GrammarSpec` is interpreted by ONE generic lexer, parser, and printer
 (`workbench/Grammar.scala`). There is no STLC-specific parsing code anywhere.
 `RoundTrip.check` asserts `parse(print(t)) == t` — a law, enforced per grammar in CI.
-A static left-recursion checker runs before every parse.
+`RoundTrip.put` / `Concrete.splice` edit one spanned subtree while preserving
+bytes outside the span (format-preserving lens slice). A static left-recursion
+checker runs before every parse.
 
 ## 3. Evaluation (L3)
 

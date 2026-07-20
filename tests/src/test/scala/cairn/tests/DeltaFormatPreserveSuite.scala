@@ -4,10 +4,14 @@ import cairn.kernel.*
 import cairn.workbench.*
 import cairn.examples.stlc.Stlc
 
-/** Format-preserving ΔL apply (grammar-as-lens, part b): `Delta.applyPreservingFormat`
-  * splices only the bytes an edit touches, built on the existing, independently
-  * tested `Concrete.splice` (M7). Covers `replace`/`edit`/`add`; `remove`/`rename`
-  * are explicitly unsupported (see Delta.scala doc comment) and checked as such.
+/** Format-preserving grammar-as-lens `put` + ΔL apply.
+  *
+  * [[RoundTrip.put]] / [[Concrete.put]] edit one spanned subtree and keep every
+  * byte outside the span. Without `put`, a whole-tree [[Printer.print]] after
+  * the same structural edit drops comments/spacing — the contrast test below
+  * fails if `put` regresses to canonical reprint. Module-level ΔL uses the same
+  * primitive via [[Delta.applyPreservingFormat]] (`replace`/`edit`/`add`;
+  * `remove`/`rename` explicitly unsupported — see Delta.scala).
   */
 class DeltaFormatPreserveSuite extends munit.FunSuite:
   private val dl = Delta.deltaOf(Stlc.language).fold(e => fail(e.map(_.render).mkString), identity)
@@ -22,6 +26,24 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
     val viaApply = Delta.apply(Stlc.language, origModule, change).toOption.get._1
     val viaPreserved = ModuleSurface.toModule(Parser.parse(mg, preservedResult).toOption.get).toOption.get
     assertEquals(viaPreserved.sorted.digest, viaApply.sorted.digest)
+
+  test("RoundTrip.put preserves trivia outside the edited span; print does not"):
+    val g = Stlc.language.grammar
+    val src = "-- keep me\nif true then x else  y -- and me\n"
+    val out = Parser.parseFull(g, src).fold(e => fail(e), identity)
+    val thenBranch = out.cst match
+      case Cst.Node("if", List(_, t, _)) => t
+      case other => fail(s"unexpected: ${other.render}")
+    val viaPut = RoundTrip.put(g, src, out, thenBranch, Stlc.fls).fold(e => fail(e), identity)
+    assertEquals(viaPut, "-- keep me\nif true then false else  y -- and me\n")
+    // Same structural edit via whole-tree print loses the surrounding trivia —
+    // that is exactly why put exists.
+    val edited = out.cst match
+      case Cst.Node("if", List(c, _, e)) => Cst.node("if", c, Stlc.fls, e)
+      case other => fail(s"unexpected: ${other.render}")
+    val viaPrint = Printer.print(g, edited).fold(e => fail(e), identity)
+    assert(!viaPrint.contains("-- keep me"), viaPrint)
+    assert(!viaPrint.contains("-- and me"), viaPrint)
 
   test("replace preserves comments/formatting on every other def, only touches the target"):
     val src = "-- header comment\na = true ;\n-- b's own comment\nb = false ;\n"

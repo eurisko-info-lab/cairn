@@ -50,7 +50,9 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
 ## Honest deviations from PLAN-2 ACs
 
 - **M7**: byte-identical round-trip holds for whole unedited files + span-precise
-  splicing; there is no general dirty-subtree re-association (splice is the API).
+  splicing / `RoundTrip.put` (format-preserving single-subtree edit). There is
+  still no general dirty-subtree re-association; format-preserving ΔL
+  `remove`/`rename` remain unsupported.
 - **M10**: incremental reparse retains prefix memo entries; suffix entries are
   discarded (index shift), so "O(affected)" is prefix-anchored.
 - **M17**: semantic merge operates on module change histories; `Branches` refs are

@@ -401,6 +401,7 @@ object Concrete:
 
   /** Replace the source region of `target` (a node instance from this parse)
     * with the canonical print of `replacement`; all other bytes preserved.
+    * This is the grammar-as-lens `put` primitive — see [[RoundTrip.put]].
     */
   def splice(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
     out.spans.get(target) match
@@ -412,6 +413,14 @@ object Concrete:
             if endTok == 0 then startOff
             else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
           source.substring(0, startOff) + printed + source.substring(endOff) }
+
+  /** Alias for [[splice]] — the asymmetric lens `put: A × S → S` for a single
+    * spanned subtree. Leading/trailing trivia and sibling text outside the
+    * span are preserved byte-for-byte. General dirty-subtree re-association
+    * (re-wrapping a parent whose children were each edited) is still absent.
+    */
+  def put(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
+    splice(g, source, out, target, replacement)
 
 /** One generic printer (S11) interpreting the print table. */
 object Printer:
@@ -483,17 +492,14 @@ object Printer:
 
     go(cst, 0).map(_ => sb.result())
 
-/** Round-trip law suite hooks (S11, M31).
+/** Round-trip law suite hooks (S11, M31) and the grammar-as-lens `put` slice.
   *
-  * `(parse, print)` is a **retraction/section pair over `Term`**, not a
-  * classical asymmetric lens: [[Printer.print]] takes no source string, so
-  * there is no `put(a, s)` that could thread an *existing* string's
-  * unrepresented details (whitespace, comments) back through an edit — only
-  * `print(a)`, which always regenerates canonical text from scratch. Given
-  * that signature, exactly two laws type-check (and are load-bearing here);
-  * a third law asking for byte-exact reproduction of arbitrary hand-written
-  * input (`print(parse(s)) == s`) does not apply and is not claimed — see
-  * `§2` "Bidirectional grammar... modulo holes/whitespace policy".
+  * `(parse, print)` alone is a **retraction/section pair over `Term`**:
+  * [[Printer.print]] takes no source string, so it always regenerates
+  * canonical text from scratch. Two laws are load-bearing for that pair; a
+  * third asking for byte-exact reproduction of arbitrary hand-written input
+  * (`print(parse(s)) == s`) does not apply — see `§2` "Bidirectional
+  * grammar... modulo holes/whitespace policy".
   *
   *   1. **Retraction** ([[check]]): `parse(print(t)) == t` for every term —
   *      printing then reparsing never loses or alters structure.
@@ -502,9 +508,12 @@ object Printer:
   *      string `s` — `print∘parse` is a retraction onto a canonical-text
   *      fixpoint, so re-running it never moves the text again.
   *
-  * A true lens (`put: A × S → S` preserving what an edit didn't touch) is a
-  * separate, currently-absent capability — format-preserving structural
-  * editing — not a restatement of these two.
+  * **Lens `put` (present, smallest useful slice):** [[put]] / [[Concrete.put]]
+  * / [[Concrete.splice]] edit one spanned subtree and preserve every byte
+  * outside that span (leading/trailing trivia, siblings). Module-level ΔL
+  * uses the same primitive via [[Delta.applyPreservingFormat]]. Still absent:
+  * general dirty-subtree re-association, and format-preserving `remove` /
+  * `rename` (rename needs leaf-name spans the parser does not yet record).
   */
 object RoundTrip:
   /** Law 1: retraction (see object doc) — `parse(print(t)) == t`. */
@@ -527,3 +536,10 @@ object RoundTrip:
       p2 <- Printer.print(g, t2)
       _ <- if p1 == p2 then Right(()) else Left(s"print/parse fixpoint failed:\n--- p1:\n$p1\n--- p2:\n$p2")
     yield ()
+
+  /** Format-preserving put: replace the spanned `target` (a node identity from
+    * `out`, itself from parsing `source`) with the canonical print of
+    * `replacement`. Bytes outside the span are unchanged.
+    */
+  def put(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
+    Concrete.put(g, source, out, target, replacement)

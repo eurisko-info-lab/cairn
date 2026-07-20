@@ -44,7 +44,8 @@ language search {
     print supports : lit "supports" sp field 0 sp field 1;
     print spawns : lit "spawns" sp field 0 sp field 1;
     print board : lit "board (" field 0 lit ")";
-    -- Stubs: proof-free Claims + host tests certify these initially (§2).
+    -- Open stubs: host Search.wellFormed / goalMet + Claim certificates gate
+    -- edges; language-file rules stay proof-free placeholders (§2 Claim vs Theorem).
     judgment wellFormed {
       rule wf-any :  |- wellFormed($x);
     }

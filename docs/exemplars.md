@@ -111,10 +111,14 @@ the Haskell/Rust ports skipping when `runghc`/`cargo` are unavailable.
 - Standalone pack (`provides search`, no `requires`) — not part of PKI→Law→SDS.
 - Sorts Fact / Intent / Hint / Edge / Board; ctors `origin`, `goal`, `fact`,
   `intent`, `hint`, `supports`, `spawns`, `board`.
-- Judgments `wellFormed` / `goalMet` are stubs; host Scala + Claims/tests gate
-  for now. ΔL = `Delta.deltaOf(search)` only (no `dsearch.cairn`).
-- Tutorial seeds origin+goal, ΔL-adds Intent+Fact into CAS, records
-  Provenance so `cairn why` hops Intent → Fact.
+- Language-file judgments `wellFormed` / `goalMet` remain open stubs; host Scala
+  `Search.wellFormed` / `Search.goalMet` plus Claim+Certificate gates are the
+  real checks. `Search.certifyEdge` issues a test-suite Certificate for a
+  `supports`/`spawns` edge after well-formedness, and records provenance so
+  `cairn why` walks Intent → Fact → Certificate. ΔL = `Delta.deltaOf(search)`
+  only (no `dsearch.cairn`).
+- Tutorial seeds origin+goal, ΔL-adds Intent+Fact+edge into CAS, certifies the
+  edge, records Provenance.
 - Transcript: `transcripts/search-board.cairn`. Explorer **Board** tab is
   read-only graph over digests ([docs/explorer.md](explorer.md)).
 

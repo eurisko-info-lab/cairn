@@ -53,12 +53,14 @@ object SearchTutorial:
 
     val factTerm = board.get("finding").get
     val factDig = Search.putFact(cas, factTerm, intentDig, "explore")
+    val edgeCert = Search.certifyEdge(cas, board, "link", factDig)
+      .fold(e => throw RuntimeException(e), identity)
 
     cas.put(lang.artifact)
     val boardArt = cas.put(board.artifact)
-    Provenance.record(cas, boardArt.valueHash, List(lang.digest, factDig, intentDig), "search-board")
+    Provenance.record(cas, boardArt.valueHash, List(lang.digest, factDig, intentDig, edgeCert.certDigest), "search-board")
 
-    val hops = Provenance.why(workDir.resolve("cas"), factDig)
+    val hops = Provenance.why(workDir.resolve("cas"), edgeCert.certDigest)
     Report(
       languageProvides = provides,
       languageRequiresMet = met,

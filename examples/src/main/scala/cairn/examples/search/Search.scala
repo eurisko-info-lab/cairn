@@ -3,13 +3,18 @@ package cairn.examples.search
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.ledger.Provenance
-import cairn.proof.Claim
+import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
 
 /** Search pack — Fact–Intent–Hint board as a `.cairn` object language.
   *
   * Object language: [[languages/search.cairn]] (`fragment board provides search`,
   * standalone). Blackboard = CAS module + optional PoA publish. Workers / LLM /
   * dispatcher are intentionally out of scope here — host stubs only.
+  *
+  * Board edges (`supports` / `spawns`) are certified as Claims with test-suite
+  * Certificates; provenance links Certificate ← Fact ← Intent so `cairn why`
+  * walks the DAG. Judgments in the language file remain open stubs; the host
+  * [[wellFormed]] / [[goalMet]] gates (and certificates) are the real checks.
   */
 object Search:
   lazy val fragments: List[Fragment] = PackLoader.requireOwn("search")
@@ -102,3 +107,55 @@ object Search:
 
   def putTerm(cas: Cas, term: Cst): Digest =
     cas.put(Artifact(ArtifactKind.Term, Cst.toCanon(term))).valueHash
+
+  /** Evidence digests carried by a certified board edge. */
+  final case class EdgeCert(
+      claim: Claim,
+      certificate: Certificate,
+      claimDigest: Digest,
+      certDigest: Digest,
+      suiteDigest: Digest
+  )
+
+  /** Certify a `supports` / `spawns` edge: Claim + test-suite Certificate after
+    * [[wellFormed]], then provenance Certificate ← Fact (and Fact already ← Intent).
+    * Dangling endpoints fail [[wellFormed]] and yield `Left` — no certificate.
+    */
+  def certifyEdge(
+      cas: Cas,
+      board: Module,
+      edgeName: String,
+      factDigest: Digest,
+      tool: String = "supports"
+  ): Either[String, EdgeCert] =
+    wellFormed(board).flatMap { _ =>
+      board.get(edgeName).toRight(s"no edge named '$edgeName'").flatMap {
+        case Cst.Node(k @ ("supports" | "spawns"), List(Cst.Leaf(a), Cst.Leaf(b))) =>
+          val claim = Claim(
+            s"$k-$edgeName",
+            Cst.node(k, Cst.Leaf(a), Cst.Leaf(b)),
+            subject = board.digest)
+          val suite = TestSuite(
+            s"edge-$edgeName",
+            board.digest,
+            List(TestCase(
+              "endpoints-known",
+              Cst.node("check", Cst.Leaf(a), Cst.Leaf(b)),
+              Cst.node("ok"))))
+          val known = board.defs.map(_._1).toSet
+          val eval = (t: Cst) => t match
+            case Cst.Node("check", List(Cst.Leaf(x), Cst.Leaf(y))) =>
+              if known.contains(x) && known.contains(y) then Right(Cst.node("ok"))
+              else Left(s"dangling edge endpoint(s): $x, $y")
+            case other => Left(s"unexpected edge check term: ${other.render}")
+          Certify.byTests(claim, suite, eval).map { cert =>
+            val claimDig = cas.put(claim.artifact).valueHash
+            val suiteDig = cas.put(suite.artifact).valueHash
+            val certDig = cas.put(cert.artifact).valueHash
+            Provenance.record(cas, certDig, List(factDigest, claimDig, suiteDig), tool)
+            EdgeCert(claim, cert, claimDig, certDig, suiteDig)
+          }
+        case other =>
+          Left(s"'$edgeName' is not a supports/spawns edge: ${other.render}")
+      }
+    }
