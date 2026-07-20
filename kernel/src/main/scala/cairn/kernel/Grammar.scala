@@ -10,6 +10,8 @@ final case class TokenSpec(
     lineComment: Option[String],
     identStartExtra: String = "_",
     identContExtra: String = "_'",
+    /** M6: markers that capture the rest of the physical line verbatim as one token. */
+    restOfLineMarkers: List[String] = Nil,
 )
 
 /** Parser combinators as data. */
@@ -23,6 +25,12 @@ enum Elem:
   case NameLeaf                          // strict identifier (keywords excluded)
   case NumLeaf
   case StrLeaf
+  // M6: layout vocabulary
+  case AnyIdentLeaf                      // identifier OR keyword as an ordinary label
+  case Block(itemCat: String)            // offside rule: items at the column of the first
+  case Run(atomCat: String)              // juxtaposition: atoms on same line / indented past floor
+  case Adjacent1(e: Elem)                // 1+ repetitions, stops at a blank-line gap
+  case RestOfLine                        // one verbatim rest-of-line token
 
 final case class ConstructorSpec(tag: String, elems: List[Elem])
 final case class CategorySpec(name: String, ctors: List[ConstructorSpec]) // ordered PEG choice
@@ -51,6 +59,8 @@ final case class GrammarSpec(
     precCategories: List[PrecCategory],
     printRules: List[PrintRule],
     top: String,
+    /** M11: tokens the recovering parser skips to after an error inside a Star. */
+    syncTokens: List[String] = Nil,
 ):
   def category(n: String): Option[CategorySpec] = categories.find(_.name == n)
   def precCategory(n: String): Option[PrecCategory] = precCategories.find(_.name == n)
@@ -69,6 +79,11 @@ object GrammarSpec:
     case Elem.NameLeaf     => CTag("nameLeaf", CInt(0))
     case Elem.NumLeaf      => CTag("numLeaf", CInt(0))
     case Elem.StrLeaf      => CTag("strLeaf", CInt(0))
+    case Elem.AnyIdentLeaf => CTag("anyIdentLeaf", CInt(0))
+    case Elem.Block(c)     => CTag("block", CStr(c))
+    case Elem.Run(c)       => CTag("run", CStr(c))
+    case Elem.Adjacent1(e) => CTag("adjacent1", elemToCanon(e))
+    case Elem.RestOfLine   => CTag("restOfLine", CInt(0))
 
   private def elemFromCanon(c: Canon): Elem = c match
     case CTag("tok", CStr(t))      => Elem.Tok(t)
@@ -80,6 +95,11 @@ object GrammarSpec:
     case CTag("nameLeaf", _)       => Elem.NameLeaf
     case CTag("numLeaf", _)        => Elem.NumLeaf
     case CTag("strLeaf", _)        => Elem.StrLeaf
+    case CTag("anyIdentLeaf", _)   => Elem.AnyIdentLeaf
+    case CTag("block", CStr(c))    => Elem.Block(c)
+    case CTag("run", CStr(c))      => Elem.Run(c)
+    case CTag("adjacent1", e)      => Elem.Adjacent1(elemFromCanon(e))
+    case CTag("restOfLine", _)     => Elem.RestOfLine
     case other                     => throw CodecError(s"not an elem: $other")
 
   private def segToCanon(s: PrintSeg): Canon = s match
@@ -110,7 +130,8 @@ object GrammarSpec:
       "puncts" -> Canon.cstrs(g.tokens.puncts),
       "lineComment" -> g.tokens.lineComment.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))),
       "identStartExtra" -> CStr(g.tokens.identStartExtra),
-      "identContExtra" -> CStr(g.tokens.identContExtra)),
+      "identContExtra" -> CStr(g.tokens.identContExtra),
+      "restOfLineMarkers" -> Canon.cstrs(g.tokens.restOfLineMarkers)),
     "categories" -> CList(g.categories.map(c => Canon.cmap(
       "name" -> CStr(c.name),
       "ctors" -> CList(c.ctors.map(k => Canon.cmap(
@@ -122,7 +143,8 @@ object GrammarSpec:
         "prec" -> CInt(o.prec), "rightAssoc" -> CInt(if o.rightAssoc then 1 else 0))))))),
     "printRules" -> CList(g.printRules.map(r => Canon.cmap(
       "tag" -> CStr(r.tag), "segs" -> CList(r.segs.map(segToCanon))))),
-    "top" -> CStr(g.top))
+    "top" -> CStr(g.top),
+    "syncTokens" -> Canon.cstrs(g.syncTokens))
 
   def fromCanon(c: Canon): GrammarSpec =
     val toks = c.field("tokens")
@@ -135,7 +157,8 @@ object GrammarSpec:
           case CTag("some", CStr(s)) => Some(s)
           case _                     => None,
         identStartExtra = toks.field("identStartExtra").asStr,
-        identContExtra = toks.field("identContExtra").asStr),
+        identContExtra = toks.field("identContExtra").asStr,
+        restOfLineMarkers = toks.field("restOfLineMarkers").asList.map(_.asStr)),
       categories = c.field("categories").asList.map { cc =>
         CategorySpec(cc.field("name").asStr, cc.field("ctors").asList.map { k =>
           ConstructorSpec(k.field("tag").asStr, k.field("elems").asList.map(elemFromCanon)) }) },
@@ -146,6 +169,7 @@ object GrammarSpec:
               o.field("prec").asInt.toInt, o.field("rightAssoc").asInt == 1L) }) },
       printRules = c.field("printRules").asList.map { r =>
         PrintRule(r.field("tag").asStr, r.field("segs").asList.map(segFromCanon)) },
-      top = c.field("top").asStr)
+      top = c.field("top").asStr,
+      syncTokens = c.field("syncTokens").asList.map(_.asStr))
 
   def artifact(g: GrammarSpec): Artifact = Artifact(ArtifactKind.Grammar, toCanon(g))

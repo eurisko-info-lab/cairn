@@ -160,7 +160,11 @@ object Compose:
         precCategories = precs.values.toList.sortBy(_.name),
         printRules = prules.values.toList.sortBy(_.tag),
         top = tops.headOption.getOrElse(""))
-      Right(ComposedLanguage(
+      // M9: static grammar analysis runs on every composed grammar
+      val lintErrors = GrammarLint.errors(grammar).map(i =>
+        ComposeError(s"grammar/lint/${i.where}", name, "-", i.msg))
+      if lintErrors.nonEmpty then Left(lintErrors)
+      else Right(ComposedLanguage(
         name, fragments, sorts, ctors, grammar,
         rules.values.toList.sortBy(_.name), judgs, varCtors.headOption))
 
