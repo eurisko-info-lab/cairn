@@ -40,6 +40,7 @@ sbt "examples/runMain cairn.examples.Main ui /path/to/store/nodeA 8765"
 | Overview | Chain length, CAS stats by `ArtifactKind` |
 | Chain | Blocks → txs (publish / heads / identities / certs) |
 | CAS | Kind histogram; open any digest |
+| Board | Read-only Fact–Intent–Hint graph from a search IR module |
 | Languages | Loaded packs; scratch editor with parse/print validate |
 
 ## Typed viewers / editors
@@ -47,8 +48,21 @@ sbt "examples/runMain cairn.examples.Main ui /path/to/store/nodeA 8765"
 Surfaces: **text** (grammar printer), **json** (Canon tree), **canon** (debug).
 Editor is propose-only (`POST /api/parse`) — no silent CAS/ledger writes.
 
+## Search board
+
+After `transcripts/search-board.cairn`, the **Board** tab (or `GET /api/board`)
+shows nodes (`origin` / `goal` / `fact` / `intent` / `hint`) and edges
+(`supports` / `spawns`) from the published module. Optional
+`?digest=<ir-hex>` selects a specific board; otherwise the first
+search-shaped IR artifact in CAS is used.
+
+```bash
+sbt "examples/runMain cairn.examples.Main transcript transcripts/search-board.cairn"
+sbt "examples/runMain cairn.examples.Main ui"   # Board tab
+```
+
 ## API (JSON)
 
-`GET /api/health|overview|chain|blocks|languages|cas/stats`,
+`GET /api/health|overview|chain|blocks|board|languages|cas/stats`,
 `GET /api/blocks/{height|digest}`, `GET /api/artifacts/{digest}[/view]`,
 `POST /api/parse`. Static UI at `/` and `/ui/…`.

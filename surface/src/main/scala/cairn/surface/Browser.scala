@@ -12,15 +12,16 @@ import java.nio.file.{Files, Path}
   * typed artifact viewers/editors. UI proposes only; kernel/CAS remain the
   * certifiers (§4.6 / CAIRN-PROMPT working style).
   *
-  * Endpoints (JSON unless noted):
-  *   GET  /api/health, /api/overview, /api/chain, /api/blocks
-  *   GET  /api/blocks/{height|digest}
-  *   GET  /api/artifacts/{digest}
-  *   GET  /api/artifacts/{digest}/view?lang=&surface=text|json|canon
-  *   GET  /api/languages, /api/cas/stats
-  *   POST /api/parse  body JSON lang+text — validate editor buffer
-  *   GET  / and /ui/... — static UI assets
-  */
+ * Endpoints (JSON unless noted):
+ *   GET  /api/health, /api/overview, /api/chain, /api/blocks
+ *   GET  /api/blocks/{height|digest}
+ *   GET  /api/artifacts/{digest}
+ *   GET  /api/artifacts/{digest}/view?lang=&surface=text|json|canon
+ *   GET  /api/board[?digest=] — Fact–Intent–Hint graph over an IR module
+ *   GET  /api/languages, /api/cas/stats
+ *   POST /api/parse  body JSON lang+text — validate editor buffer
+ *   GET  / and /ui/... — static UI assets
+ */
 final class BrowserServer(
     node: Node,
     languages: Map[String, ComposedLanguage],
@@ -168,6 +169,10 @@ final class BrowserServer(
               "top" -> Json.str(l.grammar.top),
               "ctors" -> Json.arr(l.constructors.keys.toList.sorted.map(Json.str)))
           }))
+        case ("GET", "board") =>
+          boardJson(params.get("digest")) match
+            case Left(e)  => err(ex, 404, e)
+            case Right(j) => json(ex, 200, j)
         case ("GET", "cas/stats") =>
           val st = CasAdmin.stats(node.root)
           json(ex, 200, Json.obj(
@@ -410,6 +415,61 @@ final class BrowserServer(
       "lang" -> Json.str(langName),
       "cst" -> Json.ofCst(cst),
       "printed" -> Json.str(printed))
+
+  /** Read-only Fact–Intent–Hint board graph from an IR module digest.
+    * Looks up `digest` when given; otherwise uses the latest published IR
+    * artifact that contains search-shaped constructors.
+    */
+  private def boardJson(digestOpt: Option[String]): Either[String, String] =
+    def graphFromModule(m: Module, dig: Digest): String =
+      val nodes = List.newBuilder[String]
+      val edges = List.newBuilder[String]
+      for (name, term) <- m.defs do term match
+        case Cst.Node(k @ ("origin" | "fact" | "goal" | "intent" | "hint"), List(Cst.Leaf(t))) =>
+          nodes += Json.obj(
+            "name" -> Json.str(name), "kind" -> Json.str(k), "text" -> Json.str(t))
+        case Cst.Node(k @ ("supports" | "spawns"), List(Cst.Leaf(a), Cst.Leaf(b))) =>
+          edges += Json.obj(
+            "name" -> Json.str(name), "kind" -> Json.str(k),
+            "from" -> Json.str(a), "to" -> Json.str(b))
+        case Cst.Node("board", List(Cst.Node("list", ns))) =>
+          nodes += Json.obj(
+            "name" -> Json.str(name), "kind" -> Json.str("board"),
+            "text" -> Json.str(ns.collect { case Cst.Leaf(n) => n }.mkString(", ")))
+        case _ => ()
+      Json.obj(
+        "digest" -> Json.str(dig.hex),
+        "viewer" -> Json.str("board"),
+        "nodes" -> Json.arr(nodes.result()),
+        "edges" -> Json.arr(edges.result()))
+
+    def isSearchShaped(m: Module): Boolean =
+      m.defs.exists((_, t) => t match
+        case Cst.Node(k, _) if Set("origin", "goal", "fact", "intent", "hint", "supports", "spawns").contains(k) =>
+          true
+        case _ => false)
+
+    digestOpt match
+      case Some(hex) =>
+        for
+          a <- loadArtifact(hex)
+          _ <- Either.cond(a.kind == ArtifactKind.Ir, (), s"artifact $hex is ${a.kind.name}, want ir")
+          m = Module.fromCanon(a.body)
+        yield graphFromModule(m, a.digest)
+      case None =>
+        val objs = node.root.resolve("objects")
+        if !Files.exists(objs) then Left("CAS empty — publish a search board first")
+        else
+          import scala.jdk.CollectionConverters.*
+          val found = Files.walk(objs).iterator.asScala
+            .filter(p => Files.isRegularFile(p) && !p.toString.endsWith(".corrupt"))
+            .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption)
+            .filter(_.kind == ArtifactKind.Ir)
+            .map(a => a -> Module.fromCanon(a.body))
+            .find((_, m) => isSearchShaped(m))
+          found match
+            case Some((a, m)) => Right(graphFromModule(m, a.digest))
+            case None => Left("no search-shaped board module in CAS — run transcripts/search-board.cairn")
 
 object BrowserServer:
   /** Serve UI for a local node/CAS root until interrupted. */

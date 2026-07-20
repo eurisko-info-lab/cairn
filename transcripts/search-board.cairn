@@ -1,0 +1,17 @@
+-- Search board transcript: Fact–Intent–Hint spine on CAS + ledger.
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/search-board.cairn"
+transcript search-board {
+  lang search ;
+  roundtrip "origin \"unknown start state\"" ;
+  roundtrip "goal \"reach a confirmed finding\"" ;
+  roundtrip "intent \"gather evidence\"" ;
+  roundtrip "fact \"evidence confirms the finding\"" ;
+  roundtrip "hint \"inspect the CAS first\"" ;
+  roundtrip "supports explore finding" ;
+  roundtrip "spawns start explore" ;
+  roundtrip "board (start, target, explore, finding)" ;
+  delta "{ add start = origin \"unknown start state\" ; add target = goal \"reach a confirmed finding\" ; }" ;
+  delta "{ add explore = intent \"gather evidence for the goal\" ; add finding = fact \"evidence confirms the finding\" ; add link = supports explore finding ; add spawn = spawns start explore ; add tip = hint \"inspect the CAS first\" ; add roster = board (start, target, explore, finding, tip) ; }" ;
+  publish board ;
+  fetch board ;
+}

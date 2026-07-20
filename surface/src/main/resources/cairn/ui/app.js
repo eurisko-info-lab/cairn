@@ -4,6 +4,7 @@ const state = {
   blocks: [],
   languages: [],
   cas: null,
+  board: null,
   selection: null,
 };
 
@@ -40,6 +41,14 @@ async function loadOverview() {
   state.cas = await api("cas/stats");
 }
 
+async function loadBoard() {
+  try {
+    state.board = await api("board");
+  } catch (e) {
+    state.board = { error: e.message, nodes: [], edges: [] };
+  }
+}
+
 function renderList() {
   const list = $("list");
   if (state.route === "overview") {
@@ -60,7 +69,7 @@ function renderList() {
           <p class="muted">This root has no blocks yet. Publish first, then reopen:</p>
           <pre class="view" style="min-height:auto">sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"
 sbt "examples/runMain cairn.examples.Main ui &lt;node-dir&gt; 8765"</pre>
-        </div>` : `<p class="muted">Open Chain to walk blocks, CAS for kind stats, Languages for typed surfaces.</p>`}`;
+        </div>` : `<p class="muted">Open Chain to walk blocks, Board for Fact–Intent graphs, CAS for kind stats, Languages for typed surfaces.</p>`}`;
     return;
   }
   if (state.route === "chain") {
@@ -94,6 +103,31 @@ sbt "examples/runMain cairn.examples.Main ui &lt;node-dir&gt; 8765"</pre>
     };
     return;
   }
+  if (state.route === "board") {
+    const b = state.board || {};
+    if (b.error) {
+      list.innerHTML = `<h2 style="margin-top:0">Search board</h2>
+        <p class="muted">${esc(b.error)}</p>
+        <pre class="view" style="min-height:auto">sbt "examples/runMain cairn.examples.Main transcript transcripts/search-board.cairn"</pre>`;
+      return;
+    }
+    list.innerHTML = `<h2 style="margin-top:0">Board nodes</h2>
+      <p class="muted">Digest ${short(b.digest)}</p>` +
+      (b.nodes || []).map((n) => `
+        <button class="list-item ${state.selection?.type === "board-node" && state.selection.id === n.name ? "active" : ""}"
+          data-kind="board-node" data-id="${esc(n.name)}">
+          <div class="title"><span class="pill">${esc(n.kind)}</span> ${esc(n.name)}</div>
+          <div class="meta">${esc(n.text || "")}</div>
+        </button>`).join("") || `<p class="muted">No nodes.</p>`;
+    list.innerHTML += `<h2 style="margin-top:1.25rem">Edges</h2>` +
+      (b.edges || []).map((e) => `
+        <div class="list-item">
+          <div class="title"><span class="pill">${esc(e.kind)}</span> ${esc(e.name)}</div>
+          <div class="meta">${esc(e.from)} → ${esc(e.to)}</div>
+        </div>`).join("") || `<p class="muted">No supports/spawns edges.</p>`;
+    bindListClicks();
+    return;
+  }
   if (state.route === "languages") {
     list.innerHTML = `<h2 style="margin-top:0">Loaded languages</h2>` +
       (state.languages || []).map((l) => `
@@ -113,6 +147,7 @@ function bindListClicks() {
       const id = el.dataset.id;
       if (kind === "block") openBlock(id);
       if (kind === "lang") openLanguage(id);
+      if (kind === "board-node") openBoardNode(id);
     });
   });
 }
@@ -123,6 +158,46 @@ function esc(s) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function openBoardNode(name) {
+  state.selection = { type: "board-node", id: name };
+  renderList();
+  const b = state.board || {};
+  const node = (b.nodes || []).find((n) => n.name === name);
+  const related = (b.edges || []).filter((e) => e.from === name || e.to === name);
+  const detail = $("detail");
+  if (!node) {
+    detail.innerHTML = `<p class="bad">Unknown board node</p>`;
+    return;
+  }
+  detail.innerHTML = `
+    <div class="card">
+      <h2>${esc(node.name)} <span class="pill">${esc(node.kind)}</span></h2>
+      <p>${esc(node.text || "")}</p>
+      <div class="grid">
+        <div class="stat"><div class="k">Board</div><div class="v">${short(b.digest)}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Incident edges</h2>
+      ${related.map((e) => `
+        <div class="tx">
+          <span class="pill">${esc(e.kind)}</span>
+          ${esc(e.from)} → ${esc(e.to)}
+        </div>`).join("") || "<p class='muted'>No incident edges.</p>"}
+    </div>
+    <div class="card">
+      <h2>Graph (read-only)</h2>
+      <pre class="view">${esc(renderAsciiGraph(b))}</pre>
+    </div>`;
+}
+
+function renderAsciiGraph(b) {
+  const lines = [];
+  for (const n of b.nodes || []) lines.push(`[${n.kind}] ${n.name}`);
+  for (const e of b.edges || []) lines.push(`  ${e.from} -${e.kind}-> ${e.to}`);
+  return lines.join("\n") || "(empty)";
 }
 
 async function openBlock(digest) {
@@ -190,7 +265,7 @@ async function openArtifact(digest) {
   try {
     const a = await api("artifacts/" + digest);
     const langs = (state.languages || []).map((l) => l.name);
-    const defaultLang = langs.includes("stlc") ? "stlc" : (langs[0] || "");
+    const defaultLang = langs.includes("search") ? "search" : (langs.includes("stlc") ? "stlc" : (langs[0] || ""));
     detail.innerHTML = `
       <div class="card">
         <h2>Artifact <span class="pill">${esc(a.kind)}</span></h2>
@@ -311,6 +386,9 @@ async function render() {
       return;
     }
   }
+  if (state.route === "board" && !state.board) {
+    await loadBoard();
+  }
   renderList();
   if (state.route === "overview") {
     $("detail").innerHTML = `
@@ -320,9 +398,17 @@ async function render() {
       </div>
       <div class="card">
         <h2>How to use</h2>
-        <p class="muted">Chain walks PoA blocks and transactions. Click published digests to open
-        typed viewers. Languages drive text surfaces and the validate-only editor
-        (no silent mutation — proposals must go through ΔL / kernel gates).</p>
+        <p class="muted">Chain walks PoA blocks and transactions. Board shows a read-only
+        Fact–Intent–Hint graph when a search module is in CAS. Languages drive text
+        surfaces and the validate-only editor (no silent mutation — proposals must go
+        through ΔL / kernel gates).</p>
+      </div>`;
+  } else if (state.route === "board" && state.board && !state.board.error && !state.selection) {
+    $("detail").innerHTML = `
+      <div class="card">
+        <h2>Fact–Intent–Hint board <span class="pill">read-only</span></h2>
+        <p class="muted">Select a node for detail. Edges are <code>supports</code> / <code>spawns</code>.</p>
+        <pre class="view">${esc(renderAsciiGraph(state.board))}</pre>
       </div>`;
   }
 }

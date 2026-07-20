@@ -14,8 +14,9 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(raw.contains("pki"), raw.keySet.toString)
     assert(raw.contains("law"), raw.keySet.toString)
     assert(raw.contains("sds"), raw.keySet.toString)
+    assert(raw.contains("search"), raw.keySet.toString)
     assert(raw.contains("stlc"), raw.keySet.toString)
-    assert(!raw.contains("dpki") && !raw.contains("dlaw") && !raw.contains("dsds"))
+    assert(!raw.contains("dpki") && !raw.contains("dlaw") && !raw.contains("dsds") && !raw.contains("dsearch"))
 
   test("PKI closes alone; provides cert"):
     val lang = PackLoader.requireClosed("pki")

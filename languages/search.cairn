@@ -1,0 +1,56 @@
+language search {
+  -- Fact–Intent–Hint board (oritera-style search spine as object language).
+  -- Free ΔL duals via Delta.deltaOf(search) only — never materialized.
+  -- Standalone (no requires); workers/LLM/dispatcher stay in host surface.
+  fragment board provides search {
+    sort Fact tree;
+    sort Intent tree;
+    sort Hint tree;
+    sort Edge tree;
+    sort Board tree;
+    ctor origin : Fact(Text);
+    ctor fact : Fact(Text);
+    ctor goal : Intent(Text);
+    ctor intent : Intent(Text);
+    ctor hint : Hint(Text);
+    ctor supports : Edge(Name, Name);
+    ctor spawns : Edge(Name, Name);
+    ctor board : Board(Names);
+    varctor searchRef;
+    keyword origin;
+    keyword goal;
+    keyword fact;
+    keyword intent;
+    keyword hint;
+    keyword supports;
+    keyword spawns;
+    keyword board;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax searchObj += origin : tok "origin" str;
+    syntax searchObj += goal : tok "goal" str;
+    syntax searchObj += fact : tok "fact" str;
+    syntax searchObj += intent : tok "intent" str;
+    syntax searchObj += hint : tok "hint" str;
+    syntax searchObj += supports : tok "supports" name name;
+    syntax searchObj += spawns : tok "spawns" name name;
+    syntax searchObj += board : tok "board" tok "(" sepby1 name "," tok ")";
+    print origin : lit "origin" sp strfield 0;
+    print goal : lit "goal" sp strfield 0;
+    print fact : lit "fact" sp strfield 0;
+    print intent : lit "intent" sp strfield 0;
+    print hint : lit "hint" sp strfield 0;
+    print supports : lit "supports" sp field 0 sp field 1;
+    print spawns : lit "spawns" sp field 0 sp field 1;
+    print board : lit "board (" field 0 lit ")";
+    -- Stubs: proof-free Claims + host tests certify these initially (§2).
+    judgment wellFormed {
+      rule wf-any :  |- wellFormed($x);
+    }
+    judgment goalMet {
+      rule gm-any :  |- goalMet($x);
+    }
+    top searchObj;
+  }
+}

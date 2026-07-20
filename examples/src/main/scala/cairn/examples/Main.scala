@@ -12,6 +12,7 @@ import cairn.surface.Cli
     "pki" -> cairn.examples.pki.Pki.language,
     "sds" -> cairn.examples.sds.Sds.language,
     "law" -> cairn.examples.law.Law.language,
+    "search" -> cairn.examples.search.Search.language,
     "query" -> cairn.workbench.Query.language,
     "policy" -> cairn.ledger.PolicyLang.language)
   val portModules = Map(
@@ -35,7 +36,7 @@ import cairn.surface.Cli
         .fold(e => { System.err.println(e); sys.exit(1) }, identity)
       java.nio.file.Files.writeString(dir.resolve("meta.cairn"), metaText)
       // Exemplars: re-print from loaded own fragments (source of truth stays .cairn)
-      for name <- List("pki", "law", "sds") do
+      for name <- List("pki", "law", "sds", "search") do
         val fs = cairn.workbench.PackLoader.requireOwn(name)
         val text = cairn.workbench.Meta.printLanguage(name, fs)
           .fold(e => { System.err.println(e); sys.exit(1) }, identity)

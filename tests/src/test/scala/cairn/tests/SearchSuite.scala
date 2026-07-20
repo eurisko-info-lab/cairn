@@ -1,0 +1,92 @@
+package cairn.tests
+
+import cairn.kernel.*
+import cairn.workbench.*
+import cairn.ledger.Provenance
+import cairn.examples.search.{Search, SearchTutorial}
+import java.nio.file.Files
+
+/** Fact–Intent–Hint search pack: object language + CAS provenance spine. */
+class SearchSuite extends munit.FunSuite:
+
+  test("search pack loads from languages/*.cairn at runtime"):
+    val raw = PackLoader.loadRaw()
+    assert(raw.contains("search"), raw.keySet.toString)
+    assert(!raw.contains("dsearch"))
+
+  test("search composes standalone — no unmet requires"):
+    val unmet = PackLoader.unmetRequires("search", PackLoader.loadRaw())
+    assertEquals(unmet, Set.empty[String])
+    Search.ownCompose match
+      case Right(lang) =>
+        assert(lang.fragments.exists(_.provides.contains("search")))
+        assert(lang.judgments.contains("wellFormed"))
+        assert(lang.judgments.contains("goalMet"))
+      case Left(errs) => fail(errs.map(_.render).mkString)
+
+  test("search.cairn text round-trips the meta surface"):
+    val fs = PackLoader.requireOwn("search")
+    val text = Meta.printLanguage("search", fs).fold(e => fail(e), identity)
+    val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
+    assertEquals(back._1, "search")
+    assertEquals(back._2.map(_.digest), fs.map(_.digest))
+
+  test("board terms round-trip under search grammar"):
+    val g = Search.language.grammar
+    for s <- List(
+      """origin "start"""",
+      """goal "done"""",
+      """fact "confirmed"""",
+      """intent "explore"""",
+      """hint "look here"""",
+      """supports a b""",
+      """spawns a b""",
+      """board (a, b, c)"""
+    ) do
+      val t = Parser.parse(g, s).fold(e => fail(e), identity)
+      RoundTrip.check(g, t).fold(e => fail(e), identity)
+
+  test("free ΔL is derived only — no dsearch.cairn on disk"):
+    val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
+    assert(dl.constructors.keySet.exists(_.startsWith("add:")))
+    assert(dl.constructors.keySet.exists(_.startsWith("remove:")))
+    assert(!java.nio.file.Files.exists(java.nio.file.Path.of("languages/dsearch.cairn")))
+    assert(!java.nio.file.Files.exists(java.nio.file.Path.of("docs/delta/Δsearch.cairn")))
+
+  test("wellFormed rejects dangling edge; goalMet after Fact"):
+    val seed = Search.seedBoard
+    assert(Search.wellFormed(seed).isRight)
+    assert(!Search.goalMet(seed))
+    val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val bad = Parser.parse(dl.grammar, """{ add e = supports phantom finding ; }""")
+      .fold(e => fail(e), identity)
+    assert(Search.applySearch(seed, bad).swap.exists(_.contains("unknown")))
+    val good = Parser.parse(dl.grammar,
+      """{ add explore = intent "work" ; add finding = fact "done" ; add e = supports explore finding ; }"""
+    ).fold(e => fail(e), identity)
+    val board = Search.applySearch(seed, good).fold(e => fail(e), _._1)
+    assert(Search.wellFormed(board).isRight)
+    assert(Search.goalMet(board))
+
+  test("SearchTutorial: Fact write records Intent→Fact provenance"):
+    val dir = Files.createTempDirectory("search-tutorial")
+    val r = SearchTutorial.run(dir)
+    assert(r.languageRequiresMet)
+    assert(r.wellFormed)
+    assert(r.goalMet)
+    assert(r.whyHops >= 1, r.toString)
+    assert(r.whyTools.contains("explore"), r.whyTools.toString)
+    val hops = Provenance.why(dir.resolve("cas"), Digest(r.factDigest))
+    assert(hops.exists(_.record.inputs.exists(_.hex == r.intentDigest)), hops.toString)
+    assert(r.languageProvides.contains("search"))
+
+  test("graphOf extracts nodes and supports/spawns edges"):
+    val g = Search.graphOf(Search.seedBoard)
+    assertEquals(g.nodes.map(_.kind).toSet, Set("origin", "goal"))
+    val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val ch = Parser.parse(dl.grammar,
+      """{ add i = intent "x" ; add f = fact "y" ; add e = supports i f ; }"""
+    ).fold(e => fail(e), identity)
+    val board = Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+    val graph = Search.graphOf(board)
+    assert(graph.edges.exists(e => e.kind == "supports" && e.from == "i" && e.to == "f"))

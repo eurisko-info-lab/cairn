@@ -24,7 +24,7 @@ Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 | `rosetta/` | L4 | interchange artifacts + round-trip-verified Scala and Lean port emitters |
 | `ledger/` | L5 | Ed25519 identities, PoA node, publication, pull sync, divergence surfacing |
 | `surface/` | L6 | CLI (`hash/put/get/canon/transcript`), transcript DSL (defined in the grammar engine itself) |
-| `examples/` | — | STLC, Claims, AffineNet, RosettaQuickSort(+App), PKI, SDS, Law, Riemann, Bend, Unison (never imported by L0–L2) |
+| `examples/` | — | STLC, Claims, AffineNet, RosettaQuickSort(+App), PKI, SDS, Law, Riemann, Search, Bend, Unison (never imported by L0–L2) |
 | `tests/` | — | per-phase acceptance suites |
 
 The sbt module graph enforces the import DAG:
@@ -56,6 +56,8 @@ fixpoint in [languages/meta.cairn](languages/meta.cairn)). Exemplar apps
 Riemann is a separate, standalone `.cairn` pack demonstrating `Claim` vs
 `Theorem` (§2) on a genuinely open problem — exploratory, not a parity item
 (see [docs/exemplars.md](docs/exemplars.md#riemann--an-open-claim-not-a-parity-item)).
+Search is another standalone pack: Fact–Intent–Hint board objects on CAS
+([docs/exemplars.md](docs/exemplars.md#search--factintenthint-board-spine)).
 
 ## Documents
 

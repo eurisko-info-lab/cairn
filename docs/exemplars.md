@@ -103,3 +103,20 @@ analytic-continuation machinery); the generated file is not built against
 real mathlib in this repo's tests (no network, multi-GB dependency) — only
 round-trip verified through Cairn's own grammar engine, same discipline as
 the Haskell/Rust ports skipping when `runghc`/`cargo` are unavailable.
+
+## Search — Fact–Intent–Hint board spine
+
+`languages/search.cairn` + `examples/search` (`Search` glue + `SearchTutorial`):
+
+- Standalone pack (`provides search`, no `requires`) — not part of PKI→Law→SDS.
+- Sorts Fact / Intent / Hint / Edge / Board; ctors `origin`, `goal`, `fact`,
+  `intent`, `hint`, `supports`, `spawns`, `board`.
+- Judgments `wellFormed` / `goalMet` are stubs; host Scala + Claims/tests gate
+  for now. ΔL = `Delta.deltaOf(search)` only (no `dsearch.cairn`).
+- Tutorial seeds origin+goal, ΔL-adds Intent+Fact into CAS, records
+  Provenance so `cairn why` hops Intent → Fact.
+- Transcript: `transcripts/search-board.cairn`. Explorer **Board** tab is
+  read-only graph over digests ([docs/explorer.md](explorer.md)).
+
+Out of scope this pass: Dispatcher, LLM workers, peer stigmergy RPC, Hint
+Law/Policy publish gates (capability `workflows` / `trust` remain deferred).

@@ -130,7 +130,7 @@ For every language where applicable, treat the following as one coherent bundle 
 | Workflows | Multi-step procedures as language terms |
 | Import / export formats | Surfaces for foreign encodings (§ above) |
 
-Not every language ships every row on day one; the **model** is uniform. Exemplars (SDS/PKI/…) exercise subsets (§5b).
+Not every language ships every row on day one; the **model** is uniform. Exemplars (SDS/PKI/Law/Search/…) exercise subsets (§5b).
 
 ---
 

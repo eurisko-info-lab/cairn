@@ -3,6 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.ledger.{Keypair, Node}
 import cairn.surface.BrowserServer
+import cairn.workbench.Module
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.file.Files
@@ -83,4 +84,29 @@ class BrowserSuite extends munit.FunSuite:
       assertEquals(resp.statusCode(), 200)
       assert(resp.body().contains("\"ok\":true"), resp.body())
       assert(resp.body().contains("printed"), resp.body())
+    finally srv.stop()
+
+  test("GET /api/board returns Fact–Intent graph from IR module"):
+    val root = Files.createTempDirectory("cairn-ui-board")
+    val node = Node(root)
+    val board = Module(List(
+      "origin" -> Cst.node("origin", Cst.Leaf("start")),
+      "goal" -> Cst.node("goal", Cst.Leaf("done")),
+      "i" -> Cst.node("intent", Cst.Leaf("work")),
+      "f" -> Cst.node("fact", Cst.Leaf("found")),
+      "e" -> Cst.node("supports", Cst.Leaf("i"), Cst.Leaf("f"))
+    )).sorted
+    node.cas.put(board.artifact)
+    val langs = Map("search" -> cairn.examples.search.Search.language)
+    val srv = BrowserServer(node, langs, 0)
+    val port = srv.start()
+    try
+      val (code, body) = get(port, "/api/board")
+      assertEquals(code, 200)
+      assert(body.contains("\"viewer\":\"board\""), body)
+      assert(body.contains("\"kind\":\"fact\""), body)
+      assert(body.contains("\"kind\":\"supports\""), body)
+      val (byDig, digBody) = get(port, s"/api/board?digest=${board.digest.hex}")
+      assertEquals(byDig, 200)
+      assert(digBody.contains(board.digest.hex), digBody)
     finally srv.stop()
