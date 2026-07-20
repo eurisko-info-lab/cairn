@@ -67,13 +67,18 @@ Cairn ships a real thin surface because nets are real.
 
 Remaining: numbers/recursion primitives; HVM strict/lazy modes.
 
-## Unison Core — a real domain language on Cairn's substrate (§2c)
+## Unison Core — general-purpose hosted language, peer to STLC/MiniTT (§2c)
 
 `languages/unisoncore.cairn` + `examples/unison` (`UnisonCore` glue +
 `Unison` store/codebase). Was an "ideas pack" (α-invariant digests + name
 aliases + patch-as-ΔL over *borrowed* STLC terms); §2c/§5b's amendment
 sanctioned a real term language for that store, not a Unison fork — Unison
-still informs L0/L1/L5 more than any one domain ADT (§5b).
+still informs L0/L1/L5 more than any one domain ADT (§5b). Not a domain
+pack in the PKI/SDS sense: it sits at the "general-purpose hosted
+language" layer of §2c's stack diagram, alongside STLC and MiniTT — an
+earlier revision of this doc and one table row in `CAIRN-PROMPT.md` §5b
+called it a "domain language pack (peer to PKI/SDS/Search)," which
+contradicted §2c's own stack diagram and has been corrected.
 
 - Closed built-in ADTs — `List`/`cons`/`nil`, `Option`/`some`/`none` — plus
   general application/lambda (STLC's own shape) and pattern matching as a
@@ -91,13 +96,17 @@ still informs L0/L1/L5 more than any one domain ADT (§5b).
 - Simply typed (`arrow`/`List`/`Option`/`Unit`); types are never reduced,
   so unlike MiniTT there is no `$defeq`/`t-conv` — `hasType` needs zero
   `CheckerCfg` extensions.
-- `Unison.Store`/`Codebase`/`applyPatch` (M48) are unchanged in shape —
-  they already demonstrated the substrate properties (content-addressed
-  dedup, patch-as-ΔL) — only the *stored* term language changed, from
-  borrowed STLC to real UnisonCore terms. `Store`'s `BinderSpec` now reads
-  from `UnisonCore.language` directly instead of a hand-hardcoded `lam`-only
-  map, so `Alpha.digest`/`normalize` see `matchList`/`matchOption`'s pattern
-  binders too.
+- `Unison.Codebase`/`applyPatch` (M48) are unchanged in shape — `names:
+  Module` already used the same generic type PKI/Law's registries do, so
+  there was nothing to fix there. `Store`'s `BinderSpec` now reads from
+  `UnisonCore.language` directly instead of a hand-hardcoded `lam`-only
+  map, so `Alpha.digest`/`normalize` see `matchList`/`matchOption`'s
+  pattern binders too. `Store` itself was rewired to hold bodies in
+  `workbench.Cas` (the same store PKI/Search already use directly, no
+  wrapper) instead of a hand-rolled `Map[String,Cst]` — that map was a
+  second, redundant copy of exactly what `Cas` already provides; `Store`
+  now keeps only a `Set[Digest]` index of which of its own definitions
+  have been added, not the term bytes themselves.
 - Not Unison-surface-compatible (prefix `(f a)` application, not `f a`
   juxtaposition) — a Cairn-native calculus in Unison's lineage, not a port.
 

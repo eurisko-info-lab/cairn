@@ -197,6 +197,33 @@ The corrected stack:
 The repository layer is not another stone on the cairn. It is the geology
 beneath the entire cairn.
 
+**Amended <this revision>: executable reference vs. optimized backend.**
+The bottom arrow above (`↕ external optimized implementations / bridges`)
+is not only "Cairn generates code that targets X" (that's Rosetta, rule
+10 below — projection only, never a competing host compiler for X's own
+ecosystem). For a system whose *semantics* Cairn wants to own, not just
+target, the pattern already proven by `AffineNet`/`IcNet` (§5) is:
+Cairn hosts its own executable, kernel-checked reference model of the
+relevant fragment — real interaction-net reduction, not prose describing
+HVM — while HVM itself remains available as an external, optimized
+backend (performance, scheduler, memory layout) that the reference model
+can be tested for agreement against. Lean is asymmetric today only
+because that second half hasn't been built yet: MiniTT (§5b, §8b) is an
+honest, thin dependent-type core in Lean's lineage, explicitly **not**
+claiming Lean-surface or Lean-kernel compatibility — so today Lean is
+*only* a Rosetta projection target (§4.10). That is a statement about
+what exists, not a ceiling: the formal-methods ladder (§8b) may grow a
+further rung — a Cairn-native, kernel-checked model of a Lean-kernel
+*fragment* (environments, inductive declarations + recursors,
+definitional equality, kernel reduction, theorem checking), checked by
+the same generic `Checker`/`Search` MiniTT already uses. Were that built,
+Lean would play both roles at once, same as HVM: a Rosetta target for the
+full native implementation (elaboration, macros, mathlib), and a Cairn
+object language for the kernel fragment Cairn itself checks and runs.
+Neither role replaces the other, and this does not relax rule 10 — the
+Cairn-native model is still not "a Lean compiler," it's a language like
+MiniTT, checked the same way, with its own honestly-scoped limits.
+
 ---
 
 ## 3. Architecture layers
@@ -248,7 +275,7 @@ Distilled from the family of prior prompts; treat violations as bugs.
 7. **Proofs are first-class but staged.** MVP may ship claims + certificates of testing; a proof-term check path must exist as a designed slot and appear by Phase 2.
 8. **Recursive ΔL for edits.** Every language `L` — including meta-language, grammar-language, and any `ΔL` — has a free changes language. Mutations are terms in that language, not opaque file overwrites. See §2b.
 9. **Ledger is publication, not runtime DB.** Local CAS is the working store; the ledger records publication, trust, and heads.
-10. **Rosetta is projection, not replacement.** Do not invent “Haskell++ compilers”; generate ordinary host projects plus obligations/tests.
+10. **Rosetta is projection, not replacement.** Do not invent “Haskell++ compilers”; generate ordinary host projects plus obligations/tests. This governs Rosetta *ports* specifically — it does not bar Cairn from hosting its own kernel-checked object language in an external system's lineage (§2c amendment: "executable reference vs. optimized backend"), the way `AffineNet`/`IcNet` already do for HVM's net semantics and MiniTT does for a slice of Lean's.
 11. **Domain packages stay out of kernel.** SDS, PKI, Bend, Unison-inspired packs, physics, heuristics, etc. live under `examples/` (§5b) — never in L0–L2.
 12. **Deterministic canonicalization.** Same semantic artifact ⇒ same bytes ⇒ same digest (documented normalization rules). Surfaces and foreign formats are encodings inside the language system (§2b) — still subject to canonicalization where artifacts are stored.
 13. **Tests before features.** Each phase lands with an acceptance suite; do not skip phases.
@@ -283,8 +310,8 @@ These are **first-class case studies** Cairn should eventually support as langua
 | **PKI** | Domain pack (early, after STLC+ledger); proves language-agnostic kernel | GRANITE’s **first** application pack: certificate-`Registry` object language with ΔPKI (`IssueCertificate` / `RevokeCertificate`), `ChainValidationJudgment` over real Ed25519 chains, ledger trust-anchor publish. SDS depends on PKI for encryption certs — not the reverse. **See:** `~/GRANITE/docs/pki.md`; impl `~/GRANITE/examples/pki/` (`languages/Pki.scala`, `PkiChanges.scala`, `ChainValidation.scala`). |
 | **SDS** | Flagship *domain* pack (after PKI); non-programmer object language + ΔL + studio | **Safety Data Sheet** authoring (chemical regulatory SDS — not “software design something”). An SDS is **not** a flat document: compiled view of typed objects (`Substance`, `Mixture`, `Product`, shadows, multilingual phrases). Acetone tutorial spine; `LanguagePack` with ΔSDS. **See:** flagship prose `~/GRANITE/PROMPT.md` §11–14; studio `~/GRANITE/docs/sds-studio.md`; impl `~/GRANITE/examples/sds/` (`languages/Sds.scala`, `SdsChanges.scala`, `tutorial/SdsTutorial.scala`, `chemicals/Chemicals.scala`). |
 | **Bend** | Computation-surface target (after AffineNet / QDIC-shaped nets) | In GRANITE, **Bend** is a deferred **surface profile** (with Kind/HVM) over QDIC — **no** `examples/bend` pack. Spec-only naming + deferral lists. **See (spec only):** `~/GRANITE/examples/computation/PROMPT.md` (Bend/Kind/HVM profiles; SS13/SS16/SS24). Implemented net spine to learn from first: same dir’s languages + `~/GRANITE/examples/computation/`. |
-| **Unison Core** | Domain language pack (peer to PKI/SDS/Search), demonstrating §2c on a real content-addressed, effectful language | Amended <this revision>: no longer "inspirational only" — a genuinely new, Cairn-native language (ADTs, pattern matching, a minimal ability/effect system), still **not** a Unison fork/reimplementation, built on Cairn's own substrate rather than modeling Unison's codebase manager (that machinery is just what §2c's substrate already gives any language for free — CAS, alpha-invariant identity, patch-as-ΔL — which the earlier M48 "ideas pack" phase (`examples/unison/`) proved out before this pack existed). **See:** modeling-as-fragments precedent `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`); impl `languages/unisoncore.cairn`, `examples/unison/`. |
-| **MiniTT** | General-purpose hosted language (§2c), the "Formal-methods IR ladder" rung (§8b) climbed honestly | A minimal, closed dependent type core (a 2-level, non-cumulative universe hierarchy, Π types, one hardcoded `Nat` inductive with its recursor) checked by the SAME generic kernel `Checker`/`Search` as STLC/PKI's judgments — not a Lean reimplementation, not full CIC (§8 anti-goal), not claiming Lean-surface compatibility (Lean itself remains only a Rosetta *projection* target, §4.10). **See:** `languages/minitt.cairn`, `examples/minitt/`. |
+| **Unison Core** | General-purpose hosted language (§2c), peer to STLC/MiniTT — not a domain pack | Amended <this revision>: no longer "inspirational only" — a genuinely new, Cairn-native language (ADTs, pattern matching, a minimal ability/effect system), still **not** a Unison fork/reimplementation, built on Cairn's own substrate rather than modeling Unison's codebase manager (that machinery is just what §2c's substrate already gives any language for free — CAS, alpha-invariant identity, patch-as-ΔL — which the earlier M48 "ideas pack" phase (`examples/unison/`) proved out before this pack existed; `examples/unison/Unison.scala`'s `Store` is itself backed by `workbench.Cas`, not a hand-rolled map, for the same reason). **See:** modeling-as-fragments precedent `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`); impl `languages/unisoncore.cairn`, `examples/unison/`. |
+| **MiniTT** | General-purpose hosted language (§2c), the "Formal-methods IR ladder" rung (§8b) climbed honestly | A minimal, closed dependent type core (a 2-level, non-cumulative universe hierarchy, Π types, one hardcoded `Nat` inductive with its recursor) checked by the SAME generic kernel `Checker`/`Search` as STLC/PKI's judgments — not a Lean reimplementation, not full CIC (§8 anti-goal), not claiming Lean-surface *or* Lean-kernel compatibility. Lean today is only a Rosetta *projection* target (§4.10) — not a permanent ceiling, see §2c's "executable reference vs. optimized backend" amendment: a further ladder rung, a Cairn-native checked model of a Lean-kernel fragment, remains open future work MiniTT doesn't itself claim to discharge. **See:** `languages/minitt.cairn`, `examples/minitt/`. |
 
 **Dependency hint (from GRANITE):** `PKI → Law → SDS` — Law pack at `~/GRANITE/examples/law/`; Bend on the **computation** spine (`~/GRANITE/examples/computation/`), not SDS. Unison Core and MiniTT sit at the "general-purpose hosted language" layer (§2c) — peers to STLC, not domain ADTs — and both inherit L0/L1/L5's repository substrate rather than modeling any part of it themselves.
 
@@ -398,7 +425,7 @@ Editorial scope: the following threads are **absorbed as architectural residue**
 
 | Compressed thread | Pointer |
 |-------------------|---------|
-| Formal-methods IR ladder (λ → STLC → polymorphism → dependent types / universes / identity / effects / domain rules); bridge vs relation vs formula vs judgment vs presentation. **The dependent-types/universes rung is climbed by MiniTT (§5b, §2c)** — a thin, honest slice (Π types, one hardcoded inductive, a closed 2-level hierarchy), not the full ladder in one step; polymorphism/identity-types/general effects remain compressed here. | §13: Aldo, MLTS, Granit Lean, Eurisko |
+| Formal-methods IR ladder (λ → STLC → polymorphism → dependent types / universes / identity / effects / domain rules); bridge vs relation vs formula vs judgment vs presentation. **The dependent-types/universes rung is climbed by MiniTT (§5b, §2c)** — a thin, honest slice (Π types, one hardcoded inductive, a closed 2-level hierarchy), not the full ladder in one step; polymorphism/identity-types/general effects remain compressed here. A further rung — a Cairn-native, kernel-checked Lean-kernel *fragment* (§2c amendment) — is open future work, not yet started. | §13: Aldo, MLTS, Granit Lean, Eurisko |
 | Haskell++ / Scala++ as ordinary hosts under testing/verification discipline; laziness, bottoms, effects, host interop nuances | §13: Rosetta (interchange); do **not** invent new host compilers (§4.10) |
 | Detailed QuickSort / `Ord` / `Nat` / effects Rosetta example | `~/granit/ROSETTA/examples/QuickSortOrdEffects.rosetta` (§13) |
 | Runtime experiments: StackVM, APEX, HVM5, Mogensen-style interpretation, QDIC/Kind/Bend/HVM surface relationships, threaded bytecode / decision trees | §13: HVM / IC, Δ-nets / QDIC, Bend; Phase 3 + Phase 7 |
