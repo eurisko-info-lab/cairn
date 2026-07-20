@@ -38,9 +38,10 @@ generic kernel operation driven by the language's binder table.
 
 ## 4. Edits are ΔL terms (L1, §2b)
 
-`Delta.deltaOf(stlc)` mechanically derives the free changes language `Δstlc` — a real
-`ComposedLanguage` with its own grammar (so `deltaOf(Δstlc) = ΔΔstlc` exists, and so
-on: forced recursive closure). The transcript's
+`Delta.deltaOf(stlc)` mechanically derives the changes language `Δstlc` — a real
+`ComposedLanguage` whose ops are module-level (`add`/`replace`/`remove`/`rename`)
+plus structural path edits (`edit … at [path] = …`), with forced recursive
+closure (`deltaOf(Δstlc) = ΔΔstlc`, and so on). The transcript's
 
 ```text
 delta "{ add id = fun x : Bool . x ; }" ;
@@ -63,10 +64,19 @@ one PoA block whose transactions record *digests and heads only*. `fetch main ;`
 second node pull blocks + blobs by hash, replay the chain through the pure
 `LedgerKernel`, and materialize the branch head from its own CAS.
 
-## 7. Self-description (staged, §2b)
+## 7. Self-description (fixpoint achieved, §2b)
 
-`workbench/Meta.scala` defines Cairn's fragment IR as a Cairn surface language: a
-fragment written as text parses, elaborates, and composes byte-identically to the
-host-constructed value. Grammar productions, rewrite rules and judgments are still
-host-seeded — that is the honestly-documented remaining step of the primordial
-meta-language/grammar-language bootstrap (see docs/assumptions.md).
+Self-description fixpoint achieved: `workbench/Meta.scala` is a fused meta
+surface (fragment IR + grammar vocabulary) that can describe and reconstruct
+itself — `languages/meta.cairn` matches the seed digest-for-digest
+([docs/assumptions.md](assumptions.md) §11; STATUS-2 Wave H). A separate
+`grammar.cairn` split remains deferred.
+
+What stays host-backed:
+
+- the initial Scala seed (`Meta.fragment`, STLC fragment constructors)
+- STLC/meta `.cairn` files as checked-in **canonical mirrors** emitted from Scala
+  via `cairn emit-languages` (not yet the runtime source of truth)
+
+Exemplar packs (PKI / Law / SDS / Search) are `.cairn` source of truth, loaded
+at runtime by `PackLoader`.

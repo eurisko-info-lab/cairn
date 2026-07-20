@@ -224,6 +224,8 @@ Waves are dependency-ordered; stories within a wave are largely parallel.
   STLC written as `.cairn` text equals the host-constructed language digest-for-digest.
   AC: `examples/stlc/stlc.cairn` replaces the Scala constructors as source of truth;
   host code retains only the seed loader.
+  *(Landed as digest-equal checked-in mirrors via `emit-languages`; Scala remains the
+  STLC/meta seed — see STATUS-2 honest deviations / docs/assumptions.md §11.)*
 - **M42. Bootstrap fixpoint.** *Now:* meta grammar is a host value. *Max:* the meta
   surface's own grammar written *in* the meta surface, parsed by the seed, re-parsed by
   its own artifact — fixpoint checked (`parse_self(self) == self`); languages load from
@@ -232,8 +234,9 @@ Waves are dependency-ordered; stories within a wave are largely parallel.
 - **M43. Capability bundle registry (§2b).** *Now:* capabilities are ad-hoc per pack.
   *Max:* a per-language manifest artifact enumerating the §2b bundle rows (grammar,
   surfaces, interpreters, ΔL, projections, judgments, obligations, traces, migrations,
-  queries, laws, provenance, trust, effects, workflows, import/export) with digests or
-  explicit `deferred` markers; `cairn capabilities <lang>` renders it. AC: manifests
+  queries, laws, provenance, trust, effects, workflows, import/export) with
+  `Present` (CAS digests), `PlatformProvided` (host mechanisms), or explicit
+  `deferred` markers; `cairn capabilities <lang>` renders it. AC: manifests
   for stlc/pki/affine-net/bend; lint fails on undeclared rows.
 - **M44. Language server + REPL.** *Now:* CLI + transcripts only. *Max:* LSP over the
   generic engine (diagnostics from M8/M11, hover = sort/type info from M21, formatting

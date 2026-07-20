@@ -44,10 +44,10 @@ claim certificate, publish (PoA block), fetch on second node by hash.
 | 8 | Layering matches L0–L6 | ✅ enforced by sbt module DAG; examples never imported by kernel layers |
 | 9 | Reproducibility: clean machine runs mvp transcript | ✅ `sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"` |
 | 10 | Exemplars: PKI or SDS real; Bend/Unison honest | ✅ PKI real (ΔPKI = generic ΔL, Ed25519 chains, ledger anchor); SDS/Bend/Unison documented deferrals, no stubs |
-| 11 | Universal closure: recursive ΔL + bootstrap staged | ✅ `Δ(Δ(ΔL))` constructible for any language; meta surface (S44); staging documented |
+| 11 | Universal closure: recursive ΔL + bootstrap staged | ✅ `Δ(Δ(ΔL))` constructible; meta fixpoint — see [STATUS-2.md](STATUS-2.md) (no longer “staged”) |
 
 ## Known limitations
 
-Catalogued in [docs/assumptions.md](docs/assumptions.md) — notably: proof logic has
-no side-condition vocabulary; meta surface covers interfaces/sorts/ctors/binders only;
-single-authority PoA; Rosetta expression vocabulary is QuickSort-sized.
+Superseded catalog: [docs/assumptions.md](docs/assumptions.md) and [STATUS-2.md](STATUS-2.md).
+(This minimal-plan STATUS kept for historical scorecard; meta staging and several
+other limitations listed in earlier revisions are discharged.)

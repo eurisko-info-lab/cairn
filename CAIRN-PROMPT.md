@@ -90,6 +90,8 @@ Architectural invariants. Treat violations as design bugs.
 
 Self-description (Phase 7) is the staged realization of this invariant; host engines may seed bootstrap once, then migrate definitions into fragments (§7).
 
+**Implementation note:** Cairn currently ships a *fused* meta surface (`workbench.Meta`) that already includes the grammar vocabulary; a strict two-file meta/grammar split (`grammar.cairn`) is deferred. See [docs/bootstrap.md](docs/bootstrap.md) §7 and [docs/assumptions.md](docs/assumptions.md) §11.
+
 ### Recursive universality (forced)
 
 - Every language `L` has a free changes language `ΔL`.

@@ -12,7 +12,7 @@ How the §2 vocabulary of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md) maps to code.
 | Artifact | `cairn.kernel.Artifact` (kind + canonical body) |
 | Key / digest | `Digest` (SHA-256 of canonical bytes) + `TypedKey` (valueHash + typeHash + kind) |
 | CAS | `workbench.Cas` (`MemCas`, `DiskCas` with digest re-verification) |
-| Change / ΔL | `workbench.Delta.deltaOf` — forced recursive closure; `ValidatedChangeSet` records each gated application |
+| Change / ΔL | `workbench.Delta.deltaOf` — module-level ops + structural path edits; forced recursive `deltaOf` closure; `ValidatedChangeSet` records each gated application |
 | Branch / selection | `workbench.BranchManifest` + `Branches` (append-only history) |
 | Claim vs proof | `proof.Claim` (proof-free ok) vs `proof.Theorem` (+ checked `Derivation`) |
 | Kernel gate | `proof.Checker.check`, `Delta.apply` validation, `LedgerKernel.applyBlock` |
@@ -21,6 +21,6 @@ How the §2 vocabulary of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md) maps to code.
 | Rosetta | `rosetta.RosettaModule` + `ScalaPort`/`LeanPort` (round-trip-verified emitters) |
 | Ledger | `kernel.Tx/Block/LedgerState/LedgerKernel` (pure) + `ledger.Node` (I/O) |
 | Transcript | `surface.Transcript` — DSL defined in the grammar engine itself |
-| Meta-language / grammar-language | `workbench.Meta` (staged; see docs/assumptions.md) |
+| Meta-language / grammar-language | `workbench.Meta` — fused surface (fixpoint achieved; STLC/meta `.cairn` are host-emitted mirrors; see docs/assumptions.md §11) |
 | Surface / encoding | every grammar is a surface artifact; ports and canonical bytes are non-text encodings of the same artifacts |
-| Capability bundle | per language: grammar (`.grammar`), interpreter (engines), ΔL (`deltaOf`), projections (ports), judgments, claims/certificates, migrations-as-ΔL; not every language ships every row (§2b) |
+| Capability bundle | per language: `Present` (CAS/artifact digests), `PlatformProvided` (host mechanisms), or `Deferred` — see `workbench.Capabilities`; not every language ships every row (§2b) |

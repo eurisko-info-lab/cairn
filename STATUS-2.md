@@ -69,6 +69,9 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   framed JSON-RPC; no workspace folders, no partial edits (full-document sync).
 - **M50**: fuzzing covers the six non-layout grammars; layout combinators
   (block/run/adjacent1) are exercised by directed tests instead.
+- **M41 source-of-truth**: STLC/meta `.cairn` are checked-in canonical mirrors
+  from the Scala seed (`emit-languages`), not yet the runtime load path;
+  exemplar packs (PKI/Law/SDS/Search) *are* `.cairn` source of truth.
 
 ## Success criteria (§9) — re-verified at maximal level
 

@@ -33,16 +33,17 @@ class WaveH2Suite extends munit.FunSuite:
     val riemannM = Capabilities.build(cairn.examples.riemann.Riemann.language, Map.empty)
       .fold(e => fail(e), identity)
     assertEquals(Capabilities.requiredRows.toSet, riemannM.rows.keySet)
-    // The default "obligations" row is a decorative per-language marker — Capabilities
-    // lives in L1 and can't see example-layer Claims (rule 11 layering). `extra`
-    // exists precisely so a pack with a real Claim can cite its actual digest.
+    // Default "obligations" is PlatformProvided (not a CAS key) — Capabilities lives
+    // in L1 and can't see example-layer Claims (rule 11 layering). `extra` overrides
+    // with Present(claimDigest) when a pack has a real Claim artifact.
+    assert(riemannM.rows("obligations").isInstanceOf[Capabilities.Row.PlatformProvided])
     val riemannClaim = cairn.examples.riemann.Riemann.riemannHypothesisClaim
     val riemannClaimM = Capabilities.build(cairn.examples.riemann.Riemann.language,
       Map("obligations" -> Capabilities.Row.Present(riemannClaim.artifact.digest)))
       .fold(e => fail(e), identity)
     assertEquals(riemannClaimM.rows("obligations"), Capabilities.Row.Present(riemannClaim.artifact.digest))
     assert(riemannClaimM.rows("obligations") != riemannM.rows("obligations"),
-      "override must actually change which digest 'obligations' points at")
+      "override must promote PlatformProvided → Present(claim digest)")
 
     val searchClaim = cairn.examples.search.Search.goalMetClaim(cairn.examples.search.Search.seedBoard)
     val searchM = Capabilities.build(cairn.examples.search.Search.language,
@@ -52,11 +53,24 @@ class WaveH2Suite extends munit.FunSuite:
     assert(searchM.rows("judgments").isInstanceOf[Capabilities.Row.Present],
       "search.cairn declares wellFormed/goalMet judgments")
 
-  test("M43: interpreters/judgments present for stlc, deferred honestly elsewhere"):
+  test("M43: interpreters/judgments present for stlc; platform vs deferred honest"):
     val m = Capabilities.build(Stlc.language, Map.empty).toOption.get
     assert(m.rows("interpreters").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("judgments").isInstanceOf[Capabilities.Row.Present])
+    assert(m.rows("grammar").isInstanceOf[Capabilities.Row.Present])
+    assert(m.rows("changes").isInstanceOf[Capabilities.Row.Present])
+    m.rows("traces") match
+      case Capabilities.Row.PlatformProvided("eval-trace", _) => ()
+      case other => fail(s"traces should be PlatformProvided(eval-trace), got $other")
+    m.rows("migrations") match
+      case Capabilities.Row.PlatformProvided("lang-migration", _) => ()
+      case other => fail(s"migrations should be PlatformProvided(lang-migration), got $other")
+    m.rows("laws") match
+      case Capabilities.Row.PlatformProvided("parse-print-roundtrip", _) => ()
+      case other => fail(s"laws should be PlatformProvided(parse-print-roundtrip), got $other")
     assert(m.rows("workflows").isInstanceOf[Capabilities.Row.Deferred])
+    assert(m.render.contains("platform:eval-trace"), m.render)
+    assert(m.render.contains("deferred:"), m.render)
 
   // ---- M44: LSP + REPL ----
 

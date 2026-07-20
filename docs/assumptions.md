@@ -38,10 +38,14 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
     is golden-checked. All four pass whole-file byte fixpoints (M31).
     Expression bodies inside port files are verbatim single-line regions.
-11. ~~Meta-language staging~~ — discharged by M41/M42: the meta surface covers
-    grammar productions, print rules, infix tables, rewrite rules, and
-    judgments; `languages/meta.cairn` passes the self-description fixpoint;
-    languages load from text at runtime.
+11. ~~Meta-language staging~~ — discharged by M41/M42: the fused meta surface
+    covers grammar productions, print rules, infix tables, rewrite rules, and
+    judgments; `languages/meta.cairn` passes the self-description fixpoint
+    (Meta can describe/reconstruct itself). The initial seed and STLC/meta
+    source-of-truth migration remain host-backed: STLC/meta `.cairn` are
+    checked-in canonical mirrors from Scala via `emit-languages`. Exemplar
+    packs (PKI/Law/SDS/Search) are `.cairn` source of truth and load at
+    runtime. A separate `grammar.cairn` split is deferred.
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental

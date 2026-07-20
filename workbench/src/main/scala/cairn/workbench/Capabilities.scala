@@ -3,8 +3,13 @@ package cairn.workbench
 import cairn.kernel.*
 
 /** M43: the §2b capability bundle as a first-class, lintable manifest.
-  * Every row is either a digest (the capability exists as an artifact/value)
-  * or an explicit `deferred` marker — never silently absent.
+  *
+  * Every row is one of:
+  *   - [[Row.Present]] — digest of a real CAS/artifact key (grammar, language, …)
+  *   - [[Row.PlatformProvided]] — host platform capability; version digest is
+  *     NOT a resolvable CAS object
+  *   - [[Row.Deferred]] — explicit absence with a reason
+  * Never silently absent; never mark a symbolic marker as [[Row.Present]].
   */
 object Capabilities:
   val requiredRows: List[String] = List(
@@ -13,27 +18,36 @@ object Capabilities:
     "trust", "effects", "workflows", "import-export")
 
   enum Row:
+    /** Digest addresses a real artifact / language / grammar body. */
     case Present(digest: Digest)
+    /** Platform mechanism available for this language; `version` fingerprints
+      * the capability id + language, but is not a CAS get-key. */
+    case PlatformProvided(capabilityId: String, version: Digest)
     case Deferred(note: String)
 
   final case class Manifest(language: Digest, rows: Map[String, Row]):
     def canon: Canon = Canon.cmap(
       "language" -> Canon.CStr(language.hex),
       "rows" -> Canon.CMap(rows.toList.sortBy(_._1).map((k, v) => k -> (v match
-        case Row.Present(d)  => Canon.CTag("present", Canon.CStr(d.hex))
-        case Row.Deferred(n) => Canon.CTag("deferred", Canon.CStr(n))))))
+        case Row.Present(d)                    => Canon.CTag("present", Canon.CStr(d.hex))
+        case Row.PlatformProvided(id, version) =>
+          Canon.CTag("platform", Canon.cmap(
+            "id" -> Canon.CStr(id), "version" -> Canon.CStr(version.hex)))
+        case Row.Deferred(n)                   => Canon.CTag("deferred", Canon.CStr(n))))))
     def artifact: Artifact = Artifact(ArtifactKind.Capability, canon)
     def render: String =
       (s"capabilities of ${language.short}:" ::
         rows.toList.sortBy(_._1).map((k, v) => v match
-          case Row.Present(d)  => f"  $k%-14s ${d.short}"
-          case Row.Deferred(n) => f"  $k%-14s deferred: $n")).mkString("\n")
+          case Row.Present(d)                    => f"  $k%-14s ${d.short}"
+          case Row.PlatformProvided(id, version) => f"  $k%-14s platform:$id (${version.short})"
+          case Row.Deferred(n)                   => f"  $k%-14s deferred: $n")).mkString("\n")
 
   /** Rows every language gets automatically from the platform. */
   def auto(l: ComposedLanguage): Map[String, Row] =
     val deltaDigest = Delta.deltaOf(l).toOption.map(_.digest)
-    def marker(kind: String): Digest =
-      Digest.of(Canon.cmap("capability" -> Canon.CStr(kind), "language" -> Canon.CStr(l.digest.hex)))
+    def platform(id: String): Row.PlatformProvided =
+      Row.PlatformProvided(id, Digest.of(Canon.cmap(
+        "capability" -> Canon.CStr(id), "language" -> Canon.CStr(l.digest.hex))))
     Map(
       "grammar" -> Row.Present(GrammarSpec.artifact(l.grammar).digest),
       "surfaces" -> Row.Present(Digest.of(Canon.cstrs(Surfaces.forLanguage(l).keys.toList.sorted))),
@@ -41,14 +55,14 @@ object Capabilities:
       "changes" -> deltaDigest.fold(Row.Deferred("ΔL underivable"))(Row.Present.apply),
       "judgments" -> (if l.judgments.nonEmpty then
         Row.Present(Digest.of(Canon.cstrs(l.judgments.keys.toList.sorted))) else Row.Deferred("none declared")),
-      // generic platform mechanisms that apply to ANY language:
-      "traces" -> (if l.rewriteRules.nonEmpty then Row.Present(marker("eval-trace")) // TreeEngine.normalizeTraced + TraceChecker
+      // generic platform mechanisms — not CAS-resolvable artifact keys:
+      "traces" -> (if l.rewriteRules.nonEmpty then platform("eval-trace") // TreeEngine.normalizeTraced + TraceChecker
                    else Row.Deferred("no rewrite rules to trace")),
-      "migrations" -> Row.Present(marker("lang-migration")),   // Migrate.module/changeset
+      "migrations" -> platform("lang-migration"),   // Migrate.module/changeset
       "queries" -> Row.Present(Query.language.digest),          // Query.run over any module
-      "laws" -> Row.Present(marker("parse-print-roundtrip")),   // RoundTrip.check law suite
-      "provenance" -> Row.Present(marker("provenance-record")), // ledger Provenance records
-      "obligations" -> Row.Present(marker("claims-certificates")), // proof-layer claims/certs
+      "laws" -> platform("parse-print-roundtrip"),   // RoundTrip.check law suite
+      "provenance" -> platform("provenance-record"), // ledger Provenance records
+      "obligations" -> platform("claims-certificates"), // proof-layer claims/certs (override via extra with a real Claim digest)
       // genuinely per-language, not yet uniform:
       "projections" -> Row.Deferred("rosetta ports project rosetta artifacts; net lowering is per-pack"),
       "trust" -> Row.Deferred("policies gate ledger branches, not languages"),
@@ -61,7 +75,7 @@ object Capabilities:
       r -> (extra.get(r).orElse(auto(l).get(r)).getOrElse(Row.Deferred("not yet modeled")))).toMap
     lint(Manifest(l.digest, rows)).map(_ => Manifest(l.digest, rows))
 
-  /** Lint (M43 AC): every required row present as digest or explicit deferral. */
+  /** Lint (M43 AC): every required row is Present, PlatformProvided, or Deferred. */
   def lint(m: Manifest): Either[String, Unit] =
     val missing = requiredRows.filterNot(m.rows.contains)
     val unknown = m.rows.keys.filterNot(requiredRows.contains).toList
