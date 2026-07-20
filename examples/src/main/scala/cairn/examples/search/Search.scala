@@ -3,7 +3,8 @@ package cairn.examples.search
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.ledger.Provenance
-import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
+import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite, CheckerCfg, Checker, Derivation}
+import cairn.proof.{Search as DerivSearch}
 
 /** Search pack — Fact–Intent–Hint board as a `.cairn` object language.
   *
@@ -13,8 +14,12 @@ import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
   *
   * Board edges (`supports` / `spawns`) are certified as Claims with test-suite
   * Certificates; provenance links Certificate ← Fact ← Intent so `cairn why`
-  * walks the DAG. Judgments in the language file remain open stubs; the host
-  * [[wellFormed]] / [[goalMet]] gates (and certificates) are the real checks.
+  * walks the DAG. `wellFormed` / `goalMet` are real declarative judgments in
+  * the language file (same generic kernel Checker as PKI's chain judgment) —
+  * see [[checkWellFormed]] / [[checkGoalMet]]. The host [[wellFormed]] /
+  * [[goalMet]] gates remain the whole-board checks (including `board(list)`
+  * membership, which the fixed-arity rule DSL can't express) and back
+  * [[certifyEdge]]'s existing test-suite certification, unchanged.
   */
 object Search:
   lazy val fragments: List[Fragment] = PackLoader.requireOwn("search")
@@ -71,6 +76,34 @@ object Search:
   def goalMetClaim(m: Module): Claim =
     Claim("goalMet", Cst.node("goalMet", Cst.Leaf(if goalMet(m) then "true" else "false")),
       subject = m.digest)
+
+  /** The board as a checker context — mirrors `PkiMax.registryCtx`. */
+  def boardCtx(m: Module): Cst =
+    m.defs.foldRight(Cst.node("ctxNil")) { case ((name, term), acc) =>
+      Cst.node("ctxCons", Cst.Leaf(name), term, acc) }
+
+  def checkerCfg: CheckerCfg = CheckerCfg(language.judgments.values.toList)
+
+  /** Kernel-checked wellFormed: an untrusted `DerivSearch.infer` proposes a
+    * derivation for `term` against the board's context, `Checker.check`
+    * certifies it — same two-step "propose, then certify" as
+    * `PkiMax.validate`. Covers every board term EXCEPT `board(list)` (see
+    * languages/search.cairn's judgment doc comment for why).
+    */
+  def checkWellFormed(m: Module, term: Cst): Either[String, Derivation] =
+    val cfg = checkerCfg
+    val goal = Cst.node("wellFormed", boardCtx(m), term)
+    DerivSearch.infer(cfg, goal).flatMap { d => Checker.check(cfg, d).left.map(_.render).map(_ => d) }
+
+  /** Kernel-checked goalMet for one concrete (goal, fact) witness pair. The
+    * EXISTENTIAL "does some such pair exist" stays [[goalMet]]'s job (a host
+    * scan) — `$ctx-lookup` requires a already-known name, not a search
+    * target, so the judgment can only check a candidate, not find one.
+    */
+  def checkGoalMet(m: Module, goalName: String, factName: String): Either[String, Derivation] =
+    val cfg = checkerCfg
+    val goal = Cst.node("goalMet", boardCtx(m), Cst.Leaf(goalName), Cst.Leaf(factName))
+    DerivSearch.infer(cfg, goal).flatMap { d => Checker.check(cfg, d).left.map(_.render).map(_ => d) }
 
   final case class GraphNode(name: String, kind: String, text: String)
   final case class GraphEdge(name: String, kind: String, from: String, to: String)

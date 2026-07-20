@@ -40,6 +40,9 @@ object J:
     case Cst.Node("jnum", List(Cst.Leaf(n))) => n.toLongOption
     case Cst.Node("jneg", List(Cst.Leaf(n))) => n.toLongOption.map(-_)
     case _ => None
+  def items(c: Cst): List[Cst] = c match
+    case Cst.Node("arr", List(Cst.Node("some", List(Cst.Node("list", xs))))) => xs
+    case _ => Nil
   def print(c: Cst): String = Printer.print(JsonSurface.grammar, c).getOrElse("{}")
 
 final case class LspConfig(
@@ -115,7 +118,9 @@ final class LspServer(cfg: LspConfig):
           "textDocumentSync" -> J.num(1),
           "documentFormattingProvider" -> Cst.node("jtrue"),
           "renameProvider" -> Cst.node("jtrue"),
-          "hoverProvider" -> Cst.node("jtrue")))))
+          "hoverProvider" -> Cst.node("jtrue"),
+          "executeCommandProvider" -> J.obj("commands" -> J.arr(
+            List("cairn.addDef", "cairn.replaceDef", "cairn.removeDef", "cairn.editDefAt").map(J.str)))))))
       case "textDocument/didOpen" =>
         val td = J.fields(p.getOrElse("textDocument", J.obj()))
         val uri = td.get("uri").flatMap(J.asStr).getOrElse("")
@@ -189,6 +194,63 @@ final class LspServer(cfg: LspConfig):
         yield s"$word : $ty"
         List(response(id, hover.fold(Cst.node("jnull"))(h =>
           J.obj("contents" -> J.str(h)))))
+      case "workspace/executeCommand" =>
+        val command = p.get("command").flatMap(J.asStr).getOrElse("")
+        val args = J.items(p.getOrElse("arguments", J.arr(Nil)))
+        // Format-preserving add/replace/remove/edit, exposed as custom
+        // commands since the LSP spec has no standard verb for "add/remove
+        // a definition" the way textDocument/rename covers renaming.
+        // Deliberate simplification: the edit is returned inline in this
+        // response (same WorkspaceEdit shape textDocument/rename already
+        // returns) rather than pushed via a separate server-initiated
+        // workspace/applyEdit request — this is a thin demo server with no
+        // real bidirectional client to round-trip that with, not a claim of
+        // full protocol fidelity.
+        def applyChangeCommand(uri: String, change: Cst): Either[String, Cst] =
+          val text = docs.getOrElse(uri, "")
+          for
+            cst <- Parser.parse(moduleGrammar, text)
+            module <- ModuleSurface.toModule(cst)
+            applied <- Delta.apply(cfg.language, module, change)
+            newText <- Delta.applyPreservingFormat(cfg.language, moduleGrammar, text, change)
+          yield
+            changeSets += applied._2
+            docs(uri) = newText
+            J.obj("changes" -> J.obj(uri -> J.arr(List(wholeDocEdit(text, newText)))))
+        val result: Either[String, Cst] = command match
+          case "cairn.addDef" | "cairn.replaceDef" =>
+            for
+              uri <- args.lift(0).flatMap(J.asStr).toRight("cairn.addDef/replaceDef: missing uri")
+              name <- args.lift(1).flatMap(J.asStr).toRight("cairn.addDef/replaceDef: missing name")
+              termText <- args.lift(2).flatMap(J.asStr).toRight("cairn.addDef/replaceDef: missing term")
+              term <- Parser.parse(cfg.language.grammar, termText)
+              op = if command == "cairn.addDef" then "add" else "replace"
+              edit <- applyChangeCommand(uri, Cst.node(Delta.tag(cfg.language, op), Cst.Leaf(name), term))
+            yield edit
+          case "cairn.removeDef" =>
+            for
+              uri <- args.lift(0).flatMap(J.asStr).toRight("cairn.removeDef: missing uri")
+              name <- args.lift(1).flatMap(J.asStr).toRight("cairn.removeDef: missing name")
+              edit <- applyChangeCommand(uri, Cst.node(Delta.tag(cfg.language, "remove"), Cst.Leaf(name)))
+            yield edit
+          case "cairn.editDefAt" =>
+            for
+              uri <- args.lift(0).flatMap(J.asStr).toRight("cairn.editDefAt: missing uri")
+              name <- args.lift(1).flatMap(J.asStr).toRight("cairn.editDefAt: missing name")
+              pathArg <- args.lift(2).toRight("cairn.editDefAt: missing path")
+              termText <- args.lift(3).flatMap(J.asStr).toRight("cairn.editDefAt: missing term")
+              term <- Parser.parse(cfg.language.grammar, termText)
+              path = J.items(pathArg).flatMap(J.asNum).map(_.toString)
+              pathCst = if path.isEmpty then Cst.node("none")
+                        else Cst.node("some", Cst.Node("list", path.map(Cst.Leaf(_))))
+              edit <- applyChangeCommand(uri, Cst.node(Delta.tag(cfg.language, "edit"), Cst.Leaf(name), pathCst, term))
+            yield edit
+          case other => Left(s"unknown command '$other'")
+        result match
+          case Right(edit) => List(response(id, edit))
+          case Left(err) =>
+            List(J.obj("jsonrpc" -> J.str("2.0"), "id" -> id,
+              "error" -> J.obj("code" -> J.num(-32602), "message" -> J.str(err))))
       case "shutdown" => List(response(id, Cst.node("jnull")))
       case _          => Nil // notifications we ignore
 

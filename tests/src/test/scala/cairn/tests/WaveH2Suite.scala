@@ -125,6 +125,67 @@ class WaveH2Suite extends munit.FunSuite:
     assert(out.contains("unrelated comment, untouched def"), out)
     assert(out.contains("other = true ;"), out)
 
+  def execCommand(server: LspServer, reqId: Long, command: String, args: List[Cst]): Cst =
+    server.handle(J.obj(
+      "jsonrpc" -> J.str("2.0"), "id" -> J.num(reqId), "method" -> J.str("workspace/executeCommand"),
+      "params" -> J.obj("command" -> J.str(command), "arguments" -> J.arr(args)))).head
+
+  test("workspace/executeCommand cairn.addDef: appends, preserves existing comments"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///add.stlc"
+    val text = "-- a's comment\na = true ;\n"
+    openDoc(server, uri, text)
+    val resp = execCommand(server, 10, "cairn.addDef", List(J.str(uri), J.str("b"), J.str("false")))
+    val out = J.print(resp)
+    assert(out.contains("b = false ;"), out)
+    assert(out.contains("a's comment"), out)
+    assertEquals(server.changeSets.length, 1)
+    assert(server.changeSets.head.result != server.changeSets.head.base)
+
+  test("workspace/executeCommand cairn.replaceDef: touches only the target def"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///replace.stlc"
+    val text = "-- a's comment\na = true ;\n-- b's comment\nb = false ;\n"
+    openDoc(server, uri, text)
+    val resp = execCommand(server, 11, "cairn.replaceDef", List(J.str(uri), J.str("a"), J.str("false")))
+    val out = J.print(resp)
+    assert(out.contains("a's comment"), out)
+    assert(out.contains("a = false ;"), out)
+    assert(out.contains("b's comment"), out)
+    assert(out.contains("b = false ;"), out)
+
+  test("workspace/executeCommand cairn.removeDef: drops the def and its own comment"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///remove.stlc"
+    val text = "-- a's comment\na = true ;\n-- b's comment\nb = false ;\n"
+    openDoc(server, uri, text)
+    val resp = execCommand(server, 12, "cairn.removeDef", List(J.str(uri), J.str("a")))
+    val out = J.print(resp)
+    assert(!out.contains("a's comment"), out)
+    assert(!(out.contains("a = true") || out.contains("a = false")), out)
+    assert(out.contains("b's comment"), out)
+    assert(out.contains("b = false ;"), out)
+
+  test("workspace/executeCommand cairn.editDefAt: touches only the targeted subterm"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///edit.stlc"
+    val text = "-- c comment\nc = (f x) ; -- inline\n"
+    openDoc(server, uri, text)
+    val resp = execCommand(server, 13, "cairn.editDefAt", List(J.str(uri), J.str("c"), J.arr(List(J.num(1))), J.str("y")))
+    val out = J.print(resp)
+    assert(out.contains("(f y)"), out)
+    assert(out.contains("c comment"), out)
+    assert(out.contains("inline"), out)
+
+  test("workspace/executeCommand: unknown command and missing args fail cleanly"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///err.stlc"
+    openDoc(server, uri, "a = true ;\n")
+    val bad = execCommand(server, 14, "cairn.bogus", List(J.str(uri)))
+    assert(J.print(bad).contains("\"error\""), J.print(bad))
+    val missing = execCommand(server, 15, "cairn.addDef", List(J.str(uri)))
+    assert(J.print(missing).contains("\"error\""), J.print(missing))
+
   test("M44: hover reports the inferred type"):
     val server = LspServer(lspCfg)
     openDoc(server, "file:///m.stlc", "id = fun x : Bool . x ;")

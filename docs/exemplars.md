@@ -111,12 +111,31 @@ the Haskell/Rust ports skipping when `runghc`/`cargo` are unavailable.
 - Standalone pack (`provides search`, no `requires`) — not part of PKI→Law→SDS.
 - Sorts Fact / Intent / Hint / Edge / Board; ctors `origin`, `goal`, `fact`,
   `intent`, `hint`, `supports`, `spawns`, `board`.
-- Language-file judgments `wellFormed` / `goalMet` remain open stubs; host Scala
-  `Search.wellFormed` / `Search.goalMet` plus Claim+Certificate gates are the
-  real checks. `Search.certifyEdge` issues a test-suite Certificate for a
-  `supports`/`spawns` edge after well-formedness, and records provenance so
-  `cairn why` walks Intent → Fact → Certificate. ΔL = `Delta.deltaOf(search)`
-  only (no `dsearch.cairn`).
+- `wellFormed` / `goalMet` are real declarative judgments in `search.cairn`,
+  checked by the same generic kernel `Checker` as PKI's chain judgment / STLC's
+  typing judgment — a board is a `ctxCons`/`ctxNil` context, `wellFormed(ctx,
+  term)` checks one term (nonempty text; `supports`/`spawns` endpoints resolve
+  via `$ctx-lookup`), `goalMet(ctx, g, f)` checks one candidate witness pair.
+  `Search.checkWellFormed` / `Search.checkGoalMet` do the "untrusted search
+  proposes, kernel certifies" two-step (`cairn.proof.Search.infer` then
+  `Checker.check`). **Honest limitation:** `board(list)`'s variable-arity list
+  has no fixed-arity `pat` shape to match against in the rule DSL, so `board`
+  membership stays a host-Scala check (`Search.wellFormed`) — not a gap, a
+  structural limit of the current rule engine. Host `Search.wellFormed` /
+  `Search.goalMet` plus Claim+Certificate gates remain the whole-board checks.
+  `Search.certifyEdge` issues a test-suite Certificate for a `supports`/`spawns`
+  edge after well-formedness (unchanged — still `"test-suite"`, not upgraded to
+  a proof-term certificate, to avoid changing already-asserted behavior), and
+  records provenance so `cairn why` walks Intent → Fact → Certificate. ΔL =
+  `Delta.deltaOf(search)` only (no `dsearch.cairn`).
+- LSP (`surface/Lsp.scala`) exposes format-preserving `add`/`replace`/`remove`/
+  `edit` as `workspace/executeCommand` (`cairn.addDef`, `cairn.replaceDef`,
+  `cairn.removeDef`, `cairn.editDefAt`) for any registered language, alongside
+  the existing `textDocument/rename` — the LSP spec has no standard verb for
+  "add a definition," so these are custom commands returning their edit inline
+  in the response rather than round-tripping a `workspace/applyEdit` request
+  (a deliberate simplification; there's no real bidirectional client in this
+  demo server to round-trip that with).
 - Tutorial seeds origin+goal, ΔL-adds Intent+Fact+edge into CAS, certifies the
   edge, records Provenance.
 - Transcript: `transcripts/search-board.cairn`. Explorer **Board** tab is

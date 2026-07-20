@@ -3,6 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.ledger.Provenance
+import cairn.proof.{Checker, Derivation}
 import cairn.examples.search.{Search, SearchTutorial}
 import java.nio.file.Files
 
@@ -118,3 +119,39 @@ class SearchSuite extends munit.FunSuite:
     val dangling = Module(board.defs :+ ("bad" -> Cst.node("supports", Cst.Leaf("phantom"), Cst.Leaf("finding"))))
     assert(Search.wellFormed(dangling).swap.exists(_.contains("unknown")))
     assert(Search.certifyEdge(cas, dangling, "bad", factDig).swap.exists(_.contains("unknown")))
+
+  private def boardWithEdge: Module =
+    val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val ch = Parser.parse(dl.grammar,
+      """{ add explore = intent "work" ; add finding = fact "done" ; add link = supports explore finding ; }"""
+    ).fold(e => fail(e), identity)
+    Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+
+  test("checkWellFormed: kernel-certified for nonempty leaf terms and resolvable edges"):
+    val m = boardWithEdge
+    assert(Search.checkWellFormed(m, Cst.node("fact", Cst.Leaf("done"))).isRight)
+    assert(Search.checkWellFormed(m, Cst.node("goal", Cst.Leaf("reach a confirmed finding"))).isRight)
+    assert(Search.checkWellFormed(m, Cst.node("supports", Cst.Leaf("explore"), Cst.Leaf("finding"))).isRight)
+
+  test("checkWellFormed: kernel rejects empty text ($neq gates it, not just the host check)"):
+    val m = boardWithEdge
+    assert(Search.checkWellFormed(m, Cst.node("origin", Cst.Leaf(""))).isLeft)
+
+  test("checkWellFormed: kernel rejects a dangling edge endpoint ($ctx-lookup gates it)"):
+    val m = boardWithEdge
+    assert(Search.checkWellFormed(m, Cst.node("supports", Cst.Leaf("explore"), Cst.Leaf("phantom"))).isLeft)
+
+  test("checkGoalMet: kernel-certified for a genuine (goal, fact) witness pair"):
+    val m = boardWithEdge
+    assert(Search.checkGoalMet(m, "target", "finding").isRight)
+
+  test("checkGoalMet: kernel rejects a witness pair where the 'fact' name isn't a fact"):
+    val m = boardWithEdge
+    assert(Search.checkGoalMet(m, "target", "explore").isLeft) // explore is an intent, not a fact
+
+  test("Checker.check rejects a forged derivation directly, independent of search"):
+    val m = boardWithEdge
+    val forgedConclusion = Cst.node("wellFormed", Search.boardCtx(m),
+      Cst.node("supports", Cst.Leaf("explore"), Cst.Leaf("phantom")))
+    val forged = Derivation("wf-supports", forgedConclusion, Nil)
+    assert(Checker.check(Search.checkerCfg, forged).isLeft)
