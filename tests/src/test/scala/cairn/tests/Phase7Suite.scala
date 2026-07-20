@@ -27,7 +27,7 @@ class Phase7Suite extends munit.FunSuite:
       identities = Map("alice" -> alice.publicBytes),
       published = Set(Stlc.base.artifact.key.render),
       heads = Map("main" -> Stlc.base.artifact.key),
-      certificates = Set.empty)
+      certificates = Map.empty)
     assertEquals(kernelRoot, appState.root)
     assertEquals(block.stateRoot, appState.root)
 
