@@ -46,9 +46,10 @@ object Delta:
         CtorDef(tag(l, "add"), s"Δ$p.Change", List("Name", termCat)),
         CtorDef(tag(l, "replace"), s"Δ$p.Change", List("Name", termCat)),
         CtorDef(tag(l, "remove"), s"Δ$p.Change", List("Name")),
-        CtorDef(tag(l, "rename"), s"Δ$p.Change", List("Name", "Name", "Footprint"))),
+        CtorDef(tag(l, "rename"), s"Δ$p.Change", List("Name", "Name", "Footprint")),
+        CtorDef(tag(l, "edit"), s"Δ$p.Change", List("Name", "Path", termCat))),
       grammar = GrammarPart(
-        keywords = List("add", "replace", "remove", "rename", "to", "footprint"),
+        keywords = List("add", "replace", "remove", "rename", "to", "footprint", "edit", "at"),
         puncts = List("{", "}", ";", "=", ",", "[", "]"),
         categories = List(
           CategorySpec(chgs, List(
@@ -61,6 +62,10 @@ object Delta:
               Elem.Tok("replace"), Elem.NameLeaf, Elem.Tok("="), Elem.Cat(termCat), Elem.Tok(";"))),
             ConstructorSpec(tag(l, "remove"), List(
               Elem.Tok("remove"), Elem.NameLeaf, Elem.Tok(";"))),
+            ConstructorSpec(tag(l, "edit"), List(
+              Elem.Tok("edit"), Elem.NameLeaf, Elem.Tok("at"), Elem.Tok("["),
+              Elem.Opt(Elem.SepBy1(Elem.NumLeaf, ",")), Elem.Tok("]"),
+              Elem.Tok("="), Elem.Cat(termCat), Elem.Tok(";"))),
             ConstructorSpec(tag(l, "rename"), List(
               Elem.Tok("rename"), Elem.NameLeaf, Elem.Tok("to"), Elem.NameLeaf,
               Elem.Tok("footprint"), Elem.Tok("["),
@@ -78,6 +83,10 @@ object Delta:
             PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
           PrintRule(tag(l, "remove"), List(
             PrintSeg.Lit("remove"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+          PrintRule(tag(l, "edit"), List(
+            PrintSeg.Lit("edit"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+            PrintSeg.Lit("at"), PrintSeg.Space, PrintSeg.Lit("["), PrintSeg.Field(1), PrintSeg.Lit("]"),
+            PrintSeg.Space, PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Lit(";"))),
           PrintRule(tag(l, "rename"), List(
             PrintSeg.Lit("rename"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
             PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
@@ -97,6 +106,28 @@ object Delta:
       "change" -> Cst.toCanon(change),
       "result" -> Canon.CStr(result.hex))
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, canon)
+
+  /** Child-index path helpers for structural edits (M15). */
+  def pathOf(pathCst: Cst): List[Int] = pathCst match
+    case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n.toInt }
+    case Cst.Node("none", _)                             => Nil
+    case Cst.Node("list", items)                         => items.collect { case Cst.Leaf(n) => n.toInt }
+    case _                                               => Nil
+
+  def subtreeAt(t: Cst, path: List[Int]): Either[String, Cst] = path match
+    case Nil => Right(t)
+    case i :: rest => t match
+      case Cst.Node(c, cs) if i >= 0 && i < cs.length => subtreeAt(cs(i), rest)
+      case Cst.Node(c, cs) => Left(s"path index $i out of range for '$c' (${cs.length} children)")
+      case Cst.Leaf(x)     => Left(s"path descends into leaf '$x'")
+
+  def replaceAt(t: Cst, path: List[Int], replacement: Cst): Either[String, Cst] = path match
+    case Nil => Right(replacement)
+    case i :: rest => t match
+      case Cst.Node(c, cs) if i >= 0 && i < cs.length =>
+        replaceAt(cs(i), rest, replacement).map(sub => Cst.Node(c, cs.updated(i, sub)))
+      case Cst.Node(c, cs) => Left(s"path index $i out of range for '$c' (${cs.length} children)")
+      case Cst.Leaf(x)     => Left(s"path descends into leaf '$x'")
 
   /** Validate + apply a ΔL change-set term to a module. Structured errors;
     * no silent overwrites; renames must carry an exact footprint.
@@ -120,6 +151,15 @@ object Delta:
           val refs = referencing(m, name)
           if refs.nonEmpty then Left(s"ΔL remove: '$name' still referenced by ${refs.toList.sorted.mkString(", ")}")
           else Right(Module(m.defs.filterNot(_._1 == name)))
+      case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
+        // M15: structural path edit — replace the subtree at child-index path
+        val path = pathOf(pathCst)
+        m.get(name) match
+          case None => Left(s"ΔL edit: '$name' not defined")
+          case Some(old) =>
+            replaceAt(old, path, term) match
+              case Right(updated) => Right(Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0))))
+              case Left(err)      => Left(s"ΔL edit '$name': $err")
       case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
         val declared: Set[String] = fp match
           case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }.toSet
@@ -145,7 +185,7 @@ object Delta:
       case Cst.Node(t, List(Cst.Node("list", items))) if t == tag(l, "changeset") => Right(items)
       case Cst.Node(t, items) if t == tag(l, "changeset") => Right(items)
       case single @ Cst.Node(t, _) if t.startsWith("add:") || t.startsWith("replace:") ||
-          t.startsWith("remove:") || t.startsWith("rename:") => Right(List(single))
+          t.startsWith("remove:") || t.startsWith("rename:") || t.startsWith("edit:") => Right(List(single))
       case other => Left(s"not a ΔL changeset: ${other.render}")
 
     changes.flatMap { chs =>
