@@ -136,6 +136,69 @@ Not every language ships every row on day one; the **model** is uniform. Exempla
 
 ---
 
+## 2c. Repository Substrate and Hosted Languages
+
+Amended <this revision>. Names the *consequence* of §2b explicitly, since it is
+easy to misread the capability model above as "every language brings its own
+versioning" rather than what it actually forces.
+
+**The repository layer is not a hosted application.** CAS, content/typed-key
+dual identity, branches and selections, `ΔL` and its recursive closure
+(`Δ(ΔL)`, …), change dependencies and commutation, semantic merge, conflict
+artifacts, migrations, provenance, and ledger-backed publication are **native
+platform substrate** (L0/L1/L5) — they exist once, generically, and every
+language gets them by construction (§2b's "uniform capability model" is the
+proof: `Delta.deltaOf` derives `ΔL` for *any* `ComposedLanguage`, no per-
+language reimplementation). No language — including the domain packs in §5b —
+defines its own bespoke versioning, storage, or merge story. This substrate is
+**Pijul-influenced** (changes as primary objects, explicit dependencies,
+commutation, conflict preservation) more than Git-influenced (content
+addressing, immutable objects, distributed transfer — both present, but as
+properties of the substrate, not as "Cairn reimplements Git"). Git/Pijul
+themselves, if ever touched, are external import/export/hosting *bridges*
+(§2b "surfaces / foreign formats") — they do not define Cairn history.
+
+**Languages and machines are built *on* that substrate, not modeled as
+domains that happen to resemble it.** A language like STLC, PKI, SDS, Search,
+Riemann, MiniTT (§5b), or Unison Core (§5b) is a fragment composition with its
+own grammar/judgments/rules; it automatically inherits CAS storage, `ΔL`,
+branches, and provenance from the substrate — it never needs to model "a
+repository" itself. Concretely, this is why the Unison pack does not
+reimplement Unison's codebase manager (content-addressed defs, name aliases,
+patch-as-edit): those properties are just what any Cairn language gets for
+free from L0/L1, and the pack's job is to demonstrate that, not rebuild it.
+
+The corrected stack:
+
+```text
+┌──────────────────────────────────────────────┐
+│ Domain languages and applications             │
+│ SDS · Law · PKI · Search · Riemann · …        │
+├──────────────────────────────────────────────┤
+│ General-purpose hosted languages and machines │
+│ Unison Core · MiniTT · STLC · AffineNet/IcNet │
+├──────────────────────────────────────────────┤
+│ Language workbench (L1)                       │
+│ grammar · judgments · proofs · interpreters   │
+│ lowerings · surfaces · ΔL generation          │
+├──────────────────────────────────────────────┤
+│ Native semantic repository (L0/L1/L5)         │
+│ CAS · changes · dependencies · commutation    │
+│ branches · conflicts · migrations · history   │
+├──────────────────────────────────────────────┤
+│ Certification and distribution (L5)           │
+│ kernel gates · provenance · policies · ledger │
+└──────────────────────────────────────────────┘
+               ↕
+     external optimized implementations / bridges
+     Lean · HVM · host compilers · Git hosting
+```
+
+The repository layer is not another stone on the cairn. It is the geology
+beneath the entire cairn.
+
+---
+
 ## 3. Architecture layers
 
 Enforce an import DAG. Lower layers must not depend on upper layers. Domain examples must not leak into the kernel.
@@ -213,18 +276,19 @@ Do not let example domains drive kernel APIs.
 
 ## 5b. Exemplar languages (envelop these)
 
-These are **first-class case studies** Cairn should eventually support as language packs or explicitly learn from. They are not kernel features. Characterizations follow GRANITE’s own packs/docs (SDS, PKI, Bend) plus Unison as an external inspirational system. Prefer thin, honest slices over hollow stubs. Full path map: **§13 Sources & references**.
+These are **first-class case studies** Cairn should eventually support as language packs or explicitly learn from. They are not kernel features. Characterizations follow GRANITE’s own packs/docs (SDS, PKI, Bend); Unison and Lean/HVM inform Cairn as external systems whose ideas get built as real, honestly-scoped hosted languages (§2c) — Unison Core and MiniTT — rather than reimplemented or merely name-dropped. Prefer thin, honest slices over hollow stubs. Full path map: **§13 Sources & references**.
 
 | Exemplar | Role in Cairn | Accurate characterization (source-grounded) |
 |----------|---------------|-----------------------------------------------|
 | **PKI** | Domain pack (early, after STLC+ledger); proves language-agnostic kernel | GRANITE’s **first** application pack: certificate-`Registry` object language with ΔPKI (`IssueCertificate` / `RevokeCertificate`), `ChainValidationJudgment` over real Ed25519 chains, ledger trust-anchor publish. SDS depends on PKI for encryption certs — not the reverse. **See:** `~/GRANITE/docs/pki.md`; impl `~/GRANITE/examples/pki/` (`languages/Pki.scala`, `PkiChanges.scala`, `ChainValidation.scala`). |
 | **SDS** | Flagship *domain* pack (after PKI); non-programmer object language + ΔL + studio | **Safety Data Sheet** authoring (chemical regulatory SDS — not “software design something”). An SDS is **not** a flat document: compiled view of typed objects (`Substance`, `Mixture`, `Product`, shadows, multilingual phrases). Acetone tutorial spine; `LanguagePack` with ΔSDS. **See:** flagship prose `~/GRANITE/PROMPT.md` §11–14; studio `~/GRANITE/docs/sds-studio.md`; impl `~/GRANITE/examples/sds/` (`languages/Sds.scala`, `SdsChanges.scala`, `tutorial/SdsTutorial.scala`, `chemicals/Chemicals.scala`). |
 | **Bend** | Computation-surface target (after AffineNet / QDIC-shaped nets) | In GRANITE, **Bend** is a deferred **surface profile** (with Kind/HVM) over QDIC — **no** `examples/bend` pack. Spec-only naming + deferral lists. **See (spec only):** `~/GRANITE/examples/computation/PROMPT.md` (Bend/Kind/HVM profiles; SS13/SS16/SS24). Implemented net spine to learn from first: same dir’s languages + `~/GRANITE/examples/computation/`. |
-| **Unison** | Inspirational + optional future pack for CAS/codebase semantics | External CAS language: hash-identified defs, names as aliases, shareable immutable codebase. **Not** a GRANITE pack. **See:** modeling as fragments (spec) `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`). Absorb ideas into CAS/dual-identity — do not fork Unison. |
+| **Unison Core** | Domain language pack (peer to PKI/SDS/Search), demonstrating §2c on a real content-addressed, effectful language | Amended <this revision>: no longer "inspirational only" — a genuinely new, Cairn-native language (ADTs, pattern matching, a minimal ability/effect system), still **not** a Unison fork/reimplementation, built on Cairn's own substrate rather than modeling Unison's codebase manager (that machinery is just what §2c's substrate already gives any language for free — CAS, alpha-invariant identity, patch-as-ΔL — which the earlier M48 "ideas pack" phase (`examples/unison/`) proved out before this pack existed). **See:** modeling-as-fragments precedent `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`); impl `languages/unisoncore.cairn`, `examples/unison/`. |
+| **MiniTT** | General-purpose hosted language (§2c), the "Formal-methods IR ladder" rung (§8b) climbed honestly | A minimal, closed dependent type core (a 2-level, non-cumulative universe hierarchy, Π types, one hardcoded `Nat` inductive with its recursor) checked by the SAME generic kernel `Checker`/`Search` as STLC/PKI's judgments — not a Lean reimplementation, not full CIC (§8 anti-goal), not claiming Lean-surface compatibility (Lean itself remains only a Rosetta *projection* target, §4.10). **See:** `languages/minitt.cairn`, `examples/minitt/`. |
 
-**Dependency hint (from GRANITE):** `PKI → Law → SDS` — Law pack at `~/GRANITE/examples/law/`; Bend on the **computation** spine (`~/GRANITE/examples/computation/`), not SDS. Unison informs L0/L1/L5 more than any domain ADT.
+**Dependency hint (from GRANITE):** `PKI → Law → SDS` — Law pack at `~/GRANITE/examples/law/`; Bend on the **computation** spine (`~/GRANITE/examples/computation/`), not SDS. Unison Core and MiniTT sit at the "general-purpose hosted language" layer (§2c) — peers to STLC, not domain ADTs — and both inherit L0/L1/L5's repository substrate rather than modeling any part of it themselves.
 
-Wire into later phases: after Phase 5, minimal **PKI**; then thin **SDS**; **Bend** only once net lowering is real; **Unison** as CAS north-star (optional pack later).
+Wire into later phases: after Phase 5, minimal **PKI**; then thin **SDS**; **Bend** only once net lowering is real; **Unison Core** and **MiniTT** as real language packs once the substrate (§2c) and judgment/reduction engines they both build on (`Checker`/`Search`/`TreeEngine`) are proven by STLC/PKI.
 
 ---
 
@@ -296,7 +360,8 @@ Wire into later phases: after Phase 5, minimal **PKI**; then thin **SDS**; **Ben
 - **PKI (minimal):** mirror `~/GRANITE/examples/pki/` — `Registry` + issue/revoke ΔL + chain-validation + ledger trust-anchor publish. See `~/GRANITE/docs/pki.md`.
 - **SDS (thin slice):** mirror `~/GRANITE/examples/sds/` — substance + shadow + one phrase path + ΔSDS override (+ optional render). Disambiguation: Safety Data Sheet — `~/GRANITE/PROMPT.md` §11, `~/GRANITE/docs/sds-studio.md`.
 - **Bend (when nets are ready):** gap-analyze against **spec only** `~/GRANITE/examples/computation/PROMPT.md` (Bend/Kind/HVM); implement against real nets in that pack — no empty `examples/bend`.
-- **Unison (ideas → optional pack):** CAS checklist from Unison ideas; fragment modeling in `~/Downloads/granit-rust/PROMPT.md` §20; optional IR notes `~/UnisonAbella/`.
+- **Unison Core (real pack, §2c):** a genuine ADT/pattern-match/ability language on Cairn's substrate, not the CAS-ideas-only stage; fragment modeling precedent in `~/Downloads/granit-rust/PROMPT.md` §20; IR notes `~/UnisonAbella/`.
+- **MiniTT (real pack, §2c/§8b ladder):** minimal dependent core (Π types, one hardcoded `Nat` inductive, a closed 2-level universe hierarchy) checked by the existing generic `Checker`/`Search`; not full CIC, not Lean-surface-compatible.
 
 ---
 
@@ -333,7 +398,7 @@ Editorial scope: the following threads are **absorbed as architectural residue**
 
 | Compressed thread | Pointer |
 |-------------------|---------|
-| Formal-methods IR ladder (λ → STLC → polymorphism → dependent types / universes / identity / effects / domain rules); bridge vs relation vs formula vs judgment vs presentation | §13: Aldo, MLTS, Granit Lean, Eurisko |
+| Formal-methods IR ladder (λ → STLC → polymorphism → dependent types / universes / identity / effects / domain rules); bridge vs relation vs formula vs judgment vs presentation. **The dependent-types/universes rung is climbed by MiniTT (§5b, §2c)** — a thin, honest slice (Π types, one hardcoded inductive, a closed 2-level hierarchy), not the full ladder in one step; polymorphism/identity-types/general effects remain compressed here. | §13: Aldo, MLTS, Granit Lean, Eurisko |
 | Haskell++ / Scala++ as ordinary hosts under testing/verification discipline; laziness, bottoms, effects, host interop nuances | §13: Rosetta (interchange); do **not** invent new host compilers (§4.10) |
 | Detailed QuickSort / `Ord` / `Nat` / effects Rosetta example | `~/granit/ROSETTA/examples/QuickSortOrdEffects.rosetta` (§13) |
 | Runtime experiments: StackVM, APEX, HVM5, Mogensen-style interpretation, QDIC/Kind/Bend/HVM surface relationships, threaded bytecode / decision trees | §13: HVM / IC, Δ-nets / QDIC, Bend; Phase 3 + Phase 7 |
@@ -385,7 +450,8 @@ cairn/
     pki/                    # §5b exemplar (after ledger)
     sds/                    # §5b exemplar (after pki)
     bend/                   # §5b only when net lowering exists
-    unison/                 # optional; Unison-inspired fragment pack
+    unison/                 # §5b/§2c real pack: Unison Core + CAS substrate demo
+    minitt/                 # §5b/§2c real pack: minimal dependent core
   transcripts/
   tests/
 ```
@@ -439,7 +505,7 @@ Lookup map for concepts named in this prompt. Paths are under `/home/patrick/` (
 | **Phi** | Specs-as-programs / bootstrap meta-language | `~/IdeaProjects/phi-autonomous/PROMPT.md`; demo: `~/IdeaProjects/phi/PROMPT.md` |
 | **Eurisko / Foundry** | Lattice-composable meta-language + projections | `~/Projects/eurisko.ai/PROMPT.md`; app sketch: `~/eurisko/eureka/PROMPT.md` |
 | **HVM / IC** | Interaction combinators / rewriting / proof-search | Framework: `~/HVM/PROMPT.md`; visualizer: `~/Projects/hvm/`; SweetCLIPS→HVM: `~/Projects/hvm5/PROMPT.md` |
-| **Unison** | Content-addressed defs (external inspirational) | Spec modeling: `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR: `~/UnisonAbella/README.md` |
+| **Unison** | Content-addressed defs — external inspiration AND (§2c, amended) a real Cairn pack, Unison Core, not a fork | Spec modeling: `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR: `~/UnisonAbella/README.md`; impl `languages/unisoncore.cairn`, `examples/unison/` |
 | **MLTS** | PL-metatheory proof assistant / `.lang` schemas | `~/mlts/mlts-scala/PROMPT.md` |
 | **Aldo / delta-nets roadmap** | Pur → CIC → proof assistant design | `~/aldo/PROMPT.md`; SemGuS: `~/aldo/SemGuS/PROMPT.md` |
 
