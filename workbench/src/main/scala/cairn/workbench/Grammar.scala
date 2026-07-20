@@ -256,6 +256,12 @@ object Printer:
                       case PrintSeg.Field(i) =>
                         if i >= children.length then Left(s"print rule '$tag' field $i out of range (${children.length} children)")
                         else go(children(i), maxPrec(g))
+                      case PrintSeg.StrField(i) =>
+                        children.lift(i) match
+                          case Some(Cst.Leaf(t)) =>
+                            emit("\"" + t.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"")
+                            Right(())
+                          case other => Left(s"print rule '$tag' strField $i is not a leaf: $other")
                       case PrintSeg.SepFields(from, sep) =>
                         val items = children.drop(from) match
                           case List(Cst.Node("list", xs)) => xs

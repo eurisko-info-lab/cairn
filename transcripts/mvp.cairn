@@ -1,0 +1,15 @@
+-- Cairn MVP transcript (§9.9): fresh checkout, end-to-end.
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"
+transcript mvp {
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  roundtrip "fun f : (Bool -> Bool) -> Bool . (f (fun b : Bool . b))" ;
+  eval "((fun x : Bool . x) true)" expect "true" ;
+  eval "if false then true else false" expect "false" ;
+  eval "(((fun t : Bool . fun f : Bool . t) true) false)" expect "true" ;
+  delta "{ add id = fun x : Bool . x ; }" ;
+  delta "{ rename id to ident footprint [] ; }" ;
+  claim id_true "((fun x : Bool . x) true)" expect "true" ;
+  publish main ;
+  fetch main ;
+}

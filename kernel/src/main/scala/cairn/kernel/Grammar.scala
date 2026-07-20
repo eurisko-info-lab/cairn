@@ -35,6 +35,7 @@ final case class PrecCategory(name: String, base: String, ops: List[InfixOp])
 enum PrintSeg:
   case Lit(text: String)
   case Field(index: Int)                          // print child i
+  case StrField(index: Int)                       // print child i as a quoted string literal
   case SepFields(from: Int, sep: String)          // children i.. joined by sep
   case Space
   case Newline
@@ -84,6 +85,7 @@ object GrammarSpec:
   private def segToCanon(s: PrintSeg): Canon = s match
     case PrintSeg.Lit(t)           => CTag("lit", CStr(t))
     case PrintSeg.Field(i)         => CTag("field", CInt(i))
+    case PrintSeg.StrField(i)      => CTag("strField", CInt(i))
     case PrintSeg.SepFields(f, s)  => CTag("sepFields", Canon.cmap("from" -> CInt(f), "sep" -> CStr(s)))
     case PrintSeg.Space            => CTag("space", CInt(0))
     case PrintSeg.Newline          => CTag("newline", CInt(0))
@@ -93,6 +95,7 @@ object GrammarSpec:
   private def segFromCanon(c: Canon): PrintSeg = c match
     case CTag("lit", CStr(t))   => PrintSeg.Lit(t)
     case CTag("field", CInt(i)) => PrintSeg.Field(i.toInt)
+    case CTag("strField", CInt(i)) => PrintSeg.StrField(i.toInt)
     case CTag("sepFields", m)   => PrintSeg.SepFields(m.field("from").asInt.toInt, m.field("sep").asStr)
     case CTag("space", _)       => PrintSeg.Space
     case CTag("newline", _)     => PrintSeg.Newline
