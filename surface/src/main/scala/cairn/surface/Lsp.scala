@@ -161,7 +161,10 @@ final class LspServer(cfg: LspConfig):
             Cst.Node(Delta.tag(cfg.language, "rename"),
               List(Cst.Leaf(oldName), Cst.Leaf(newName), fpCst))))))
           applied <- Delta.apply(cfg.language, module, change)
-          newText <- Printer.print(moduleGrammar, ModuleSurface.fromModule(applied._1))
+          // format-preserving: only the renamed def's name and each footprint
+          // reference get touched; every other byte (comments, spacing on
+          // untouched defs) survives — see Delta.applyPreservingFormat.
+          newText <- Delta.applyPreservingFormat(cfg.language, moduleGrammar, text, change)
         yield (applied._2, newText)
         result match
           case Right((vcs, newText)) =>

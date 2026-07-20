@@ -215,23 +215,44 @@ object Delta:
       case _ => false
     }
 
+  /** Pairs of (original leaf instance, its replacement) wherever `orig` and
+    * `renamed` — same shape throughout, since `Binding.rename`/`subst` only
+    * ever swaps whole `varCtor`-shaped nodes at matching positions, never
+    * changes arity or tag elsewhere — differ at a leaf. Reuses the already
+    * shadowing-aware `Binding.rename` instead of re-deriving that logic:
+    * whatever it legitimately changed (occurrences of `from`, and any
+    * incidental capture-avoidance renames) is exactly what gets spliced.
+    */
+  private def diffLeaves(orig: Cst, renamed: Cst): List[(Cst, Cst)] = (orig, renamed) match
+    case (Cst.Leaf(a), Cst.Leaf(b)) => if a != b then List((orig, renamed)) else Nil
+    case (Cst.Node(_, cs1), Cst.Node(_, cs2)) if cs1.length == cs2.length =>
+      cs1.zip(cs2).flatMap(diffLeaves)
+    case _ => Nil // shapes always match for a pure rename; defensive no-op
+
   /** Format-preserving ΔL apply (grammar-as-lens, part b): reprints only the
     * bytes an edit actually touches, splicing into the ORIGINAL source text
     * instead of [[apply]] + `Printer.print`'s whole-module canonical reprint.
-    * Built entirely on the existing, independently-tested `Concrete.splice`
-    * (M7, `Grammar.scala`) — no kernel or parser changes.
+    * Built entirely on the existing, independently-tested `Concrete.put`/
+    * `putMany` (M7, `Grammar.scala`) — no kernel changes; the parser change
+    * this needed (leaf spans for `Elem.NameLeaf`) already landed there.
     *
-    * Handles `replace` / `edit` (both are 1:1 subtree substitution — exactly
-    * what `Concrete.splice` already does) and `add` (pure insertion, no
-    * existing span to touch). `remove` and `rename` are NOT supported here,
-    * on purpose, and fail with an explicit `Left` rather than a silent
-    * fallback to canonical reprint:
-    *   - `remove` needs a design decision for the blank-line trivia left
-    *     around a deleted def that shouldn't be made unilaterally here.
-    *   - `rename` needs the parser to also record spans for bare `Cst.Leaf`
-    *     name tokens — today `spanned(...)` only wraps `Cst.Node`
-    *     construction, never `Elem.NameLeaf`'s result, so a def's own name
-    *     token has no span to splice against yet.
+    * Handles `replace` / `edit` (1:1 subtree substitution — exactly what
+    * `Concrete.put` does), `add` (pure insertion, no existing span to touch),
+    * `rename` (the def's own name leaf plus every footprint reference,
+    * located via [[diffLeaves]] against `Binding.rename`'s already-trusted,
+    * shadowing-aware output, spliced together in one pass via `Concrete.putMany`),
+    * and `remove` (deletes the def's own span, extended BACKWARD through its
+    * own leading trivia — comment/blank-line — since a lexer's trivia belongs
+    * to the token that follows it, never to the one before; the trivia
+    * following the removed def, i.e. leading the NEXT def, is left untouched.
+    * That convention alone avoids both an orphaned "about the thing I just
+    * deleted" comment and a doubled blank line, with no separate collapse
+    * heuristic needed — see the case body for a worked-through example).
+    * `rename`/`remove` validate by delegating to the trusted [[apply]] first
+    * (footprint exactness, still-referenced checks, etc.), so format-preserving
+    * apply can never succeed where a plain apply would reject the edit;
+    * `replace`/`edit`/`add`'s validation (defined/not-defined) is simple
+    * enough to check directly, matching `applyOne`'s own checks.
     */
   def applyPreservingFormat(l: ComposedLanguage, moduleGrammar: GrammarSpec,
                             source: String, change: Cst): Either[String, String] =
@@ -271,10 +292,65 @@ object Delta:
                 prefix + sep + printedDef + "\n" + source.substring(insertAt)
               }
 
-          case Cst.Node(t, _) if t == tag(l, "remove") =>
-            Left("format-preserving apply not yet supported for 'remove' — see Delta.applyPreservingFormat doc comment")
-          case Cst.Node(t, _) if t == tag(l, "rename") =>
-            Left("format-preserving apply not yet supported for 'rename' — see Delta.applyPreservingFormat doc comment")
+          case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fpCst)) if t == tag(l, "rename") =>
+            // Validate via the trusted semantic path first (footprint exactness,
+            // 'to' not already defined, etc. — see apply's own rename case) —
+            // reused rather than re-derived, so format-preserving rename can
+            // never succeed where a plain apply would reject it.
+            ModuleSurface.toModule(out.cst).flatMap { module =>
+              apply(l, module, ch).left.map(e => s"ΔL rename (format-preserving): $e").flatMap { _ =>
+                findDef(defs, from) match
+                  case None => Left(s"ΔL rename (format-preserving): '$from' not defined")
+                  case Some(Cst.Node(_, List(ownNameLeaf, _))) =>
+                    val footprint = fpCst match
+                      case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }
+                      case _ => Nil
+                    val vc = l.varCtor.getOrElse("var")
+                    val refEdits = footprint.foldLeft[Either[String, List[(Cst, Cst)]]](Right(Nil)) { (acc, fname) =>
+                      acc.flatMap { pairs =>
+                        findDef(defs, fname) match
+                          case Some(Cst.Node(_, List(_, fTermInstance))) =>
+                            val renamedTerm = Binding.rename(l.binderSpec, vc)(fTermInstance, from, to)
+                            Right(pairs ++ diffLeaves(fTermInstance, renamedTerm))
+                          case _ => Left(s"ΔL rename (format-preserving): footprint '$fname' not defined")
+                      }
+                    }
+                    refEdits.flatMap { refs =>
+                      Concrete.putMany(mg, source, out, (ownNameLeaf, Cst.Leaf(to)) :: refs)
+                    }
+                  case Some(_) => Left(s"ΔL rename (format-preserving): malformed def '$from'")
+              }
+            }
+
+          case Cst.Node(t, List(Cst.Leaf(name))) if t == tag(l, "remove") =>
+            // Validated via the trusted semantic path first (still-referenced
+            // check, same as apply's own remove case) — same reuse pattern as
+            // rename above.
+            ModuleSurface.toModule(out.cst).flatMap { module =>
+              apply(l, module, ch).left.map(e => s"ΔL remove (format-preserving): $e").flatMap { _ =>
+                findDef(defs, name) match
+                  case None => Left(s"ΔL remove (format-preserving): '$name' not defined")
+                  case Some(defNode) =>
+                    out.spans.get(defNode) match
+                      case None => Left("ΔL remove (format-preserving): target def has no recorded span (not from this parse)")
+                      case Some((startTok, endTok)) =>
+                        // Extend the deletion BACKWARD through the def's own leading
+                        // trivia (its comment/blank-line, per the lexer's convention
+                        // that trivia belongs to the FOLLOWING token) — but never
+                        // forward into whatever follows: that trivia belongs to the
+                        // NEXT def, not this one, and must survive untouched. This
+                        // is what avoids leaving an orphaned "-- about the thing I
+                        // just deleted" comment, or a doubled blank line, without any
+                        // separate collapse heuristic.
+                        val startOff =
+                          if startTok == 0 then 0
+                          else { val prev = out.tokens(startTok - 1); prev.offset + prev.rawLen }
+                        val endOff =
+                          if endTok == 0 then startOff
+                          else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+                        Right(source.substring(0, startOff) + source.substring(endOff))
+              }
+            }
 
           case other => Left(s"not a ΔL change term: ${other.render}")
       }

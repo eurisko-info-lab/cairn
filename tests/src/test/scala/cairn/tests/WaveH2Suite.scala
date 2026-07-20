@@ -109,6 +109,22 @@ class WaveH2Suite extends munit.FunSuite:
     assertEquals(server.changeSets.length, 1)  // kernel-gated change-set emitted
     assert(server.changeSets.head.result != server.changeSets.head.base)
 
+  test("M44: rename preserves comments/formatting on untouched defs (format-preserving apply)"):
+    val server = LspServer(lspCfg)
+    val text = "-- id's own comment\nid = fun x : Bool . x ;\n-- unrelated comment, untouched def\nother = true ;\n"
+    openDoc(server, "file:///m2.stlc", text)
+    val resp = server.handle(J.obj(
+      "jsonrpc" -> J.str("2.0"), "id" -> J.num(4), "method" -> J.str("textDocument/rename"),
+      "params" -> J.obj(
+        "textDocument" -> J.obj("uri" -> J.str("file:///m2.stlc")),
+        "position" -> J.obj("line" -> J.num(1), "character" -> J.num(1)),
+        "newName" -> J.str("ident"))))
+    val out = J.print(resp.head)
+    assert(out.contains("ident = fun x : Bool . x ;"), out)
+    assert(out.contains("id's own comment"), out)
+    assert(out.contains("unrelated comment, untouched def"), out)
+    assert(out.contains("other = true ;"), out)
+
   test("M44: hover reports the inferred type"):
     val server = LspServer(lspCfg)
     openDoc(server, "file:///m.stlc", "id = fun x : Bool . x ;")

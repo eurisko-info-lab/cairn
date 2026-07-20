@@ -290,7 +290,12 @@ object Parser:
           err.toLeft(List(Cst.Node("list", items.result())))
         }
       case Elem.NameLeaf =>
-        if peek.kind == TokKind.Name then { val t = peek.text; pos += 1; Right(List(Cst.Leaf(t))) }
+        // Spanned (unlike other bare leaves below): identifiers are the one leaf
+        // kind `put`/rename need to locate and splice individually — a def's own
+        // name, or a variable reference, has no enclosing Cst.Node of its own.
+        if peek.kind == TokKind.Name then
+          val start = pos; val t = peek.text; pos += 1
+          Right(List(spanned(Cst.Leaf(t), start)))
         else Left(fail("identifier"))
       case Elem.AnyIdentLeaf =>
         if peek.kind == TokKind.Name || peek.kind == TokKind.Keyword then
@@ -426,6 +431,39 @@ object Concrete:
   def put(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
     splice(g, source, out, target, replacement)
 
+  /** Multiple independent `put`s against the SAME parse, applied in one pass.
+    * Every `target` must be a node/leaf instance from `out` (so it has a valid
+    * span); edits are applied rightmost-first so an earlier (leftward) edit's
+    * offset is never invalidated by a later one — all offsets come from the
+    * single, unmodified `out.tokens`, never recomputed against the growing
+    * result text. This is what makes multi-occurrence rename possible: each
+    * occurrence is one `put`, composed here instead of needing its own reparse.
+    */
+  def putMany(g: GrammarSpec, source: String, out: ParseOut, edits: List[(Cst, Cst)]): Either[String, String] =
+    val located = edits.foldLeft[Either[String, List[((Int, Int), Cst)]]](Right(Nil)) { (acc, edit) =>
+      val (target, replacement) = edit
+      acc.flatMap { pairs =>
+        out.spans.get(target) match
+          case Some(span) => Right(pairs :+ (span, replacement))
+          case None => Left("put: target node has no recorded span (not from this parse)")
+      }
+    }
+    located.flatMap { withSpans =>
+      val ordered = withSpans.sortBy(-_._1._1) // rightmost (highest startTok) first
+      ordered.foldLeft[Either[String, String]](Right(source)) { (acc, pair) =>
+        val ((startTok, endTok), replacement) = pair
+        acc.flatMap { text =>
+          Printer.print(g, replacement).map { printed =>
+            val startOff = out.tokens(startTok).offset
+            val endOff =
+              if endTok == 0 then startOff
+              else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+            text.substring(0, startOff) + printed + text.substring(endOff)
+          }
+        }
+      }
+    }
+
 /** One generic printer (S11) interpreting the print table. */
 object Printer:
   def print(g: GrammarSpec, cst: Cst): Either[String, String] =
@@ -547,3 +585,7 @@ object RoundTrip:
     */
   def put(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
     Concrete.put(g, source, out, target, replacement)
+
+  /** [[Concrete.putMany]] — several `put`s against one parse, in one pass. */
+  def putMany(g: GrammarSpec, source: String, out: ParseOut, edits: List[(Cst, Cst)]): Either[String, String] =
+    Concrete.putMany(g, source, out, edits)

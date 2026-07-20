@@ -91,11 +91,76 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
     val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
     assert(result.swap.exists(_.contains("already defined")), result.toString)
 
-  test("remove and rename are explicitly unsupported, not silently canonicalized"):
+  test("remove deletes the def's own leading comment, leaves the next def's comment untouched"):
+    val src = "-- header comment\na = true ;\n-- b's own comment\nb = false ;\n-- footer comment\nc = true ;\n"
+    val change = parseChange("{ remove b ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assertEquals(result, "-- header comment\na = true ;\n-- footer comment\nc = true ;\n")
+    assertSameMeaning(src, change, result)
+
+  test("remove between blank-line-separated defs leaves a single blank line, not double"):
+    val src = "a = true ;\n\nb = false ;\n\nc = true ;\n"
+    val change = parseChange("{ remove b ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assertEquals(result, "a = true ;\n\nc = true ;\n")
+    assertSameMeaning(src, change, result)
+
+  test("remove the first def consumes its own leading trivia back to file start"):
+    val src = "-- a's comment\na = true ;\nb = false ;\n"
+    val change = parseChange("{ remove a ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    // "a"'s own leading comment is gone; the separator newline before "b" is
+    // b's leading trivia, not a's — untouched, same rule as the middle-def
+    // case (see the test above), so it survives as a leading blank line here.
+    assertEquals(result, "\nb = false ;\n")
+    assertSameMeaning(src, change, result)
+
+  test("remove the last def leaves trailing trivia (EOF's leading) untouched"):
+    val src = "a = true ;\n-- b's comment\nb = false ;\n"
+    val change = parseChange("{ remove b ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assertEquals(result, "a = true ;\n")
+    assertSameMeaning(src, change, result)
+
+  test("remove of a name still referenced by another def fails (delegated to apply's validation)"):
+    val src = "id = fun x : Bool . x ;\nuse = (id true) ;\n"
+    val change = parseChange("{ remove id ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
+    assert(result.swap.exists(_.contains("still referenced")), result.toString)
+
+  test("remove of an undefined name fails"):
     val src = "a = true ;\n"
-    val rm = parseChange("{ remove a ; }")
-    val rn = parseChange("{ rename a to b footprint [ ] ; }")
-    assert(Delta.applyPreservingFormat(Stlc.language, mg, src, rm)
-      .swap.exists(_.contains("not yet supported for 'remove'")))
-    assert(Delta.applyPreservingFormat(Stlc.language, mg, src, rn)
-      .swap.exists(_.contains("not yet supported for 'rename'")))
+    val change = parseChange("{ remove z ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
+    assert(result.isLeft, result.toString)
+
+  test("rename touches the def's own name and every footprint reference, nothing else"):
+    val src = "-- id's own comment\nid = fun x : Bool . x ;\n" +
+      "-- use1 comment\nuse1 = (id true) ;\n-- use2 comment\nuse2 = (id false) ;\n"
+    val change = parseChange("{ rename id to ident footprint [ use1 , use2 ] ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assert(result.contains("-- id's own comment\nident = fun x : Bool . x ;"), result)
+    assert(result.contains("-- use1 comment\nuse1 = (ident true) ;"), result)
+    assert(result.contains("-- use2 comment\nuse2 = (ident false) ;"), result)
+    assert(!result.contains("(id true)") && !result.contains("(id false)"), result)
+    assert(Parser.parse(mg, result).isRight, result)
+    assertSameMeaning(src, change, result)
+
+  test("rename with an empty footprint touches only the def's own name"):
+    val src = "-- lone comment\na = true ;\n-- other comment\nb = false ;\n"
+    val change = parseChange("{ rename a to renamed footprint [ ] ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assertEquals(result, "-- lone comment\nrenamed = true ;\n-- other comment\nb = false ;\n")
+    assertSameMeaning(src, change, result)
+
+  test("rename of an undefined name fails"):
+    val src = "a = true ;\n"
+    val change = parseChange("{ rename z to y footprint [ ] ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
+    assert(result.isLeft, result.toString)
+
+  test("rename to an already-defined name fails (delegated to apply's validation)"):
+    val src = "a = true ;\nb = false ;\n"
+    val change = parseChange("{ rename a to b footprint [ ] ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
+    assert(result.isLeft, result.toString)
