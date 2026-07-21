@@ -13,10 +13,10 @@ import cairn.kernel.Effects
   * `system-handler` — so authority state (`mode`/`policies`/`events`) is
   * explicit and constructible rather than shared, hidden, JVM-wide mutable
   * state. A directly-constructed `AuthorityGate()` starts in `Mode.Audit`
-  * with no policies, as before; `AuthorityGate.default` (below) is
-  * special-cased into `Mode.Enforce` with a bootstrap policy already
-  * installed. Full per-call injection (no default at all) is a separate
-  * future slice.
+  * with no policies, as before; `AuthorityGate.forFamily` (below) hands
+  * out one bootstrapped, `Mode.Enforce` instance per [[Effects.Family]], so
+  * families can genuinely diverge instead of sharing one JVM-wide switch.
+  * Full per-call injection (no registry at all) is a separate future slice.
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
@@ -75,28 +75,42 @@ object AuthorityGate:
   enum Mode:
     case Audit, Enforce
 
-  /** Process-wide default instance — the 8 effect handlers and `Node.append`
-    * use this today; full per-call injection is a follow-up.
-    *
-    * Runs in `Mode.Enforce` with one bootstrap policy per known `Action`,
-    * allowing any subject (`"*"`) over any resource — not just the
-    * placeholder `Subject("local")` the 8 effect handlers use, since
-    * `Node.append` authenticates as the real signing authority
-    * (`Subject(authority.name)`, e.g. `"alice"`), and any subject wildcard
-    * had to cover both (confirmed the hard way: a `Subject("local")`-only
-    * policy passed compilation but broke every ledger-touching test under
-    * real `Enforce` mode). This is the first time `Enforce` mode has ever
-    * run in the real program rather than an isolated unit test — it proves
-    * the `Authority.validate`/Kernel-checked code path actually works
-    * end-to-end, but it is honestly **not** meaningful access control yet:
-    * a blanket allow-everyone-everything policy can't deny anything. Real
-    * enforcement needs real, distinct subjects and narrower policies,
-    * which needs real identity — see priority #2's deferred "full
-    * injection" work.
+  private def bootstrapPolicies: List[EffectPolicy] =
+    Effects.Action.values.toList.map(a =>
+      EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow))
+
+  /** Same bootstrap shape the old shared `default` instance used: `Mode.
+    * Enforce` with one allow policy per known `Action`, allowing any
+    * subject (`"*"`) over any resource — not just the placeholder
+    * `Subject("local")` the 8 effect handlers use, since `Node.append`
+    * authenticates as the real signing authority (`Subject(authority.name)`,
+    * e.g. `"alice"`), and any subject wildcard had to cover both (confirmed
+    * the hard way: a `Subject("local")`-only policy passed compilation but
+    * broke every ledger-touching test under real `Enforce` mode). Honestly
+    * **not** meaningful access control yet: a blanket allow-everyone-
+    * everything policy can't deny anything. Real enforcement needs real,
+    * distinct subjects and narrower policies, which needs real identity.
     */
-  val default: AuthorityGate =
+  private def bootstrap(): AuthorityGate =
     val gate = new AuthorityGate()
-    gate.install(Effects.Action.values.toList.map(a =>
-      EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow)))
+    gate.install(bootstrapPolicies)
     gate.setMode(Mode.Enforce)
     gate
+
+  private val registry = scala.collection.mutable.Map[Effects.Family, AuthorityGate]()
+
+  /** Per-family gate, lazily bootstrapped — replaces the single shared
+    * `default` instance from the prior slice. Each family now gets its OWN
+    * instance, so one family's `Mode`/policies can genuinely diverge from
+    * another's: `AuthorityGate.forFamily(Family.Filesystem).setMode(Mode.
+    * Audit)` affects only `Filesystem`, leaving every other family in
+    * `Enforce`. This is the actual capability gap "per-family Enforce
+    * granularity" named — full literal injection (every one of the ~30
+    * call sites, including a dozen test suites that don't test authority
+    * behavior at all, receiving an explicit `AuthorityGate` parameter with
+    * no registry at all) was considered and not done: the cost (rewriting
+    * test suites that don't exercise authority) didn't match the benefit
+    * over this registry. Available as separate future work if still wanted.
+    */
+  def forFamily(family: Effects.Family): AuthorityGate =
+    synchronized { registry.getOrElseUpdate(family, bootstrap()) }

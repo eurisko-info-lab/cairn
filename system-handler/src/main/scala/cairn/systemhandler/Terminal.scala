@@ -24,7 +24,7 @@ object Terminal:
       case Term.Request.Write(_)     => Effects.Action.TerminalWrite
       case Term.Request.WriteLine(_) => Effects.Action.TerminalWrite
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("terminal", "*"))
-    AuthorityGate.default.checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.Terminal).checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
       try req match
         case Term.Request.Write(t) => write(t); Right(Term.Response.Ok)
         case Term.Request.WriteLine(t) => writeLine(t); Right(Term.Response.Ok)

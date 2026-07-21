@@ -413,6 +413,54 @@ policy can't deny anything. Real enforcement needs real, distinct
 subjects and narrower policies, which needs real identity — the deferred
 "full injection" work above.
 
+## Deferred work, tackled: per-family Enforce + the PackAccess bug
+
+A full call-graph audit (an Explore agent) mapped every file "no ambient
+fallback anywhere" would touch before doing it, and found two things that
+reshaped scope:
+
+- Literal "no ambient fallback ever" for `AuthorityGate` means touching
+  **~30 files**, a dozen of them independent test suites (`Phase5Suite`,
+  `Phase7Suite`, `Phase8Suite`, `WaveGSuite`, `BrowserSuite`, `ParitySuite`,
+  etc.) that construct `Node`/call `.append` directly and don't test
+  authority behavior at all. 4 of the 9 `AuthorityGate` call sites
+  (`Random`, `Clock`, `Terminal`, `ExternalBackend`) have **zero real
+  callers anywhere** in the repo.
+- **There is no real composition root today.** `runtime.PackLoader` is
+  documented as one, but its `PackAccess.install(this)` self-install only
+  actually runs because of *accidental* JVM class-init ordering:
+  `examples.Main`'s pack map happens to evaluate `Pki` (which touches
+  `PackLoader` directly) before `Sds`/`Law` (which need `PackAccess.get`);
+  test suites rely on some *other* test class in the same JVM run having
+  touched `PackLoader` first; `tests/FuzzSuite.scala` has **no
+  `PackLoader` reference of its own at all** and only works by luck of
+  sbt's test-class ordering — one import/map-key reorder away from
+  `RuntimeException("PackAccess not installed...")` at startup. A real
+  latent bug, not just a style concern.
+
+**`AuthorityGate`: per-family registry (done)** — resolves the "per-family
+Enforce granularity" gap named above via `AuthorityGate.forFamily(family:
+Effects.Family): AuthorityGate`, a lazily-bootstrapped registry replacing
+the single shared `default`. Each family now gets its own instance, so
+`AuthorityGate.forFamily(Family.Filesystem).setMode(Mode.Audit)` affects
+only `Filesystem`, leaving every other family in `Enforce` — proven by two
+new `AuthoritySuite` cases (distinct instances per family; the same
+family always returns the same instance). All 9 call sites changed from
+`AuthorityGate.default.checked(...)`/`.check(...)` to
+`AuthorityGate.forFamily(Effects.Family.<X>).checked(...)`/`.check(...)`
+— purely internal to each handler, zero external call-site changes.
+**The literal 30-file full-injection rewrite was considered and not
+done**: the cost (rewriting test suites that don't exercise authority at
+all) didn't match the benefit over this registry. Available as separate
+future work if still wanted.
+
+**`PackAccess`: composition-root bug — not yet fixed this round.** The
+accidental-ordering problem above is real and worth fixing properly
+(making `PackLoader`'s installation explicit and guaranteed rather than a
+side effect of unrelated class-init order), but is independent enough
+from the `AuthorityGate` registry work to be its own slice — tracked here
+so it isn't lost, not silently skipped.
+
 ## Forbidden-import rules (ModuleBoundarySuite)
 
 - `kernel` / `core`: no filesystem, networking, or process APIs

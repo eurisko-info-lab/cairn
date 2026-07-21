@@ -68,7 +68,7 @@ object Filesystem:
       case None => performRaw(req)
       case Some(a) =>
         val authReq = Authority.EffectRequest(Authority.Subject("local"), a, Authority.Resource("filesystem", resourcePath))
-        AuthorityGate.default.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
+        AuthorityGate.forFamily(Effects.Family.Filesystem).checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
 
   private def performRaw(req: Fs.Request): Either[Fs.Error, Fs.Response] =
     try req match

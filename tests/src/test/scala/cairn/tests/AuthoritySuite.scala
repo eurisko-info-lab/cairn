@@ -67,3 +67,24 @@ class AuthoritySuite extends munit.FunSuite:
       PolicyEval.denyAll("deny", alice, Effects.Action.FsRead))
     val d = PolicyEval.propose(readReq, policies)
     assertEquals(d.decision, Decision.Deny)
+
+  test("AuthorityGate.forFamily gives each family its own instance, so Mode can genuinely diverge"):
+    // forFamily is a shared registry, not a fresh-per-test instance like the
+    // gates above — mutate and restore inside try/finally so a failed
+    // assertion can't leave a family's Mode altered for other tests/suites
+    // that share this JVM.
+    val fs = AuthorityGate.forFamily(Effects.Family.Filesystem)
+    val random = AuthorityGate.forFamily(Effects.Family.Random)
+    assert(fs ne random, "different families must not share a gate instance")
+    assertEquals(fs.currentMode, AuthorityGate.Mode.Enforce)
+    assertEquals(random.currentMode, AuthorityGate.Mode.Enforce)
+    try
+      fs.setMode(AuthorityGate.Mode.Audit)
+      assertEquals(fs.currentMode, AuthorityGate.Mode.Audit)
+      assertEquals(random.currentMode, AuthorityGate.Mode.Enforce) // unaffected
+    finally fs.setMode(AuthorityGate.Mode.Enforce) // restore
+
+  test("AuthorityGate.forFamily is stable: the same family always returns the same instance"):
+    val a = AuthorityGate.forFamily(Effects.Family.Terminal)
+    val b = AuthorityGate.forFamily(Effects.Family.Terminal)
+    assert(a eq b)

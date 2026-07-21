@@ -34,7 +34,7 @@ object Process:
     val action = req match
       case Proc.Request.Run(_, _, _) => Effects.Action.ProcessRun
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("process", "*"))
-    AuthorityGate.default.checked(authReq)(err => Proc.Error.Io(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.Process).checked(authReq)(err => Proc.Error.Io(s"denied: $err")) {
       req match
         case Proc.Request.Run(cmd, cwd, merge) =>
           run(cmd, cwd.map(p => Path.of(p.value)), merge)

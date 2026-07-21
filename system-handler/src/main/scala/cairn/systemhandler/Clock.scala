@@ -22,7 +22,7 @@ object Clock:
       case Clk.Request.Now           => Effects.Action.ClockNow
       case Clk.Request.TimestampSlug => Effects.Action.ClockTimestampSlug
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("clock", "*"))
-    AuthorityGate.default.checked(authReq)(err => Clk.Error.Unavailable(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.Clock).checked(authReq)(err => Clk.Error.Unavailable(s"denied: $err")) {
       try req match
         case Clk.Request.Now => Right(Clk.Response.Instant(nowMillis()))
         case Clk.Request.TimestampSlug => Right(Clk.Response.Slug(timestampSlug()))

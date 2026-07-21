@@ -37,7 +37,7 @@ object Workspace:
   def perform(req: Ws.Request): Either[Ws.Error, Ws.Response] =
     val authReq = Authority.EffectRequest(
       Authority.Subject("local"), Effects.Action.WorkspaceRead, Authority.Resource("workspace", "*"))
-    AuthorityGate.default.checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.Workspace).checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
       try req match
         case Ws.Request.LanguageDirs =>
           Right(Ws.Response.Paths(languageDirs.map(p => Fs.Path(p.toString))))

@@ -31,7 +31,7 @@ final class Node(val root: Path):
       Authority.Subject(authority.name),
       Effects.Action.LedgerAppend,
       Authority.Resource("ledger", root.toString))
-    AuthorityGate.default.check(req).flatMap { _ =>
+    AuthorityGate.forFamily(Effects.Family.LedgerTransport).check(req).flatMap { _ =>
       for
         bs <- blocks
         st <- LedgerKernel.replay(authorities, bs, Ed25519.verify)

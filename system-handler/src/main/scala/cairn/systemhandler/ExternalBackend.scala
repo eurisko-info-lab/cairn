@@ -34,7 +34,7 @@ object ExternalBackend:
       case EB.Request.Find(_)   => Effects.Action.BackendFind
       case EB.Request.Run(_, _, _) => Effects.Action.BackendRun
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("externalBackend", "*"))
-    AuthorityGate.default.checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.ExternalBackend).checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
       req match
         case EB.Request.Find(host) =>
           find(host) match

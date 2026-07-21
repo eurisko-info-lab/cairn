@@ -46,7 +46,7 @@ object LspTransport:
       case LspIface.Request.ReadMessage     => Effects.Action.LspRead
       case LspIface.Request.WriteMessage(_) => Effects.Action.LspWrite
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("lsp", "*"))
-    AuthorityGate.default.checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
+    AuthorityGate.forFamily(Effects.Family.Lsp).checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
       try req match
         case LspIface.Request.ReadMessage =>
           readMessage(in) match
