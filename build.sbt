@@ -19,6 +19,13 @@ lazy val systemHandler = project.in(file("system-handler"))
   .dependsOn(kernel, systemInterface)
   .settings(libraryDependencies += munit)
 
+// MIGRATION-PLAN.md Phase 2 (first slice): the untrusted-proposer half of
+// the old proof.Proof.scala (Search/Tactics) — depends only on kernel,
+// which now also holds the independent Checker they call into.
+lazy val core = project.in(file("core"))
+  .dependsOn(kernel)
+  .settings(libraryDependencies += munit)
+
 lazy val workbench = project.in(file("workbench"))
   .dependsOn(kernel)
   .settings(libraryDependencies += munit)
@@ -32,7 +39,7 @@ lazy val compute = project.in(file("compute"))
   .settings(libraryDependencies += munit)
 
 lazy val rosetta = project.in(file("rosetta"))
-  .dependsOn(proof, compute)
+  .dependsOn(proof, compute, core)
   .settings(libraryDependencies += munit)
 
 lazy val ledger = project.in(file("ledger"))
@@ -54,5 +61,5 @@ lazy val tests = project.in(file("tests"))
   .settings(libraryDependencies += munit)
 
 lazy val root = project.in(file("."))
-  .aggregate(kernel, systemInterface, systemHandler, workbench, proof, compute, rosetta, ledger, surface, examples, tests)
+  .aggregate(kernel, core, systemInterface, systemHandler, workbench, proof, compute, rosetta, ledger, surface, examples, tests)
   .settings(publish / skip := true)

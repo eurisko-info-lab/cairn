@@ -18,7 +18,7 @@ Purity alone does not place Core (or anything else) outside the trusted base.
 Every Core result used for acceptance needs an independent Kernel validation
 path — Core proposes, Kernel certifies, same "untrusted proposer, independent
 checker" pattern already used throughout the proof/derivation machinery
-(`proof.Checker` vs `proof.Search`).
+(`kernel.Checker` vs `core.Search`/`core.Tactics`).
 
 ## Current module graph
 
@@ -28,19 +28,37 @@ As of this revision:
 kernel ← workbench ← {proof, compute} ← rosetta ← ledger ← surface ← examples ← tests
 system-interface → kernel
 system-handler   → kernel, system-interface
+core             → kernel
+rosetta          → proof, compute, core (in addition to the chain above)
 ledger           → rosetta, system-interface, system-handler (in addition to the chain above)
 ```
 
-`system-interface`/`system-handler` are the first migration slice: the `Cas`
-trait lives in `system-interface` (pure — only `cairn.kernel.*`); `MemCas`,
-`DiskCas`, `Branches`, and CAS maintenance (`CasAdmin`/`Chunker`/`HashAlgo`/
+`system-interface`/`system-handler` (Phase 1): the `Cas` trait lives in
+`system-interface` (pure — only `cairn.kernel.*`); `MemCas`, `DiskCas`,
+`Branches`, and CAS maintenance (`CasAdmin`/`Chunker`/`HashAlgo`/
 `DigestMigration`) live in `system-handler` (filesystem I/O). `BranchManifest`
 moved to `kernel` (pure data; its validity is a Kernel concern per the
-migration plan's own mapping). `surface`/`examples`/`tests` see the new
-modules transitively through `ledger` — no `build.sbt` changes were needed
-there. `core`, `user`, and `runtime` do not exist yet — `workbench`/`proof`/
-`compute`/`rosetta` still play Core's role, unsplit. Every exemplar language
-and domain pack still lives under `examples/`.
+migration plan's own mapping).
+
+`core` (Phase 2, first slice): `object Search` and `object Tactics` (plus
+`Tactic`/`TacticScript`) moved out of `proof.Proof.scala` into `core` — the
+untrusted proposer half. `Derivation`/`CheckError`/`CheckerCfg`/`object
+Checker` (the independent, decidable validator half) moved into `kernel`
+instead. `proof` keeps only `Claim`/`Theorem`/`TestCase`/`TestSuite`/
+`Certificate`/`object Certify` — orchestration/data that sits above both and
+didn't fit either side cleanly. `compute`'s analogous `TreeEngine`/
+`TraceChecker` split is **not yet done** — `TraceChecker` currently reaches
+into `TreeEngine`'s own `matchPattern`/`instantiate` and the `EvalTrace`/
+`TraceStep` types nested inside it, which would invert the dependency
+direction (Kernel→Core) if split as-is; it needs a preparatory hoist first
+(pull those out to independent, non-nested definitions), not attempted yet.
+
+`surface`/`examples`/`tests` see all of the above transitively through
+`ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
+only import updates at call sites. `user` and `runtime` do not exist yet;
+most of `workbench` and all of `rosetta`'s own projection engine still play
+Core's role, unsplit. Every exemplar language and domain pack still lives
+under `examples/`.
 
 ## Forbidden-import rules
 
@@ -69,7 +87,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | Not started | |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split landed. Still pending within Phase 2: `compute`'s `TreeEngine`/`TraceChecker` split (needs a preparatory hoist), `workbench`'s Meta/grammar/Delta machinery, `rosetta`'s projection engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |

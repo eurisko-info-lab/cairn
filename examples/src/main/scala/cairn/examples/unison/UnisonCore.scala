@@ -3,7 +3,7 @@ package cairn.examples.unison
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.compute.TreeEngine
-import cairn.proof.{CheckerCfg, Checker, Search, Derivation}
+import cairn.core.Search
 
 /** UnisonCore (§5b, §2c): a real term language for the Unison-inspired
   * content-addressed store (`Unison.Store`/`Unison.Codebase`), replacing the

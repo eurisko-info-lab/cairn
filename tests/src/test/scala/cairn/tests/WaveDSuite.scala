@@ -3,6 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.compute.*
 import cairn.proof.*
+import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.examples.claims.Claims
 

@@ -3,7 +3,7 @@ package cairn.examples.leancore
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.compute.TreeEngine
-import cairn.proof.{CheckerCfg, Checker, Search, Derivation}
+import cairn.core.Search
 
 /** LeanCore — the formal-methods IR ladder's rung past MiniTT (§5b, §2c
   * amendment "executable reference vs. optimized backend", §8b): everything

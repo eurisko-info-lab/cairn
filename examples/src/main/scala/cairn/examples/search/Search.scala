@@ -4,8 +4,8 @@ import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systeminterface.Cas
 import cairn.ledger.Provenance
-import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite, CheckerCfg, Checker, Derivation}
-import cairn.proof.{Search as DerivSearch}
+import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
+import cairn.core.{Search as DerivSearch}
 
 /** Search pack — Fact–Intent–Hint board as a `.cairn` object language.
   *

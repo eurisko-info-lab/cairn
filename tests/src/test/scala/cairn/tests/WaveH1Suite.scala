@@ -23,7 +23,6 @@ class WaveH1Suite extends munit.FunSuite:
     // language reproduces itself byte-for-byte — not a second, separately
     // implemented kernel to bisimulate against; this is the "check" analogue
     // of that same fixpoint, on the one language here with real judgments.)
-    import cairn.proof.Checker
     import cairn.examples.claims.Claims
     val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)
     val fromText = Meta.parseFile(text).fold(e => fail(e), identity)

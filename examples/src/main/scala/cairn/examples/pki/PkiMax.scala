@@ -1,7 +1,7 @@
 package cairn.examples.pki
 
 import cairn.kernel.*
-import cairn.proof.{CheckerCfg, Checker, Search, Derivation}
+import cairn.core.Search
 import cairn.ledger.{Ed25519, Keypair}
 
 /** PKI maximal (M46): validity windows, CRLs as signed artifacts, and — the
