@@ -120,7 +120,7 @@ object Transcript:
     * injected by callers, §4.11).
     */
   def run(src: String, packs: Map[String, ComposedLanguage], workDir: Path,
-          portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, Report] =
+          portModules: Map[String, cairn.core.RosettaModule2] = Map.empty): Either[String, Report] =
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("transcript", List(Cst.Leaf(name), Cst.Node("list", steps))) =>
         runSteps(name, steps, packs, workDir, portModules)
@@ -129,7 +129,7 @@ object Transcript:
 
   private def runSteps(name: String, steps: List[Cst],
                        packsIn: Map[String, ComposedLanguage], workDir: Path,
-                       portModules: Map[String, cairn.rosetta.RosettaModule2]): Either[String, Report] =
+                       portModules: Map[String, cairn.core.RosettaModule2]): Either[String, Report] =
     var packs = packsIn
     var lang: Option[ComposedLanguage] = None
     var module = Module(Nil)
@@ -243,14 +243,14 @@ object Transcript:
             log += s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)" }
         case Cst.Node("port", List(Cst.Leaf(host))) =>
           portModules.values.headOption.toRight("no rosetta module registered for port steps").flatMap { m =>
-            val port: Option[cairn.rosetta.PortV2] = host match
-              case "scala"   => Some(cairn.rosetta.Ports2.ScalaPort2)
-              case "lean"    => Some(cairn.rosetta.Ports2.LeanPort2)
-              case "haskell" => Some(cairn.rosetta.Ports2.HaskellPort2)
-              case "rust"    => Some(cairn.rosetta.Ports2.RustPort2)
+            val port: Option[cairn.core.PortV2] = host match
+              case "scala"   => Some(cairn.core.Ports2.ScalaPort2)
+              case "lean"    => Some(cairn.core.Ports2.LeanPort2)
+              case "haskell" => Some(cairn.core.Ports2.HaskellPort2)
+              case "rust"    => Some(cairn.core.Ports2.RustPort2)
               case _          => None
             port.toRight(s"unknown port host '$host'").flatMap { p =>
-              cairn.rosetta.PortV2.verified(p, m).flatMap { out =>
+              cairn.core.PortV2.verified(p, m).flatMap { out =>
                 if host == "scala" then
                   val scalaCli = sys.env.getOrElse("PATH", "").split(":")
                     .map(java.nio.file.Paths.get(_, "scala-cli")).find(Files.isExecutable(_))
@@ -303,7 +303,7 @@ object Cli:
     PackLoader.loadClosed(dir)
 
   def main(args: List[String], packsIn: Map[String, ComposedLanguage],
-           portModules: Map[String, cairn.rosetta.RosettaModule2] = Map.empty): Either[String, String] =
+           portModules: Map[String, cairn.core.RosettaModule2] = Map.empty): Either[String, String] =
     /** Durable store root. Override with env `CAIRN_HOME`.
       * Default: `./.cas`. Each transcript writes a fresh run under
       * `$CAIRN_HOME/runs/<timestamp>/{nodeA,nodeB,…}` and prints those paths.

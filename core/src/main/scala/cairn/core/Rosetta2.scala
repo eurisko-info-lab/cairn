@@ -1,7 +1,6 @@
-package cairn.rosetta
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.RoundTrip
 
 /** Rosetta v2 (M30–M34): richer declaration vocabulary — polymorphic defs with
   * `Ord`-style constraints, ADT declarations, list pattern matching, effect
@@ -92,7 +91,7 @@ object PortV2:
     yield out
 
 /** Shared host-neutral expression rendering helpers. */
-private[rosetta] object ExprUtil:
+private[core] object ExprUtil:
   def foldE[A](r: Cst)(
       varF: String => A, numF: String => A, nilF: => A,
       callF: (String, List[A]) => A, ifF: (A, A, A) => A,

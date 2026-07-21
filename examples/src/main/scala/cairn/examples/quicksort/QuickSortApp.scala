@@ -1,7 +1,7 @@
 package cairn.examples.quicksort
 
 import cairn.kernel.Cst
-import cairn.rosetta.*
+import cairn.core.*
 
 /** Rosetta sample app depth — on par with ROSETTA `QuickSortOrdEffects`
   * public entrypoints (`sortNatWithTrace` / `runSample`). Builds on the same

@@ -1,6 +1,6 @@
 package cairn.tests
 
-import cairn.rosetta.*
+import cairn.core.*
 import cairn.examples.quicksort.QuickSort
 
 /** Phase 4 acceptance (S30–S34): one artifact emits two ports; the Scala port

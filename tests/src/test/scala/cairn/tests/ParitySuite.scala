@@ -1,10 +1,9 @@
 package cairn.tests
 
-import cairn.core.*
 import cairn.kernel.*
 import cairn.ledger.Encryption
-import cairn.rosetta.*
-import cairn.rosetta.Ports2.*
+import cairn.core.*
+import cairn.core.Ports2.*
 import cairn.examples.pki.{DemoPki, PkiMax, PkiTutorial}
 import cairn.examples.sds.{CompositionSealing, SdsTutorial}
 import cairn.examples.law.{Law, LawTutorial}

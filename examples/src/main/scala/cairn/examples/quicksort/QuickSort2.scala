@@ -1,7 +1,7 @@
 package cairn.examples.quicksort
 
 import cairn.kernel.Cst
-import cairn.rosetta.*
+import cairn.core.*
 
 /** QuickSortOrdEffects (M30/M34): ONE semantic artifact — generic quicksort
   * over any `Ord a`, plus a counter-effect variant — with sortedness and

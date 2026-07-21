@@ -1,8 +1,9 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.rosetta.*
-import cairn.rosetta.Ports2.*
+import cairn.core.*
+import cairn.core.Ports2.*
+import cairn.rosetta.Scaffold
 import cairn.examples.quicksort.QuickSort2
 
 /** Wave F acceptance (M30–M34). */

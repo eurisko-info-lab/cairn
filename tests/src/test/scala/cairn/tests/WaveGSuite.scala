@@ -198,7 +198,7 @@ class WaveGSuite extends munit.FunSuite:
     cas.put(rosettaArt)
     Provenance.record(cas, rosettaArt.digest, List(module.digest), "rosetta-model")
     // hop 4: rosetta artifact -> emitted port text
-    val portText = cairn.rosetta.PortV2.verified(cairn.rosetta.Ports2.ScalaPort2,
+    val portText = cairn.core.PortV2.verified(cairn.core.Ports2.ScalaPort2,
       cairn.examples.quicksort.QuickSort2.module).toOption.get.text
     val portDigest = cas.putBytes(portText.getBytes)
     Provenance.record(cas, portDigest, List(rosettaArt.digest), "port-scala")

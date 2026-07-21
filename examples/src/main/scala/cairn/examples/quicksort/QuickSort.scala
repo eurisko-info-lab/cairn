@@ -1,7 +1,7 @@
 package cairn.examples.quicksort
 
 import cairn.kernel.Cst
-import cairn.rosetta.*
+import cairn.core.*
 
 /** RosettaQuickSort pack (S34, §5): one semantic artifact, claims about
   * sortedness and permutation, projected to ≥2 ports (Scala tested, Lean

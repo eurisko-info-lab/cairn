@@ -1,7 +1,6 @@
-package cairn.rosetta
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.{Printer, RoundTrip}
 
 /** Rosetta interchange layer (S30–S33, §2 Rosetta, §4.10).
   *

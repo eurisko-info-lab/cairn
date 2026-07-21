@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.kernel.*
-import cairn.core.JsonSurface
+import cairn.core.{JsonSurface, PortOutput, PortV2, Ports2, RosettaModule2}
 import cairn.systemhandler.Filesystem
 import java.nio.file.Path
 
@@ -9,14 +9,13 @@ import java.nio.file.Path
   * linking every theorem to its host artifact. The manifest is a Cst encoded
   * through the JSON surface (M12) — no ad-hoc JSON strings.
   *
-  * MIGRATION-PLAN.md Phase 2 (fourth slice): `plan` is the pure half —
-  * computes every `Project` record and every file to write, without
-  * touching disk. `emitAll` is now a thin execution wrapper over
-  * `system-handler.Filesystem`. `plan` stays here rather than moving to
-  * `core`: `obligationsManifest` needs `cairn.workbench.JsonSurface`, and
-  * `core` cannot depend on `workbench` (the dependency runs the other way) —
-  * moving it would cycle. A future slice could revisit this once
-  * `JsonSurface` (confirmed I/O-free) has its own Core/Kernel-reachable home.
+  * Thin I/O façade over `core`'s port-generation engine (`Ports2`/`PortV2`)
+  * and `system-handler.Filesystem`. `plan` is the pure half — computes every
+  * `Project` record and every file to write, without touching disk —
+  * `emitAll` is the thin executor. `plan` stays here rather than moving to
+  * `core` because it still threads `java.nio.file.Path` (host project layout);
+  * a future slice could purify that to string-relative paths once a User /
+  * runtime composition root owns scaffolding.
   *
   * One deliberate behavior refinement from the pre-split version: writes now
   * happen only after the full plan succeeds, instead of incrementally as
