@@ -2,6 +2,8 @@ language meta {
   fragment meta provides meta {
     sort FragmentD tree;
     keyword language;
+    keyword surface;
+    keyword for;
     keyword fragment;
     keyword provides;
     keyword requires;
@@ -62,6 +64,7 @@ language meta {
     punct "$";
     identcont "-";
     syntax file += file : tok "language" anyident tok "{" star cat fragmentDecl tok "}";
+    syntax file += surfaceFile : tok "surface" anyident tok "for" anyident tok "{" star cat fragmentDecl tok "}";
     syntax fragmentDecl += fragmentDecl : tok "fragment" anyident opt cat providesClause opt cat requiresClause tok "{" star cat item tok "}";
     syntax providesClause += provides : tok "provides" sepby1 anyident ",";
     syntax requiresClause += requires : tok "requires" sepby1 anyident ",";
@@ -112,6 +115,7 @@ language meta {
     syntax judgRule += judgRule : tok "rule" anyident tok ":" opt sepby1 cat pat "," tok "|-" cat pat opt cat whereClause tok ";";
     syntax whereClause += whereC : tok "where" sepby1 cat pat ",";
     print file : lit "language" sp field 0 sp lit "{" nl indent sep 1 "\n" nl dedent lit "}";
+    print surfaceFile : lit "surface" sp field 0 sp lit "for" sp field 1 sp lit "{" nl indent sep 2 "\n" nl dedent lit "}";
     print fragmentDecl : lit "fragment" sp field 0 field 1 field 2 sp lit "{" nl indent sep 3 "\n" nl dedent lit "}";
     print provides : sp lit "provides" sp sep 0 ", ";
     print requires : sp lit "requires" sp sep 0 ", ";

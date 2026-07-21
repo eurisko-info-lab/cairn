@@ -13,10 +13,11 @@ import java.nio.file.{Files, Path}
   * Dependency fragments are demoted (no `top`, no `varCtor`) so leaf packs keep
   * a single surface top while still amalgamating dependency sorts/ctors/grammar.
   *
-  * Phase 2: semantic language files under `languages/<name>.cairn` may be paired
-  * with concrete surfaces at `languages/<name>/surfaces/<style>.cairn`. Closing a
-  * pack binds the requested surface (default `"default"`) before compose.
-  * Fused packs (no `surfaces/` dir — e.g. meta) keep grammar in the language file.
+  * Phase 2/3: semantic language files under `languages/<name>.cairn` may be paired
+  * with concrete surfaces at `languages/<name>/surfaces/<style>.cairn`
+  * (`surface <style> for <name> { … }`). Closing a pack binds the requested surface
+  * (default `"default"`) before compose. Fused packs (no `surfaces/` dir — e.g. meta)
+  * keep grammar in the language file.
   */
 object PackLoader:
   val DefaultSurface: String = "default"
@@ -73,8 +74,11 @@ object PackLoader:
             val packs = Files.list(surfRoot).iterator.asScala
               .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
               .map { p =>
-                Meta.parseLanguageAst(Files.readString(p)) match
-                  case Right((style, fs)) =>
+                Meta.parseSurfaceAst(Files.readString(p)) match
+                  case Right((style, lang, fs)) =>
+                    if lang != langName then
+                      throw RuntimeException(
+                        s"surface pack $p declares for '$lang' but lives under languages/$langName/")
                     style -> SurfacePack(style, langName, fs)
                   case Left(err) =>
                     throw RuntimeException(s"failed to parse surface pack $p: $err")

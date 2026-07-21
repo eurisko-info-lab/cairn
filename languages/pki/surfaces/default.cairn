@@ -1,4 +1,4 @@
-language default {
+surface default for pki {
   fragment certs {
     keyword cert;
     keyword key;

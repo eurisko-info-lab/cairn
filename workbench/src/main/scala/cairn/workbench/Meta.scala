@@ -30,7 +30,7 @@ object Meta:
     requires = Nil,
     sorts = List(SortDef("FragmentD", SortMode.Tree)),
     grammar = GrammarPart(
-      keywords = List("language", "fragment", "provides", "requires", "sort", "tree", "graph",
+      keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
         "ctor", "binds", "in", "varctor", "keyword", "punct", "identcont", "syntax", "print",
         "infix", "over", "tag", "prec", "left", "right", "rule", "judgment", "top",
         "tok", "tokfield", "name", "anyident", "num", "str", "restofline", "cat", "opt",
@@ -42,6 +42,9 @@ object Meta:
         CategorySpec("file", List(
           ConstructorSpec("file", List(
             Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok("{"),
+            Elem.Star(Elem.Cat("fragmentDecl")), Elem.Tok("}"))),
+          ConstructorSpec("surfaceFile", List(
+            Elem.Tok("surface"), Elem.AnyIdentLeaf, Elem.Tok("for"), Elem.AnyIdentLeaf, Elem.Tok("{"),
             Elem.Star(Elem.Cat("fragmentDecl")), Elem.Tok("}"))))),
         CategorySpec("fragmentDecl", List(
           ConstructorSpec("fragmentDecl", List(
@@ -131,6 +134,11 @@ object Meta:
         PrintRule("file", List(
           PrintSeg.Lit("language"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("{"),
           PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
+          PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
+        PrintRule("surfaceFile", List(
+          PrintSeg.Lit("surface"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+          PrintSeg.Lit("for"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("{"),
+          PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(2, "\n"),
           PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
         PrintRule("fragmentDecl", List(
           PrintSeg.Lit("fragment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Field(1), PrintSeg.Field(2),
@@ -385,7 +393,19 @@ object Meta:
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("file", List(Cst.Leaf(name), Cst.Node("list", frags))) =>
         seq(frags.map(elaborateFragment)).map(name -> _)
+      case Cst.Node("surfaceFile", _) =>
+        Left("expected language file, got surface file (use parseSurfaceAst)")
       case other => Left(s"not a language file: ${other.render}")
+    }
+
+  /** Parse a `surface STYLE for LANG { fragment* }` file (Phase 3). */
+  def parseSurfaceAst(src: String): Either[String, (String, String, List[Fragment])] =
+    Parser.parse(grammar, src).flatMap {
+      case Cst.Node("surfaceFile", List(Cst.Leaf(style), Cst.Leaf(lang), Cst.Node("list", frags))) =>
+        seq(frags.map(elaborateFragment)).map((style, lang, _))
+      case Cst.Node("file", _) =>
+        Left("expected surface file, got language file (use parseLanguageAst)")
+      case other => Left(s"not a surface file: ${other.render}")
     }
 
   /** Parse a self-contained `language NAME { fragment* }` file into a composed language. */
@@ -471,9 +491,16 @@ object Meta:
   def encodeLanguage(name: String, fragments: List[Fragment]): Cst =
     n("file", leaf(name), lst(fragments.map(encode)))
 
+  def encodeSurface(name: String, language: String, fragments: List[Fragment]): Cst =
+    n("surfaceFile", leaf(name), leaf(language), lst(fragments.map(encode)))
+
   /** Render a whole language as meta-surface text. */
   def printLanguage(name: String, fragments: List[Fragment]): Either[String, String] =
     Printer.print(grammar, encodeLanguage(name, fragments))
+
+  /** Render a surface pack as `surface NAME for LANG { … }` text. */
+  def printSurface(name: String, language: String, fragments: List[Fragment]): Either[String, String] =
+    Printer.print(grammar, encodeSurface(name, language, fragments))
 
   /** Format-preserving regeneration: reprints ONLY the declarations that
     * actually changed, splicing original source bytes — comments included,
@@ -602,6 +629,66 @@ object Meta:
                     val req = if requires.isEmpty then "" else s" requires ${requires.mkString(", ")}"
                     val leading = workOut.tokens.headOption.map(_.leading).getOrElse("")
                     Right(s"$leading" + s"language $name {\n  fragment $fname$prov$req {" + itemsText + "\n  }\n}")
+              case _ => fullReprint
+          case _ => fullReprint
+      case _ => fullReprint
+
+  /** Format-preserving surface regeneration (Fragment source vs on-disk text). */
+  def printSurfacePreservingFormat(
+      name: String, language: String, fragments: List[Fragment], currentText: String,
+  ): Either[String, String] =
+    def fullReprint: Either[String, String] = printSurface(name, language, fragments)
+    if fragments.length != 1 then fullReprint
+    else
+      Parser.parseFull(grammar, currentText) match
+        case Left(_) => fullReprint
+        case Right(out) =>
+          (out.cst, encodeSurface(name, language, fragments)) match
+            case (Cst.Node("surfaceFile", List(Cst.Leaf(n2), Cst.Leaf(l2), Cst.Node("list", List(origFragCst)))),
+                  Cst.Node("surfaceFile", List(_, _, Cst.Node("list", List(canonFragCst)))))
+                if n2 == name && l2 == language =>
+              (origFragCst, canonFragCst) match
+                case (Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", origItems))),
+                      Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", canonItems))))
+                    if origItems.length == canonItems.length =>
+                  spliceItems(out, currentText, origItems, canonItems) match
+                    case Left(_) => fullReprint
+                    case Right(itemsText) =>
+                      val f = fragments.head
+                      val prov = if f.provides.isEmpty then "" else s" provides ${f.provides.mkString(", ")}"
+                      val req = if f.requires.isEmpty then "" else s" requires ${f.requires.mkString(", ")}"
+                      val leading = out.tokens.headOption.map(_.leading).getOrElse("")
+                      Right(s"$leading" + s"surface $name for $language {\n  fragment ${f.name}$prov$req {" +
+                        itemsText + "\n  }\n}")
+                case _ => fullReprint
+            case _ => fullReprint
+
+  /** Format-preserving surface regeneration against a separate baseline (e.g. git HEAD). */
+  def printSurfacePreservingFormatVsReference(
+      name: String, language: String, workingText: String, referenceText: String,
+  ): Either[String, String] =
+    def fullReprint: Either[String, String] =
+      parseSurfaceAst(workingText).flatMap((n2, l2, fs) => printSurface(n2, l2, fs))
+    (Parser.parseFull(grammar, workingText), Parser.parseFull(grammar, referenceText)) match
+      case (Right(workOut), Right(refOut)) =>
+        (workOut.cst, refOut.cst) match
+          case (Cst.Node("surfaceFile", List(Cst.Leaf(n2), Cst.Leaf(l2), Cst.Node("list", List(workFragCst)))),
+                Cst.Node("surfaceFile", List(Cst.Leaf(n3), Cst.Leaf(l3), Cst.Node("list", List(refFragCst)))))
+              if n2 == name && n3 == name && l2 == language && l3 == language =>
+            (workFragCst, refFragCst) match
+              case (Cst.Node("fragmentDecl", List(Cst.Leaf(fname), provCst, reqCst, Cst.Node("list", workItems))),
+                    Cst.Node("fragmentDecl", List(_, _, _, Cst.Node("list", refItems))))
+                  if workItems.length == refItems.length =>
+                spliceItemsVsReference(workOut, workingText, refItems, workItems) match
+                  case Left(_) => fullReprint
+                  case Right(itemsText) =>
+                    val provides = optClauseNames(provCst)
+                    val requires = optClauseNames(reqCst)
+                    val prov = if provides.isEmpty then "" else s" provides ${provides.mkString(", ")}"
+                    val req = if requires.isEmpty then "" else s" requires ${requires.mkString(", ")}"
+                    val leading = workOut.tokens.headOption.map(_.leading).getOrElse("")
+                    Right(s"$leading" + s"surface $name for $language {\n  fragment $fname$prov$req {" +
+                      itemsText + "\n  }\n}")
               case _ => fullReprint
           case _ => fullReprint
       case _ => fullReprint

@@ -75,6 +75,20 @@ import cairn.surface.Cli
         java.nio.file.Files.writeString(path, text)
         text
 
+      def writeFromSurface(
+          path: java.nio.file.Path, style: String, language: String, fragments: List[cairn.kernel.Fragment],
+      ): String =
+        java.nio.file.Files.createDirectories(path.getParent)
+        val text = onDisk(path) match
+          case Some(existing) =>
+            cairn.workbench.Meta.printSurfacePreservingFormat(style, language, fragments, existing)
+              .fold(e => { System.err.println(e); sys.exit(1) }, identity)
+          case None =>
+            cairn.workbench.Meta.printSurface(style, language, fragments)
+              .fold(e => { System.err.println(e); sys.exit(1) }, identity)
+        java.nio.file.Files.writeString(path, text)
+        text
+
       /** Exemplar packs: semantic `languages/<name>.cairn` + surface under
         * `languages/<name>/surfaces/default.cairn`. Format-preserve each against
         * git HEAD so CI's `git diff languages/` stays meaningful.
@@ -82,7 +96,7 @@ import cairn.surface.Cli
       def writeExemplarPair(name: String): (String, String) =
         val semPath = dir.resolve(s"$name.cairn")
         val surfPath = dir.resolve(name).resolve("surfaces").resolve("default.cairn")
-        def rewrite(path: java.nio.file.Path, langName: String): String =
+        def rewriteLanguage(path: java.nio.file.Path, langName: String): String =
           val working = onDisk(path).getOrElse(
             throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
           val text = gitHeadVersion(path) match
@@ -96,19 +110,33 @@ import cairn.surface.Cli
                 case Left(e) => System.err.println(e); sys.exit(1)
           java.nio.file.Files.writeString(path, text)
           text
-        (rewrite(semPath, name), rewrite(surfPath, "default"))
+        def rewriteSurface(path: java.nio.file.Path, style: String, language: String): String =
+          val working = onDisk(path).getOrElse(
+            throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
+          val text = gitHeadVersion(path) match
+            case Some(headText) =>
+              cairn.workbench.Meta.printSurfacePreservingFormatVsReference(style, language, working, headText)
+                .fold(e => { System.err.println(e); sys.exit(1) }, identity)
+            case None =>
+              cairn.workbench.Meta.parseSurfaceAst(working) match
+                case Right((n, l, fs)) =>
+                  cairn.workbench.Meta.printSurface(n, l, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
+                case Left(e) => System.err.println(e); sys.exit(1)
+          java.nio.file.Files.writeString(path, text)
+          text
+        (rewriteLanguage(semPath, name), rewriteSurface(surfPath, "default", name))
 
       val stlcText = writeFromFragments(dir.resolve("stlc.cairn"), "stlc", cairn.examples.stlc.Stlc.fragments)
-      val stlcSurf = writeFromFragments(
+      val stlcSurf = writeFromSurface(
         dir.resolve("stlc").resolve("surfaces").resolve("default.cairn"),
-        "default",
+        "default", "stlc",
         cairn.examples.stlc.Stlc.surfaceFragments)
       val metaText = writeFromFragments(dir.resolve("meta.cairn"), "meta", List(cairn.workbench.Meta.fragment))
       for name <- List("pki", "law", "sds", "search") do
         val (sem, surf) = writeExemplarPair(name)
         println(s"wrote languages/$name.cairn (${sem.length} bytes) + surfaces/default.cairn (${surf.length} bytes)")
       println(s"wrote languages/stlc.cairn (${stlcText.length} bytes) + surfaces/default.cairn (${stlcSurf.length} bytes)")
-      println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; surface split deferred)")
+      println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; Meta describes surface tops)")
     case other =>
       Cli.main(other, packs, portModules) match
         case Right(out) => println(out)

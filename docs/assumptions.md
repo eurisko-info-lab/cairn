@@ -49,8 +49,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     packs (PKI/Law/SDS/Search) are `.cairn` source of truth and load at
     runtime. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds:
     semantic `languages/<name>.cairn` + `languages/<name>/surfaces/default.cairn`.
-    Meta remains fused until a Meta `surface` top (Phase 3) without breaking
-    the bootstrap fixpoint.
+    **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
+    `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
+    unisoncore) split the same way. Meta itself stays fused (bootstrap fixpoint)
+    while describing the surface top.
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental

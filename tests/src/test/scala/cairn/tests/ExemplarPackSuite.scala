@@ -5,6 +5,7 @@ import cairn.workbench.*
 import cairn.examples.pki.Pki
 import cairn.examples.law.{Law, LawTutorial}
 import cairn.examples.sds.Sds
+import cairn.examples.stlc.Stlc
 
 /** Exemplar languages as `.cairn` data + PKI → Law → SDS dependency DAG. */
 class ExemplarPackSuite extends munit.FunSuite:
@@ -73,10 +74,11 @@ class ExemplarPackSuite extends munit.FunSuite:
       assertEquals(back._1, name)
       assertEquals(back._2.map(_.digest), fs.map(_.digest))
       val surf = PackLoader.requireSurface(name)
-      val sText = Meta.printLanguage(surf.name, surf.fragments).fold(e => fail(e), identity)
-      val sBack = Meta.parseLanguageAst(sText).fold(e => fail(e), identity)
+      val sText = Meta.printSurface(surf.name, surf.language, surf.fragments).fold(e => fail(e), identity)
+      val sBack = Meta.parseSurfaceAst(sText).fold(e => fail(e), identity)
       assertEquals(sBack._1, surf.name)
-      assertEquals(sBack._2.map(_.digest), surf.fragments.map(_.digest))
+      assertEquals(sBack._2, surf.language)
+      assertEquals(sBack._3.map(_.digest), surf.fragments.map(_.digest))
 
   test("language digest ignores surface edits"):
     val lang = PackLoader.requireClosed("search")
@@ -86,6 +88,17 @@ class ExemplarPackSuite extends munit.FunSuite:
       PackLoader.bindSurface(PackLoader.requireOwn("search"), surf)).fold(e => fail(e.map(_.render).mkString), identity)
     assertEquals(rebound.digest, lang.digest)
     assertEquals(rebound.grammar, lang.grammar)
+
+  test("alternate STLC surface changes surface digest, not language digest"):
+    val langDefault = PackLoader.requireClosed("stlc")
+    val langHs = PackLoader.requireClosed("stlc", "haskell-style")
+    assertEquals(langHs.digest, langDefault.digest)
+    val dSurf = PackLoader.requireSurface("stlc", "default")
+    val hsSurf = PackLoader.requireSurface("stlc", "haskell-style")
+    assert(dSurf.digest != hsSurf.digest)
+    // haskell-style uses `lam` instead of `fun`
+    val term = Parser.parse(langHs.grammar, "lam x : Bool . x").fold(e => fail(e), identity)
+    assertEquals(term, Stlc.idBool)
 
   test("free ΔL is derived only — add/remove via Delta.deltaOf, not on disk"):
     val dl = Delta.deltaOf(Pki.language).fold(e => fail(e.map(_.render).mkString), identity)

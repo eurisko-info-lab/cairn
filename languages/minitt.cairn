@@ -12,39 +12,6 @@ language minitt {
     ctor succ : Term(Term);
     ctor natRec : Term(Term, Term, Term, Term);
     varctor var;
-    keyword Type;
-    keyword Type1;
-    keyword Pi;
-    keyword fun;
-    keyword Nat;
-    keyword zero;
-    keyword succ;
-    keyword rec;
-    punct "(";
-    punct ")";
-    punct ":";
-    punct ".";
-    punct ",";
-    syntax term += sort0 : tok "Type";
-    syntax term += sort1 : tok "Type1";
-    syntax term += pi : tok "Pi" name tok ":" cat term tok "." cat term;
-    syntax term += lam : tok "fun" name tok ":" cat term tok "." cat term;
-    syntax term += app : tok "(" cat term cat term tok ")";
-    syntax term += natTy : tok "Nat";
-    syntax term += zero : tok "zero";
-    syntax term += succ : tok "succ" tok "(" cat term tok ")";
-    syntax term += natRec : tok "rec" tok "(" cat term tok "," cat term tok "," cat term tok "," cat term tok ")";
-    syntax term += var : name;
-    print sort0 : lit "Type";
-    print sort1 : lit "Type1";
-    print pi : lit "Pi" sp field 0 sp lit ":" sp field 1 sp lit "." sp field 2;
-    print lam : lit "fun" sp field 0 sp lit ":" sp field 1 sp lit "." sp field 2;
-    print app : lit "(" field 0 sp field 1 lit ")";
-    print natTy : lit "Nat";
-    print zero : lit "zero";
-    print succ : lit "succ(" field 0 lit ")";
-    print natRec : lit "rec(" field 0 lit "," field 1 lit "," field 2 lit "," field 3 lit ")";
-    print var : field 0;
     rule beta : app(lam($x, $A, $b), $v) => $subst($b, $x, $v);
     rule iota-zero : natRec($mo, $z, $s, zero()) => $z;
     rule iota-succ : natRec($mo, $z, $s, succ($n)) => app(app($s, $n), natRec($mo, $z, $s, $n));
@@ -61,6 +28,5 @@ language minitt {
       rule t-rec : hasType($ctx, $z, app($mo, zero())), hasType($ctx, $s, pi($k, natTy(), pi($ih, app($mo, var($k)), app($mo, succ(var($k)))))), hasType($ctx, $n, natTy()) |- hasType($ctx, natRec($mo, $z, $s, $n), $U) where $defeq($U, app($mo, $n));
       rule t-conv : hasType($ctx, $e, $T1) |- hasType($ctx, $e, $T2) where $defeq($T1, $T2);
     }
-    top term;
   }
 }

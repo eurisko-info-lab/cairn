@@ -115,7 +115,7 @@ user-declarable ADTs/abilities.
 
 ## MiniTT — the formal-methods IR ladder's dependent-types rung (§8b)
 
-`languages/minitt.cairn` + `examples/minitt` (`MiniTT` glue). A minimal,
+`languages/minitt.cairn` + `languages/minitt/surfaces/default.cairn` + `examples/minitt` (`MiniTT` glue). A minimal,
 closed dependent type core — Π types, a 2-level non-cumulative universe
 hierarchy (`Type : Type1`, `Type1` itself untyped), and one hardcoded `Nat`
 inductive with a dependent-motive recursor — checked by the *same* generic
@@ -202,7 +202,7 @@ open problem in mathematics) and undecidable by Cairn's kernel (a decidable
 syntactic term checker, §2b/L2, with no business in continuous complex
 analysis).
 
-`languages/riemann.cairn` is a small standalone (no `requires`) grammar for
+`languages/riemann.cairn` + `languages/riemann/surfaces/default.cairn` is a small standalone (no `requires`) pack for
 analytic propositions (`Term`/`RExpr`/`Prop` sorts). `examples/riemann/Riemann.scala`
 builds the standard critical-strip formalization — "∀s, (ζ(s)=0 ∧ 0<Re(s)<1)
 → Re(s)=1/2" — as a `cairn.proof.Claim`, and projects it to Lean, referencing

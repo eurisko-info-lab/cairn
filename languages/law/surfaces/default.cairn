@@ -1,4 +1,4 @@
-language default {
+surface default for law {
   fragment statutes {
     keyword section;
     keyword heading;

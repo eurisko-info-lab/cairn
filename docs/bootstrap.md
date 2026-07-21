@@ -67,10 +67,12 @@ second node pull blocks + blobs by hash, replay the chain through the pure
 ## 7. Self-description (fixpoint achieved, §2b)
 
 Self-description fixpoint achieved: `workbench/Meta.scala` is a fused meta
-surface (fragment IR + grammar vocabulary) that can describe and reconstruct
+surface (fragment IR + grammar vocabulary, including the Phase 3
+`surface <style> for <lang>` top) that can describe and reconstruct
 itself — `languages/meta.cairn` matches the seed digest-for-digest
-([docs/assumptions.md](assumptions.md) §11; STATUS-2 Wave H). A separate
-`grammar.cairn` split remains deferred.
+([docs/assumptions.md](assumptions.md) §11; STATUS-2 Wave H). Meta stays fused;
+object languages split semantics vs surfaces under `languages/<name>/surfaces/`.
+A separate `grammar.cairn` split remains deferred.
 
 What stays host-backed:
 

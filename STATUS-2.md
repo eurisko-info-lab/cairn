@@ -81,8 +81,12 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   fragment/language digests. Concrete syntax for stlc/search/pki/law/sds lives
   under `languages/<name>/surfaces/default.cairn`; `PackLoader.bindSurface` /
   `requireClosed` attach the default surface. Capability `grammar` digests the
-  bound `GrammarSpec`; `surfaces` digests registered `SurfacePack`s. **Meta
-  stays fused** (bootstrap fixpoint) until Phase 3 adds a Meta `surface` top.
+  bound `GrammarSpec`; `surfaces` digests registered `SurfacePack`s.
+- **Surface top (Phase 3)**: Meta parses/prints `surface <style> for <lang> { … }`.
+  Existing surfaces migrated off the interim `language <style>` hack; riemann/
+  minitt/leancore/unisoncore split. Optional STLC `haskell-style` surface proves
+  language digest is surface-invariant. **Meta stays fused** (bootstrap fixpoint)
+  but its grammar now describes the surface top.
 
 ## Success criteria (§9) — re-verified at maximal level
 

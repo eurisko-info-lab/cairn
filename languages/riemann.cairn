@@ -1,10 +1,10 @@
+-- Analytic-claims vocabulary (§2 Claim vs proof): just enough grammar to
+-- STATE propositions about the Riemann zeta function. No judgment/rule is
+-- defined here — the domain is continuous complex analysis, outside the
+-- kernel's decidable term checker (§2b/L2). Statements built in this
+-- language are Claims (see examples/riemann/Riemann.scala), never Theorems:
+-- this pack never produces a Theorem or Certificate for riemann_hypothesis.
 language riemann {
-  -- Analytic-claims vocabulary (§2 Claim vs proof): just enough grammar to
-  -- STATE propositions about the Riemann zeta function. No judgment/rule is
-  -- defined here — the domain is continuous complex analysis, outside the
-  -- kernel's decidable term checker (§2b/L2). Statements built in this
-  -- language are Claims (see examples/riemann/Riemann.scala), never Theorems:
-  -- this pack never produces a Theorem or Certificate for riemann_hypothesis.
   fragment analytic provides riemann {
     sort Term tree;
     sort RExpr tree;
@@ -22,45 +22,5 @@ language riemann {
     ctor rimplies : Prop(Prop, Prop);
     ctor forallC : Prop(Name, Prop) binds 0 in 1;
     varctor cvar;
-    keyword zeta;
-    keyword Re;
-    keyword Zero;
-    keyword One;
-    keyword Half;
-    keyword forall;
-    keyword in;
-    keyword C;
-    punct "(";
-    punct ")";
-    punct ".";
-    punct "&&";
-    punct "=>";
-    punct "<";
-    punct "=";
-    syntax term += cvar : name;
-    syntax term += zetaOf : tok "zeta" tok "(" cat term tok ")";
-    syntax rExpr += reOf : tok "Re" tok "(" cat term tok ")";
-    syntax rExpr += rzero : tok "Zero";
-    syntax rExpr += rone : tok "One";
-    syntax rExpr += rhalf : tok "Half";
-    syntax prop += isZero : cat term tok "=" tok "Zero";
-    syntax prop += req : cat rExpr tok "=" cat rExpr;
-    syntax prop += rlt : cat rExpr tok "<" cat rExpr;
-    syntax prop += rand : tok "(" cat prop tok "&&" cat prop tok ")";
-    syntax prop += rimplies : tok "(" cat prop tok "=>" cat prop tok ")";
-    syntax prop += forallC : tok "forall" name tok "in" tok "C" tok "." cat prop;
-    print cvar : field 0;
-    print zetaOf : lit "zeta" lit "(" field 0 lit ")";
-    print reOf : lit "Re" lit "(" field 0 lit ")";
-    print rzero : lit "Zero";
-    print rone : lit "One";
-    print rhalf : lit "Half";
-    print isZero : field 0 sp lit "=" sp lit "Zero";
-    print req : field 0 sp lit "=" sp field 1;
-    print rlt : field 0 sp lit "<" sp field 1;
-    print rand : lit "(" field 0 sp lit "&&" sp field 1 lit ")";
-    print rimplies : lit "(" field 0 sp lit "=>" sp field 1 lit ")";
-    print forallC : lit "forall" sp field 0 sp lit "in" sp lit "C" lit "." sp field 1;
-    top prop;
   }
 }

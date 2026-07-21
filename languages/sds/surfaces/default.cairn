@@ -1,4 +1,4 @@
-language default {
+surface default for sds {
   fragment sds-objects {
     keyword substance;
     keyword phrase;

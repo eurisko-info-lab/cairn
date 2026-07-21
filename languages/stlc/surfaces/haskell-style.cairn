@@ -1,4 +1,4 @@
-surface default for stlc {
+surface haskell-style for stlc {
   fragment base {
     punct "(";
     punct ")";
@@ -17,10 +17,10 @@ surface default for stlc {
     infix type over typeAtom : "->" tag arrow prec 1 right;
   }
   fragment lambda {
-    keyword fun;
+    keyword lam;
     punct ":";
     punct ".";
-    syntax term += lam : tok "fun" name tok ":" cat type tok "." cat term;
+    syntax term += lam : tok "lam" name tok ":" cat type tok "." cat term;
   }
   fragment booleans {
     keyword true;
