@@ -348,6 +348,45 @@ rather than an injected instance — both are the same larger, separate
 future slice: converting singleton objects into constructor-injected
 values, rippling to every consumer.
 
+## Enforce mode is now genuinely running (post-migration priority item 2)
+
+Prior finding: `Mode.Enforce` had **never actually run in the real
+program** — the only code anywhere calling `setMode(Mode.Enforce)` was
+`AuthoritySuite`'s tests, on their own throwaway local `AuthorityGate`
+instances, never on `AuthorityGate.default`. Despite `MIGRATION-PLAN.md`
+describing Phase 5 as "Enforce mode + `LedgerAppend` gate on
+`Node.append`... Done," the real singleton sat in `Audit` mode the whole
+time.
+
+All 9 gated call sites (8 handlers + `Node.append`) share one
+`AuthorityGate` instance, and `Mode` is a property of that shared
+instance, not per-family — so there is currently **no way to enforce one
+family while auditing another** (the "remaining families opt in
+incrementally via `AuthorityGate.check`" language elsewhere in this doc
+described a per-family granularity the current single-shared-instance
+design doesn't actually support — a real gap, noted rather than silently
+left inconsistent). The user chose the simpler of two fixes: enforce
+everything at once through the shared instance, rather than giving each
+family its own gate for real incremental rollout (bigger, separate design
+work).
+
+`AuthorityGate.default` now installs one bootstrap policy per known
+`Effects.Action` (`gate.install(Effects.Action.values.toList.map(...))`)
+and runs in `Mode.Enforce`. First attempt used subject `Subject("local")`
+only (matching the 8 effect handlers' placeholder) — empirical
+verification (the full suite, not just compilation) caught a real bug:
+`Node.append` authenticates as the actual signing authority
+(`Subject(authority.name)`, e.g. `"alice"`), not `"local"`, so every
+ledger-touching test failed under real enforcement. Fixed by using
+subject `"*"` (any subject) in the bootstrap policy instead.
+
+Stated honestly: this proves the `Authority.validate`/Kernel-checked code
+path works end-to-end in the real program for the first time, but it is
+**not** meaningful access control — a blanket allow-everyone-everything
+policy can't deny anything. Real enforcement needs real, distinct
+subjects and narrower policies, which needs real identity — the deferred
+"full injection" work above.
+
 ## Forbidden-import rules (ModuleBoundarySuite)
 
 - `kernel` / `core`: no filesystem, networking, or process APIs

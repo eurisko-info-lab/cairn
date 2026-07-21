@@ -3,18 +3,20 @@ package cairn.systemhandler
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.kernel.Authority.*
+import cairn.kernel.Effects
 
-/** Authority gate (Phases 4–5, priority #2 first slice). Starts in audit
-  * mode; enforcement is opt-in per family via [[enforce]]. Handlers call
+/** Authority gate (Phases 4–5, priority #2). Handlers call
   * [[check]]/[[checked]] before privileged work.
   *
   * An instantiable class (not a singleton `object`) — matching the
   * `Node`/`Cas`/`DiskCas`/`Branches` pattern already used elsewhere in
   * `system-handler` — so authority state (`mode`/`policies`/`events`) is
   * explicit and constructible rather than shared, hidden, JVM-wide mutable
-  * state. `AuthorityGate.default` is the process-wide instance the 8
-  * effect handlers and `Node.append` use today; full per-call injection
-  * (no default at all) is a separate future slice.
+  * state. A directly-constructed `AuthorityGate()` starts in `Mode.Audit`
+  * with no policies, as before; `AuthorityGate.default` (below) is
+  * special-cased into `Mode.Enforce` with a bootstrap policy already
+  * installed. Full per-call injection (no default at all) is a separate
+  * future slice.
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
@@ -74,7 +76,27 @@ object AuthorityGate:
     case Audit, Enforce
 
   /** Process-wide default instance — the 8 effect handlers and `Node.append`
-    * use this today; full per-call injection is a follow-up (priority #2,
-    * next slice).
+    * use this today; full per-call injection is a follow-up.
+    *
+    * Runs in `Mode.Enforce` with one bootstrap policy per known `Action`,
+    * allowing any subject (`"*"`) over any resource — not just the
+    * placeholder `Subject("local")` the 8 effect handlers use, since
+    * `Node.append` authenticates as the real signing authority
+    * (`Subject(authority.name)`, e.g. `"alice"`), and any subject wildcard
+    * had to cover both (confirmed the hard way: a `Subject("local")`-only
+    * policy passed compilation but broke every ledger-touching test under
+    * real `Enforce` mode). This is the first time `Enforce` mode has ever
+    * run in the real program rather than an isolated unit test — it proves
+    * the `Authority.validate`/Kernel-checked code path actually works
+    * end-to-end, but it is honestly **not** meaningful access control yet:
+    * a blanket allow-everyone-everything policy can't deny anything. Real
+    * enforcement needs real, distinct subjects and narrower policies,
+    * which needs real identity — see priority #2's deferred "full
+    * injection" work.
     */
-  val default: AuthorityGate = new AuthorityGate()
+  val default: AuthorityGate =
+    val gate = new AuthorityGate()
+    gate.install(Effects.Action.values.toList.map(a =>
+      EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow)))
+    gate.setMode(Mode.Enforce)
+    gate
