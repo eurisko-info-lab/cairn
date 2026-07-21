@@ -89,7 +89,7 @@ class WaveFSuite extends munit.FunSuite:
     assert(java.nio.file.Files.exists(dir.resolve("rust/Cargo.toml")))
     val manifest = java.nio.file.Files.readString(dir.resolve("obligations.json"))
     // manifest is valid JSON in our own surface and covers 2 theorems x 4 hosts
-    val decoded = cairn.workbench.JsonSurface.decode(manifest).fold(e => fail(e), identity)
+    val decoded = cairn.core.JsonSurface.decode(manifest).fold(e => fail(e), identity)
     decoded match
       case Cst.Node("obligations", List(Cst.Node("list", entries))) =>
         assertEquals(entries.length, 8)

@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 
 /** Format-preserving meta-surface regeneration: the follow-up to a real CI
   * incident where hand-editing `languages/search.cairn` (real declarative

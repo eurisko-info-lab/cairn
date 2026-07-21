@@ -1,7 +1,6 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.*
 
 /** M41/M42: the FULL meta surface — Cairn's fragment IR as a Cairn language.
   *

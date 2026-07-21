@@ -67,10 +67,10 @@ import cairn.surface.Cli
         java.nio.file.Files.createDirectories(path.getParent)
         val text = onDisk(path) match
           case Some(existing) =>
-            cairn.workbench.Meta.printLanguagePreservingFormat(name, fragments, existing)
+            cairn.core.Meta.printLanguagePreservingFormat(name, fragments, existing)
               .fold(e => { System.err.println(e); sys.exit(1) }, identity)
           case None =>
-            cairn.workbench.Meta.printLanguage(name, fragments)
+            cairn.core.Meta.printLanguage(name, fragments)
               .fold(e => { System.err.println(e); sys.exit(1) }, identity)
         java.nio.file.Files.writeString(path, text)
         text
@@ -81,10 +81,10 @@ import cairn.surface.Cli
         java.nio.file.Files.createDirectories(path.getParent)
         val text = onDisk(path) match
           case Some(existing) =>
-            cairn.workbench.Meta.printSurfacePreservingFormat(style, language, fragments, existing)
+            cairn.core.Meta.printSurfacePreservingFormat(style, language, fragments, existing)
               .fold(e => { System.err.println(e); sys.exit(1) }, identity)
           case None =>
-            cairn.workbench.Meta.printSurface(style, language, fragments)
+            cairn.core.Meta.printSurface(style, language, fragments)
               .fold(e => { System.err.println(e); sys.exit(1) }, identity)
         java.nio.file.Files.writeString(path, text)
         text
@@ -101,12 +101,12 @@ import cairn.surface.Cli
             throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
           val text = gitHeadVersion(path) match
             case Some(headText) =>
-              cairn.workbench.Meta.printLanguagePreservingFormatVsReference(langName, working, headText)
+              cairn.core.Meta.printLanguagePreservingFormatVsReference(langName, working, headText)
                 .fold(e => { System.err.println(e); sys.exit(1) }, identity)
             case None =>
-              cairn.workbench.Meta.parseLanguageAst(working) match
+              cairn.core.Meta.parseLanguageAst(working) match
                 case Right((n, fs)) =>
-                  cairn.workbench.Meta.printLanguage(n, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
+                  cairn.core.Meta.printLanguage(n, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
                 case Left(e) => System.err.println(e); sys.exit(1)
           java.nio.file.Files.writeString(path, text)
           text
@@ -115,12 +115,12 @@ import cairn.surface.Cli
             throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
           val text = gitHeadVersion(path) match
             case Some(headText) =>
-              cairn.workbench.Meta.printSurfacePreservingFormatVsReference(style, language, working, headText)
+              cairn.core.Meta.printSurfacePreservingFormatVsReference(style, language, working, headText)
                 .fold(e => { System.err.println(e); sys.exit(1) }, identity)
             case None =>
-              cairn.workbench.Meta.parseSurfaceAst(working) match
+              cairn.core.Meta.parseSurfaceAst(working) match
                 case Right((n, l, fs)) =>
-                  cairn.workbench.Meta.printSurface(n, l, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
+                  cairn.core.Meta.printSurface(n, l, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
                 case Left(e) => System.err.println(e); sys.exit(1)
           java.nio.file.Files.writeString(path, text)
           text
@@ -131,7 +131,7 @@ import cairn.surface.Cli
         dir.resolve("stlc").resolve("surfaces").resolve("default.cairn"),
         "default", "stlc",
         cairn.examples.stlc.Stlc.surfaceFragments)
-      val metaText = writeFromFragments(dir.resolve("meta.cairn"), "meta", List(cairn.workbench.Meta.fragment))
+      val metaText = writeFromFragments(dir.resolve("meta.cairn"), "meta", List(cairn.core.Meta.fragment))
       for name <- List("pki", "law", "sds", "search") do
         val (sem, surf) = writeExemplarPair(name)
         println(s"wrote languages/$name.cairn (${sem.length} bytes) + surfaces/default.cairn (${surf.length} bytes)")

@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.kernel.*
-import cairn.workbench.JsonSurface
+import cairn.core.JsonSurface
 import cairn.systemhandler.Filesystem
 import java.nio.file.Path
 

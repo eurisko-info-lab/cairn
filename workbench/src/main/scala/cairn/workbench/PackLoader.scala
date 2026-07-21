@@ -1,7 +1,7 @@
 package cairn.workbench
 
 import cairn.kernel.*
-import cairn.core.PackCompose
+import cairn.core.{PackCompose, Meta}
 import cairn.systemhandler.PackFiles
 import java.nio.file.Path
 

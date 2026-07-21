@@ -104,18 +104,35 @@ already depended on `kernel`; `workbench` already depended on `core`). ~40
 call sites across `examples`/`surface`/`rosetta`/`ledger`/`tests` updated
 (import-line or fully-qualified-prefix changes only — no call-site logic
 changed). **Scope boundary**: this slice moved `Grammar` only, not
-`workbench.Meta`/`workbench.Surfaces` (`JsonSurface`) — those still depend on
-the rest of `workbench` (`Delta`, `Module`, `Capabilities`) and stay put, so
-the `PackLoader`/`Scaffold` deferrals from the third/fourth slices are not
-yet resolved, though this slice is their prerequisite.
+`workbench.Meta`/`workbench.Surfaces` (`JsonSurface`) — turned out (per the
+sixth slice's research, below) that both only ever needed `Parser`/`Printer`
+from `workbench`, not `Delta`/`Module`/`Capabilities` as this doc previously
+assumed; the fifth slice was their prerequisite, not an independent guess.
+
+`core` (Phase 2, sixth slice): `workbench.Meta` (695 lines: elaborates/prints
+the full `Fragment` IR as a Cairn language — parses and re-emits language and
+surface packs, including format-preserving printing) and `workbench.Surfaces`
+(98 lines: `JsonSurface` encode/decode via the JSON grammar) moved wholesale
+to `core.Meta`/`core.Surfaces`. Both files only ever imported `cairn.kernel.*`
+and `cairn.core.*` — pure code motion again, no restructuring, no `build.sbt`
+change. This directly unblocks (but by itself only partly resolves)
+`rosetta.Scaffold`'s deferred pure `plan`: the specific blocker named in the
+fourth slice (`cairn.workbench.JsonSurface`) is gone, since `JsonSurface` now
+lives in `core` where `rosetta` already reaches; `Scaffold.plan` itself was
+not revisited in this slice. ~19 files updated: 15 needed no change (an
+existing `core.*` wildcard already in scope picked up the relocated symbols
+once compiled), 2 needed an added import (`tests/MetaPreserveFormatSuite.scala`,
+`workbench/PackLoader.scala`), 3 needed a `cairn.workbench.X` →
+`cairn.core.X` prefix fix (`examples/Main.scala`, `rosetta/Scaffold.scala`,
+`tests/WaveFSuite.scala`).
 
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
 only import updates at call sites. `user` and `runtime` do not exist yet;
-most of `workbench` (`Meta`/`Delta`/`Capabilities`) and `rosetta`'s own
-port-generation engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`,
-confirmed I/O-free but not yet relocated) still play Core's role, unsplit.
-Every exemplar language and domain pack still lives under `examples/`.
+`workbench.Delta`/`Capabilities` and `rosetta`'s own port-generation engine
+(`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`, confirmed I/O-free but not
+yet relocated) still play Core's role, unsplit. Every exemplar language and
+domain pack still lives under `examples/`.
 
 ## Forbidden-import rules
 
@@ -144,7 +161,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Fifth slice: `workbench.Grammar` (Lexer/Parser/Concrete/Printer/RoundTrip) moved wholesale to `core.Grammar`, unblocking (but not yet resolving) the third/fourth slices' deferrals. Still pending within Phase 2: `workbench.Meta`/`Surfaces`(`JsonSurface`)/`Delta`/`Capabilities`, `rosetta`'s port-generation engine |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Fifth slice: `workbench.Grammar` (Lexer/Parser/Concrete/Printer/RoundTrip) moved wholesale to `core.Grammar`, unblocking (but not yet resolving) the third/fourth slices' deferrals. Sixth slice: `workbench.Meta`+`Surfaces`(`JsonSurface`) moved wholesale to `core`, removing `Scaffold`'s specific `JsonSurface` blocker (though `Scaffold.plan` itself wasn't revisited). Still pending within Phase 2: `workbench.Delta`/`Capabilities`, `rosetta`'s port-generation engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |
