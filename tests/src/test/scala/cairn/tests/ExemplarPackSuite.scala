@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.pki.Pki
 import cairn.examples.law.{Law, LawTutorial}
 import cairn.examples.sds.Sds

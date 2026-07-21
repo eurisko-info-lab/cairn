@@ -1,4 +1,4 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
 import scala.util.boundary

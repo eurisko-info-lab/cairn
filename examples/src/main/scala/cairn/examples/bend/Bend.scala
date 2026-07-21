@@ -1,7 +1,7 @@
 package cairn.examples.bend
 
 import cairn.kernel.*
-import cairn.workbench.Parser
+import cairn.core.Parser
 import cairn.compute.*
 import cairn.examples.icnet.IcNet
 

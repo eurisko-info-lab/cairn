@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.kernel.*
-import cairn.workbench.Printer
+import cairn.core.Printer
 
 /** The four host ports (M30–M34). Every port emits by BUILDING a file Cst and
   * printing it through its file grammar — so the whole-file byte fixpoint

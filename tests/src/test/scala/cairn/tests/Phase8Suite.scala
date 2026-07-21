@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.ledger.*
 import cairn.surface.Transcript
 import cairn.examples.pki.Pki
@@ -46,7 +47,7 @@ class Phase8Suite extends munit.FunSuite:
 
   test("pki certificates parse and round-trip in the pki language (S47)"):
     val term = Pki.certTerm("alice", alice, root)
-    val printed = cairn.workbench.Printer.print(Pki.language.grammar, term).toOption.get
+    val printed = cairn.core.Printer.print(Pki.language.grammar, term).toOption.get
     assertEquals(Parser.parse(Pki.language.grammar, printed), Right(term))
 
   test("ΔPKI free duals: issue≈add, revoke≈remove (S47)"):
@@ -55,8 +56,8 @@ class Phase8Suite extends munit.FunSuite:
     assertEquals(dl.name, "Δpki")
     val rootT = Pki.rootTerm(root)
     val aliceT = Pki.certTerm("alice", alice, root)
-    val rootSrc = cairn.workbench.Printer.print(lang.grammar, rootT).toOption.get
-    val aliceSrc = cairn.workbench.Printer.print(lang.grammar, aliceT).toOption.get
+    val rootSrc = cairn.core.Printer.print(lang.grammar, rootT).toOption.get
+    val aliceSrc = cairn.core.Printer.print(lang.grammar, aliceT).toOption.get
     val change = Parser.parse(dl.grammar, s"{ add root = $rootSrc ; add alice = $aliceSrc ; }").toOption.get
     val Right((registry, _)) = Delta.apply(lang, Module(Nil), change): @unchecked
     assertEquals(registry.get("alice"), Some(aliceT))

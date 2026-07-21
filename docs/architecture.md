@@ -94,14 +94,28 @@ is now generic and reusable, but the *pure* half couldn't fully migrate to
 `core` today. A future slice could revisit once `JsonSurface` (confirmed
 I/O-free) has its own Core/Kernel-reachable home.
 
+`core` (Phase 2, fifth slice): `workbench.Grammar` (`Lexer`/`Parser`/
+`Concrete`/`Printer`/`RoundTrip`, 592 lines) moved to `core.Grammar` wholesale
+— it already imported only `cairn.kernel.*` and stdlib, so this was pure code
+motion with no internal restructuring, unlike every prior Phase 2 slice. This
+is exactly `MIGRATION-PLAN.md` §5's "Core Meta: grammar interpretation;
+parser and printer derivation." No `build.sbt` change was needed (`core`
+already depended on `kernel`; `workbench` already depended on `core`). ~40
+call sites across `examples`/`surface`/`rosetta`/`ledger`/`tests` updated
+(import-line or fully-qualified-prefix changes only — no call-site logic
+changed). **Scope boundary**: this slice moved `Grammar` only, not
+`workbench.Meta`/`workbench.Surfaces` (`JsonSurface`) — those still depend on
+the rest of `workbench` (`Delta`, `Module`, `Capabilities`) and stay put, so
+the `PackLoader`/`Scaffold` deferrals from the third/fourth slices are not
+yet resolved, though this slice is their prerequisite.
+
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
-only import updates at call sites (none at all for the third or fourth
-slice). `user` and `runtime` do not exist yet; most of `workbench`
-(`Meta`/`Grammar`/`Delta`/`Capabilities`) and `rosetta`'s own port-generation
-engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`, confirmed I/O-free
-but not yet relocated) still play Core's role, unsplit. Every exemplar
-language and domain pack still lives under `examples/`.
+only import updates at call sites. `user` and `runtime` do not exist yet;
+most of `workbench` (`Meta`/`Delta`/`Capabilities`) and `rosetta`'s own
+port-generation engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`,
+confirmed I/O-free but not yet relocated) still play Core's role, unsplit.
+Every exemplar language and domain pack still lives under `examples/`.
 
 ## Forbidden-import rules
 
@@ -130,7 +144,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Still pending within Phase 2: `workbench`'s remaining Meta/Grammar/Delta/Capabilities machinery, `rosetta`'s port-generation engine |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Fifth slice: `workbench.Grammar` (Lexer/Parser/Concrete/Printer/RoundTrip) moved wholesale to `core.Grammar`, unblocking (but not yet resolving) the third/fourth slices' deferrals. Still pending within Phase 2: `workbench.Meta`/`Surfaces`(`JsonSurface`)/`Delta`/`Capabilities`, `rosetta`'s port-generation engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |

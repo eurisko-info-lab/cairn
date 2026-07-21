@@ -2,6 +2,7 @@ package cairn.examples.riemann
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.proof.Claim
 import java.nio.file.{Files, Path}
 

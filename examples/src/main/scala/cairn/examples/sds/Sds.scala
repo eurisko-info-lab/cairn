@@ -2,6 +2,7 @@ package cairn.examples.sds
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 
 /** SDS pack (M47, §5b): Safety Data Sheet authoring — flagship of
   * `PKI → Law → SDS`. An SDS is NOT a flat document: it is a compiled view

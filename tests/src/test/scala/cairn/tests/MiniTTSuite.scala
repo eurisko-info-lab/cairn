@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.minitt.MiniTT
 
 /** MiniTT (§5b, §2c): minimal dependent type core, checked by the same

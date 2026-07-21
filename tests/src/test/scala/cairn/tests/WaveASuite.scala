@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
+import cairn.core.*
 import cairn.systemhandler.{DiskCas, CasAdmin, Chunker, DigestMigration}
 import cairn.examples.stlc.Stlc
 

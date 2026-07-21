@@ -2,6 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.systemhandler.DiskCas
 import cairn.core.TreeEngine
 import cairn.ledger.*

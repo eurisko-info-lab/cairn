@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.leancore.LeanCore
 
 /** LeanCore (§5b, §2c amendment, §8b): the formal-methods IR ladder's rung

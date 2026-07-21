@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systemhandler.DiskCas
 import cairn.surface.*
-import cairn.core.Search
+import cairn.core.{Search, Parser, Printer, RoundTrip}
 import cairn.examples.stlc.Stlc
 import cairn.examples.pki.PkiMax
 import cairn.examples.sds.Sds

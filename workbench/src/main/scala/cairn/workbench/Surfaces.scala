@@ -1,6 +1,7 @@
 package cairn.workbench
 
 import cairn.kernel.*
+import cairn.core.*
 
 /** M12: non-text surfaces (§2b). A "foreign format" is another surface INSIDE
   * the language system. JSON is itself defined as a grammar-engine language

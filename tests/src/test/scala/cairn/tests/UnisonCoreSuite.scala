@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.unison.{Unison, UnisonCore}
 
 /** UnisonCore (§5b, §2c): a real term language — closed List/Option ADTs,

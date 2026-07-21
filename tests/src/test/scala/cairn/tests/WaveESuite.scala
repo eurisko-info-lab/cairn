@@ -148,8 +148,8 @@ class WaveESuite extends munit.FunSuite:
     assertEquals(Bend.run(bendProgram), Right(Cst.node("true")))
 
   test("M29: bend surface round-trips"):
-    val cst = cairn.workbench.Parser.parse(Bend.grammar, bendProgram).fold(e => fail(e), identity)
-    cairn.workbench.RoundTrip.check(Bend.grammar, cst).fold(e => fail(e), identity)
+    val cst = cairn.core.Parser.parse(Bend.grammar, bendProgram).fold(e => fail(e), identity)
+    cairn.core.RoundTrip.check(Bend.grammar, cst).fold(e => fail(e), identity)
 
   test("M29: bend errors are honest"):
     assert(Bend.run("def main = ghost").swap.exists(_.contains("unbound variable 'ghost'")))

@@ -1,6 +1,7 @@
 package cairn.tests
 
 import cairn.workbench.*
+import cairn.core.*
 import cairn.kernel.*
 import cairn.ledger.Encryption
 import cairn.rosetta.*

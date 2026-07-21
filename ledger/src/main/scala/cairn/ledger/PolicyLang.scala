@@ -1,7 +1,8 @@
 package cairn.ledger
 
 import cairn.kernel.*
-import cairn.workbench.{Delta, Parser}
+import cairn.workbench.Delta
+import cairn.core.Parser
 
 /** M37: the branch-policy language — defined in the grammar engine like any
   * other language, so ΔPolicy exists via the generic closure.

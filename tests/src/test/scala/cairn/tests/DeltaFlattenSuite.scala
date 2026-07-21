@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.stlc.Stlc
 
 /** Δ(ΔL) — the recursive closure §2b claims (`deltaOf(deltaOf(L))`, doc

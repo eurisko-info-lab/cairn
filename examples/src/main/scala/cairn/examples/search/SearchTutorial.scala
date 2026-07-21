@@ -2,6 +2,7 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.Parser
 import cairn.systemhandler.DiskCas
 import cairn.ledger.Provenance
 import java.nio.file.{Files, Path}

@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.examples.riemann.{Riemann, RiemannTutorial}
 import java.nio.file.Files
 

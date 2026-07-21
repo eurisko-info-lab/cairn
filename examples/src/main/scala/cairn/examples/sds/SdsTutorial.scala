@@ -2,6 +2,7 @@ package cairn.examples.sds
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.ledger.{Encryption, Keypair, Node}
 import cairn.examples.pki.DemoPki
 

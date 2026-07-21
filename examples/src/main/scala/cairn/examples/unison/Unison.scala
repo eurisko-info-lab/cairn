@@ -2,6 +2,7 @@ package cairn.examples.unison
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.systeminterface.Cas
 import cairn.systemhandler.MemCas
 

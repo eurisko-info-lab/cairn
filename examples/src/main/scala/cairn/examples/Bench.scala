@@ -43,7 +43,7 @@ import cairn.examples.icnet.IcNet
 
   println("== parsing (packrat, M10) ==")
   val bigSource = (1 to 200).map(i => s"fun v$i : Bool . ").mkString + "true"
-  time("parse 200-lambda chain")(cairn.workbench.Parser.parse(lang.grammar, bigSource))
+  time("parse 200-lambda chain")(cairn.core.Parser.parse(lang.grammar, bigSource))
 
   println("== net reduction (M27) ==")
   val two = Stlc.lam1("f", Stlc.tBool,

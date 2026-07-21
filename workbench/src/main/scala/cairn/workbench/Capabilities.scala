@@ -1,6 +1,7 @@
 package cairn.workbench
 
 import cairn.kernel.*
+import cairn.core.*
 
 /** M43: the §2b capability bundle as a first-class, lintable manifest.
   *

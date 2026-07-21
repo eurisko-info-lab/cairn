@@ -2,6 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 import cairn.core.TreeEngine
 
 /** M44: a language server for ANY registered language, built entirely on the

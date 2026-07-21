@@ -1,6 +1,6 @@
 package cairn.examples.riemann
 
-import cairn.workbench.*
+import cairn.core.*
 import java.nio.file.{Files, Path}
 
 /** Thin Riemann tutorial: load the standalone analytic-claims language,
