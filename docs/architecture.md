@@ -143,24 +143,30 @@ language rather than an opaque Scala shape.
   `LspServe` was referenced nowhere outside its own declaration — a
   confirmed orphan. Asked the user directly rather than deciding silently:
   replaced it with `LspRead`/`LspWrite`, mirroring `Terminal` exactly.
-- **Vestigial families** (found while scoping the `ExternalBackend` slice,
-  by checking for a `def perform(req: X.Request)` entry point in
-  `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
-  **no handler implementation at all** — real functionality (if any) is
+- **Vestigial families — removed** (found while scoping the
+  `ExternalBackend` slice, by checking for a `def perform(req: X.Request)`
+  entry point in `system-handler/`): `Http`, `Network`, `Crypto` had **no
+  handler implementation at all** — real functionality (if any) was
   implemented elsewhere bypassing the `system-interface` contract entirely
   (HTTP: `system-handler.HttpNode`/`HttpSync`/`Distribution` and
   `surface.Browser` use raw JDK `com.sun.net.httpserver.HttpServer`
   directly; crypto: `cairn.ledger.Ed25519`/`Encryption`, not
-  `system-interface.Crypto`). Converting these to Meta-defined form would be
-  Meta-defining dead code — lower priority than the still-live families, and
-  possibly a case for removing them instead of converting them (an explicit
-  decision for later, not made here). `Cas` is a trait-based contract, not a
-  Request/Response enum family, and is out of scope for this mechanism as
-  designed.
-- **All 8 live families are now Meta-defined.** What's left of this
-  priority: the vestigial families above (convert for completeness, or
-  remove — a call for the user) and the two "not yet attempted" items
-  below.
+  `system-interface.Crypto`). The user chose removal over conversion or
+  leaving them as-is. `system-interface/{Http,Network,Crypto}.scala` and
+  their `Effects.Family`/`Action` entries are gone entirely. **Precise
+  boundary**: `LedgerTransport` was *not* wholesale-removed —
+  `Effects.Family.LedgerTransport` and `Effects.Action.LedgerAppend` are
+  real, actively gated (`Node.append`, running under real `Enforce` mode).
+  Only `system-interface/LedgerTransport.scala` (its own unused
+  `Request`/`Response`/`Error` types — `Node.append`/`Sync.pull` never
+  used them, calling methods directly instead) and the 3 dead sibling
+  actions (`LedgerPull`, `LedgerPublish`, `BranchAdvance`, zero usage
+  anywhere) were removed. `Cas` is a trait-based contract, not a
+  Request/Response enum family, and stays out of scope for this mechanism
+  as designed — untouched.
+- **All 8 live families are now Meta-defined; the vestigial ones are
+  removed.** What's left of this priority: the two "not yet attempted"
+  items below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
   hand-written Scala enum — `EffectMeta.completeness` checks it, doesn't
   replace it) and typed per-family resources (`Authority.Resource` is still
