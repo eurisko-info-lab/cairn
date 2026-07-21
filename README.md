@@ -9,26 +9,61 @@ fetch it — so meaning, not merely text, is what moves between machines.
 
 ## Host decision
 
-**Scala 3** (3.3 LTS) for all engines L0–L6, per [CAIRN-PROMPT.md](CAIRN-PROMPT.md) §6
+**Scala 3** (3.3 LTS) for the engines, per [CAIRN-PROMPT.md](CAIRN-PROMPT.md) §6
 Phase 0 / §11.2. Rosetta *targets* remain multi-host (Scala + Lean 4 ports shipped).
 Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 
-## Layout (layers L0–L6, §3)
+## Layout (post-migration)
 
-| Module | Layer | Contents |
+Trust and effect boundaries are the live module story (full detail in
+[docs/architecture.md](docs/architecture.md)):
+
+| Module | Role | Contents |
 |---|---|---|
-| `kernel/` | L0 | canonical bytes, digests, dual typed keys, artifact kinds, Cst + generic binding, fragment IR + pushout composition laws, grammar-as-data vocabulary, pure ledger transition |
-| `workbench/` | L1 | CAS (memory/disk), branches, ONE generic lexer/parser/printer, recursive ΔL generation, meta surface (self-description) |
-| `proof/` | L2 | derivation checker (independent, decidable), claims, theorems, test suites, certificates |
-| `compute/` | L3 | generic tree rewriter (rules as data), interaction-net engine (agents/ports/rules as data) |
-| `rosetta/` | L4 | interchange artifacts + round-trip-verified Scala and Lean port emitters |
-| `ledger/` | L5 | Ed25519 identities, PoA node, publication, pull sync, divergence surfacing |
-| `surface/` | L6 | CLI (`hash/put/get/canon/transcript`), transcript DSL (defined in the grammar engine itself) |
-| `examples/` | — | STLC, Claims, AffineNet, RosettaQuickSort(+App), PKI, SDS, Law, Riemann, Search, Bend, Unison (never imported by L0–L2) |
-| `tests/` | — | per-phase acceptance suites |
+| `kernel/` | Semantic TCB | Canonical bytes, digests, artifacts, fragment IR + composition laws, grammar vocabulary, derivation checker, authority models, Meta validation, pure ledger transition |
+| `core/` | Pure proposals | Grammar engine, Meta elaboration, ΔL / change algebra, search & tactics, tree + interaction-net engines, Rosetta projection engine, policy evaluation — no I/O |
+| `system-interface/` | Effect contracts | CAS trait, filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas, PackAccess |
+| `system-handler/` | Privileged I/O | MemCas / DiskCas / Branches, filesystem & process handlers, PoA node, crypto, distribution, AuthorityGate, Meta activation |
+| `user/` | Extensible data | Language packs, policies, workflows (STLC, Law, SDS, MiniTT, LeanCore, UnisonCore, AffineNet, …); may name effects, never imports handlers |
+| `runtime/` | Composition root | PackLoader — ties User + Handlers together |
 
-The sbt module graph enforces the import DAG:
-`kernel ← workbench ← {proof, compute} ← rosetta ← ledger ← surface ← examples ← tests`.
+Key prohibition: `user ↛ system-handler`.
+
+### Compatibility façades
+
+Older PLAN.md layers L0–L6 survive as thin shims / surface I/O — **not** owners of
+CAS, grammar, ΔL, or Meta:
+
+| Module | What it actually is |
+|---|---|
+| `workbench/` | Re-exports `runtime.PackLoader` |
+| `compute/` | Re-exports `core` net engine / builder |
+| `proof/` | Certification / property helpers on top of Core + Kernel |
+| `rosetta/` | Scaffold emit façade (projection engine lives in `core`) |
+| `ledger/` | Re-exports handler crypto/node/distribution + `user` PolicyLang |
+| `surface/` | CLI, transcript DSL, LSP, Web explorer |
+| `examples/` | Host-glue demos (PKI, SDS sealing, Search, Riemann, …); never imported by Kernel/Core |
+| `tests/` | Acceptance suites |
+
+sbt enforces the DAG (façades sit above the real graph):
+
+```text
+kernel
+core                → kernel
+system-interface    → kernel
+system-handler      → kernel, core, system-interface
+user                → kernel, core, system-interface
+runtime             → user, system-handler, core, kernel, system-interface
+
+workbench           → runtime (+ kernel, core, system-handler)
+proof               → workbench, core, kernel
+compute             → workbench, core
+rosetta             → proof, compute, core, system-handler
+ledger              → rosetta, system-interface, system-handler, user
+surface             → ledger, runtime, system-handler
+examples            → surface, user, runtime
+tests               → examples, runtime, user
+```
 
 ## Quick start
 
@@ -52,18 +87,21 @@ host port. Languages in [languages/](languages/) load at runtime — adding one
 requires no recompilation (the meta surface is self-describing: see the bootstrap
 fixpoint in [languages/meta.cairn](languages/meta.cairn)). Exemplar apps
 **PKI → Law → SDS** are `.cairn` languages with fragment `requires`/`provides`
-([docs/exemplars.md](docs/exemplars.md)); Scala under `examples/` is host glue.
-Riemann is a separate, standalone `.cairn` pack demonstrating `Claim` vs
-`Theorem` (§2) on a genuinely open problem — exploratory, not a parity item
+([docs/exemplars.md](docs/exemplars.md)); Scala under `examples/` is host glue,
+with pure pack defs in `user/`. Riemann is a separate, standalone `.cairn` pack
+demonstrating `Claim` vs `Theorem` (§2) on a genuinely open problem — exploratory,
+not a parity item
 (see [docs/exemplars.md](docs/exemplars.md#riemann--an-open-claim-not-a-parity-item)).
 Search is another standalone pack: Fact–Intent–Hint board objects on CAS
 ([docs/exemplars.md](docs/exemplars.md#search--factintenthint-board-spine)).
 
 ## Documents
 
+- [docs/architecture.md](docs/architecture.md) — **module / trust / effect boundaries (source of truth)**
 - [PLAN.md](PLAN.md) — the original 50-story plan (S1–S50, all landed)
 - [PLAN-2.md](PLAN-2.md) — the 50-story maximalization plan (M1–M50, all landed)
 - [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations, **parity vs sources**
+- [MIGRATION-PLAN.md](MIGRATION-PLAN.md) — Kernel/Core/System/User refactor (phases 0–8 landed)
 - [docs/bootstrap.md](docs/bootstrap.md) — empty CAS → published STLC in one sitting
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),
