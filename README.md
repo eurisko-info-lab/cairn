@@ -15,8 +15,9 @@ Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 
 ## Layout (post-migration)
 
-Trust and effect boundaries are the live module story (full detail in
-[docs/architecture.md](docs/architecture.md)):
+Trust and effect boundaries are the live module story (current detail in
+[docs/architecture.md](docs/architecture.md); migration archaeology in
+[docs/migration-history.md](docs/migration-history.md)):
 
 | Module | Role | Contents |
 |---|---|---|
@@ -97,11 +98,12 @@ Search is another standalone pack: Fact–Intent–Hint board objects on CAS
 
 ## Documents
 
-- [docs/architecture.md](docs/architecture.md) — **module / trust / effect boundaries (source of truth)**
+- [docs/architecture.md](docs/architecture.md) — **current** module / trust / effect boundaries (source of truth)
+- [docs/migration-history.md](docs/migration-history.md) — chronological archaeology (superseded designs, phase narrative)
 - [PLAN.md](PLAN.md) — the original 50-story plan (S1–S50, all landed)
 - [PLAN-2.md](PLAN-2.md) — the 50-story maximalization plan (M1–M50, all landed)
 - [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations, **parity vs sources**
-- [MIGRATION-PLAN.md](MIGRATION-PLAN.md) — Kernel/Core/System/User refactor (phases 0–8 landed)
+- [MIGRATION-PLAN.md](MIGRATION-PLAN.md) — Kernel/Core/System/User refactor operational plan (phases 0–8 landed)
 - [docs/bootstrap.md](docs/bootstrap.md) — empty CAS → published STLC in one sitting
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),

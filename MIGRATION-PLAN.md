@@ -282,7 +282,8 @@ Before moving code:
 1. Record the current head and generated-language digests.
 2. Run the complete test, transcript, language-sync and fuzz suites.
 3. Add characterization tests around every cross-module behavior.
-4. Add `docs/architecture.md` with the target boundaries.
+4. Add `docs/architecture.md` with the target boundaries (current source of
+   truth; chronological notes later split to `docs/migration-history.md`).
 5. Add forbidden-import checks.
 
 Examples of forbidden imports:
@@ -343,10 +344,11 @@ Acceptance:
 
 Create `core/` and migrate pure proposal machinery.
 
-**Progress (ground truth in `docs/architecture.md`):** slices 1–10 landed —
-Search/Tactics, TreeEngine, PackCompose, Filesystem extraction, Grammar, Meta/
-Surfaces, Delta/ModuleSurface/Capabilities+Query, ChangeAlgebra/Merge/Migrate,
-the Rosetta port-generation engine, and the optional `Scaffold.plan` revisit
+**Progress (phase narrative in `docs/migration-history.md`; current Core
+surface in `docs/architecture.md`):** slices 1–10 landed — Search/Tactics,
+TreeEngine, PackCompose, Filesystem extraction, Grammar, Meta/Surfaces,
+Delta/ModuleSurface/Capabilities+Query, ChangeAlgebra/Merge/Migrate, the
+Rosetta port-generation engine, and the optional `Scaffold.plan` revisit
 (`core.ScaffoldPlan` with relative-path purity; `rosetta.Scaffold` remains the
 thin I/O façade). **Phase 2 Core introduction is complete.** `workbench` holds
 only `PackLoader`; `rosetta` holds only `Scaffold` emit over Filesystem.
@@ -476,7 +478,8 @@ examples  → user language packs (where moved)
 rosetta   → Scaffold emit façade (engine already in core)
 ```
 
-`docs/architecture.md` updated. Module DAG matches the diamond + runtime root.
+`docs/architecture.md` holds the current boundaries; phase archaeology lives in
+`docs/migration-history.md`. Module DAG matches the diamond + runtime root.
 
 **AuthorityGate / PackAccess injection — DONE.** No ambient
 `PackAccess.get`/`install` or `AuthorityGate.default`/`forFamily`. Composition
