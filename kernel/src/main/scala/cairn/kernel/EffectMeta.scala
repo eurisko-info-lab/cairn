@@ -156,7 +156,7 @@ object EffectMeta:
       CtorDef("io", "Error", List("Str"))))
 
   /** All 5 requests are read-only discovery/reading (confirmed via
-    * `system-handler.PackFiles.perform` — nothing mutates), so all 5 map to
+    * `system-handler.Workspace.perform` — nothing mutates), so all 5 map to
     * the single existing `WorkspaceRead` right — a genuine 5-to-1 grouping,
     * unlike `Terminal`'s 2-to-1, with no drift to fix.
     */

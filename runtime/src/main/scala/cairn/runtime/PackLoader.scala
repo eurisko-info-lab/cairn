@@ -2,12 +2,13 @@ package cairn.runtime
 
 import cairn.kernel.*
 import cairn.core.{PackCompose, Meta}
-import cairn.systemhandler.PackFiles
+import cairn.systemhandler.Workspace
 import cairn.systeminterface.PackAccess
+import cairn.systeminterface.{Filesystem as Fs, Workspace as Ws}
 import java.nio.file.Path
 
 /** Runtime pack loader (Phase 6/8) — composition root over
-  * `system-handler.PackFiles` + `core.PackCompose`. Implements [[PackAccess]]
+  * `system-handler.Workspace` + `core.PackCompose`. Implements [[PackAccess]]
   * so User code never imports this module directly.
   */
 object PackLoader extends PackAccess:
@@ -16,11 +17,23 @@ object PackLoader extends PackAccess:
   // Install as the process-global PackAccess on first touch.
   PackAccess.install(this)
 
-  def languageDirs: List[Path] = PackFiles.languageDirs
+  private def unwrapPaths(result: Either[Ws.Error, Ws.Response], label: String): List[Path] = result match
+    case Right(Ws.Response.Paths(paths)) => paths.map(p => Path.of(p.value))
+    case Left(err) => throw RuntimeException(s"$label failed: $err")
+    case Right(other) => throw RuntimeException(s"unexpected workspace response for $label: $other")
+
+  private def unwrapText(result: Either[Ws.Error, Ws.Response], label: String): String = result match
+    case Right(Ws.Response.Text(t)) => t
+    case Left(err) => throw RuntimeException(s"$label failed: $err")
+    case Right(other) => throw RuntimeException(s"unexpected workspace response for $label: $other")
+
+  def languageDirs: List[Path] =
+    unwrapPaths(Workspace.perform(Ws.Request.LanguageDirs), "languageDirs")
 
   def loadRaw(dir: Path): Map[String, List[Fragment]] =
-    PackFiles.listCairnFiles(dir).map { p =>
-      Meta.parseLanguageAst(PackFiles.readText(p)) match
+    unwrapPaths(Workspace.perform(Ws.Request.ListCairnFiles(Fs.Path(dir.toString))), "listCairnFiles").map { p =>
+      val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString))), s"readText($p)")
+      Meta.parseLanguageAst(text) match
         case Right((name, fs)) => name -> fs
         case Left(err) =>
           throw RuntimeException(s"failed to parse language pack $p: $err")
@@ -30,10 +43,13 @@ object PackLoader extends PackAccess:
     languageDirs.view.map(loadRaw).find(_.nonEmpty).getOrElse(Map.empty)
 
   def loadSurfaces(dir: Path): Map[String, Map[String, SurfacePack]] =
-    PackFiles.listSubdirs(dir).flatMap { langDir =>
+    unwrapPaths(Workspace.perform(Ws.Request.ListSubdirs(Fs.Path(dir.toString))), "listSubdirs").flatMap { langDir =>
       val langName = langDir.getFileName.toString
-      val packs = PackFiles.listSurfaceCairnFiles(langDir).map { p =>
-        Meta.parseSurfaceAst(PackFiles.readText(p)) match
+      val packs = unwrapPaths(
+        Workspace.perform(Ws.Request.ListSurfaceCairnFiles(Fs.Path(langDir.toString))), "listSurfaceCairnFiles"
+      ).map { p =>
+        val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString))), s"readText($p)")
+        Meta.parseSurfaceAst(text) match
           case Right((style, lang, fs)) =>
             if lang != langName then
               throw RuntimeException(

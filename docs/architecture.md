@@ -265,8 +265,31 @@ goes through `Process.perform` too instead of bypassing it via the old
 raw `run` — so `ExternalBackend.perform`'s own gate no longer has an
 ungated escape hatch into `Process`.
 
-**Remaining** (`PackFiles`/`Workspace`): the last family, 6 call sites in
-one file (`runtime/PackLoader.scala`) — a separate future slice.
+**`Workspace`/`PackFiles`** (done): the last of the 8 families — 6 call
+sites, all in `runtime/PackLoader.scala`, itself the system's composition
+root (its own docstring: *"Implements `PackAccess` so User code never
+imports this module directly"*). `system-handler/PackFiles.scala` actually
+defined two objects: `Workspace` (the real handler) and `PackFiles` (a
+pure compatibility alias re-exporting `Workspace`'s methods, kept because
+"call sites and `PackLoader` historically used `PackFiles`"). Confirmed
+`PackFiles` had exactly one consumer anywhere — `PackLoader`'s 6 call
+sites — so once `PackLoader` migrated onto `Workspace.perform`, `PackFiles`
+became fully dead and was **removed entirely** rather than left as an
+empty shim with nothing left to be compatible with. `PackLoader`'s own
+established convention (throw on failure, not `Either`-propagation) was
+preserved via two small private unwrap helpers, rather than threading
+`Either` through `PackLoader`'s public API (used throughout `runtime`/
+`examples`/`tests` — changing those signatures would be a much bigger,
+unrelated risk). No public `PackLoader` signature changed.
+
+**All 8 effect families are now capability-gated.** Every `perform` is the
+sole entry point for its family, with every convenience method either
+`private` or (for the two confirmed "no real effect" cases — `Filesystem.
+Resolve`, `Lsp`'s test-fixture `writeMessage`/`readMessage`) left public
+with the reasoning documented inline. All eight still run in `Audit` mode
+(never blocks) with the `Subject("local")` placeholder — flipping any
+family to `Enforce`, and replacing that placeholder with real injected
+capabilities, remain open (the latter is priority #2's territory).
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 
