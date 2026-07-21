@@ -18,7 +18,7 @@ object Terminal:
   private def readLine(): Option[String] =
     Option(in.readLine())
 
-  def perform(req: Term.Request): Either[Term.Error, Term.Response] =
+  def perform(req: Term.Request, gate: AuthorityGate): Either[Term.Error, Term.Response] =
     val action = req match
       case Term.Request.ReadLine     => Effects.Action.TerminalRead
       case Term.Request.Write(_)     => Effects.Action.TerminalWrite
@@ -27,7 +27,7 @@ object Terminal:
     // session-level resource, not a per-request one — there's no "which
     // terminal" to scope by.
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("terminal", "*"))
-    AuthorityGate.forFamily(Effects.Family.Terminal).checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
+    gate.checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
       try req match
         case Term.Request.Write(t) => write(t); Right(Term.Response.Ok)
         case Term.Request.WriteLine(t) => writeLine(t); Right(Term.Response.Ok)

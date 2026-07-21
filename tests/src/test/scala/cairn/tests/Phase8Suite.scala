@@ -1,23 +1,28 @@
 package cairn.tests
 
+import cairn.systemhandler.AuthorityGate
+import cairn.runtime.PackLoader
 import cairn.kernel.*
 import cairn.core.*
 import cairn.ledger.*
 import cairn.surface.Transcript
-import cairn.examples.pki.Pki
 import cairn.examples.stlc.Stlc
 
 /** Phase 8 acceptance (S46–S47): transcript DSL runs the MVP end-to-end;
   * PKI pack with generic ΔPKI + Ed25519 chain validation + trust anchors.
   */
 class Phase8Suite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Pki = cairn.examples.pki.Pki(packs)
+  private val ledgerGate = AuthorityGate.bootstrapped()
+  private val processGate = AuthorityGate.bootstrapped()
 
   test("mvp transcript runs from checkout (S46 acceptance, §9.9)"):
     val candidates = List("transcripts/mvp.cairn", "../transcripts/mvp.cairn").map(java.nio.file.Path.of(_))
     val path = candidates.find(java.nio.file.Files.exists(_)).getOrElse(fail("transcripts/mvp.cairn not found"))
     val src = java.nio.file.Files.readString(path)
     val work = java.nio.file.Files.createTempDirectory("cairn-mvp")
-    Transcript.run(src, Map("stlc" -> Stlc.language), work) match
+    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerGate, processGate) match
       case Right(report) =>
         assert(report.steps.exists(_.startsWith("published main")), report.render)
         assert(report.steps.exists(_.startsWith("fetched main")), report.render)
@@ -32,7 +37,7 @@ class Phase8Suite extends munit.FunSuite:
   test("transcript failure is a structured error, not silence (S46)"):
     val src = """transcript t { lang stlc ; eval "true" expect "false" ; }"""
     val work = java.nio.file.Files.createTempDirectory("cairn-bad")
-    Transcript.run(src, Map("stlc" -> Stlc.language), work) match
+    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerGate, processGate) match
       case Left(e)  => assert(e.contains("eval mismatch"), e)
       case Right(r) => fail(s"expected failure, got ${r.render}")
 
@@ -107,7 +112,7 @@ class Phase8Suite extends munit.FunSuite:
     val anchorDigest = Pki.anchorCertificateDigest(registry, "root").toOption.get
     val authority = Keypair.dev("authority")
     val auth = Map("authority" -> authority.publicBytes)
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"))
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"), AuthorityGate.bootstrapped())
     val txs = List(
       authority.signTx(Tx.RegisterIdentity("authority", authority.publicBytes)),
       authority.signTx(Tx.RecordCertificate(anchorDigest)))

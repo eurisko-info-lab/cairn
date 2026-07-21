@@ -79,6 +79,12 @@ object GrammarFuzz:
     case Elem.Block(_) | Elem.Run(_) | Elem.Adjacent1(_) => None // layout: not fuzzed
 
 class FuzzSuite extends munit.FunSuite:
+  private val packs = cairn.runtime.PackLoader(cairn.systemhandler.AuthorityGate.bootstrapped())
+  private val Pki = cairn.examples.pki.Pki(packs)
+  private val Law = cairn.examples.law.Law(packs)
+  private val Sds = cairn.examples.sds.Sds(packs)
+  private val Riemann = cairn.examples.riemann.Riemann(packs)
+  private val Search = cairn.examples.search.Search(packs)
   override def munitTimeout = scala.concurrent.duration.Duration(600, "s")
 
   private def fuzz(g0: GrammarSpec, top: String, count: Int, seed: Long, depth: Int): Int =
@@ -134,12 +140,12 @@ class FuzzSuite extends munit.FunSuite:
     // These packs only ever had hand-written golden-example round-trips before
     // this test; nothing had exercised them under random generation.
     var total = 0
-    total += fuzz(cairn.examples.pki.Pki.language.grammar, "registryItem", 5_000, seed = 10L, depth = 3)
-    total += fuzz(cairn.examples.law.Law.language.grammar, "lawObj", 5_000, seed = 11L, depth = 3)
-    total += fuzz(cairn.examples.sds.Sds.language.grammar, "sdsObj", 5_000, seed = 12L, depth = 3)
-    total += fuzz(cairn.examples.riemann.Riemann.language.grammar, "prop", 5_000, seed = 13L, depth = 4)
-    total += fuzz(cairn.examples.riemann.Riemann.LeanPort.grammar, "prop", 5_000, seed = 14L, depth = 4)
-    total += fuzz(cairn.examples.search.Search.language.grammar, "searchObj", 5_000, seed = 15L, depth = 3)
+    total += fuzz(Pki.language.grammar, "registryItem", 5_000, seed = 10L, depth = 3)
+    total += fuzz(Law.language.grammar, "lawObj", 5_000, seed = 11L, depth = 3)
+    total += fuzz(Sds.language.grammar, "sdsObj", 5_000, seed = 12L, depth = 3)
+    total += fuzz(Riemann.language.grammar, "prop", 5_000, seed = 13L, depth = 4)
+    total += fuzz(Riemann.LeanPort.grammar, "prop", 5_000, seed = 14L, depth = 4)
+    total += fuzz(Search.language.grammar, "searchObj", 5_000, seed = 15L, depth = 3)
     assert(total >= 25_000, s"only $total terms generated")
 
   test("Law 2: canonicalization idempotence holds string-first across every shipped grammar"):
@@ -148,12 +154,12 @@ class FuzzSuite extends munit.FunSuite:
     // RoundTrip's object doc) — starting from text, not from a term.
     var total = 0
     total += fuzzFixpoint(Stlc.language.grammar, "term", 5_000, seed = 20L, depth = 4)
-    total += fuzzFixpoint(cairn.examples.pki.Pki.language.grammar, "registryItem", 2_000, seed = 21L, depth = 3)
-    total += fuzzFixpoint(cairn.examples.law.Law.language.grammar, "lawObj", 2_000, seed = 22L, depth = 3)
-    total += fuzzFixpoint(cairn.examples.sds.Sds.language.grammar, "sdsObj", 2_000, seed = 23L, depth = 3)
-    total += fuzzFixpoint(cairn.examples.riemann.Riemann.language.grammar, "prop", 2_000, seed = 24L, depth = 4)
-    total += fuzzFixpoint(cairn.examples.riemann.Riemann.LeanPort.grammar, "prop", 2_000, seed = 25L, depth = 4)
-    total += fuzzFixpoint(cairn.examples.search.Search.language.grammar, "searchObj", 2_000, seed = 26L, depth = 3)
+    total += fuzzFixpoint(Pki.language.grammar, "registryItem", 2_000, seed = 21L, depth = 3)
+    total += fuzzFixpoint(Law.language.grammar, "lawObj", 2_000, seed = 22L, depth = 3)
+    total += fuzzFixpoint(Sds.language.grammar, "sdsObj", 2_000, seed = 23L, depth = 3)
+    total += fuzzFixpoint(Riemann.language.grammar, "prop", 2_000, seed = 24L, depth = 4)
+    total += fuzzFixpoint(Riemann.LeanPort.grammar, "prop", 2_000, seed = 25L, depth = 4)
+    total += fuzzFixpoint(Search.language.grammar, "searchObj", 2_000, seed = 26L, depth = 3)
     total += fuzzFixpoint(Query.language.grammar, "query", 2_000, seed = 27L, depth = 4)
     total += fuzzFixpoint(cairn.ledger.PolicyLang.language.grammar, "policyTerm", 2_000, seed = 28L, depth = 3)
     assert(total >= 15_000, s"only $total terms generated")

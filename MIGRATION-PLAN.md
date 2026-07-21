@@ -469,6 +469,12 @@ rosetta   → Scaffold emit façade (engine already in core)
 
 `docs/architecture.md` updated. Module DAG matches the diamond + runtime root.
 
+**AuthorityGate / PackAccess injection — DONE.** No ambient
+`PackAccess.get`/`install` or `AuthorityGate.default`/`forFamily`. Composition
+roots (`Main`, tests) construct `AuthorityGate.bootstrapped()` and
+`PackLoader(gate)`, pass gates into handlers/`Node`/`Lsp`/`Browser`/`Cli`, and
+construct language packs as `Law(packs)` / `Pki(packs)` / … classes.
+
 ## 7. Concrete old-to-new mapping
 
 | Current module                            | Target                   |

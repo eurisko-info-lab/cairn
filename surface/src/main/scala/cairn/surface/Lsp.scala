@@ -257,11 +257,11 @@ object Lsp:
   /** Content-Length framed serve loop (stdio or any stream pair).
     * Framing I/O lives in `system-handler.LspTransport` (Phase 3).
     */
-  def serve(cfg: LspConfig, in: java.io.InputStream, out: java.io.OutputStream): Unit =
+  def serve(cfg: LspConfig, in: java.io.InputStream, out: java.io.OutputStream, gate: cairn.systemhandler.AuthorityGate): Unit =
     val server = LspServer(cfg)
     var running = true
     while running do
-      cairn.systemhandler.LspTransport.perform(cairn.systeminterface.Lsp.Request.ReadMessage, in, out) match
+      cairn.systemhandler.LspTransport.perform(cairn.systeminterface.Lsp.Request.ReadMessage, in, out, gate) match
         case Right(cairn.systeminterface.Lsp.Response.Message(text)) =>
           JsonSurface.decodeRaw(text) match
             case Right(msg) =>
@@ -269,7 +269,7 @@ object Lsp:
               if method.contains("exit") then running = false
               else server.handle(msg).foreach(m =>
                 cairn.systemhandler.LspTransport.perform(
-                  cairn.systeminterface.Lsp.Request.WriteMessage(J.print(m)), in, out))
+                  cairn.systeminterface.Lsp.Request.WriteMessage(J.print(m)), in, out, gate))
             case Left(_) => ()
         case Right(cairn.systeminterface.Lsp.Response.SessionEnded) => running = false
         case Right(cairn.systeminterface.Lsp.Response.Ok) => () // WriteMessage's response shape; unreachable here

@@ -1,5 +1,6 @@
 package cairn.tests
 
+import cairn.systemhandler.AuthorityGate
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systemhandler.DiskCas
@@ -7,20 +8,29 @@ import cairn.surface.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.examples.pki.PkiMax
-import cairn.examples.sds.Sds
-import cairn.examples.unison.Unison
 import cairn.ledger.Keypair
 
 /** Wave H part 2 (M43–M49). */
 class WaveH2Suite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
 
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Pki = cairn.examples.pki.Pki(packs)
+  private val Sds = cairn.examples.sds.Sds(packs)
+  private val SearchPack = cairn.examples.search.Search(packs)
+  private val Riemann = cairn.examples.riemann.Riemann(packs)
+  private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
+  private val Unison = cairn.examples.unison.Unison(UnisonCore)
+  private val ledgerGate = AuthorityGate.bootstrapped()
+  private val processGate = AuthorityGate.bootstrapped()
+  private val lspGate = AuthorityGate.bootstrapped()
+
   // ---- M43: capability manifests ----
 
   test("M43: manifests for shipped languages, lint enforced"):
-    for l <- List(Stlc.language, cairn.examples.pki.Pki.language, Sds.language,
+    for l <- List(Stlc.language, Pki.language, Sds.language,
                   Query.language, cairn.ledger.PolicyLang.language) do
-      val surf = PackLoader.surfacesFor(l.name).map((n, s) => n -> s.digest)
+      val surf = packs.surfacesFor(l.name).map((n, s) => n -> s.digest)
       val m = Capabilities.build(l, Map.empty, surf).fold(e => fail(e), identity)
       assertEquals(m.artifact.kind, ArtifactKind.Capability)
       assertEquals(Capabilities.requiredRows.toSet, m.rows.keySet)
@@ -28,28 +38,28 @@ class WaveH2Suite extends munit.FunSuite:
       assert(m.render.contains("changes"))
     // lint fails on undeclared/missing rows
     val stlcM = Capabilities.build(Stlc.language, Map.empty,
-      PackLoader.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
+      packs.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows - "traces")).isLeft)
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows + ("bogus" -> Capabilities.Row.Deferred("x")))).isLeft)
 
   test("M43: Riemann/Search manifests build; obligations row can cite a real Claim"):
-    val riemannM = Capabilities.build(cairn.examples.riemann.Riemann.language, Map.empty)
+    val riemannM = Capabilities.build(Riemann.language, Map.empty)
       .fold(e => fail(e), identity)
     assertEquals(Capabilities.requiredRows.toSet, riemannM.rows.keySet)
     // Default "obligations" is PlatformProvided (not a CAS key) — Capabilities lives
     // in L1 and can't see example-layer Claims (rule 11 layering). `extra` overrides
     // with Present(claimDigest) when a pack has a real Claim artifact.
     assert(riemannM.rows("obligations").isInstanceOf[Capabilities.Row.PlatformProvided])
-    val riemannClaim = cairn.examples.riemann.Riemann.riemannHypothesisClaim
-    val riemannClaimM = Capabilities.build(cairn.examples.riemann.Riemann.language,
+    val riemannClaim = Riemann.riemannHypothesisClaim
+    val riemannClaimM = Capabilities.build(Riemann.language,
       Map("obligations" -> Capabilities.Row.Present(riemannClaim.artifact.digest)))
       .fold(e => fail(e), identity)
     assertEquals(riemannClaimM.rows("obligations"), Capabilities.Row.Present(riemannClaim.artifact.digest))
     assert(riemannClaimM.rows("obligations") != riemannM.rows("obligations"),
       "override must promote PlatformProvided → Present(claim digest)")
 
-    val searchClaim = cairn.examples.search.Search.goalMetClaim(cairn.examples.search.Search.seedBoard)
-    val searchM = Capabilities.build(cairn.examples.search.Search.language,
+    val searchClaim = SearchPack.goalMetClaim(cairn.examples.search.Search.seedBoard)
+    val searchM = Capabilities.build(SearchPack.language,
       Map("obligations" -> Capabilities.Row.Present(searchClaim.artifact.digest)))
       .fold(e => fail(e), identity)
     assertEquals(Capabilities.requiredRows.toSet, searchM.rows.keySet)
@@ -58,7 +68,7 @@ class WaveH2Suite extends munit.FunSuite:
 
   test("M43: interpreters/judgments present for stlc; platform vs deferred honest"):
     val m = Capabilities.build(Stlc.language, Map.empty,
-      PackLoader.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
+      packs.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
     assert(m.rows("interpreters").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("judgments").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("grammar").isInstanceOf[Capabilities.Row.Present])
@@ -222,7 +232,7 @@ class WaveH2Suite extends munit.FunSuite:
     cairn.systemhandler.LspTransport.writeMessage(inBytes, request)
     cairn.systemhandler.LspTransport.writeMessage(inBytes, exitNote)
     val out = new java.io.ByteArrayOutputStream()
-    Lsp.serve(lspCfg, new java.io.ByteArrayInputStream(inBytes.toByteArray), out)
+    Lsp.serve(lspCfg, new java.io.ByteArrayInputStream(inBytes.toByteArray), out, lspGate)
     val response = out.toString
     assert(response.contains("Content-Length:"), response)
     assert(response.contains("renameProvider"), response)
@@ -368,7 +378,7 @@ class WaveH2Suite extends munit.FunSuite:
     assert(doc1.contains("Causes serious eye irritation"), doc1) // non-shadowed intact
     // ledger publish
     val alice = Keypair.dev("alice")
-    val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"))
+    val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerGate)
     node.cas.put(m2.artifact)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
@@ -410,7 +420,10 @@ class WaveH2Suite extends munit.FunSuite:
     Transcript.run(src,
       Map("stlc" -> Stlc.language),
       work,
-      portModules = Map("quicksort2" -> cairn.examples.quicksort.QuickSort2.module)) match
+      portModules = Map("quicksort2" -> cairn.examples.quicksort.QuickSort2.module),
+      packLoader = packs,
+      ledgerGate = ledgerGate,
+      processGate = processGate) match
       case Right(report) =>
         assert(report.steps.exists(_.startsWith("loaded language stlc")), report.render)
         assert(report.steps.exists(_.startsWith("gossip converged")), report.render)

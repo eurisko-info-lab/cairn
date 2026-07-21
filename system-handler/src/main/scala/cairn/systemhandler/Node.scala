@@ -8,7 +8,7 @@ import java.nio.file.{Files, Path}
   * family). Moved from `ledger.Node`. All validation delegates to the pure
   * [[LedgerKernel]].
   */
-final class Node(val root: Path):
+final class Node(val root: Path, gate: AuthorityGate):
   val cas: Cas = DiskCas(root)
   private val chainFile = root.resolve("chain")
 
@@ -24,14 +24,14 @@ final class Node(val root: Path):
     blocks.flatMap(LedgerKernel.replay(authorities, _, Ed25519.verify))
 
   /** Seal and append a block of txs. Atomic under kernel validation.
-    * Phase 5: ledger append goes through [[AuthorityGate]] (audit by default).
+    * Phase 5: ledger append goes through the injected [[AuthorityGate]].
     */
   def append(authority: Keypair, authorities: Map[String, Vector[Byte]], txs: List[SignedTx]): Either[String, Block] =
     val req = Authority.EffectRequest(
       Authority.Subject(authority.name),
       Effects.Action.LedgerAppend,
       Authority.Resource("ledger", root.toString))
-    AuthorityGate.forFamily(Effects.Family.LedgerTransport).check(req).flatMap { _ =>
+    gate.check(req).flatMap { _ =>
       for
         bs <- blocks
         st <- LedgerKernel.replay(authorities, bs, Ed25519.verify)

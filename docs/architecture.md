@@ -380,13 +380,14 @@ escape hatch with zero callers anywhere in the repo — unlike
 `AuthorityGate`'s equivalent reset pattern, which was actually used, just
 badly, this one was never used at all).
 
-**Explicitly not done**: full injection — the 5 `user/` language objects
-(`Law`/`MiniTT`/`UnisonCore`/`LeanCore`/`Sds`) still call `PackAccess.get`
-rather than receiving an explicit `PackAccess` parameter, and
-`AuthorityGate`/`Node`/the 8 handlers still reach `AuthorityGate.default`
-rather than an injected instance — both are the same larger, separate
-future slice: converting singleton objects into constructor-injected
-values, rippling to every consumer.
+**Explicit injection — DONE.** Language packs are classes taking
+`PackAccess` (`Law(packs)`, `MiniTT(packs)`, …). Handlers take an explicit
+`AuthorityGate` on `perform`. `Node(root, gate)`, `PackLoader(workspaceGate)`,
+`Lsp.serve(..., gate)`, `BrowserServer.serve(..., gate)`, and `Cli.main` /
+`Transcript.run` receive distinct bootstrapped gates at composition roots
+(`examples.Main`, tests). There is no `PackAccess.get`/`install`, no
+`AuthorityGate.default`/`forFamily` registry — each composition root
+constructs fresh gates and passes them down.
 
 ## Enforce mode is now genuinely running (post-migration priority item 2)
 
@@ -424,8 +425,7 @@ Stated honestly: this proves the `Authority.validate`/Kernel-checked code
 path works end-to-end in the real program for the first time, but it is
 **not** meaningful access control — a blanket allow-everyone-everything
 policy can't deny anything. Real enforcement needs real, distinct
-subjects and narrower policies, which needs real identity — the deferred
-"full injection" work above.
+subjects and narrower policies, which needs real identity.
 
 ## Deferred work, tackled: per-family Enforce + the PackAccess bug
 
@@ -503,8 +503,8 @@ continuing to pass, not by reproducing the failure mode itself.
 - **BFT / gossip daemon / peer discovery** — deferred forever (docs/distribution.md)
 - **Separate `grammar.cairn`** — deferred (docs/bootstrap.md)
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in `examples/` because they need handler crypto/CAS/filesystem; pure language defs that can live without handlers are in `user/`
-- **Full per-family Enforce on every handler entry** — pattern established (LedgerAppend); remaining families opt in incrementally via `AuthorityGate.check`
 - **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports, `rosetta.Scaffold`) retained as documented compatibility shims
+- **Full AuthorityGate/PackAccess injection** — **DONE**: explicit constructor/`perform` params; composition roots build `AuthorityGate.bootstrapped()` + `PackLoader(gate)` and pass them; no ambient `get`/`install`/`forFamily`/`default`
 
 ## Final principle
 

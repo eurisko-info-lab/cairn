@@ -2,7 +2,6 @@ package cairn.examples.law
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.examples.pki.Pki
 
 /** Thin Law tutorial: load statute language (closed over PKI), validate
   * citations, record enacting authority as a PKI cert name, repeal via free ΔLaw.
@@ -17,11 +16,14 @@ object LawTutorial:
   )
 
   def run(): Report =
+    val packs = cairn.runtime.PackLoader(cairn.systemhandler.AuthorityGate.bootstrapped())
+    val Law = cairn.examples.law.Law(packs)
+    val Pki = cairn.examples.pki.Pki(packs)
     val lang = Law.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet
     val met = requires.subsetOf(provides)
-    val act = Law.modelAct
+    val act = cairn.examples.law.Law.modelAct
     val citationOk = Law.validate(act).isRight
     val cert = act.get("authority") match
       case Some(Cst.Node("enactedBy", List(_, Cst.Leaf(c)))) => c

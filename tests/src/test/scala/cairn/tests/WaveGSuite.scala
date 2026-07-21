@@ -1,5 +1,6 @@
 package cairn.tests
 
+import cairn.systemhandler.AuthorityGate
 import cairn.kernel.*
 import cairn.core.Module
 import cairn.core.{Parser, RoundTrip}
@@ -20,7 +21,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M35: Merkle state + inclusion proofs ----
 
   test("M35: inclusion proof verifies against root without full state"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-merkle"))
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-merkle"), AuthorityGate.bootstrapped())
     node.cas.put(Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     node.append(alice, bootAuth, List(
@@ -52,7 +53,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M36: multi-authority PoA ----
 
   test("M36: 2-of-3 rotation — add authorities by quorum, seal round-robin"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth"))
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth"), AuthorityGate.bootstrapped())
     // block 0: alice bootstraps herself as first on-chain authority
     val b0 = node.append(alice, bootAuth, List(
       alice.signTx(Tx.AddAuthority("alice", alice.publicBytes, Nil)))).fold(e => fail(e), identity)
@@ -72,7 +73,7 @@ class WaveGSuite extends munit.FunSuite:
     assertEquals(LedgerKernel.expectedSealer(st, 3), Some("alice"))
 
   test("M36: insufficient quorum rejected; removed authority cannot seal"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth2"))
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth2"), AuthorityGate.bootstrapped())
     node.append(alice, bootAuth, List(
       alice.signTx(Tx.AddAuthority("alice", alice.publicBytes, Nil)))).fold(e => fail(e), identity)
     val addBobPayload = Tx.approvalPayload(Tx.AddAuthority("bob", bob.publicBytes, Nil))
@@ -107,7 +108,7 @@ class WaveGSuite extends munit.FunSuite:
     assert(cairn.core.Delta.deltaOf(dp).isRight) // Δ(ΔPolicy)
 
   test("M37: head update violating policy rejected with policy cited"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"))
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"), AuthorityGate.bootstrapped())
     node.cas.put(Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     val certDigest = Digest.of(Canon.CStr("some-proof-cert"))
@@ -133,7 +134,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M38: HTTP sync ----
 
   test("M38: two nodes sync over localhost HTTP; interrupted pull resumes"):
-    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-a"))
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-a"), AuthorityGate.bootstrapped())
     a.cas.put(Stlc.language.artifact)
     Stlc.fragments.foreach(f => a.cas.put(f.artifact))
     a.append(alice, bootAuth,
@@ -144,7 +145,7 @@ class WaveGSuite extends munit.FunSuite:
     val http = HttpNode(a, bootAuth)
     val port = http.start()
     try
-      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-b"))
+      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-b"), AuthorityGate.bootstrapped())
       val r1 = HttpSync.pull(s"http://localhost:$port", b, bootAuth).fold(e => fail(e), identity)
       assert(r1.fetchedBlocks > 0 || r1.fetchedBlobs > 0)
       assertEquals(b.state(bootAuth).map(_.heads("main")), Right(Stlc.language.artifact.key))
@@ -157,7 +158,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M39: gossip + fork choice ----
 
   test("M39: three nodes converge; fork surfaces as an explicit reorg event"):
-    def freshNode(tag: String) = Node(java.nio.file.Files.createTempDirectory(s"cairn-gossip-$tag"))
+    def freshNode(tag: String) = Node(java.nio.file.Files.createTempDirectory(s"cairn-gossip-$tag"), AuthorityGate.bootstrapped())
     val (a, b, c) = (freshNode("a"), freshNode("b"), freshNode("c"))
     // a builds 2 blocks; b builds 1 different block; c is empty
     register(a)

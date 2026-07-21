@@ -10,8 +10,8 @@ import java.nio.file.Path
   */
 object MetaActivation:
   /** Load a `.cairn` Meta/language file from disk, elaborate, and Kernel-check. */
-  def loadAndValidate(path: Path): Either[String, ComposedLanguage] =
-    Filesystem.perform(Fs.Request.Read(Fs.Path(path.toString))) match
+  def loadAndValidate(path: Path, gate: AuthorityGate): Either[String, ComposedLanguage] =
+    Filesystem.perform(Fs.Request.Read(Fs.Path(path.toString)), gate) match
       case Left(e) => Left(e.toString)
       case Right(Fs.Response.Text(text)) =>
         Meta.parseLanguageAst(text).flatMap { (name, fragments) =>

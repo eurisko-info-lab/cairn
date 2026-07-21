@@ -3,7 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.examples.unison.{Unison, UnisonCore}
+import cairn.systemhandler.AuthorityGate
 
 /** UnisonCore (§5b, §2c): a real term language — closed List/Option ADTs,
   * pattern matching, a minimal non-resumptive `Abort` ability — checked by
@@ -14,13 +14,16 @@ import cairn.examples.unison.{Unison, UnisonCore}
   * what isn't (no user-declarable ADTs/abilities, no Unison-surface syntax).
   */
 class UnisonCoreSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
+  private val Unison = cairn.examples.unison.Unison(UnisonCore)
 
   test("unisoncore pack loads from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("unisoncore"), raw.keySet.toString)
 
   test("unisoncore composes standalone — no unmet requires"):
-    val unmet = PackLoader.unmetRequires("unisoncore", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("unisoncore", packs.loadRaw())
     assertEquals(unmet, Set.empty[String])
     UnisonCore.ownCompose match
       case Right(lang) =>
@@ -30,7 +33,7 @@ class UnisonCoreSuite extends munit.FunSuite:
       case Left(errs) => fail(errs.map(_.render).mkString)
 
   test("unisoncore.cairn text round-trips the meta surface"):
-    val fs = PackLoader.requireOwn("unisoncore")
+    val fs = packs.requireOwn("unisoncore")
     val text = Meta.printLanguage("unisoncore", fs).fold(e => fail(e), identity)
     val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
     assertEquals(back._1, "unisoncore")

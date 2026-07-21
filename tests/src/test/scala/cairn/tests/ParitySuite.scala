@@ -4,9 +4,11 @@ import cairn.kernel.*
 import cairn.ledger.Encryption
 import cairn.core.*
 import cairn.core.Ports2.*
+import cairn.systemhandler.AuthorityGate
+import cairn.runtime.PackLoader
 import cairn.examples.pki.{DemoPki, PkiMax, PkiTutorial}
 import cairn.examples.sds.{CompositionSealing, SdsTutorial}
-import cairn.examples.law.{Law, LawTutorial}
+import cairn.examples.law.LawTutorial
 import cairn.examples.quicksort.QuickSortApp
 
 /** Parity vs source top-level surfaces (GRANITE PKI/SDS/Law/encryption,
@@ -15,6 +17,10 @@ import cairn.examples.quicksort.QuickSortApp
   */
 class ParitySuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
+
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Law = cairn.examples.law.Law(packs)
+  private val Sds = cairn.examples.sds.Sds(packs)
 
   // ---- Encryption (GRANITE sharing/encryption) ----
 
@@ -78,25 +84,26 @@ class ParitySuite extends munit.FunSuite:
   // ---- Law pack (GRANITE PKI→Law→SDS middle link) ----
 
   test("parity: Law statute round-trips; citation judgment; repeal via ΔLaw"):
-    RoundTrip.check(Law.language.grammar, Law.modelAct.defs.find(_._1 == "s2").get._2)
+    val act = cairn.examples.law.Law.modelAct
+    RoundTrip.check(Law.language.grammar, act.defs.find(_._1 == "s2").get._2)
       .fold(e => fail(e), identity)
-    Law.validate(Law.modelAct).fold(e => fail(e), identity)
-    assert(Law.modelAct.get("authority").exists {
+    Law.validate(act).fold(e => fail(e), identity)
+    assert(act.get("authority").exists {
       case Cst.Node("enactedBy", List(Cst.Leaf("act"), Cst.Leaf("root"))) => true
       case _ => false
     })
     val dl = Delta.deltaOf(Law.language).fold(e => fail(e.map(_.render).mkString), identity)
     // repeal Section 1 — Section 2's citation becomes dangling
     val repeal = Parser.parse(dl.grammar, """{ remove s1 ; }""").fold(e => fail(e), identity)
-    val after = Delta.apply(Law.language, Law.modelAct, repeal).fold(e => fail(e), _._1)
+    val after = Delta.apply(Law.language, act, repeal).fold(e => fail(e), _._1)
     val errs = Law.citationCheck(after)
     assert(errs.exists(_.contains("cites Section 1")), errs.toString)
 
   test("parity: Law tutorial closes over PKI; SDS language includes Law+PKI"):
     val r = LawTutorial.run()
     assert(r.languageRequiresMet && r.citationOk && r.repealDangling)
-    assert(cairn.examples.sds.Sds.language.constructors.contains("cert"))
-    assert(cairn.examples.sds.Sds.language.constructors.contains("enactedBy"))
+    assert(Sds.language.constructors.contains("cert"))
+    assert(Sds.language.constructors.contains("enactedBy"))
 
   // ---- Rosetta QuickSort sample app (ROSETTA QuickSortOrdEffects entrypoints) ----
 

@@ -11,15 +11,15 @@ import cairn.core.*
   * `enactedBy` cites a PKI certificate name as enacting authority.
   * Scala glue: citation judgment + ΔLaw gate + model act fixture.
   */
-object Law:
-  lazy val fragments: List[Fragment] = PackAccess.get.requireOwn("law")
+final class Law(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("law")
 
   /** Own fragment only — compose fails: `requires cert` unmet without PKI. */
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("law", fragments)
 
   /** Closed language: Law + demoted PKI (cert). */
-  lazy val language: ComposedLanguage = PackAccess.get.requireClosed("law")
+  lazy val language: ComposedLanguage = packs.requireClosed("law")
 
   private val citation = """Section\s+(\S+)""".r
 
@@ -50,7 +50,8 @@ object Law:
     Delta.apply(language, m, change).flatMap { out =>
       validate(out._1).map(_ => out) }
 
-  /** Model Chemical Safety Act slice — citations + PKI enacting authority. */
+object Law:
+  /** Pure fixture — no pack load. */
   def modelAct: Module = Module(List(
     "s1" -> Cst.node("section", Cst.Leaf("1"), Cst.Leaf("Purpose"),
       Cst.Leaf("This Act governs chemical safety disclosure.")),

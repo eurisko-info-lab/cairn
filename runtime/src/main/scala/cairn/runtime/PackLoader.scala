@@ -2,7 +2,7 @@ package cairn.runtime
 
 import cairn.kernel.*
 import cairn.core.{PackCompose, Meta}
-import cairn.systemhandler.Workspace
+import cairn.systemhandler.{AuthorityGate, Workspace}
 import cairn.systeminterface.PackAccess
 import cairn.systeminterface.{Filesystem as Fs, Workspace as Ws}
 import java.nio.file.Path
@@ -10,13 +10,11 @@ import java.nio.file.Path
 /** Runtime pack loader (Phase 6/8) — composition root over
   * `system-handler.Workspace` + `core.PackCompose`. Implements [[PackAccess]]
   * so User code never imports this module directly.
+  *
+  * Constructed with an explicit Workspace-family [[AuthorityGate]]; there is
+  * no process-global install or ambient fallback.
   */
-object PackLoader extends PackAccess:
-  export PackCompose.{DefaultSurface, demote, bindSurface}
-
-  // Install as the process-global PackAccess on first touch.
-  PackAccess.install(this)
-
+final class PackLoader(workspaceGate: AuthorityGate) extends PackAccess:
   private def unwrapPaths(result: Either[Ws.Error, Ws.Response], label: String): List[Path] = result match
     case Right(Ws.Response.Paths(paths)) => paths.map(p => Path.of(p.value))
     case Left(err) => throw RuntimeException(s"$label failed: $err")
@@ -28,11 +26,11 @@ object PackLoader extends PackAccess:
     case Right(other) => throw RuntimeException(s"unexpected workspace response for $label: $other")
 
   def languageDirs: List[Path] =
-    unwrapPaths(Workspace.perform(Ws.Request.LanguageDirs), "languageDirs")
+    unwrapPaths(Workspace.perform(Ws.Request.LanguageDirs, workspaceGate), "languageDirs")
 
   def loadRaw(dir: Path): Map[String, List[Fragment]] =
-    unwrapPaths(Workspace.perform(Ws.Request.ListCairnFiles(Fs.Path(dir.toString))), "listCairnFiles").map { p =>
-      val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString))), s"readText($p)")
+    unwrapPaths(Workspace.perform(Ws.Request.ListCairnFiles(Fs.Path(dir.toString)), workspaceGate), "listCairnFiles").map { p =>
+      val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceGate), s"readText($p)")
       Meta.parseLanguageAst(text) match
         case Right((name, fs)) => name -> fs
         case Left(err) =>
@@ -43,12 +41,12 @@ object PackLoader extends PackAccess:
     languageDirs.view.map(loadRaw).find(_.nonEmpty).getOrElse(Map.empty)
 
   def loadSurfaces(dir: Path): Map[String, Map[String, SurfacePack]] =
-    unwrapPaths(Workspace.perform(Ws.Request.ListSubdirs(Fs.Path(dir.toString))), "listSubdirs").flatMap { langDir =>
+    unwrapPaths(Workspace.perform(Ws.Request.ListSubdirs(Fs.Path(dir.toString)), workspaceGate), "listSubdirs").flatMap { langDir =>
       val langName = langDir.getFileName.toString
       val packs = unwrapPaths(
-        Workspace.perform(Ws.Request.ListSurfaceCairnFiles(Fs.Path(langDir.toString))), "listSurfaceCairnFiles"
+        Workspace.perform(Ws.Request.ListSurfaceCairnFiles(Fs.Path(langDir.toString)), workspaceGate), "listSurfaceCairnFiles"
       ).map { p =>
-        val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString))), s"readText($p)")
+        val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceGate), s"readText($p)")
         Meta.parseSurfaceAst(text) match
           case Right((style, lang, fs)) =>
             if lang != langName then
@@ -71,12 +69,12 @@ object PackLoader extends PackAccess:
       name: String,
       packs: Map[String, List[Fragment]],
       surfaces: Map[String, Map[String, SurfacePack]] = Map.empty,
-      surface: String = DefaultSurface,
+      surface: String = PackLoader.DefaultSurface,
   ): Either[List[ComposeError], ComposedLanguage] =
     PackCompose.close(name, packs, surfaces, surface)
 
   def close(name: String): Either[List[ComposeError], ComposedLanguage] =
-    close(name, loadRaw(), loadSurfaces(), DefaultSurface)
+    close(name, loadRaw(), loadSurfaces(), PackLoader.DefaultSurface)
 
   def close(name: String, surface: String): Either[List[ComposeError], ComposedLanguage] =
     close(name, loadRaw(), loadSurfaces(), surface)
@@ -84,16 +82,16 @@ object PackLoader extends PackAccess:
   def requireOwn(name: String): List[Fragment] =
     loadRaw().getOrElse(name, throw RuntimeException(s"language pack '$name' not found under languages/"))
 
-  def requireSurface(lang: String, surface: String = DefaultSurface): SurfacePack =
+  def requireSurface(lang: String, surface: String = PackLoader.DefaultSurface): SurfacePack =
     surfacesFor(lang).getOrElse(surface,
       throw RuntimeException(s"surface '$surface' for language '$lang' not found under languages/$lang/surfaces/"))
 
-  def requireClosed(name: String, surface: String = DefaultSurface): ComposedLanguage =
+  def requireClosed(name: String, surface: String = PackLoader.DefaultSurface): ComposedLanguage =
     close(name, surface).fold(
       e => throw RuntimeException(e.map(_.render).mkString("\n")),
       identity)
 
-  def loadClosed(dir: Path, surface: String = DefaultSurface): Map[String, ComposedLanguage] =
+  def loadClosed(dir: Path, surface: String = PackLoader.DefaultSurface): Map[String, ComposedLanguage] =
     val raw = loadRaw(dir)
     val surfaces = loadSurfaces(dir)
     raw.keys.flatMap(n => close(n, raw, surfaces, surface).toOption.map(n -> _)).toMap
@@ -103,3 +101,6 @@ object PackLoader extends PackAccess:
 
   def unmetRequires(name: String, packs: Map[String, List[Fragment]]): Set[String] =
     PackCompose.unmetRequires(name, packs)
+
+object PackLoader:
+  export PackCompose.{DefaultSurface, demote, bindSurface}

@@ -3,7 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.examples.minitt.MiniTT
+import cairn.systemhandler.AuthorityGate
 
 /** MiniTT (§5b, §2c): minimal dependent type core, checked by the same
   * generic kernel Checker/Search as STLC/PKI. See MiniTT.scala's doc
@@ -12,13 +12,15 @@ import cairn.examples.minitt.MiniTT
   * polymorphism, no user inductives, no tactics/elaboration, not Lean).
   */
 class MiniTTSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val MiniTT = cairn.examples.minitt.MiniTT(packs)
 
   test("minitt pack loads from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("minitt"), raw.keySet.toString)
 
   test("minitt composes standalone — no unmet requires"):
-    val unmet = PackLoader.unmetRequires("minitt", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("minitt", packs.loadRaw())
     assertEquals(unmet, Set.empty[String])
     MiniTT.ownCompose match
       case Right(lang) =>
@@ -28,7 +30,7 @@ class MiniTTSuite extends munit.FunSuite:
       case Left(errs) => fail(errs.map(_.render).mkString)
 
   test("minitt.cairn text round-trips the meta surface"):
-    val fs = PackLoader.requireOwn("minitt")
+    val fs = packs.requireOwn("minitt")
     val text = Meta.printLanguage("minitt", fs).fold(e => fail(e), identity)
     val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
     assertEquals(back._1, "minitt")

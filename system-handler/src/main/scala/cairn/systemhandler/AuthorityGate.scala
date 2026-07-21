@@ -8,15 +8,17 @@ import cairn.kernel.Effects
 /** Authority gate (Phases 4–5, priority #2). Handlers call
   * [[check]]/[[checked]] before privileged work.
   *
-  * An instantiable class (not a singleton `object`) — matching the
-  * `Node`/`Cas`/`DiskCas`/`Branches` pattern already used elsewhere in
-  * `system-handler` — so authority state (`mode`/`policies`/`events`) is
-  * explicit and constructible rather than shared, hidden, JVM-wide mutable
-  * state. A directly-constructed `AuthorityGate()` starts in `Mode.Audit`
-  * with no policies, as before; `AuthorityGate.forFamily` (below) hands
-  * out one bootstrapped, `Mode.Enforce` instance per [[Effects.Family]], so
-  * families can genuinely diverge instead of sharing one JVM-wide switch.
-  * Full per-call injection (no registry at all) is a separate future slice.
+  * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
+  * pattern already used elsewhere in `system-handler` — so authority state
+  * (`mode`/`policies`/`events`) is explicit and constructible rather than
+  * shared, hidden, JVM-wide mutable state. Callers pass a gate instance
+  * explicitly (constructor injection on `Node`, method parameter on effect
+  * handler `perform`s). There is no process-global registry or default
+  * instance: composition roots and tests construct gates and pass them down.
+  *
+  * A directly-constructed `AuthorityGate()` starts in `Mode.Audit` with no
+  * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with the
+  * allow-all bootstrap policies used by production wiring.
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
@@ -63,8 +65,8 @@ final class AuthorityGate(
 
   /** Check-then-run: denies map to the caller's own error type via
     * `onDenied`, so handlers don't hand-roll the same check/map boilerplate.
-    * In `Audit` mode (the default everywhere today) `check` never returns
-    * `Left`, so `onDenied` only fires once a family opts into `Enforce`.
+    * In `Audit` mode (the default for a fresh gate) `check` never returns
+    * `Left`, so `onDenied` only fires once a gate is put in `Enforce`.
     */
   def checked[E, A](req: EffectRequest)(onDenied: String => E)(body: => Either[E, A]): Either[E, A] =
     check(req) match
@@ -79,38 +81,19 @@ object AuthorityGate:
     Effects.Action.values.toList.map(a =>
       EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow))
 
-  /** Same bootstrap shape the old shared `default` instance used: `Mode.
-    * Enforce` with one allow policy per known `Action`, allowing any
-    * subject (`"*"`) over any resource — not just the placeholder
-    * `Subject("local")` the 8 effect handlers use, since `Node.append`
-    * authenticates as the real signing authority (`Subject(authority.name)`,
-    * e.g. `"alice"`), and any subject wildcard had to cover both (confirmed
-    * the hard way: a `Subject("local")`-only policy passed compilation but
-    * broke every ledger-touching test under real `Enforce` mode). Honestly
-    * **not** meaningful access control yet: a blanket allow-everyone-
-    * everything policy can't deny anything. Real enforcement needs real,
-    * distinct subjects and narrower policies, which needs real identity.
+  /** Production/test wiring helper: `Mode.Enforce` with one allow policy per
+    * known `Action`, allowing any subject (`"*"`) over any resource — not just
+    * the placeholder `Subject("local")` the 8 effect handlers use, since
+    * `Node.append` authenticates as the real signing authority
+    * (`Subject(authority.name)`, e.g. `"alice"`). Honestly **not** meaningful
+    * access control yet: a blanket allow-everyone-everything policy can't deny
+    * anything. Real enforcement needs real, distinct subjects and narrower
+    * policies, which needs real identity.
+    *
+    * Each call returns a **fresh** gate — never a shared singleton.
     */
-  private def bootstrap(): AuthorityGate =
+  def bootstrapped(): AuthorityGate =
     val gate = new AuthorityGate()
     gate.install(bootstrapPolicies)
     gate.setMode(Mode.Enforce)
     gate
-
-  private val registry = scala.collection.mutable.Map[Effects.Family, AuthorityGate]()
-
-  /** Per-family gate, lazily bootstrapped — replaces the single shared
-    * `default` instance from the prior slice. Each family now gets its OWN
-    * instance, so one family's `Mode`/policies can genuinely diverge from
-    * another's: `AuthorityGate.forFamily(Family.Filesystem).setMode(Mode.
-    * Audit)` affects only `Filesystem`, leaving every other family in
-    * `Enforce`. This is the actual capability gap "per-family Enforce
-    * granularity" named — full literal injection (every one of the ~30
-    * call sites, including a dozen test suites that don't test authority
-    * behavior at all, receiving an explicit `AuthorityGate` parameter with
-    * no registry at all) was considered and not done: the cost (rewriting
-    * test suites that don't exercise authority) didn't match the benefit
-    * over this registry. Available as separate future work if still wanted.
-    */
-  def forFamily(family: Effects.Family): AuthorityGate =
-    synchronized { registry.getOrElseUpdate(family, bootstrap()) }

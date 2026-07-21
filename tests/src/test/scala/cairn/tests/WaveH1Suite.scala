@@ -3,10 +3,12 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
+import cairn.systemhandler.AuthorityGate
 import cairn.examples.stlc.Stlc
 
 /** Wave H part 1 (M41–M42): full meta surface + bootstrap fixpoint. */
 class WaveH1Suite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
 
   test("M41: complete STLC written in the meta surface is digest-identical"):
     val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)
@@ -72,7 +74,7 @@ class WaveH1Suite extends munit.FunSuite:
       case other => fail(s"unexpected: ${other.render}")
 
   test("M42: checked-in language files load at runtime (no recompile)"):
-    val lang = PackLoader.requireClosed("stlc")
+    val lang = packs.requireClosed("stlc")
     assertEquals(lang.digest, Stlc.language.digest)
     assertEquals(lang.grammar, Stlc.language.grammar)
 

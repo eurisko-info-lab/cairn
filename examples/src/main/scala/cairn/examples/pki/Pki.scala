@@ -1,7 +1,7 @@
 package cairn.examples.pki
 
 import cairn.kernel.*
-import cairn.workbench.*
+import cairn.systeminterface.PackAccess
 import cairn.core.*
 import cairn.ledger.{Ed25519, Keypair}
 
@@ -12,10 +12,10 @@ import cairn.ledger.{Ed25519, Keypair}
   * (hard); soft revoke is `add` of a `revocation` term. Never materialized.
   * Scala here is host glue: Ed25519 + chain validation.
   */
-object Pki:
-  lazy val fragments: List[Fragment] = PackLoader.requireOwn("pki")
+final class Pki(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("pki")
 
-  lazy val language: ComposedLanguage = PackLoader.requireClosed("pki")
+  lazy val language: ComposedLanguage = packs.requireClosed("pki")
 
   private def hex(bs: Array[Byte]): String = bs.map(b => f"${b & 0xff}%02x").mkString
   private def unhex(s: String): Array[Byte] =

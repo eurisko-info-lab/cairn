@@ -3,9 +3,10 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.DiskCas
+import cairn.systemhandler.{AuthorityGate, DiskCas}
 import cairn.core.TreeEngine
 import cairn.ledger.*
+import cairn.runtime.PackLoader
 import java.nio.file.{Files, Path}
 
 /** Transcript DSL (S46, §2 Transcript, §7 "Transcripts are CI").
@@ -117,19 +118,34 @@ object Transcript:
 
   /** Interpret a transcript against a working directory. `packs` is the
     * language registry (domain packs stay out of the surface layer — they are
-    * injected by callers, §4.11).
+    * injected by callers, §4.11). Gates and packLoader are explicit — no
+    * ambient AuthorityGate / PackAccess.
     */
-  def run(src: String, packs: Map[String, ComposedLanguage], workDir: Path,
-          portModules: Map[String, cairn.core.RosettaModule2] = Map.empty): Either[String, Report] =
+  def run(
+      src: String,
+      packs: Map[String, ComposedLanguage],
+      workDir: Path,
+      portModules: Map[String, cairn.core.RosettaModule2] = Map.empty,
+      packLoader: PackLoader,
+      ledgerGate: AuthorityGate,
+      processGate: AuthorityGate,
+  ): Either[String, Report] =
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("transcript", List(Cst.Leaf(name), Cst.Node("list", steps))) =>
-        runSteps(name, steps, packs, workDir, portModules)
+        runSteps(name, steps, packs, workDir, portModules, packLoader, ledgerGate, processGate)
       case other => Left(s"not a transcript: ${other.render}")
     }
 
-  private def runSteps(name: String, steps: List[Cst],
-                       packsIn: Map[String, ComposedLanguage], workDir: Path,
-                       portModules: Map[String, cairn.core.RosettaModule2]): Either[String, Report] =
+  private def runSteps(
+      name: String,
+      steps: List[Cst],
+      packsIn: Map[String, ComposedLanguage],
+      workDir: Path,
+      portModules: Map[String, cairn.core.RosettaModule2],
+      packLoader: PackLoader,
+      ledgerGate: AuthorityGate,
+      processGate: AuthorityGate,
+  ): Either[String, Report] =
     var packs = packsIn
     var lang: Option[ComposedLanguage] = None
     var module = Module(Nil)
@@ -142,7 +158,7 @@ object Transcript:
         val path = workDir.resolve(n).toAbsolutePath.normalize
         Files.createDirectories(path)
         log += s"node $n at $path"
-        Node(path)
+        Node(path, ledgerGate)
       })
 
     def need: Either[String, ComposedLanguage] = lang.toRight("no language selected (use `lang NAME ;` first)")
@@ -187,9 +203,9 @@ object Transcript:
           src.flatMap { text =>
             Meta.parseLanguageAst(text).flatMap { (name, fs) =>
               val dir = Option(p.toAbsolutePath.normalize.getParent).getOrElse(Path.of("."))
-              val packsHere = PackLoader.loadRaw(dir) + (name -> fs)
-              val surfaces = PackLoader.loadSurfaces(dir)
-              PackLoader.close(name, packsHere, surfaces).left.map(_.map(_.render).mkString("\n"))
+              val packsHere = packLoader.loadRaw(dir) + (name -> fs)
+              val surfaces = packLoader.loadSurfaces(dir)
+              packLoader.close(name, packsHere, surfaces).left.map(_.map(_.render).mkString("\n"))
             }
           }.map { l =>
             packs = packs + (l.name -> l)
@@ -261,7 +277,8 @@ object Transcript:
                       Files.writeString(f, out.text)
                       cairn.systemhandler.Process.perform(
                         cairn.systeminterface.Process.Request.Run(
-                          List(cli.toString, "run", "--server=false", f.toString))
+                          List(cli.toString, "run", "--server=false", f.toString)),
+                        processGate
                       ) match
                         case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
                           Right(log += s"port $host tests pass in host")
@@ -300,11 +317,18 @@ object Transcript:
   * language requires no recompilation).
   */
 object Cli:
-  def loadLanguages(dir: Path): Map[String, ComposedLanguage] =
-    PackLoader.loadClosed(dir)
+  def loadLanguages(dir: Path, packLoader: PackLoader): Map[String, ComposedLanguage] =
+    packLoader.loadClosed(dir)
 
-  def main(args: List[String], packsIn: Map[String, ComposedLanguage],
-           portModules: Map[String, cairn.core.RosettaModule2] = Map.empty): Either[String, String] =
+  def main(
+      args: List[String],
+      packsIn: Map[String, ComposedLanguage],
+      portModules: Map[String, cairn.core.RosettaModule2] = Map.empty,
+      packLoader: PackLoader,
+      ledgerGate: AuthorityGate,
+      processGate: AuthorityGate,
+      lspGate: AuthorityGate,
+  ): Either[String, String] =
     /** Durable store root. Override with env `CAIRN_HOME`.
       * Default: `./.cas`. Each transcript writes a fresh run under
       * `$CAIRN_HOME/runs/<timestamp>/{nodeA,nodeB,…}` and prints those paths.
@@ -326,7 +350,7 @@ object Cli:
         else if Files.exists(home.resolve("chain")) then home
         else nodeA
       }
-    val packs = packsIn ++ PackLoader.loadClosed() ++ loadLanguages(Path.of("languages"))
+    val packs = packsIn ++ packLoader.loadClosed() ++ loadLanguages(Path.of("languages"), packLoader)
     args match
       case List("home") =>
         val latest = Option.when(Files.isRegularFile(home.resolve("LATEST")))(
@@ -354,7 +378,7 @@ object Cli:
           .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
         val runDir = home.resolve("runs").resolve(runId).toAbsolutePath.normalize
         Files.createDirectories(runDir)
-        Transcript.run(src, packs, runDir, portModules).map { r =>
+        Transcript.run(src, packs, runDir, portModules, packLoader, ledgerGate, processGate).map { r =>
           // Remember latest publisher for bare `ui`
           val latest = home.resolve("LATEST")
           Files.writeString(latest, runDir.toString + "\n")
@@ -368,7 +392,7 @@ object Cli:
       case List("capabilities", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'")
           .flatMap { l =>
-            val surfDigests = PackLoader.surfacesFor(langName).map((n, s) => n -> s.digest)
+            val surfDigests = packLoader.surfacesFor(langName).map((n, s) => n -> s.digest)
             Capabilities.build(l, Map.empty, surfDigests)
           }.map(_.render)
       case List("languages") =>
@@ -386,7 +410,7 @@ object Cli:
           out.result() }
       case List("lsp", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'").map { l =>
-          Lsp.serve(LspConfig(l), System.in, System.out); "lsp session ended" }
+          Lsp.serve(LspConfig(l), System.in, System.out, lspGate); "lsp session ended" }
       case "ui" :: rest =>
         val portOpt = rest.lastOption.filter(s => s.forall(_.isDigit) && s.nonEmpty).map(_.toInt)
         val rootArg = rest match
@@ -397,7 +421,7 @@ object Cli:
         val root = rootArg.map(_.toAbsolutePath.normalize).getOrElse(defaultUiRoot)
         val port = portOpt.getOrElse(8765)
         Files.createDirectories(root)
-        val bound = BrowserServer.serve(root, packs, port)
+        val bound = BrowserServer.serve(root, packs, ledgerGate, port)
         System.out.println(s"Cairn Explorer at http://127.0.0.1:$bound")
         System.out.println(s"CAIRN_HOME=$home")
         System.out.println(s"serving root=$root")

@@ -21,8 +21,10 @@ import cairn.core.*
   *     against itself would always be a no-op.
   */
 class MetaPreserveFormatSuite extends munit.FunSuite:
+  private val packs = cairn.runtime.PackLoader(cairn.systemhandler.AuthorityGate.bootstrapped())
+  private val Search = cairn.examples.search.Search(packs)
   private val name = "search"
-  private val fragments = cairn.examples.search.Search.fragments
+  private val fragments = Search.fragments
   private val canonical = Meta.printLanguage(name, fragments).fold(e => fail(e), identity)
 
   // Stable, currently-emitted declaration text used as a comment-anchor site.

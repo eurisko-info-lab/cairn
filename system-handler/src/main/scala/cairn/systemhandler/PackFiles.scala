@@ -34,7 +34,7 @@ object Workspace:
       .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
       .toList
 
-  def perform(req: Ws.Request): Either[Ws.Error, Ws.Response] =
+  def perform(req: Ws.Request, gate: AuthorityGate): Either[Ws.Error, Ws.Response] =
     // Real request target, not a wildcard, so path-scoped policies have
     // real data to match against (same pattern as Filesystem). LanguageDirs
     // takes no input — it discovers the dirs rather than targeting one —
@@ -47,7 +47,7 @@ object Workspace:
       case Ws.Request.ReadText(path)                => path.value
     val authReq = Authority.EffectRequest(
       Authority.Subject("local"), Effects.Action.WorkspaceRead, Authority.Resource("workspace", resourcePath))
-    AuthorityGate.forFamily(Effects.Family.Workspace).checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
+    gate.checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
       try req match
         case Ws.Request.LanguageDirs =>
           Right(Ws.Response.Paths(languageDirs.map(p => Fs.Path(p.toString))))

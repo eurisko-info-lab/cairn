@@ -45,7 +45,7 @@ object Filesystem:
   private def createTempDirectory(prefix: String): Path =
     Files.createTempDirectory(prefix)
 
-  def perform(req: Fs.Request): Either[Fs.Error, Fs.Response] =
+  def perform(req: Fs.Request, gate: AuthorityGate): Either[Fs.Error, Fs.Response] =
     // Resource path is the real target of the request (or, for
     // CreateTempDirectory, its prefix — the closest thing to a target it
     // has, since the actual path is OS-generated after the fact) rather
@@ -68,7 +68,7 @@ object Filesystem:
       case None => performRaw(req)
       case Some(a) =>
         val authReq = Authority.EffectRequest(Authority.Subject("local"), a, Authority.Resource("filesystem", resourcePath))
-        AuthorityGate.forFamily(Effects.Family.Filesystem).checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
+        gate.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
 
   private def performRaw(req: Fs.Request): Either[Fs.Error, Fs.Response] =
     try req match

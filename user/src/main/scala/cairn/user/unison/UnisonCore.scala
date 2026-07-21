@@ -30,13 +30,13 @@ import cairn.core.*
   * shapes (as MiniTT enumerates `Nat`'s constructors) keeps `handle`
   * honest under normal-order, root-first rewriting.
   */
-object UnisonCore:
-  lazy val fragments: List[Fragment] = PackAccess.get.requireOwn("unisoncore")
+final class UnisonCore(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("unisoncore")
 
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("unisoncore", fragments)
 
-  lazy val language: ComposedLanguage = PackAccess.get.requireClosed("unisoncore")
+  lazy val language: ComposedLanguage = packs.requireClosed("unisoncore")
 
   private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
 

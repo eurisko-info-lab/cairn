@@ -34,13 +34,13 @@ import cairn.core.*
   * bridges them with an explicit `$defeq` — same "declare the alternative
   * as another rule" idiom the judgment already uses elsewhere.
   */
-object MiniTT:
-  lazy val fragments: List[Fragment] = PackAccess.get.requireOwn("minitt")
+final class MiniTT(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("minitt")
 
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("minitt", fragments)
 
-  lazy val language: ComposedLanguage = PackAccess.get.requireClosed("minitt")
+  lazy val language: ComposedLanguage = packs.requireClosed("minitt")
 
   private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
 

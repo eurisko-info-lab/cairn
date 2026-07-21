@@ -3,7 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.examples.leancore.LeanCore
+import cairn.systemhandler.AuthorityGate
 
 /** LeanCore (§5b, §2c amendment, §8b): the formal-methods IR ladder's rung
   * past MiniTT — identity types (`Eq`/`refl`/`subst`) and a minimal
@@ -14,13 +14,15 @@ import cairn.examples.leancore.LeanCore
   * universe polymorphism, real Lean syntax).
   */
 class LeanCoreSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val LeanCore = cairn.examples.leancore.LeanCore(packs)
 
   test("leancore pack loads from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("leancore"), raw.keySet.toString)
 
   test("leancore composes standalone — no unmet requires"):
-    val unmet = PackLoader.unmetRequires("leancore", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("leancore", packs.loadRaw())
     assertEquals(unmet, Set.empty[String])
     LeanCore.ownCompose match
       case Right(lang) =>
@@ -30,7 +32,7 @@ class LeanCoreSuite extends munit.FunSuite:
       case Left(errs) => fail(errs.map(_.render).mkString)
 
   test("leancore.cairn text round-trips the meta surface"):
-    val fs = PackLoader.requireOwn("leancore")
+    val fs = packs.requireOwn("leancore")
     val text = Meta.printLanguage("leancore", fs).fold(e => fail(e), identity)
     val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
     assertEquals(back._1, "leancore")

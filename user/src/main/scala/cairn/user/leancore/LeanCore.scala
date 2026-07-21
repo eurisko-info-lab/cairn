@@ -31,13 +31,13 @@ import cairn.core.*
   * `theorem checking` here means "the value checks against the stated
   * type," not "the body is available for delta-reduction."
   */
-object LeanCore:
-  lazy val fragments: List[Fragment] = PackAccess.get.requireOwn("leancore")
+final class LeanCore(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("leancore")
 
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("leancore", fragments)
 
-  lazy val language: ComposedLanguage = PackAccess.get.requireClosed("leancore")
+  lazy val language: ComposedLanguage = packs.requireClosed("leancore")
 
   private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
 

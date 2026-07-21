@@ -1,8 +1,11 @@
 package cairn.examples.sds
 
+import cairn.systemhandler.AuthorityGate
 import cairn.kernel.*
 import cairn.core.*
 import cairn.ledger.{Encryption, Keypair, Node}
+import cairn.systemhandler.AuthorityGate
+import cairn.runtime.PackLoader
 import cairn.examples.pki.DemoPki
 
 /** Acetone tutorial spine — on par with GRANITE `SdsTutorial`: build base →
@@ -41,6 +44,7 @@ object SdsTutorial:
     "regBasis" -> Cst.node("basis", Cst.Leaf("cleanerProduct"), Cst.Leaf("3")))).sorted
 
   def run(work: java.nio.file.Path): Report =
+    val Sds = cairn.examples.sds.Sds(PackLoader(AuthorityGate.bootstrapped()))
     val base = acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
     val en = Sds.render(base, "cleanerProduct", "en").fold(e => throw RuntimeException(e), identity)
@@ -81,7 +85,7 @@ object SdsTutorial:
 
     // Ledger publish of industrial module
     val alice = Keypair.dev("alice")
-    val node = Node(work)
+    val node = Node(work, AuthorityGate.bootstrapped())
     node.cas.put(industrial.artifact)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),

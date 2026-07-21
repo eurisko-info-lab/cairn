@@ -24,13 +24,15 @@ object SearchTutorial:
 
   def run(workDir: Path = Files.createTempDirectory("cairn-search")): Report =
     Files.createDirectories(workDir)
+    val Search = cairn.examples.search.Search(
+      cairn.runtime.PackLoader(cairn.systemhandler.AuthorityGate.bootstrapped()))
     val cas = DiskCas(workDir.resolve("cas"))
     val lang = Search.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet
     val met = requires.subsetOf(provides)
 
-    val seed = Search.seedBoard
+    val seed = cairn.examples.search.Search.seedBoard
     Search.wellFormed(seed).fold(e => throw RuntimeException(e), identity)
 
     val dl = Delta.deltaOf(lang).fold(e => throw RuntimeException(e.map(_.render).mkString), identity)

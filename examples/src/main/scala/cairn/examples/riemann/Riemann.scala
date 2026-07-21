@@ -1,7 +1,7 @@
 package cairn.examples.riemann
 
 import cairn.kernel.*
-import cairn.workbench.*
+import cairn.systeminterface.PackAccess
 import cairn.core.*
 import cairn.proof.Claim
 import java.nio.file.{Files, Path}
@@ -16,14 +16,14 @@ import java.nio.file.{Files, Path}
   * mathlib's real `riemannZeta`. This pack never builds a `Theorem` or
   * `Certificate` for it: that absence is the honest statement "this is open."
   */
-object Riemann:
-  lazy val fragments: List[Fragment] = PackLoader.requireOwn("riemann")
+final class Riemann(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("riemann")
 
   /** Standalone: composes on its own (no `requires` to satisfy). */
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("riemann", fragments)
 
-  lazy val language: ComposedLanguage = PackLoader.requireClosed("riemann")
+  lazy val language: ComposedLanguage = packs.requireClosed("riemann")
 
   private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
 

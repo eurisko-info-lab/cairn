@@ -49,3 +49,23 @@ class ModuleBoundarySuite extends munit.FunSuite:
 
   test("user module sources exist"):
     assert(Files.isDirectory(Path.of("user/src/main/scala/cairn/user")))
+
+  test("no PackAccess.get/install or AuthorityGate.forFamily/default escape hatches"):
+    val roots = List(
+      "kernel", "core", "system-interface", "system-handler", "runtime",
+      "user", "surface", "examples", "rosetta", "ledger", "tests"
+    ).map(d => Path.of(s"$d/src"))
+    val banned = List(
+      "PackAccess.get", "PackAccess.install",
+      "AuthorityGate.forFamily", "AuthorityGate.default")
+    val hits =
+      for
+        root <- roots if Files.exists(root)
+        file <- scalaFilesUnder(root)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        bad <- banned.find(line.contains)
+        // allow docs of the ban itself and this suite's string literals
+        if !file.toString.contains("ModuleBoundarySuite")
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+      yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))

@@ -3,21 +3,23 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.DiskCas
+import cairn.systemhandler.{AuthorityGate, DiskCas}
 import cairn.ledger.Provenance
-import cairn.examples.search.{Search, SearchTutorial}
+import cairn.examples.search.SearchTutorial
 import java.nio.file.Files
 
 /** Fact–Intent–Hint search pack: object language + CAS provenance spine. */
 class SearchSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Search = cairn.examples.search.Search(packs)
 
   test("search pack loads from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("search"), raw.keySet.toString)
     assert(!raw.contains("dsearch"))
 
   test("search composes standalone — no unmet requires"):
-    val unmet = PackLoader.unmetRequires("search", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("search", packs.loadRaw())
     assertEquals(unmet, Set.empty[String])
     Search.ownCompose match
       case Right(lang) =>
@@ -27,7 +29,7 @@ class SearchSuite extends munit.FunSuite:
       case Left(errs) => fail(errs.map(_.render).mkString)
 
   test("search.cairn text round-trips the meta surface"):
-    val fs = PackLoader.requireOwn("search")
+    val fs = packs.requireOwn("search")
     val text = Meta.printLanguage("search", fs).fold(e => fail(e), identity)
     val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
     assertEquals(back._1, "search")
@@ -56,7 +58,7 @@ class SearchSuite extends munit.FunSuite:
     assert(!java.nio.file.Files.exists(java.nio.file.Path.of("docs/delta/Δsearch.cairn")))
 
   test("wellFormed rejects dangling edge; goalMet after Fact"):
-    val seed = Search.seedBoard
+    val seed = cairn.examples.search.Search.seedBoard
     assert(Search.wellFormed(seed).isRight)
     assert(!Search.goalMet(seed))
     val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
@@ -83,13 +85,13 @@ class SearchSuite extends munit.FunSuite:
     assert(r.languageProvides.contains("search"))
 
   test("graphOf extracts nodes and supports/spawns edges"):
-    val g = Search.graphOf(Search.seedBoard)
+    val g = Search.graphOf(cairn.examples.search.Search.seedBoard)
     assertEquals(g.nodes.map(_.kind).toSet, Set("origin", "goal"))
     val dl = Delta.deltaOf(Search.language).fold(e => fail(e.map(_.render).mkString), identity)
     val ch = Parser.parse(dl.grammar,
       """{ add i = intent "x" ; add f = fact "y" ; add e = supports i f ; }"""
     ).fold(e => fail(e), identity)
-    val board = Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+    val board = Search.applySearch(cairn.examples.search.Search.seedBoard, ch).fold(e => fail(e), _._1)
     val graph = Search.graphOf(board)
     assert(graph.edges.exists(e => e.kind == "supports" && e.from == "i" && e.to == "f"))
 
@@ -100,7 +102,7 @@ class SearchSuite extends munit.FunSuite:
     val ch = Parser.parse(dl.grammar,
       """{ add explore = intent "work" ; add finding = fact "done" ; add link = supports explore finding ; }"""
     ).fold(e => fail(e), identity)
-    val board = Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+    val board = Search.applySearch(cairn.examples.search.Search.seedBoard, ch).fold(e => fail(e), _._1)
     val intentDig = Search.putTerm(cas, board.get("explore").get)
     val factDig = Search.putFact(cas, board.get("finding").get, intentDig)
     val edge = Search.certifyEdge(cas, board, "link", factDig).fold(e => fail(e), identity)
@@ -126,7 +128,7 @@ class SearchSuite extends munit.FunSuite:
     val ch = Parser.parse(dl.grammar,
       """{ add explore = intent "work" ; add finding = fact "done" ; add link = supports explore finding ; }"""
     ).fold(e => fail(e), identity)
-    Search.applySearch(Search.seedBoard, ch).fold(e => fail(e), _._1)
+    Search.applySearch(cairn.examples.search.Search.seedBoard, ch).fold(e => fail(e), _._1)
 
   test("checkWellFormed: kernel-certified for nonempty leaf terms and resolvable edges"):
     val m = boardWithEdge

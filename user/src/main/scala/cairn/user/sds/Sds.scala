@@ -13,15 +13,15 @@ import cairn.core.*
   * Closed composition pulls Law + PKI; compose without them fails.
   * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
   */
-object Sds:
-  lazy val fragments: List[Fragment] = PackAccess.get.requireOwn("sds")
+final class Sds(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("sds")
 
   /** Own fragment only — compose fails: `requires law` unmet without Law/PKI. */
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("sds", fragments)
 
   /** Closed language: SDS + demoted Law + demoted PKI. */
-  lazy val language: ComposedLanguage = PackAccess.get.requireClosed("sds")
+  lazy val language: ComposedLanguage = packs.requireClosed("sds")
 
   // ---- domain validation (ΔSDS = generic ΔL + these checks) ----
 

@@ -3,7 +3,8 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.examples.riemann.{Riemann, RiemannTutorial}
+import cairn.systemhandler.AuthorityGate
+import cairn.examples.riemann.RiemannTutorial
 import java.nio.file.Files
 
 /** Riemann Hypothesis pack: an open claim, not a parity item (docs/exemplars.md).
@@ -12,20 +13,22 @@ import java.nio.file.Files
   * unproven (no Theorem/Certificate, no `sorry`, generated Lean is a `def`).
   */
 class RiemannSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Riemann = cairn.examples.riemann.Riemann(packs)
 
   test("riemann pack loads from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("riemann"), raw.keySet.toString)
 
   test("riemann composes standalone — no unmet requires"):
-    val unmet = PackLoader.unmetRequires("riemann", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("riemann", packs.loadRaw())
     assertEquals(unmet, Set.empty[String])
     Riemann.ownCompose match
       case Right(lang) => assert(lang.fragments.exists(_.provides.contains("riemann")))
       case Left(errs)  => fail(errs.map(_.render).mkString)
 
   test("riemann.cairn text round-trips the meta surface"):
-    val fs = PackLoader.requireOwn("riemann")
+    val fs = packs.requireOwn("riemann")
     val text = Meta.printLanguage("riemann", fs).fold(e => fail(e), identity)
     val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
     assertEquals(back._1, "riemann")

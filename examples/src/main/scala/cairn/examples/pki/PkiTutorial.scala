@@ -1,7 +1,9 @@
 package cairn.examples.pki
 
+import cairn.systemhandler.AuthorityGate
 import cairn.kernel.*
 import cairn.ledger.{Ed25519, Encryption, Keypair, Node}
+import cairn.systemhandler.AuthorityGate
 import java.security.KeyPair
 
 /** Demo PKI hierarchy on par with GRANITE `authorities/DemoPki`: root →
@@ -98,7 +100,7 @@ object PkiTutorial:
     val afterTamper = PkiMax.validate(tampered, "leaf", now, Set("root")).isLeft
 
     // Publish trust-anchor certificate digest on ledger
-    val node = Node(work)
+    val node = Node(work, AuthorityGate.bootstrapped())
     val alice = h.root.signing
     val auth = Map(alice.name -> alice.publicBytes)
     val anchorArt = Artifact(ArtifactKind.Certificate, Cst.toCanon(h.root.cert))

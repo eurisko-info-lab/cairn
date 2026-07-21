@@ -3,16 +3,19 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.examples.pki.Pki
-import cairn.examples.law.{Law, LawTutorial}
-import cairn.examples.sds.Sds
+import cairn.systemhandler.AuthorityGate
+import cairn.examples.law.LawTutorial
 import cairn.examples.stlc.Stlc
 
 /** Exemplar languages as `.cairn` data + PKI → Law → SDS dependency DAG. */
 class ExemplarPackSuite extends munit.FunSuite:
+  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val Pki = cairn.examples.pki.Pki(packs)
+  private val Law = cairn.examples.law.Law(packs)
+  private val Sds = cairn.examples.sds.Sds(packs)
 
   test("packs load from languages/*.cairn at runtime"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     assert(raw.contains("pki"), raw.keySet.toString)
     assert(raw.contains("law"), raw.keySet.toString)
     assert(raw.contains("sds"), raw.keySet.toString)
@@ -21,13 +24,13 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(!raw.contains("dpki") && !raw.contains("dlaw") && !raw.contains("dsds") && !raw.contains("dsearch"))
 
   test("PKI closes alone; provides cert"):
-    val lang = PackLoader.requireClosed("pki")
+    val lang = packs.requireClosed("pki")
     assertEquals(lang.name, "pki")
     assert(lang.fragments.exists(_.provides.contains("cert")))
     assertEquals(lang.digest, Pki.language.digest)
 
   test("Law own fragment requires cert — compose without PKI fails"):
-    val unmet = PackLoader.unmetRequires("law", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("law", packs.loadRaw())
     assertEquals(unmet, Set("cert"))
     Law.ownCompose match
       case Left(errs) =>
@@ -35,7 +38,7 @@ class ExemplarPackSuite extends munit.FunSuite:
       case Right(_) => fail("Law must not compose without PKI cert")
 
   test("SDS own fragment requires law — compose without Law fails"):
-    val unmet = PackLoader.unmetRequires("sds", PackLoader.loadRaw())
+    val unmet = packs.unmetRequires("sds", packs.loadRaw())
     assertEquals(unmet, Set("law"))
     Sds.ownCompose match
       case Left(errs) =>
@@ -43,7 +46,7 @@ class ExemplarPackSuite extends munit.FunSuite:
       case Right(_) => fail("SDS must not compose without Law")
 
   test("SDS + Law without PKI still fails (transitive cert)"):
-    val raw = PackLoader.loadRaw()
+    val raw = packs.loadRaw()
     val lawFs = raw("law")
     val sdsFs = raw("sds")
     Compose.compose("sds-no-pki", sdsFs ++ lawFs.map(PackLoader.demote)) match
@@ -52,13 +55,13 @@ class ExemplarPackSuite extends munit.FunSuite:
       case Right(_) => fail("SDS+Law without PKI must fail")
 
   test("closed Law pulls PKI; closed SDS pulls Law+PKI"):
-    val law = PackLoader.requireClosed("law")
+    val law = packs.requireClosed("law")
     assert(law.constructors.contains("cert"), "Law closed must include PKI cert")
     assert(law.constructors.contains("enactedBy"), "Law cites PKI via enactedBy")
     assert(law.fragments.exists(_.provides.contains("cert")))
     assert(law.fragments.exists(_.provides.contains("law")))
 
-    val sds = PackLoader.requireClosed("sds")
+    val sds = packs.requireClosed("sds")
     assert(sds.constructors.contains("cert"), "SDS closed must include PKI cert")
     assert(sds.constructors.contains("section") || sds.constructors.contains("enactedBy"),
       "SDS closed must include Law constructors")
@@ -69,12 +72,12 @@ class ExemplarPackSuite extends munit.FunSuite:
 
   test("exemplar .cairn text round-trips the meta surface"):
     for name <- List("pki", "law", "sds") do
-      val fs = PackLoader.requireOwn(name)
+      val fs = packs.requireOwn(name)
       val text = Meta.printLanguage(name, fs).fold(e => fail(e), identity)
       val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
       assertEquals(back._1, name)
       assertEquals(back._2.map(_.digest), fs.map(_.digest))
-      val surf = PackLoader.requireSurface(name)
+      val surf = packs.requireSurface(name)
       val sText = Meta.printSurface(surf.name, surf.language, surf.fragments).fold(e => fail(e), identity)
       val sBack = Meta.parseSurfaceAst(sText).fold(e => fail(e), identity)
       assertEquals(sBack._1, surf.name)
@@ -82,20 +85,20 @@ class ExemplarPackSuite extends munit.FunSuite:
       assertEquals(sBack._3.map(_.digest), surf.fragments.map(_.digest))
 
   test("language digest ignores surface edits"):
-    val lang = PackLoader.requireClosed("search")
-    val surf = PackLoader.requireSurface("search")
+    val lang = packs.requireClosed("search")
+    val surf = packs.requireSurface("search")
     // rebinding the same surface is identity on language digest
     val rebound = Compose.compose("search",
-      PackLoader.bindSurface(PackLoader.requireOwn("search"), surf)).fold(e => fail(e.map(_.render).mkString), identity)
+      PackLoader.bindSurface(packs.requireOwn("search"), surf)).fold(e => fail(e.map(_.render).mkString), identity)
     assertEquals(rebound.digest, lang.digest)
     assertEquals(rebound.grammar, lang.grammar)
 
   test("alternate STLC surface changes surface digest, not language digest"):
-    val langDefault = PackLoader.requireClosed("stlc")
-    val langHs = PackLoader.requireClosed("stlc", "haskell-style")
+    val langDefault = packs.requireClosed("stlc")
+    val langHs = packs.requireClosed("stlc", "haskell-style")
     assertEquals(langHs.digest, langDefault.digest)
-    val dSurf = PackLoader.requireSurface("stlc", "default")
-    val hsSurf = PackLoader.requireSurface("stlc", "haskell-style")
+    val dSurf = packs.requireSurface("stlc", "default")
+    val hsSurf = packs.requireSurface("stlc", "haskell-style")
     assert(dSurf.digest != hsSurf.digest)
     // haskell-style uses `lam` instead of `fun`
     val term = Parser.parse(langHs.grammar, "lam x : Bool . x").fold(e => fail(e), identity)

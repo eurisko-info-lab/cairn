@@ -1,8 +1,7 @@
 package cairn.examples.search
 
 import cairn.kernel.*
-import cairn.workbench.*
-import cairn.systeminterface.Cas
+import cairn.systeminterface.{Cas, PackAccess}
 import cairn.ledger.Provenance
 import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
 import cairn.core.{Search as DerivSearch, Module, Delta}
@@ -22,19 +21,13 @@ import cairn.core.{Search as DerivSearch, Module, Delta}
   * membership, which the fixed-arity rule DSL can't express) and back
   * [[certifyEdge]]'s existing test-suite certification, unchanged.
   */
-object Search:
-  lazy val fragments: List[Fragment] = PackLoader.requireOwn("search")
+final class Search(packs: PackAccess):
+  lazy val fragments: List[Fragment] = packs.requireOwn("search")
 
   def ownCompose: Either[List[ComposeError], ComposedLanguage] =
     Compose.compose("search", fragments)
 
-  lazy val language: ComposedLanguage = PackLoader.requireClosed("search")
-
-  /** Seed board: origin Fact + goal Intent. */
-  def seedBoard: Module = Module(List(
-    "start" -> Cst.node("origin", Cst.Leaf("unknown start state")),
-    "target" -> Cst.node("goal", Cst.Leaf("reach a confirmed finding"))
-  )).sorted
+  lazy val language: ComposedLanguage = packs.requireClosed("search")
 
   /** Domain gate: edge endpoints and board members must resolve. */
   def wellFormed(m: Module): Either[String, Unit] =
@@ -193,3 +186,10 @@ object Search:
           Left(s"'$edgeName' is not a supports/spawns edge: ${other.render}")
       }
     }
+
+object Search:
+  /** Pure fixture — no pack load. */
+  def seedBoard: Module = Module(List(
+    "start" -> Cst.node("origin", Cst.Leaf("unknown start state")),
+    "target" -> Cst.node("goal", Cst.Leaf("reach a confirmed finding"))
+  )).sorted

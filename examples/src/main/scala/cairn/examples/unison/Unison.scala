@@ -13,20 +13,20 @@ import cairn.systemhandler.MemCas
   *
   * Stored terms are real `UnisonCore` terms (§2c: this pack is a general-
   * purpose hosted language, peer to STLC/MiniTT — not a domain ADT, not a
-  * Unison fork) — the binding discipline is read from `UnisonCore.language`
+  * Unison fork) — the binding discipline is read from `core.language`
   * itself rather than hardcoded, so `Alpha.digest`/`normalize` see ALL of
   * its binders (`lam` plus `matchList`/`matchOption`'s pattern binders), not
   * just `lam`.
   *
-  * `Store` bodies live in `workbench.Cas` (the SAME generic content-store
+  * `Store` bodies live in `Cas` (the SAME generic content-store
   * PKI/Law's `Module`-backed registries and Search's `putTerm` already use,
   * §2c: no language reimplements its own storage) — `digests` is just a
   * local index of which of THIS store's alpha-normalized terms have been
   * added, not a second copy of the term bytes.
   */
-object Unison:
-  private val spec = UnisonCore.language.binderSpec
-  private val varCtor = UnisonCore.language.varCtor.getOrElse("var")
+final class Unison(core: UnisonCore):
+  private val spec = core.language.binderSpec
+  private val varCtor = core.language.varCtor.getOrElse("var")
 
   final case class Store(cas: Cas, digests: Set[Digest]):
     def add(term: Cst): (Digest, Store) =
