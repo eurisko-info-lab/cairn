@@ -15,7 +15,6 @@ import java.nio.file.{Files, Path}
 final class Node(val root: Path, ctx: EffectContext):
   val cas: Cas = DiskCas(root)
   private val chainFile = root.resolve("chain")
-  private def gate: AuthorityGate = ctx.gate
 
   def chainDigests: List[Digest] =
     if !Files.exists(chainFile) then Nil
@@ -29,14 +28,15 @@ final class Node(val root: Path, ctx: EffectContext):
     blocks.flatMap(LedgerKernel.replay(authorities, _, Ed25519.verify))
 
   /** Seal and append a block of txs. Atomic under kernel validation.
-    * Phase 5: ledger append goes through the injected [[AuthorityGate]].
+    * Phase 5: ledger append is authorized via [[EffectContext.authorize]]
+    * (seal identity = `Subject(authority.name)`, not the process-local subject).
     */
   def append(authority: Keypair, authorities: Map[String, Vector[Byte]], txs: List[SignedTx]): Either[String, Block] =
     val req = Authority.EffectRequest(
       Authority.Subject(authority.name),
       Effects.Action.LedgerAppend,
       Authority.Resource("ledger", root.toString))
-    gate.check(req).flatMap { _ =>
+    ctx.authorize(req).flatMap { _ =>
       for
         bs <- blocks
         st <- LedgerKernel.replay(authorities, bs, Ed25519.verify)

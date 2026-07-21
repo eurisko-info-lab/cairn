@@ -18,7 +18,7 @@ import cairn.examples.quicksort.QuickSortApp
 class ParitySuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
 
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Law = cairn.examples.law.Law(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
 

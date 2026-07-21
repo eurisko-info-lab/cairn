@@ -29,3 +29,15 @@ object PolicyEval:
 
   def denyAll(id: String, subject: Subject, action: Effects.Action): EffectPolicy =
     EffectPolicy(id, subject, action, Resource("*", "*"), Decision.Deny)
+
+  /** Narrow policies for the PackLoader / Workspace language-pack workflow:
+    * `WorkspaceRead` only, under `languages*` (see Workspace path rewrite),
+    * for a single subject. Denies other actions, subjects, and paths.
+    */
+  def packLoaderWorkspace(subject: Subject): List[EffectPolicy] =
+    List(EffectPolicy(
+      "pack-loader-workspace-read",
+      subject,
+      Effects.Action.WorkspaceRead,
+      Resource("workspace", "languages*"),
+      Decision.Allow))

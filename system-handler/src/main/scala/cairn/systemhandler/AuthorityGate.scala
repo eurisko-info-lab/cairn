@@ -5,22 +5,21 @@ import cairn.kernel.Authority
 import cairn.kernel.Authority.*
 import cairn.kernel.Effects
 
-/** Authority gate (Phases 4–5, priority #2). Handlers call
-  * [[check]]/[[checked]] before privileged work.
+/** Authority gate (Phases 4–5, priority #2). Composition roots authorize via
+  * [[EffectContext.authorize]] (which calls [[check]]); handlers accept only
+  * [[AuthorizedEffect]] and must not call [[check]]/[[checked]] themselves.
   *
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
   * (`mode`/`policies`/`events`) is explicit and constructible rather than
-  * shared, hidden, JVM-wide mutable state. Callers pass an [[EffectContext]]
-  * (subject + gate + optional capabilities/audit) explicitly — constructor
-  * injection on `Node`/`PackLoader`, method parameter on effect handler
-  * `perform`s. There is no process-global registry, default instance, or
-  * thread-local context: composition roots and tests construct contexts and
-  * pass them down.
+  * shared, hidden, JVM-wide mutable state. There is no process-global
+  * registry, default instance, or thread-local context: composition roots
+  * and tests construct [[EffectContext]]s and authorize through them.
   *
   * A directly-constructed `AuthorityGate()` starts in `Mode.Audit` with no
-  * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with the
-  * allow-all bootstrap policies used by production wiring.
+  * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with
+  * allow-all policies (test / non-pack-loader wiring). PackLoader production
+  * wiring uses [[EffectContext.forPackLoader]] instead.
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
@@ -65,10 +64,9 @@ final class AuthorityGate(
       body
     finally mode = prev
 
-  /** Check-then-run: denies map to the caller's own error type via
-    * `onDenied`, so handlers don't hand-roll the same check/map boilerplate.
-    * In `Audit` mode (the default for a fresh gate) `check` never returns
-    * `Left`, so `onDenied` only fires once a gate is put in `Enforce`.
+  /** Check-then-run helper retained for non-handler call sites. Prefer
+    * [[EffectContext.authorize]] → handler `perform(AuthorizedEffect)`.
+    * Handlers must not call this (see ModuleBoundarySuite).
     */
   def checked[E, A](req: EffectRequest)(onDenied: String => E)(body: => Either[E, A]): Either[E, A] =
     check(req) match
@@ -83,19 +81,19 @@ object AuthorityGate:
     Effects.Action.values.toList.map(a =>
       EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow))
 
-  /** Production/test wiring helper: `Mode.Enforce` with one allow policy per
-    * known `Action`, allowing any subject (`"*"`) over any resource — not just
-    * the process-local subject composition roots put in [[EffectContext]],
-    * since `Node.append` authenticates as the real signing authority
-    * (`Subject(authority.name)`, e.g. `"alice"`). Honestly **not** meaningful
-    * access control yet: a blanket allow-everyone-everything policy can't deny
-    * anything. Real enforcement needs real, distinct subjects and narrower
-    * policies, which needs real identity.
+  /** Test / non-pack-loader wiring helper: `Mode.Enforce` with one allow
+    * policy per known `Action`, any subject (`"*"`), any resource. Still used
+    * for ledger/process/LSP and suites that do not exercise path-scoped
+    * denial. PackLoader production uses [[EffectContext.forPackLoader]].
     *
     * Each call returns a **fresh** gate — never a shared singleton.
     */
   def bootstrapped(): AuthorityGate =
+    enforcing(bootstrapPolicies)
+
+  /** Fresh Enforce gate with the given policies. */
+  def enforcing(policies: List[EffectPolicy]): AuthorityGate =
     val gate = new AuthorityGate()
-    gate.install(bootstrapPolicies)
+    gate.install(policies)
     gate.setMode(Mode.Enforce)
     gate

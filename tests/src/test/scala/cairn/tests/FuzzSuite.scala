@@ -79,7 +79,7 @@ object GrammarFuzz:
     case Elem.Block(_) | Elem.Run(_) | Elem.Adjacent1(_) => None // layout: not fuzzed
 
 class FuzzSuite extends munit.FunSuite:
-  private val packs = cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.bootstrapped())
+  private val packs = cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Law = cairn.examples.law.Law(packs)
   private val Sds = cairn.examples.sds.Sds(packs)

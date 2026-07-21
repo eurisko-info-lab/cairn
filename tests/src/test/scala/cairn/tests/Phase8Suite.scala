@@ -12,7 +12,7 @@ import cairn.examples.stlc.Stlc
   * PKI pack with generic ΔPKI + Ed25519 chain validation + trust anchors.
   */
 class Phase8Suite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val ledgerCtx = EffectContext.bootstrapped()
   private val processCtx = EffectContext.bootstrapped()

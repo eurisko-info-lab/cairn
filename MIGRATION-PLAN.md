@@ -471,17 +471,27 @@ rosetta   → Scaffold emit façade (engine already in core)
 
 **AuthorityGate / PackAccess injection — DONE.** No ambient
 `PackAccess.get`/`install` or `AuthorityGate.default`/`forFamily`. Composition
-roots (`Main`, tests) construct `AuthorityGate.bootstrapped()` and
-`PackLoader(gate)`, pass gates into handlers/`Node`/`Lsp`/`Browser`/`Cli`, and
+roots (`Main`, tests) construct `EffectContext` / gates and
+`PackLoader(ctx)`, pass them into handlers/`Node`/`Lsp`/`Browser`/`Cli`, and
 construct language packs as `Law(packs)` / `Pki(packs)` / … classes.
 
-**EffectContext — DONE (next summit after gate injection).** Handlers take
-`EffectContext(subject, gate, capabilities = Nil, audit)` rather than a bare
-`AuthorityGate`; composition roots mint subject via `EffectContext.bootstrapped()`
-/ `.local(gate)`. Handler-internal `Subject("local")` removed. Ledger
-`Node.append` still authenticates as `Subject(authority.name)` (seal identity).
-`capabilities` remains a placeholder. **Deferred:** AuthorizedEffect-only
-handler APIs (priority 2) — context is designed so that split stays natural.
+**EffectContext + AuthorizedEffect — DONE.** Composition roots mint
+`EffectContext(subject, gate, capabilities = Nil, audit)` via
+`EffectContext.forPackLoader()` (PackLoader), `.bootstrapped()` (other
+families / tests), or `.local(gate)`. Authorization is a single
+entry point: `ctx.authorize(req) → AuthorizedEffect` (wraps Kernel
+`AuthorizedRequest`). Handlers `perform` only an `AuthorizedEffect` (plus
+the interface request payload); thin `run(req, ctx)` adapters authorize then
+perform for composition roots. Handler-internal `Subject("local")` and
+`gate.checked` removed. Ledger `Node.append` authorizes as
+`Subject(authority.name)` (seal identity). `capabilities` remains a
+placeholder pending grant-bundle threading.
+
+**Narrow PackLoader policy — DONE.** First restrictive deployment path:
+`PolicyEval.packLoaderWorkspace` allows only `WorkspaceRead` for a single
+subject under `languages*`. `examples.Main` wires PackLoader with
+`EffectContext.forPackLoader()` (not allow-all). Ledger/process/LSP remain
+on `bootstrapped()` until scoped similarly.
 
 ## 7. Concrete old-to-new mapping
 

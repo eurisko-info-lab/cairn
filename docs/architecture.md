@@ -191,8 +191,10 @@ language rather than an opaque Scala shape.
   `Workspace`, `ExternalBackend`, and `Process` had a natural per-request
   resource identifier and now thread it through, same pattern as
   `Filesystem`: `Workspace.perform` uses the real `dir`/`langDir`/`path`
-  per request (`LanguageDirs` takes no input at all, so `"*"` there is
-  honestly correct, not a placeholder); `ExternalBackend.perform` uses the
+  per request (`LanguageDirs` authorizes as `"languages"` — discovery of
+  language-pack roots; other requests rewrite paths under those roots to
+  `languages` / `languages/<rel>` so prefix policies are cwd-independent);
+  `ExternalBackend.perform` uses the
   `Host` being invoked (`ScalaCli`/`Cargo`/`Runghc`/`Lake`) — there's no
   path to scope by until `find` resolves one, and the tool itself is what
   a policy would actually want to restrict; `Process.perform` uses the
@@ -249,10 +251,10 @@ complete.
 **Placeholder, flagged explicitly**: all four previously used
 `Authority.Subject("local")` invented inside the handler. That placeholder is
 now owned by composition roots via `EffectContext` (`EffectContext.local` /
-`.bootstrapped`); handlers take `ctx: EffectContext` and build
-`EffectRequest` from `ctx.subject`. Replacing the still-empty
-`capabilities` list with real injected grants remains the AuthorizedEffect
-split (priority #2) — noted here as a forward pointer.
+`.bootstrapped`). Authorization is no longer inside handlers: roots call
+`ctx.authorize(...)` → `AuthorizedEffect`, then `handler.perform(req, auth)`
+(or the thin `handler.run(req, ctx)` adapter). The still-empty `capabilities`
+list awaits grant-bundle threading from Kernel validation.
 
 **`LspTransport`** (done): the first family with real callers to be
 migrated. `surface.Lsp.serve`'s session loop — the actual live effect path,
@@ -426,6 +428,12 @@ path works end-to-end in the real program for the first time, but it is
 policy can't deny anything. Real enforcement needs real, distinct
 subjects and narrower policies, which needs real identity.
 
+**Update (narrow pack-loader path):** PackLoader no longer uses that
+allow-all bootstrap. `EffectContext.forPackLoader()` +
+`PolicyEval.packLoaderWorkspace` enforce `WorkspaceRead` for subject
+`local` under `languages*` only; wrong path/action/subject are denied
+(see `AuthoritySuite`). Other composition roots (ledger, process, LSP)
+still use `bootstrapped()` allow-all for now.
 ## Deferred work, tackled: per-family Enforce + the PackAccess bug
 
 A full call-graph audit (an Explore agent) mapped every file "no ambient
@@ -503,9 +511,9 @@ continuing to pass, not by reproducing the failure mode itself.
 - **Separate `grammar.cairn`** — deferred (docs/bootstrap.md)
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in `examples/` because they need handler crypto/CAS/filesystem; pure language defs that can live without handlers are in `user/`
 - **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports, `rosetta.Scaffold`) retained as documented compatibility shims
-- **Full AuthorityGate/PackAccess injection** — **DONE**: explicit constructor/`perform` params; composition roots build `AuthorityGate.bootstrapped()` + `PackLoader(gate)` and pass them; no ambient `get`/`install`/`forFamily`/`default`
-- **EffectContext** — **DONE**: handlers take `EffectContext(subject, gate, capabilities, audit)` instead of a bare gate; composition roots (`Main`, tests, `PackLoader`, `Node`, `Cli`/`Transcript`/`Lsp`/`Browser`) supply subject (typically `EffectContext.local` / `.bootstrapped`); handlers no longer invent `Subject("local")`. `capabilities` is still an empty placeholder pending grant-bundle threading. **Not yet done**: AuthorizedEffect-only handler split (handlers accepting only Kernel-minted tokens) — EffectContext is shaped so that split stays additive.
-
+- **Full AuthorityGate/PackAccess injection** — **DONE**: explicit constructor/`perform` params; composition roots pass `EffectContext` into `PackLoader` / handlers; no ambient `get`/`install`/`forFamily`/`default`
+- **EffectContext + AuthorizedEffect** — **DONE**: composition roots supply `EffectContext` and mint via `ctx.authorize` → opaque `AuthorizedEffect` (Kernel `AuthorizedRequest`); handlers `perform(req, auth: AuthorizedEffect)` only — no raw request+gate path; thin `run(req, ctx)` adapters at composition roots; `capabilities` still an empty placeholder pending grant-bundle threading
+- **Narrow pack-loader policy** — **DONE** (first restrictive deployment path): `EffectContext.forPackLoader()` installs Enforce + `PolicyEval.packLoaderWorkspace` — subject `local`, action `WorkspaceRead` only, resource `workspace`/`languages*`. Workspace rewrites paths under discovered language roots to that prefix. `examples.Main` and PackLoader call sites use it. Ledger/process/LSP still use allow-all `bootstrapped()` until they get their own scopes.
 ## Final principle
 
 ```text

@@ -13,7 +13,7 @@ import java.nio.file.Files
   * unproven (no Theorem/Certificate, no `sorry`, generated Lean is a `def`).
   */
 class RiemannSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Riemann = cairn.examples.riemann.Riemann(packs)
 
   test("riemann pack loads from languages/*.cairn at runtime"):

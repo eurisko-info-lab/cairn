@@ -261,14 +261,14 @@ object Lsp:
     val server = LspServer(cfg)
     var running = true
     while running do
-      cairn.systemhandler.LspTransport.perform(cairn.systeminterface.Lsp.Request.ReadMessage, in, out, ctx) match
+      cairn.systemhandler.LspTransport.run(cairn.systeminterface.Lsp.Request.ReadMessage, in, out, ctx) match
         case Right(cairn.systeminterface.Lsp.Response.Message(text)) =>
           JsonSurface.decodeRaw(text) match
             case Right(msg) =>
               val method = J.fields(msg).get("method").flatMap(J.asStr)
               if method.contains("exit") then running = false
               else server.handle(msg).foreach(m =>
-                cairn.systemhandler.LspTransport.perform(
+                cairn.systemhandler.LspTransport.run(
                   cairn.systeminterface.Lsp.Request.WriteMessage(J.print(m)), in, out, ctx))
             case Left(_) => ()
         case Right(cairn.systeminterface.Lsp.Response.SessionEnded) => running = false

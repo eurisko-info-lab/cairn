@@ -43,7 +43,7 @@ object SdsTutorial:
     "regBasis" -> Cst.node("basis", Cst.Leaf("cleanerProduct"), Cst.Leaf("3")))).sorted
 
   def run(work: java.nio.file.Path): Report =
-    val Sds = cairn.examples.sds.Sds(PackLoader(EffectContext.bootstrapped()))
+    val Sds = cairn.examples.sds.Sds(PackLoader(EffectContext.forPackLoader()))
     val base = acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
     val en = Sds.render(base, "cleanerProduct", "en").fold(e => throw RuntimeException(e), identity)

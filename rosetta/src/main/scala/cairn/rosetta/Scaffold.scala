@@ -29,7 +29,7 @@ object Scaffold:
       val written = writes.foldLeft[Either[String, Unit]](Right(())) { (acc, rw) =>
         val (rel, content) = rw
         acc.flatMap(_ =>
-          Filesystem.perform(Fs.Request.Write(Fs.Path(dir.resolve(rel).toString), content), ctx)
+          Filesystem.run(Fs.Request.Write(Fs.Path(dir.resolve(rel).toString), content), ctx)
             .map(_ => ()).left.map(_.toString))
       }
       written.map { _ =>

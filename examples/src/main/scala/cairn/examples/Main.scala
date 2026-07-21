@@ -9,7 +9,9 @@ import cairn.systemhandler.EffectContext
   * layer stays domain-free, §4.11).
   */
 @main def Main(args: String*): Unit =
-    val workspaceCtx = EffectContext.bootstrapped()
+    // PackLoader runs under a narrow WorkspaceRead/languages* policy; other
+    // families still use allow-all bootstrap until they get their own scopes.
+    val workspaceCtx = EffectContext.forPackLoader()
     val packLoader = PackLoader(workspaceCtx)
     val ledgerCtx = EffectContext.bootstrapped()
     val processCtx = EffectContext.bootstrapped()

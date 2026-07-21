@@ -82,3 +82,18 @@ class ModuleBoundarySuite extends munit.FunSuite:
         if !line.trim.startsWith("//") && !line.trim.startsWith("*")
       yield s"${file}:${i + 1}: ${line.trim}"
     assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("handlers do not call gate.check/checked — authorize then AuthorizedEffect.perform"):
+    val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
+    // EffectContext.authorize is the sole mint path (calls gate.check).
+    // Handlers must not call the gate themselves.
+    val allow = Set("AuthorityGate.scala", "EffectContext.scala", "AuthorizedEffect.scala")
+    val hits =
+      for
+        file <- scalaFilesUnder(handlerRoot)
+        if !allow.contains(file.getFileName.toString)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        if line.contains("gate.check") // also matches gate.checked
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+      yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))

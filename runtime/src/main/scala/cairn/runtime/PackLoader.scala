@@ -26,11 +26,11 @@ final class PackLoader(workspaceCtx: EffectContext) extends PackAccess:
     case Right(other) => throw RuntimeException(s"unexpected workspace response for $label: $other")
 
   def languageDirs: List[Path] =
-    unwrapPaths(Workspace.perform(Ws.Request.LanguageDirs, workspaceCtx), "languageDirs")
+    unwrapPaths(Workspace.run(Ws.Request.LanguageDirs, workspaceCtx), "languageDirs")
 
   def loadRaw(dir: Path): Map[String, List[Fragment]] =
-    unwrapPaths(Workspace.perform(Ws.Request.ListCairnFiles(Fs.Path(dir.toString)), workspaceCtx), "listCairnFiles").map { p =>
-      val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceCtx), s"readText($p)")
+    unwrapPaths(Workspace.run(Ws.Request.ListCairnFiles(Fs.Path(dir.toString)), workspaceCtx), "listCairnFiles").map { p =>
+      val text = unwrapText(Workspace.run(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceCtx), s"readText($p)")
       Meta.parseLanguageAst(text) match
         case Right((name, fs)) => name -> fs
         case Left(err) =>
@@ -41,12 +41,12 @@ final class PackLoader(workspaceCtx: EffectContext) extends PackAccess:
     languageDirs.view.map(loadRaw).find(_.nonEmpty).getOrElse(Map.empty)
 
   def loadSurfaces(dir: Path): Map[String, Map[String, SurfacePack]] =
-    unwrapPaths(Workspace.perform(Ws.Request.ListSubdirs(Fs.Path(dir.toString)), workspaceCtx), "listSubdirs").flatMap { langDir =>
+    unwrapPaths(Workspace.run(Ws.Request.ListSubdirs(Fs.Path(dir.toString)), workspaceCtx), "listSubdirs").flatMap { langDir =>
       val langName = langDir.getFileName.toString
       val packs = unwrapPaths(
-        Workspace.perform(Ws.Request.ListSurfaceCairnFiles(Fs.Path(langDir.toString)), workspaceCtx), "listSurfaceCairnFiles"
+        Workspace.run(Ws.Request.ListSurfaceCairnFiles(Fs.Path(langDir.toString)), workspaceCtx), "listSurfaceCairnFiles"
       ).map { p =>
-        val text = unwrapText(Workspace.perform(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceCtx), s"readText($p)")
+        val text = unwrapText(Workspace.run(Ws.Request.ReadText(Fs.Path(p.toString)), workspaceCtx), s"readText($p)")
         Meta.parseSurfaceAst(text) match
           case Right((style, lang, fs)) =>
             if lang != langName then

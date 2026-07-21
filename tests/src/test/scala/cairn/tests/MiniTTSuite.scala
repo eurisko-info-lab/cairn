@@ -11,7 +11,7 @@ import cairn.systemhandler.EffectContext
   * polymorphism, no user inductives, no tactics/elaboration, not Lean).
   */
 class MiniTTSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val MiniTT = cairn.examples.minitt.MiniTT(packs)
 
   test("minitt pack loads from languages/*.cairn at runtime"):

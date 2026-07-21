@@ -5,12 +5,12 @@ import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
-/** Local filesystem handler (Phase 3). `perform` is the only entry point,
-  * gated via [[EffectContext]] (subject comes from the composition root,
-  * not invented here); every other method here is private. The action
-  * derivation below mirrors `kernel.EffectMeta.filesystem`'s
-  * `requestActions` grouping exactly (read/write/mkdirs classes;
-  * `Resolve` needs no right, pure path arithmetic with zero I/O).
+/** Local filesystem handler (Phase 3). [[perform]] accepts only a
+  * pre-authorized [[AuthorizedEffect]]; composition roots authorize via
+  * [[EffectContext.authorize]] then perform, or use [[run]] as a thin adapter.
+  * Every other method here is private. The action derivation mirrors
+  * `kernel.EffectMeta.filesystem`'s `requestActions` grouping
+  * (read/write/mkdirs; `Resolve` needs no right).
   */
 object Filesystem:
   private def toNio(p: Fs.Path): Path = Path.of(p.value)
@@ -18,7 +18,6 @@ object Filesystem:
 
   private def mkdirs(dir: Path): Unit = Files.createDirectories(dir)
 
-  /** Write `content` to `path`, creating parent directories if needed. */
   private def writeFile(path: Path, content: String): Unit =
     Option(path.getParent).foreach(Files.createDirectories(_))
     Files.writeString(path, content)
@@ -27,8 +26,6 @@ object Filesystem:
     Option(path.getParent).foreach(Files.createDirectories(_))
     Files.write(path, bytes)
 
-  private def readText(path: Path): String = Files.readString(path)
-  private def readBytes(path: Path): Array[Byte] = Files.readAllBytes(path)
   private def exists(path: Path): Boolean = Files.exists(path)
   private def isDirectory(path: Path): Boolean = Files.isDirectory(path)
   private def isRegularFile(path: Path): Boolean = Files.isRegularFile(path)
@@ -44,30 +41,38 @@ object Filesystem:
   private def createTempDirectory(prefix: String): Path =
     Files.createTempDirectory(prefix)
 
-  def perform(req: Fs.Request, ctx: EffectContext): Either[Fs.Error, Fs.Response] =
-    // Resource path is the real target of the request (or, for
-    // CreateTempDirectory, its prefix — the closest thing to a target it
-    // has, since the actual path is OS-generated after the fact) rather
-    // than a wildcard, so path-scoped policies (already supported by
-    // Authority.Resource.matches) have real data to match against.
+  /** Action + resource for authorization, or `None` when ungated (`Resolve`). */
+  def intent(req: Fs.Request): Option[(Effects.Action, Authority.Resource)] =
     val (action, resourcePath): (Option[Effects.Action], String) = req match
-      case Fs.Request.Read(p)                     => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.Exists(p)                    => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsDirectory(p)               => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsRegularFile(p)              => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsExecutable(p)               => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.List(p)                       => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.Write(p, _)                   => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.WriteBytes(p, _)               => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.Delete(p)                     => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.Mkdirs(p)                      => (Some(Effects.Action.FsMkdirs), p.value)
-      case Fs.Request.CreateTempDirectory(prefix)    => (Some(Effects.Action.FsMkdirs), prefix)
-      case Fs.Request.Resolve(_, _)                  => (None, "*")
-    action match
+      case Fs.Request.Read(p)                  => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.Exists(p)                => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsDirectory(p)           => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsRegularFile(p)         => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsExecutable(p)          => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.List(p)                  => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.Write(p, _)              => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.WriteBytes(p, _)         => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.Delete(p)                => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.Mkdirs(p)                => (Some(Effects.Action.FsMkdirs), p.value)
+      case Fs.Request.CreateTempDirectory(prefix) => (Some(Effects.Action.FsMkdirs), prefix)
+      case Fs.Request.Resolve(_, _)            => (None, "*")
+    action.map(a => (a, Authority.Resource("filesystem", resourcePath)))
+
+  /** Thin adapter: authorize then [[perform]]. */
+  def run(req: Fs.Request, ctx: EffectContext): Either[Fs.Error, Fs.Response] =
+    intent(req) match
       case None => performRaw(req)
-      case Some(a) =>
-        val authReq = ctx.effectRequest(a, Authority.Resource("filesystem", resourcePath))
-        ctx.gate.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
+      case Some((action, resource)) =>
+        ctx.authorize(action, resource) match
+          case Left(err)  => Left(Fs.Error.Io(s"denied: $err"))
+          case Right(auth) => perform(req, auth)
+
+  def perform(req: Fs.Request, auth: AuthorizedEffect): Either[Fs.Error, Fs.Response] =
+    intent(req) match
+      case None => performRaw(req)
+      case Some((action, resource)) =>
+        if auth.covers(action, resource) then performRaw(req)
+        else Left(Fs.Error.Io("authorized effect does not cover request"))
 
   private def performRaw(req: Fs.Request): Either[Fs.Error, Fs.Response] =
     try req match

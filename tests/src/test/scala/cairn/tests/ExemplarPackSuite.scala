@@ -9,7 +9,7 @@ import cairn.examples.stlc.Stlc
 
 /** Exemplar languages as `.cairn` data + PKI → Law → SDS dependency DAG. */
 class ExemplarPackSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Law = cairn.examples.law.Law(packs)
   private val Sds = cairn.examples.sds.Sds(packs)

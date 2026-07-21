@@ -13,7 +13,7 @@ import cairn.systemhandler.EffectContext
   * universe polymorphism, real Lean syntax).
   */
 class LeanCoreSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val LeanCore = cairn.examples.leancore.LeanCore(packs)
 
   test("leancore pack loads from languages/*.cairn at runtime"):

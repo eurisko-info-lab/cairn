@@ -4,10 +4,9 @@ import cairn.systeminterface.{ExternalBackend as EB, Filesystem as Fs, Process a
 import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 
-/** Host-toolchain discovery and invocation (Phase 3). `find`/`run` are
-  * private: `perform` is the only entry point, gated via [[EffectContext]]
-  * (subject from composition root). Nested process runs use a separate
-  * process [[EffectContext]].
+/** Host-toolchain discovery and invocation (Phase 3). [[perform]] accepts
+  * only a pre-authorized [[AuthorizedEffect]]; nested process runs use
+  * [[Process.run]] with a separate process [[EffectContext]].
   */
 object ExternalBackend:
   private def findOnPath(name: String): Option[Path] =
@@ -20,32 +19,38 @@ object ExternalBackend:
     case EB.Host.Runghc   => findOnPath("runghc")
     case EB.Host.Lake     => findOnPath("lake")
 
-  private def run(host: EB.Host, args: List[String],
+  private def runHost(host: EB.Host, args: List[String],
           cwd: Option[Path], processCtx: EffectContext): Either[EB.Error, EB.Response] =
     find(host) match
       case None => Right(EB.Response.Missing(host))
       case Some(bin) =>
-        Process.perform(
+        Process.run(
           Proc.Request.Run(bin.toString :: args, cwd.map(p => Fs.Path(p.toString))),
           processCtx)
           .map(r => EB.Response.ProcessResult(r.exitCode, r.combined))
           .left.map(e => EB.Error.Io(e.toString))
 
-  def perform(req: EB.Request, ctx: EffectContext, processCtx: EffectContext)
-      : Either[EB.Error, EB.Response] =
-    // The Host being invoked is the natural resource identifier — there's
-    // no path to scope by until `find` resolves one, and the tool itself
-    // is what a policy would actually want to restrict.
+  def intent(req: EB.Request): (Effects.Action, Authority.Resource) =
     val (action, resourcePath) = req match
       case EB.Request.Find(host)      => (Effects.Action.BackendFind, host.toString)
       case EB.Request.Run(host, _, _) => (Effects.Action.BackendRun, host.toString)
-    val authReq = ctx.effectRequest(action, Authority.Resource("externalBackend", resourcePath))
-    ctx.gate.checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
-      req match
-        case EB.Request.Find(host) =>
-          find(host) match
-            case Some(p) => Right(EB.Response.Found(Fs.Path(p.toString)))
-            case None    => Right(EB.Response.Missing(host))
-        case EB.Request.Run(host, args, cwd) =>
-          run(host, args, cwd.map(p => Path.of(p.value)), processCtx)
-    }
+    (action, Authority.Resource("externalBackend", resourcePath))
+
+  def run(req: EB.Request, ctx: EffectContext, processCtx: EffectContext)
+      : Either[EB.Error, EB.Response] =
+    val (action, resource) = intent(req)
+    ctx.authorize(action, resource) match
+      case Left(err)   => Left(EB.Error.Io(s"denied: $err"))
+      case Right(auth) => perform(req, auth, processCtx)
+
+  def perform(req: EB.Request, auth: AuthorizedEffect, processCtx: EffectContext)
+      : Either[EB.Error, EB.Response] =
+    val (action, resource) = intent(req)
+    if !auth.covers(action, resource) then Left(EB.Error.Io("authorized effect does not cover request"))
+    else req match
+      case EB.Request.Find(host) =>
+        find(host) match
+          case Some(p) => Right(EB.Response.Found(Fs.Path(p.toString)))
+          case None    => Right(EB.Response.Missing(host))
+      case EB.Request.Run(host, args, cwd) =>
+        runHost(host, args, cwd.map(p => Path.of(p.value)), processCtx)

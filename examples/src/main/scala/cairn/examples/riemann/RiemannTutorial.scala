@@ -23,7 +23,7 @@ object RiemannTutorial:
 
   def run(dir: Path): Report =
     val Riemann = cairn.examples.riemann.Riemann(
-      cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.bootstrapped()))
+      cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
     val lang = Riemann.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet

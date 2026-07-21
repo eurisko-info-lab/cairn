@@ -4,11 +4,11 @@ import cairn.systeminterface.{Filesystem as Fs, Process as Proc}
 import cairn.kernel.{Authority, Effects}
 import java.nio.file.Path
 
-/** Local process runner (Phase 3). `run` is private: `perform` is the only
-  * entry point, gated via [[EffectContext]] (subject from composition root).
+/** Local process runner (Phase 3). [[perform]] accepts only a pre-authorized
+  * [[AuthorizedEffect]]; use [[run]] as the thin authorize-then-perform adapter.
   */
 object Process:
-  private def run(command: List[String], cwd: Option[Path] = None,
+  private def runCmd(command: List[String], cwd: Option[Path] = None,
           mergeStderr: Boolean = true): Either[Proc.Error, Proc.Result] =
     if command.isEmpty then Left(Proc.Error.Io("empty command"))
     else
@@ -29,13 +29,20 @@ object Process:
         case e: Exception =>
           Left(Proc.Error.Io(e.getMessage))
 
-  def perform(req: Proc.Request, ctx: EffectContext): Either[Proc.Error, Proc.Result] =
-    // The executable being run is the natural resource identifier.
-    val (action, resourcePath) = req match
-      case Proc.Request.Run(command, _, _) => (Effects.Action.ProcessRun, command.headOption.getOrElse("*"))
-    val authReq = ctx.effectRequest(action, Authority.Resource("process", resourcePath))
-    ctx.gate.checked(authReq)(err => Proc.Error.Io(s"denied: $err")) {
-      req match
-        case Proc.Request.Run(cmd, cwd, merge) =>
-          run(cmd, cwd.map(p => Path.of(p.value)), merge)
-    }
+  def intent(req: Proc.Request): (Effects.Action, Authority.Resource) =
+    req match
+      case Proc.Request.Run(command, _, _) =>
+        (Effects.Action.ProcessRun, Authority.Resource("process", command.headOption.getOrElse("*")))
+
+  def run(req: Proc.Request, ctx: EffectContext): Either[Proc.Error, Proc.Result] =
+    val (action, resource) = intent(req)
+    ctx.authorize(action, resource) match
+      case Left(err)   => Left(Proc.Error.Io(s"denied: $err"))
+      case Right(auth) => perform(req, auth)
+
+  def perform(req: Proc.Request, auth: AuthorizedEffect): Either[Proc.Error, Proc.Result] =
+    val (action, resource) = intent(req)
+    if !auth.covers(action, resource) then Left(Proc.Error.Io("authorized effect does not cover request"))
+    else req match
+      case Proc.Request.Run(cmd, cwd, merge) =>
+        runCmd(cmd, cwd.map(p => Path.of(p.value)), merge)

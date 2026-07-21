@@ -12,7 +12,7 @@ import java.nio.file.Files
 /** Browser API: navigate local node/CAS with typed artifact views. */
 class BrowserSuite extends munit.FunSuite:
   private val client = HttpClient.newHttpClient()
-  private val packs = cairn.runtime.PackLoader(EffectContext.bootstrapped())
+  private val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
 
   private def get(port: Int, path: String): (Int, String) =

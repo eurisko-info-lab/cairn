@@ -10,7 +10,7 @@ import java.nio.file.Files
 
 /** Fact–Intent–Hint search pack: object language + CAS provenance spine. */
 class SearchSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
 
   test("search pack loads from languages/*.cairn at runtime"):

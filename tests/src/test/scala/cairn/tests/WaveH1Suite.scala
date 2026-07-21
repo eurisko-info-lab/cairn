@@ -8,7 +8,7 @@ import cairn.examples.stlc.Stlc
 
 /** Wave H part 1 (M41–M42): full meta surface + bootstrap fixpoint. */
 class WaveH1Suite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
 
   test("M41: complete STLC written in the meta surface is digest-identical"):
     val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)

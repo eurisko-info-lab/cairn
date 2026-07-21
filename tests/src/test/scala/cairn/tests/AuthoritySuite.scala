@@ -78,17 +78,68 @@ class AuthoritySuite extends munit.FunSuite:
     assertEquals(fs.currentMode, AuthorityGate.Mode.Audit)
     assertEquals(random.currentMode, AuthorityGate.Mode.Enforce) // unaffected
 
-  test("EffectContext subject flows into handler EffectRequest"):
+  test("EffectContext authorize then Filesystem.perform"):
     import cairn.systeminterface.Filesystem as Fs
     val gate = AuthorityGate()
     gate.setMode(AuthorityGate.Mode.Enforce)
     gate.install(List(PolicyEval.allowAll("allow-alice", alice, Effects.Action.FsRead)))
     val aliceCtx = EffectContext(alice, gate)
     val localCtx = EffectContext.local(gate)
+    val resource = Resource("filesystem", "/tmp")
     // Exists is FsRead-gated; alice is allowed, local is not.
-    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), aliceCtx).isRight)
-    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), localCtx).isLeft)
+    val aliceAuth = aliceCtx.authorize(Effects.Action.FsRead, resource)
+    assert(aliceAuth.isRight, aliceAuth.toString)
+    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), aliceAuth.toOption.get).isRight)
+    assert(localCtx.authorize(Effects.Action.FsRead, resource).isLeft)
+    assert(Filesystem.run(Fs.Request.Exists(Fs.Path("/tmp")), aliceCtx).isRight)
+    assert(Filesystem.run(Fs.Request.Exists(Fs.Path("/tmp")), localCtx).isLeft)
     assertEquals(aliceCtx.subject, alice)
     assertEquals(localCtx.subject, Subject("local"))
     assert(localCtx.capabilities.isEmpty)
     assertEquals(localCtx.audit, EffectContext.Audit.Local)
+
+  test("AuthorizedEffect covers check rejects mismatched resource"):
+    import cairn.systeminterface.Filesystem as Fs
+    val gate = AuthorityGate()
+    gate.setMode(AuthorityGate.Mode.Enforce)
+    gate.install(List(PolicyEval.allowAll("allow-alice", alice, Effects.Action.FsRead)))
+    val aliceCtx = EffectContext(alice, gate)
+    val auth = aliceCtx.authorize(Effects.Action.FsRead, Resource("filesystem", "/other")).toOption.get
+    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), auth).isLeft)
+
+  test("pack-loader narrow policy allows WorkspaceRead under languages*"):
+    import cairn.systemhandler.Workspace
+    import cairn.systeminterface.Workspace as Ws
+    val ctx = EffectContext.forPackLoader()
+    assertEquals(ctx.subject, Subject("local"))
+    assertEquals(ctx.gate.currentMode, AuthorityGate.Mode.Enforce)
+    val langDirs = Workspace.run(Ws.Request.LanguageDirs, ctx)
+    assert(langDirs.isRight, langDirs.toString)
+    val readOk = Workspace.run(
+      Ws.Request.ReadText(cairn.systeminterface.Filesystem.Path("languages/stlc.cairn")), ctx)
+    assert(readOk.isRight, readOk.toString)
+
+  test("pack-loader narrow policy denies wrong path"):
+    import cairn.systemhandler.Workspace
+    import cairn.systeminterface.Workspace as Ws
+    val ctx = EffectContext.forPackLoader()
+    val denied = Workspace.run(
+      Ws.Request.ReadText(cairn.systeminterface.Filesystem.Path("/etc/passwd")), ctx)
+    assert(denied.isLeft, denied.toString)
+
+  test("pack-loader narrow policy denies wrong action"):
+    val ctx = EffectContext.forPackLoader()
+    assert(ctx.authorize(Effects.Action.FsWrite, Resource("workspace", "languages/stlc.cairn")).isLeft)
+    assert(ctx.authorize(Effects.Action.LedgerAppend, Resource("workspace", "languages")).isLeft)
+
+  test("pack-loader narrow policy denies wrong subject"):
+    val ctx = EffectContext.forPackLoader()
+    val aliceCtx = ctx.withSubject(alice)
+    assert(aliceCtx.authorize(Effects.Action.WorkspaceRead, Resource("workspace", "languages")).isLeft)
+    assert(ctx.authorize(Effects.Action.WorkspaceRead, Resource("workspace", "languages")).isRight)
+
+  test("PackLoader loads packs under forPackLoader gate"):
+    import cairn.runtime.PackLoader
+    val packs = PackLoader(EffectContext.forPackLoader())
+    val stlc = packs.requireOwn("stlc")
+    assert(stlc.nonEmpty)

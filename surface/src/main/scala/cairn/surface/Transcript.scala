@@ -275,7 +275,7 @@ object Transcript:
                     case Some(cli) =>
                       val f = Files.createTempDirectory(workDir, "port").resolve(out.fileName)
                       Files.writeString(f, out.text)
-                      cairn.systemhandler.Process.perform(
+                      cairn.systemhandler.Process.run(
                         cairn.systeminterface.Process.Request.Run(
                           List(cli.toString, "run", "--server=false", f.toString)),
                         processCtx

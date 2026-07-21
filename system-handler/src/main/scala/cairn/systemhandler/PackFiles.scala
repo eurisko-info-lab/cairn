@@ -5,9 +5,9 @@ import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
-/** Workspace / language-pack discovery handler (Phase 3). `perform` is the
-  * only entry point, gated via [[EffectContext]] (subject from composition
-  * root); every other method here is private.
+/** Workspace / language-pack discovery handler (Phase 3). [[perform]] accepts
+  * only a pre-authorized [[AuthorizedEffect]]; use [[run]] as the thin
+  * authorize-then-perform adapter.
   */
 object Workspace:
   private def languageDirs: List[Path] =
@@ -33,20 +33,45 @@ object Workspace:
       .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
       .toList
 
-  def perform(req: Ws.Request, ctx: EffectContext): Either[Ws.Error, Ws.Response] =
-    // Real request target, not a wildcard, so path-scoped policies have
-    // real data to match against (same pattern as Filesystem). LanguageDirs
-    // takes no input — it discovers the dirs rather than targeting one —
-    // so "*" there is honestly correct, not a placeholder.
-    val resourcePath = req match
-      case Ws.Request.LanguageDirs                  => "*"
-      case Ws.Request.ListCairnFiles(dir)           => dir.value
-      case Ws.Request.ListSubdirs(dir)              => dir.value
-      case Ws.Request.ListSurfaceCairnFiles(langDir) => langDir.value
-      case Ws.Request.ReadText(path)                => path.value
-    val authReq = ctx.effectRequest(
-      Effects.Action.WorkspaceRead, Authority.Resource("workspace", resourcePath))
-    ctx.gate.checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
+  /** Authority resource path for a workspace request.
+    *
+    * Paths under a discovered language-pack root are rewritten to
+    * `languages` / `languages/<rel>` so a single prefix policy stays
+    * cwd-independent (covers `languages/`, `../languages/`, absolutes).
+    * Paths outside those roots pass through unchanged and are denied by
+    * [[cairn.core.PolicyEval.packLoaderWorkspace]].
+    */
+  private def resourcePath(raw: String): String =
+    val p = Path.of(raw).toAbsolutePath.normalize
+    languageDirs.iterator
+      .map(_.toAbsolutePath.normalize)
+      .find(root => p.startsWith(root))
+      .map { root =>
+        val rel = root.relativize(p).toString.replace('\\', '/')
+        if rel.isEmpty || rel == "." then "languages"
+        else s"languages/$rel"
+      }
+      .getOrElse(raw.replace('\\', '/'))
+
+  def intent(req: Ws.Request): (Effects.Action, Authority.Resource) =
+    val path = req match
+      case Ws.Request.LanguageDirs                   => "languages"
+      case Ws.Request.ListCairnFiles(dir)            => resourcePath(dir.value)
+      case Ws.Request.ListSubdirs(dir)               => resourcePath(dir.value)
+      case Ws.Request.ListSurfaceCairnFiles(langDir) => resourcePath(langDir.value)
+      case Ws.Request.ReadText(path)                 => resourcePath(path.value)
+    (Effects.Action.WorkspaceRead, Authority.Resource("workspace", path))
+
+  def run(req: Ws.Request, ctx: EffectContext): Either[Ws.Error, Ws.Response] =
+    val (action, resource) = intent(req)
+    ctx.authorize(action, resource) match
+      case Left(err)   => Left(Ws.Error.Io(s"denied: $err"))
+      case Right(auth) => perform(req, auth)
+
+  def perform(req: Ws.Request, auth: AuthorizedEffect): Either[Ws.Error, Ws.Response] =
+    val (action, resource) = intent(req)
+    if !auth.covers(action, resource) then Left(Ws.Error.Io("authorized effect does not cover request"))
+    else
       try req match
         case Ws.Request.LanguageDirs =>
           Right(Ws.Response.Paths(languageDirs.map(p => Fs.Path(p.toString))))
@@ -59,4 +84,3 @@ object Workspace:
         case Ws.Request.ReadText(path) =>
           Right(Ws.Response.Text(readText(Path.of(path.value))))
       catch case e: Exception => Left(Ws.Error.Io(e.getMessage))
-    }

@@ -14,7 +14,7 @@ import cairn.ledger.Keypair
 class WaveH2Suite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
 
-  private val packs = PackLoader(EffectContext.bootstrapped())
+  private val packs = PackLoader(EffectContext.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
   private val SearchPack = cairn.examples.search.Search(packs)
