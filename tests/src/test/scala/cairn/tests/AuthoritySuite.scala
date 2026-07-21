@@ -4,8 +4,9 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, CasEffects, EffectContext, Filesystem, MemCas}
+import cairn.systemhandler.{AuthorityGate, CasEffects, EffectContext, Filesystem, Keypair, MemCas}
 import cairn.systeminterface.Cas
+import cairn.kernel.Tx
 
 /** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
   * Each test constructs its own fresh `AuthorityGate` instance instead of
@@ -508,6 +509,14 @@ class AuthoritySuite extends munit.FunSuite:
       EffectMeta.cas.actionKey("put"),
       EffectMeta.cas.resource.at("abc")).isRight)
     assert(casCtx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
+    assert(led.authorize(
+      EffectMeta.cas.actionKey("put"),
+      EffectMeta.cas.resource.at("abc")).isRight, "forLedger includes local CAS")
+    val fsCtx = EffectContext.forFilesystem("/tmp*")
+    assert(fsCtx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/x")).isRight)
+    assert(fsCtx.authorize(
+      EffectMeta.ledgerTransport.actionKey("append"),
+      EffectMeta.ledgerTransport.resource.at("/tmp")).isLeft)
 
   test("CasEffects: authorize → perform put/get over MemCas"):
     val store = MemCas()
@@ -524,4 +533,17 @@ class AuthoritySuite extends munit.FunSuite:
       case _ => Digest.ofBytes(Array.empty)
     }, Right(art.digest))
     val denied = CasEffects.run(store, Cas.Request.Get(key.valueHash), EffectContext.forPackLoader())
+    assert(denied.isLeft, denied.toString)
+
+  test("LedgerTransport: authorize → perform append over Node"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-lt")
+    val node = cairn.systemhandler.Node(dir, EffectContext.forLedger())
+    val alice = Keypair.dev("alice")
+    val auth = Map("alice" -> alice.publicBytes)
+    val req = cairn.systeminterface.LedgerTransport.Request.Append(
+      "alice", auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
+    val got = cairn.systemhandler.LedgerTransport.run(node, alice, req, node.ctx)
+    assert(got.isRight, got.toString)
+    val denied = cairn.systemhandler.LedgerTransport.run(
+      node, alice, req, EffectContext.forPackLoader())
     assert(denied.isLeft, denied.toString)

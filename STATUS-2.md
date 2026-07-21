@@ -61,8 +61,10 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   are merge-aware via `Branches.merge` / `mergeBranches` → `SemanticRepository.integrate`
   (conflict artifacts persist to CAS without advancing the head; clean merges
   advance and record provenance). `commitTip` persists ValidatedChangeSet
-  sidecars so everyday merge need not pass CSTs explicitly; ledger
-  `SetBranchHead` remains optional via `Branches.publishHead`.
+  tip sidecars plus a `.changes` history log (`loadTip` /
+  `loadChangeHistory`); ledger `SetBranchHead` is opt-in via
+  `Branches.publishHead` (or `publish = Some(...)` on merge) — not automatic
+  on accept.
 - **M31**: signatures/declarations are fully grammatical; expression BODIES are
   verbatim single-line regions inside the file grammars (rendered by one shared
   fold, not per-host string soup). Whole-file byte fixpoint still enforced.

@@ -87,12 +87,32 @@ class SemanticRepositorySuite extends munit.FunSuite:
         val node = cairn.systemhandler.Node(dir.resolve("ledger"), EffectContext.forLedger())
         node.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
           .fold(e => fail(e), identity)
+        // Accept is local-only: heads stay empty until explicit publishHead
+        assert(!node.state(auth).fold(e => fail(e), _.heads.contains("main")))
         branches.publishHead("main", node, alice, auth).fold(e => fail(e), identity)
         val st = node.state(auth).fold(e => fail(e), identity)
         assert(st.heads.contains("main"), s"heads=${st.heads}")
         assertEquals(st.heads("main"), branches.load("main").head.get)
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)
+
+  test("Branches.loadTip / loadChangeHistory reconstruct from sidecars"):
+    val dir = Files.createTempDirectory("cairn-semrepo-hist")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"))
+    val c1 = parseChange("{ replace a = false ; }")
+    val tip1 = SemanticRepository.tipAfter(lang, m0, c1).fold(e => fail(e), identity)
+    branches.commitTip("feat", lang.digest, tip1)
+    val c2 = parseChange("{ replace b = true ; }")
+    val tip2 = SemanticRepository.tipAfter(lang, tip1.tip, c2).fold(e => fail(e), identity)
+    // Second tip on same branch: history log grows; tip sidecar is latest
+    branches.commitTip("feat", lang.digest, tip2)
+    val loaded = branches.loadTip("feat").fold(e => fail(e), identity)
+    assertEquals(loaded.tipDigest, tip2.tipDigest)
+    assertEquals(loaded.baseDigest, tip2.baseDigest)
+    val hist = branches.loadChangeHistory("feat").fold(e => fail(e), identity)
+    assertEquals(hist.length, 2)
+    assertEquals(hist.last.result, tip2.tipDigest)
 
   test("Branches.merge: conflict persists artifact and leaves target head unset"):
     val dir = Files.createTempDirectory("cairn-semrepo-conflict")

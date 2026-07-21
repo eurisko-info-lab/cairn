@@ -12,7 +12,7 @@ class WaveFSuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
   val m = QuickSort2.module
   val allPorts: List[PortV2] = List(ScalaPort2, LeanPort2, HaskellPort2, RustPort2)
-  private val scaffoldCtx = EffectContext.bootstrapped()
+  private val scaffoldCtx = EffectContext.forFilesystem()
 
   test("M30: generic Ord-constrained quicksort is one canonical artifact"):
     assertEquals(m.artifact.kind, ArtifactKind.RosettaDecl)

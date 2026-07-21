@@ -1,8 +1,8 @@
 package cairn.examples.pki
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, EffectContext, Node}
 import cairn.kernel.*
-import cairn.ledger.{Ed25519, Encryption, Keypair, Node}
+import cairn.ledger.{Ed25519, Encryption, Keypair}
 import java.security.KeyPair
 
 /** Demo PKI hierarchy on par with GRANITE `authorities/DemoPki`: root →
@@ -103,7 +103,7 @@ object PkiTutorial:
     val alice = h.root.signing
     val auth = Map(alice.name -> alice.publicBytes)
     val anchorArt = Artifact(ArtifactKind.Certificate, Cst.toCanon(h.root.cert))
-    node.cas.put(anchorArt)
+    CasEffects.put(node.cas, anchorArt, node.ctx).fold(e => throw RuntimeException(e.toString), identity)
     node.append(alice, auth, List(
       alice.signTx(Tx.RegisterIdentity(alice.name, alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(anchorArt.key)),

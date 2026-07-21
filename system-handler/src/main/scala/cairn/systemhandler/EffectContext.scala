@@ -86,11 +86,11 @@ object EffectContext:
     val subject = Subject("local")
     EffectContext(subject, AuthorityGate.enforcing(PolicyEval.packLoaderWorkspace(subject)), Nil, audit)
 
-  /** Ledger composition root: append under any ledger root; subject `*` so
-    * [[cairn.systemhandler.Node.append]] can authorize as the signing authority.
+  /** Ledger composition root: append under any ledger root (subject `*` so
+    * signing authorities authorize) plus local CAS put/get for the node store.
     */
   def forLedger(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.ledgerNode("*"), audit)
+    localCtx(PolicyEval.ledgerWithCas(), audit)
 
   /** Process composition root: run any command (deployment may narrow further). */
   def forProcess(audit: Audit = Audit.Local): EffectContext =
@@ -107,6 +107,10 @@ object EffectContext:
   /** CAS composition root: put/get under any digest path. */
   def forCas(audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.casStore(Subject("local")), audit)
+
+  /** Filesystem composition root: read/write/mkdirs under a path pattern. */
+  def forFilesystem(pathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.filesystemStore(Subject("local"), pathPattern), audit)
 
   private def localCtx(policies: List[Authority.EffectPolicy], audit: Audit): EffectContext =
     EffectContext(Subject("local"), AuthorityGate.enforcing(policies), Nil, audit)

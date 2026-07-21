@@ -2,6 +2,7 @@ package cairn.systemhandler
 
 import cairn.kernel.*
 import cairn.systeminterface.Cas
+import cairn.systeminterface.LedgerTransport as LT
 import java.nio.file.{Files, Path}
 
 /** Single-node PoA ledger over a CAS directory (Phase 3 ledger-transport
@@ -11,8 +12,9 @@ import java.nio.file.{Files, Path}
   * Constructed with an [[EffectContext]] for the gate; ledger append still
   * authenticates as the signing authority (`Subject(authority.name)`), not
   * the process-local subject — that identity is intrinsic to the seal.
+  * CAS puts/gets on the node store go through [[CasEffects]].
   */
-final class Node(val root: Path, ctx: EffectContext):
+final class Node(val root: Path, val ctx: EffectContext):
   val cas: Cas = DiskCas(root)
   private val chainFile = root.resolve("chain")
 
@@ -22,42 +24,29 @@ final class Node(val root: Path, ctx: EffectContext):
 
   def blocks: Either[String, List[Block]] =
     chainDigests.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
-      acc.flatMap(bs => cas.getByDigest(d).map(a => bs :+ Block.fromCanon(a.body))) }
+      acc.flatMap { bs =>
+        CasEffects.get(cas, d, ctx) match
+          case Right(a) => Right(bs :+ Block.fromCanon(a.body))
+          case Left(cairn.systeminterface.Cas.Error.Missing(_)) =>
+            Left(s"blob ${d.short} not in CAS")
+          case Left(cairn.systeminterface.Cas.Error.Io(m)) => Left(m)
+      }
+    }
 
   def state(authorities: Map[String, Vector[Byte]]): Either[String, LedgerState] =
     blocks.flatMap(LedgerKernel.replay(authorities, _, Ed25519.verify))
 
-  /** Seal and append a block of txs. Atomic under kernel validation.
-    * Phase 5: ledger append is authorized via [[EffectContext.authorize]]
-    * (seal identity = `Subject(authority.name)`, not the process-local subject).
-    */
+  /** Seal and append a block of txs. Thin adapter over [[LedgerTransport.run]]. */
   def append(authority: Keypair, authorities: Map[String, Vector[Byte]], txs: List[SignedTx]): Either[String, Block] =
-    val req = Authority.EffectRequest(
-      Authority.Subject(authority.name),
-      EffectMeta.ledgerTransport.actionKey("append"),
-      EffectMeta.ledgerTransport.resource.at(root.toString))
-    ctx.authorize(req).flatMap { _ =>
-      for
-        bs <- blocks
-        st <- LedgerKernel.replay(authorities, bs, Ed25519.verify)
-        parent = bs.lastOption.map(_.digest).getOrElse(LedgerKernel.genesisParent)
-        height = bs.length.toLong
-        after <- txs.foldLeft[Either[String, LedgerState]](Right(st)) { (acc, stx) =>
-          acc.flatMap(LedgerKernel.applyTx(_, stx, Ed25519.verify)) }
-        unsealed = Block(height, parent, txs, after.root, authority.name, Vector.empty)
-        seal = Ed25519.sign(authority.privateKey, Canon.encode(unsealed.unsealedCanon))
-        block = unsealed.copy(seal = seal)
-        _ <- LedgerKernel.applyBlock(st, parent, height, authorities, block, Ed25519.verify)
-      yield
-        cas.put(block.artifact)
-        Files.createDirectories(root)
-        Files.writeString(chainFile, (chainDigests :+ block.digest).map(_.hex).mkString("", "\n", "\n"))
-        block
-    }
+    LedgerTransport.run(this, authority, LT.Request.Append(authority.name, authorities, txs), ctx) match
+      case Right(LT.Response.Sealed(block)) => Right(block)
+      case Left(LT.Error.Denied(m))         => Left(m)
+      case Left(LT.Error.Io(m))             => Left(m)
 
 object Sync:
   /** Pull-based blob sync: copy blocks + published artifact bodies the
     * consumer is missing, by digest. Returns fetched digests.
+    * Blob copies authorize through each node's [[CasEffects]] context.
     */
   def pull(from: Node, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, List[Digest]] =
     for
@@ -68,7 +57,9 @@ object Sync:
       val fetched = List.newBuilder[Digest]
       def fetch(d: Digest): Unit =
         if !to.cas.contains(d) then
-          from.cas.getBytes(d).foreach { bs => to.cas.putBytes(bs); fetched += d }
+          CasEffects.getBytes(from.cas, d, from.ctx).foreach { bs =>
+            CasEffects.putBytes(to.cas, bs, to.ctx).foreach { _ => fetched += d }
+          }
       theirBlocks.foreach(b => fetch(b.digest))
       st.published.foreach { render =>
         render.split(":") match

@@ -215,3 +215,26 @@ object PolicyEval:
         "cas-get", subject, EffectMeta.cas.actionKey("get"),
         EffectMeta.cas.resource.at(pathPattern), Decision.Allow))
 
+  /** Filesystem read/write/mkdirs under a path pattern (default `*` = whole FS).
+    * Narrower than allow-all: other families remain denied.
+    */
+  def filesystemStore(subject: Subject | "*", pathPattern: String = "*"): List[EffectPolicy] =
+    List(
+      EffectPolicy(
+        "fs-read", subject, EffectMeta.filesystem.actionKey("read"),
+        EffectMeta.filesystem.resource.at(pathPattern), Decision.Allow),
+      EffectPolicy(
+        "fs-write", subject, EffectMeta.filesystem.actionKey("write"),
+        EffectMeta.filesystem.resource.at(pathPattern), Decision.Allow),
+      EffectPolicy(
+        "fs-mkdirs", subject, EffectMeta.filesystem.actionKey("mkdirs"),
+        EffectMeta.filesystem.resource.at(pathPattern), Decision.Allow))
+
+  /** Ledger node + its local CAS (append as any subject; CAS as `local`). */
+  def ledgerWithCas(
+      subject: Subject | "*" = "*",
+      rootPattern: String = "*",
+      casSubject: Subject = Subject("local"),
+  ): List[EffectPolicy] =
+    ledgerNode(subject, rootPattern) ++ casStore(casSubject)
+

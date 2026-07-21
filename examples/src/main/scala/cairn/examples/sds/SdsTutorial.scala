@@ -1,9 +1,9 @@
 package cairn.examples.sds
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, EffectContext, Node}
 import cairn.kernel.*
 import cairn.core.*
-import cairn.ledger.{Encryption, Keypair, Node}
+import cairn.ledger.{Encryption, Keypair}
 import cairn.runtime.PackLoader
 import cairn.examples.pki.DemoPki
 
@@ -85,7 +85,8 @@ object SdsTutorial:
     // Ledger publish of industrial module
     val alice = Keypair.dev("alice")
     val node = Node(work, EffectContext.forLedger())
-    node.cas.put(industrial.artifact)
+    CasEffects.put(node.cas, industrial.artifact, node.ctx)
+      .fold(e => throw RuntimeException(e.toString), identity)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(industrial.artifact.key)),

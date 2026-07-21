@@ -10,6 +10,7 @@ import cairn.systeminterface.Workspace as WorkspaceEffect
 import cairn.systeminterface.Filesystem as FsEffect
 import cairn.systeminterface.Lsp as LspEffect
 import cairn.systeminterface.Cas as CasEffect
+import cairn.systeminterface.LedgerTransport as LedgerEffect
 
 /** Meta-defined effect interfaces (post-migration priority #1 / #4): all 8 live
   * effect families (`Random`, `Clock`, `Process`, `ExternalBackend`,
@@ -246,6 +247,18 @@ class EffectMetaSuite extends munit.FunSuite:
       ctorNameOf(CasEffect.Request.Put(dummy)),
       ctorNameOf(CasEffect.Request.Get(Digest.ofBytes(Array.empty))))
     val fragmentReqCtors = EffectMeta.cas.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.ledgerTransport composes; Request cases correspond 1:1"):
+    Compose.compose("effect.ledgerTransport", List(EffectMeta.ledgerTransport.fragment)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+    assertEquals(EffectMeta.completeness(EffectMeta.ledgerTransport), Nil)
+    def ctorNameOf(r: LedgerEffect.Request): String = r match
+      case LedgerEffect.Request.Append(_, _, _) => "append"
+    val scalaReqCases = Set(
+      ctorNameOf(LedgerEffect.Request.Append("alice", Map.empty, Nil)))
+    val fragmentReqCtors =
+      EffectMeta.ledgerTransport.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
 
   test("derived ActionKeys cover all host Actions; Cas/Ledger are Meta-defined"):

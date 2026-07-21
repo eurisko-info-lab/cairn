@@ -57,8 +57,8 @@ Key prohibition: `user ↛ system-handler`.
 
 Composition roots own authorization:
 
-1. Construct an `EffectContext` (`forPackLoader()`, `bootstrapped()`, or
-   `local(gate)`).
+1. Construct an `EffectContext` (`forPackLoader()`, `forLedger()`,
+   `forFilesystem()`, `bootstrapped()`, or `local(gate)`).
 2. `ctx.authorize(req)` → opaque `AuthorizedEffect` (Kernel
    `AuthorizedRequest`).
 3. Handlers `perform(req, auth: AuthorizedEffect)` only — no raw request+gate
@@ -82,12 +82,13 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
   `EffectMetaSuite`.
 - **Gating:** every live family’s `perform` is the sole public effect entry
   point; convenience methods are private (or documented ungated exceptions
-  such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas remains
-  a trait contract; LedgerTransport `append` is gated on `Node.append`.
+  such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas trait
+  put/get go through `CasEffects`; LedgerTransport `append` through
+  `LedgerTransport.run` (`Node.append` is a thin adapter).
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
-  PackLoader (`packLoaderWorkspace`), ledger (`forLedger`), process
-  (`forProcess`), LSP (`forLsp`), backends (`forBackend`). `bootstrapped()`
-  remain for broad test wiring.
+  PackLoader (`packLoaderWorkspace`), ledger+CAS (`forLedger`), process
+  (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
+  filesystem (`forFilesystem`). `bootstrapped()` remain for broad test wiring.
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
   accidental prefix of a non-wildcard path.
 - **Meta conditions:** known `meta:*` keys validate value shape fail-closed
@@ -123,9 +124,10 @@ branch state
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
-Residuals: everyday path uses `commitTip` + `mergeBranches` (change histories
-persisted with tips); ledger `SetBranchHead` remains optional via
-`Branches.publishHead` after accept.
+Residuals: everyday path uses `commitTip` + `mergeBranches` (tip sidecar +
+`.changes` history log; `loadTip` / `loadChangeHistory` reconstruct). Ledger
+`SetBranchHead` is **opt-in** via `Branches.publishHead` or
+`merge(..., publish = Some(...))` — accept does not auto-publish.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -158,9 +160,9 @@ LeanCore `#check` envelope.
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
 - **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
-  (changes persisted with tips); `merge(..., changeOurs, changeTheirs)` remains
-  for callers that already hold CSTs. Ledger `SetBranchHead` is optional via
-  `Branches.publishHead` after accept
+  (`loadTip` / change-history log); `merge(..., changeOurs, changeTheirs)` for
+  callers that already hold CSTs. Ledger publish is **opt-in**
+  (`publishHead` or `publish = Some(...)` on merge) — not the default on accept
 
 ## Final principle
 

@@ -98,13 +98,53 @@ object CasEffects:
             case Left(_)  => Left(Cas.Error.Missing(digest))
       catch case e: Exception => Left(Cas.Error.Io(e.getMessage))
 
+  /** Convenience: authorize + put an artifact; returns its typed key. */
+  def put(store: Cas, artifact: Artifact, ctx: EffectContext): Either[Cas.Error, TypedKey] =
+    run(store, Cas.Request.Put(artifact), ctx).flatMap {
+      case Cas.Response.Key(k) => Right(k)
+      case other               => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
+
+  /** Convenience: authorize + get an artifact by digest. */
+  def get(store: Cas, digest: Digest, ctx: EffectContext): Either[Cas.Error, Artifact] =
+    run(store, Cas.Request.Get(digest), ctx).flatMap {
+      case Cas.Response.Stored(a) => Right(a)
+      case other                  => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
+
+  /** Authorize put at the content digest, then store raw bytes (Sync path). */
+  def putBytes(store: Cas, bs: Array[Byte], ctx: EffectContext): Either[Cas.Error, Digest] =
+    val d = Digest.ofBytes(bs)
+    ctx.authorize(iface.actionKey("put"), iface.resource.at(d.hex)) match
+      case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
+      case Right(auth) =>
+        if !auth.covers(iface.actionKey("put"), iface.resource.at(d.hex)) then
+          Left(Cas.Error.Io("authorized effect does not cover request"))
+        else
+          try Right(store.putBytes(bs))
+          catch case e: Exception => Left(Cas.Error.Io(e.getMessage))
+
+  /** Authorize get at `digest`, then read raw bytes (Sync path). */
+  def getBytes(store: Cas, digest: Digest, ctx: EffectContext): Either[Cas.Error, Array[Byte]] =
+    ctx.authorize(iface.actionKey("get"), iface.resource.at(digest.hex)) match
+      case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
+      case Right(auth) =>
+        if !auth.covers(iface.actionKey("get"), iface.resource.at(digest.hex)) then
+          Left(Cas.Error.Io("authorized effect does not cover request"))
+        else store.getBytes(digest).left.map(_ => Cas.Error.Missing(digest))
+
 /** Named branch refs over a CAS; ref file stores the manifest digest.
   *
   * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
   * [[cairn.core.SemanticRepository.integrate]] then either advance the target
   * head or persist the conflict artifact. [[commitTip]] persists the
-  * ValidatedChangeSet alongside the tip so everyday merge need not pass
-  * change histories explicitly.
+  * ValidatedChangeSet alongside the tip (tip sidecar + append-only history
+  * log) so everyday merge need not pass change histories explicitly.
+  *
+  * Accept is local-only by default: advancing the branch ref does **not**
+  * publish to the ledger. Call [[publishHead]] explicitly (or pass
+  * `publish = Some(...)` to [[merge]] / [[mergeBranches]]) when a ledger
+  * `SetBranchHead` is wanted.
   */
 final class Branches(cas: Cas, refsDir: Path):
   private def refPath(branch: String): Path =
@@ -114,6 +154,27 @@ final class Branches(cas: Cas, refsDir: Path):
   /** Sidecar ref: digest of the ValidatedChangeSet that produced the tip. */
   private def changeRefPath(branch: String): Path =
     refsDir.resolve(s"$branch.change")
+
+  /** Append-only log of every ValidatedChangeSet digest for `branch`. */
+  private def changeHistoryPath(branch: String): Path =
+    refsDir.resolve(s"$branch.changes")
+
+  private def isSidecar(name: String): Boolean =
+    name.endsWith(".change") || name.endsWith(".changes")
+
+  private def persistChange(branch: String, vcsKey: TypedKey): Unit =
+    Files.createDirectories(refsDir)
+    Files.writeString(changeRefPath(branch), vcsKey.valueHash.hex)
+    val hist = changeHistoryPath(branch)
+    val prev = if Files.exists(hist) then Files.readString(hist) else ""
+    val line = vcsKey.valueHash.hex + "\n"
+    Files.writeString(hist, prev + line)
+
+  private def loadVcs(digest: Digest): Either[String, Delta.ValidatedChangeSet] =
+    cas.getByDigest(digest).flatMap { a =>
+      if a.kind != ArtifactKind.ChangeSet then Left(s"digest ${digest.short} is ${a.kind.name}, not a change-set")
+      else Right(Delta.ValidatedChangeSet.fromCanon(a.body))
+    }
 
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
@@ -135,7 +196,7 @@ final class Branches(cas: Cas, refsDir: Path):
     if !Files.exists(refsDir) then Nil
     else
       Files.list(refsDir).map(_.getFileName.toString).toArray.toList.map(_.toString)
-        .filterNot(_.endsWith(".change")).sorted
+        .filterNot(isSidecar).sorted
 
   /** Load the module at a branch head (heads are [[ArtifactKind.Ir]] modules). */
   def headModule(branch: String): Either[String, Module] =
@@ -151,7 +212,7 @@ final class Branches(cas: Cas, refsDir: Path):
     advance(branch, cas.put(module.artifact))
 
   /** Persist a semantic tip: store base + ValidatedChangeSet + tip module,
-    * record provenance, write the change sidecar, and advance the branch.
+    * record provenance, write the change sidecar + history log, and advance.
     */
   def commitTip(branch: String, language: Digest, tip: SemanticRepository.Tip): BranchManifest =
     cas.put(tip.base.artifact)
@@ -159,25 +220,61 @@ final class Branches(cas: Cas, refsDir: Path):
     val vcsKey = cas.put(vcs.artifact)
     val modKey = cas.put(tip.tip.artifact)
     Provenance.record(cas, tip.tipDigest, List(tip.baseDigest, vcsKey.valueHash), "semantic-commit")
-    Files.createDirectories(refsDir)
-    Files.writeString(changeRefPath(branch), vcsKey.valueHash.hex)
+    persistChange(branch, vcsKey)
     advance(branch, modKey)
 
-  /** Load the ValidatedChangeSet recorded by [[commitTip]] for `branch`. */
+  /** Load the tip ValidatedChangeSet recorded by [[commitTip]] / merge accept. */
   def loadChange(branch: String): Either[String, Delta.ValidatedChangeSet] =
     val p = changeRefPath(branch)
     if !Files.exists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
-    else
-      val d = Digest(Files.readString(p).trim)
-      cas.getByDigest(d).flatMap { a =>
-        if a.kind != ArtifactKind.ChangeSet then Left(s"change ref for '$branch' is ${a.kind.name}, not a change-set")
-        else Right(Delta.ValidatedChangeSet.fromCanon(a.body))
+    else loadVcs(Digest(Files.readString(p).trim))
+
+  /** Full change history for `branch` (oldest → newest), from the `.changes` log.
+    * Falls back to the tip sidecar alone when the log is absent (pre-history tips).
+    */
+  def loadChangeHistory(branch: String): Either[String, List[Delta.ValidatedChangeSet]] =
+    val hist = changeHistoryPath(branch)
+    if Files.exists(hist) then
+      val digests = Files.readString(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
+      digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
+        acc.flatMap(xs => loadVcs(d).map(xs :+ _))
       }
+    else loadChange(branch).map(List(_))
+
+  /** Reconstruct a [[SemanticRepository.Tip]] from the tip sidecar + head module. */
+  def loadTip(branch: String): Either[String, SemanticRepository.Tip] =
+    for
+      vcs <- loadChange(branch)
+      tipMod <- headModule(branch)
+      baseArt <- cas.getByDigest(vcs.base)
+      base <-
+        if baseArt.kind != ArtifactKind.Ir then Left(s"base ${vcs.base.short} is not a module")
+        else Right(Module.fromCanon(baseArt.body))
+      _ <- Either.cond(tipMod.digest == vcs.result, (),
+        s"branch '$branch' head ${tipMod.digest.short} does not match change result ${vcs.result.short}")
+    yield SemanticRepository.Tip(base, tipMod, vcs.change)
+
+  /** Optional ledger publish after a local accept. */
+  final case class Publish(
+      node: Node,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+  )
+
+  private def maybePublish(
+      into: String,
+      outcome: Either[Merge.Conflict, BranchManifest],
+      publish: Option[Publish],
+  ): Either[String, Either[Merge.Conflict, BranchManifest]] =
+    (outcome, publish) match
+      case (Right(_), Some(p)) =>
+        publishHead(into, p.node, p.authority, p.authorities).map(_ => outcome)
+      case _ => Right(outcome)
 
   /** Semantic merge into `into`: integrate two change histories relative to
     * `base`, persist the ValidatedChangeSet + provenance, and advance `into`
     * on success. On conflict, the conflict artifact is stored in CAS and the
-    * branch head is left unchanged.
+    * branch head is left unchanged. Ledger publish is opt-in via `publish`.
     *
     * @return `Right(manifest)` on accept, `Left(conflict)` on overlap.
     */
@@ -188,23 +285,24 @@ final class Branches(cas: Cas, refsDir: Path):
       changeOurs: Cst,
       changeTheirs: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      publish: Option[Publish] = None,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).map {
+    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
         cas.put(conflict.artifact)
-        Left(conflict)
+        Right(Left(conflict))
       case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
         val vcsKey = cas.put(vcs.artifact)
         val modKey = cas.put(module.artifact)
         Provenance.record(cas, module.digest,
           List(base.digest, vcsKey.valueHash), "semantic-merge")
-        Files.createDirectories(refsDir)
-        Files.writeString(changeRefPath(into), vcsKey.valueHash.hex)
-        Right(advance(into, modKey))
+        persistChange(into, vcsKey)
+        maybePublish(into, Right(advance(into, modKey)), publish)
     }
 
-  /** Everyday merge: load change histories persisted by [[commitTip]] on
+  /** Everyday merge: load tip changes persisted by [[commitTip]] on
     * `ours` / `theirs` (shared base from the VCS records). No explicit Cst.
+    * Ledger publish remains opt-in via `publish` (default: local accept only).
     */
   def mergeBranches(
       language: ComposedLanguage,
@@ -212,21 +310,18 @@ final class Branches(cas: Cas, refsDir: Path):
       ours: String,
       theirs: String,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      publish: Option[Publish] = None,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
-      vcsA <- loadChange(ours)
-      vcsB <- loadChange(theirs)
-      _ <- Either.cond(vcsA.base == vcsB.base, (),
-        s"branch tips do not share a base: ${vcsA.base.short} vs ${vcsB.base.short}")
-      baseArt <- cas.getByDigest(vcsA.base)
-      base <-
-        if baseArt.kind != ArtifactKind.Ir then Left(s"base ${vcsA.base.short} is not a module")
-        else Right(Module.fromCanon(baseArt.body))
-      out <- merge(language, into, base, vcsA.change, vcsB.change, migration)
+      tipA <- loadTip(ours)
+      tipB <- loadTip(theirs)
+      _ <- Either.cond(tipA.baseDigest == tipB.baseDigest, (),
+        s"branch tips do not share a base: ${tipA.baseDigest.short} vs ${tipB.baseDigest.short}")
+      out <- merge(language, into, tipA.base, tipA.change, tipB.change, migration, publish)
     yield out
 
-  /** Optionally publish the accepted branch head via ledger: `PublishArtifact`
-    * then `SetBranchHead` (heads must be published before they can be set).
+  /** Opt-in ledger publication of an accepted branch head: `PublishArtifact`
+    * then `SetBranchHead`. Not called automatically on merge accept.
     */
   def publishHead(
       branch: String,
