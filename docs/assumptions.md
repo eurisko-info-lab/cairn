@@ -40,8 +40,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    majority-quorum add/remove, round-robin sealing. BFT finality still out.
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
-    is golden-checked. All four pass whole-file byte fixpoints (M31).
-    Expression bodies inside port files are verbatim single-line regions.
+    Rosetta skeletons are golden-checked. All four pass whole-file byte
+    fixpoints (M31). Expression bodies inside port files are verbatim
+    single-line regions. **Agreement envelopes** (LeanCore ↔ Lean `#check`,
+    AffineNet/IcNet ↔ classical IC) are separate from Rosetta — see
+    [docs/agreement.md](agreement.md); native tools optional with goldens/stubs.
 11. ~~Meta-language staging~~ — discharged by M41/M42: the fused meta surface
     covers grammar productions, print rules, infix tables, rewrite rules, and
     judgments; `languages/meta.cairn` passes the self-description fixpoint

@@ -38,6 +38,7 @@ enum ArtifactKind(val name: String):
   case ProofTerm      extends ArtifactKind("proof-term")
   case TestSuite      extends ArtifactKind("test-suite")
   case Certificate    extends ArtifactKind("certificate")
+  case AgreementCertificate extends ArtifactKind("agreement-certificate")
   case BranchManifest extends ArtifactKind("branch-manifest")
   case ChangeSet      extends ArtifactKind("change-set")
   case Block          extends ArtifactKind("block")

@@ -41,13 +41,26 @@ tests               → examples, runtime, user
 | ----- | ------ | ------- |
 | 0 | Done | architecture.md; ModuleBoundarySuite |
 | 1 | Done | Cas → system-interface; MemCas/DiskCas/Branches → system-handler; BranchManifest → kernel |
-| 2 | Done | Core holds Search/Tactics, TreeEngine, PackCompose, Grammar, Meta, Surfaces, Delta, ChangeAlgebra, Rosetta engine, ScaffoldPlan, NetEngine; SemanticRepository spine |
+| 2 | Done | Core holds Search/Tactics, TreeEngine, PackCompose, Grammar, Meta, Surfaces, Delta, ChangeAlgebra, Rosetta engine, ScaffoldPlan, NetEngine, Agreement envelopes; SemanticRepository spine |
 | 3 | Done | Full effect-family contracts + handlers (fs, workspace, process, crypto, clock, random, network, http, ledger transport, terminal, lsp, external backend) |
 | 4 | Done | Kernel Authority models; Core PolicyEval; AuthorityGate audit mode |
 | 5 | Done | Enforce mode + LedgerAppend gate on Node.append; AuthoritySuite |
 | 6 | Done | `user/` module; PackAccess; language packs moved; boundary test |
 | 7 | Done | MetaValidate (kernel) + MetaActivation (handler); core.Meta stays pure |
 | 8 | Done | `runtime.PackLoader`; façades; docs |
+
+## Agreement envelopes (Lean · HVM)
+
+LeanCore and AffineNet/IcNet are **Cairn-native** calculi in the Lean / HVM
+lineages — not proven Lean-kernel or HVM-ABI compatible. Explicit boundaries:
+
+- Doc: [agreement.md](agreement.md)
+- Types: `cairn.core.Agreement` (`Envelope`, `AgreementCertificate`, `check` / `certify`)
+- Tests: `AgreementSuite` — always Cairn reference; optional `lean` on PATH;
+  classical-IC goldens for nets; `hvm` stubbed (`no-hvm-surface-exporter`)
+
+Rosetta LeanPort remains projection + `sorry` obligations (§4.10), orthogonal
+to the LeanCore `#check` envelope.
 
 ## Effect interfaces: Meta-definition status
 

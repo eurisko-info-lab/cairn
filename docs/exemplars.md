@@ -67,6 +67,10 @@ Cairn ships a real thin surface because nets are real.
 
 Remaining: numbers/recursion primitives; HVM strict/lazy modes.
 
+**Agreement envelope** (not full HVM compatibility): AffineNet/IcNet claim the
+classical IC rule table + corpus NFs vs recorded goldens; live `hvm` is stubbed
+until a surface exporter exists. See [agreement.md](agreement.md).
+
 ## Unison Core — general-purpose hosted language, peer to STLC/MiniTT (§2c)
 
 `languages/unisoncore.cairn` + `examples/unison` (`UnisonCore` glue +
@@ -184,6 +188,10 @@ judgment rules added.
 
 Remaining: full path-induction `J`; delta-unfolding `def`s; universe
 polymorphism; user-declarable inductives; a real Lean import/export surface.
+
+**Agreement envelope** (not Lean-kernel compatibility): closed LeanCore fragment
+vs native Lean `#check` when `lean` is on PATH, else goldens — see
+[agreement.md](agreement.md). Rosetta LeanPort obligations stay separate (§4.10).
 
 ## Rosetta QuickSort — on par with ROSETTA entrypoints
 

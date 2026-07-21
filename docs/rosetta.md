@@ -27,3 +27,10 @@ never hand-concatenated per construct.
 - Lean defs are `partial` (no termination proofs) and theorems are stated with
   `sorry` — they are **obligations**, as §4.10 prescribes, not verified results.
 - Prelude regions are fixed literal surfaces per host, outside the round-trip region.
+
+## Not Lean-kernel / HVM agreement
+
+Rosetta ports are **projections**, not differential agreement with native Lean or
+HVM. LeanCore ↔ Lean and AffineNet/IcNet ↔ classical IC/HVM-lineage boundaries live
+in [agreement.md](agreement.md) (`AgreementCertificate`, `AgreementSuite`). Do not
+read a successful LeanPort emit as a Lean-kernel compatibility claim.

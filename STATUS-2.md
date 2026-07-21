@@ -120,7 +120,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | parity (Scala shape) | parity | L0–L6 engines; Unison pack; CLI/transcript |
 | marblego | Grammar VM + artifact/branch/store crates | parity (absorbed) | parity | Same L0–L1 story in Scala |
 | MetaLego / Kiwi | Composable fragments + STLC | parity | parity | STLC fragments + pushout |
-| Eurisko / HVM | Lattice meta / IC lineage | N/A deferred | N/A deferred | Absorbed as residue (§8b); Bend/IcNet cover compute intent |
+| Eurisko / HVM | Lattice meta / IC lineage | N/A deferred | **envelope** | `docs/agreement.md` + `AgreementSuite` (classical IC goldens; live HVM stubbed) |
 
 ### What closed this pass
 
@@ -137,7 +137,10 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - GRANITE SDS depth beyond the spine: full chemicals corpus, section numbering,
   phrase-staleness machine, Studio UI.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
-  proofs — §4.10).
+  proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
+  `#check` ([docs/agreement.md](docs/agreement.md)), not full kernel compatibility.
+- HVM live differential: classical IC goldens certify AffineNet/IcNet; no HVM
+  surface exporter yet (`stub:no-hvm-surface-exporter` when `hvm` is on PATH).
 - BFT / gossip daemon / public ledger (explicitly deferred).
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.

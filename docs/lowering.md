@@ -35,4 +35,6 @@ Well-formedness (declared kinds, arities, exactly-once wiring) is checkable.
 ## Still deferred
 
 Call-by-need boxes/levels for exponentials; lowering for `if`; net-level
-benchmarking against the compiled tree engine beyond the Bench harness.
+benchmarking against the compiled tree engine beyond the Bench harness;
+HVM CLI surface exporter (agreement uses classical-IC goldens — see
+[agreement.md](agreement.md)).
