@@ -85,14 +85,14 @@ host projects from Rosetta port output) extracted to a small, generic
 3's eventual "filesystem" effect family. `Scaffold` itself gained a private
 `plan` (pure: every `Project` record + every `(path, content)` write,
 computed with zero disk access) with `emitAll` shrunk to a thin executor
-over `Filesystem`. `plan` stays in `rosetta`, **not** `core`: it calls
-`obligationsManifest`, which needs `cairn.workbench.JsonSurface`, and `core`
-cannot depend on `workbench` (the dependency runs the other way) — moving it
-would cycle. Unlike the first three slices, this one is an intentionally
-partial win: the pure/impure boundary is now explicit and the I/O primitive
-is now generic and reusable, but the *pure* half couldn't fully migrate to
-`core` today. A future slice could revisit once `JsonSurface` (confirmed
-I/O-free) has its own Core/Kernel-reachable home.
+over `Filesystem`. `plan` stayed in `rosetta` (not `core`) at this slice
+because it called `obligationsManifest`, which needed `cairn.workbench.JsonSurface`,
+and `core` cannot depend on `workbench` — moving it would cycle. Unlike the
+first three slices, this one was an intentionally partial win: the pure/impure
+boundary became explicit and the I/O primitive generic/reusable, but the
+*pure* half could not fully migrate to `core` yet. Resolved in the tenth
+slice once `JsonSurface` lived in `core` and relative-path purification
+dropped `Path` from the pure API.
 
 `core` (Phase 2, fifth slice): `workbench.Grammar` (`Lexer`/`Parser`/
 `Concrete`/`Printer`/`RoundTrip`, 592 lines) moved to `core.Grammar` wholesale
@@ -163,6 +163,17 @@ project layout). No `build.sbt` change (`rosetta` already depended on
 `cairn.rosetta` → `cairn.core` for port types; `Scaffold` stays
 `cairn.rosetta`.
 
+`core` (Phase 2, tenth slice — optional `Scaffold.plan` revisit): pure
+planning extracted to `core.ScaffoldPlan`. Dropped `java.nio.file.Path`
+from the pure API (relative `/`-joined strings only; no emit-root
+parameter). `obligationsManifest` moved with it. `rosetta.Scaffold` is now
+solely the thin executor: resolve relative plan paths against a root
+`Path`, write via `system-handler.Filesystem`, and reify a Path-typed
+public `Project` for callers. Same PackCompose/PackLoader split shape.
+**Phase 2 Core introduction is complete** — every remaining Phase 2
+candidate from the migration lists has landed; `workbench` is
+`PackLoader` only, `rosetta` is `Scaffold` emit only.
+
 ## Forbidden-import rules
 
 Enforced today, mechanically, by `tests/ModuleBoundarySuite`:
@@ -191,7 +202,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First–eighth slices as previously recorded. Ninth slice: `rosetta` port-generation engine (`Rosetta`/`Rosetta2`/`Ports2`) → `core`; `Scaffold` remains the thin I/O façade in `rosetta`. Still pending within Phase 2: optional `Scaffold.plan` revisit. `workbench` is down to `PackLoader` only |
+| 2. Introduce Core | Done | First–ninth slices as previously recorded. Tenth slice: `Scaffold.plan` → `core.ScaffoldPlan` (relative-path purity); `rosetta.Scaffold` remains Path resolve + `Filesystem` emit. `workbench` = `PackLoader` only; `rosetta` = `Scaffold` only |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |
