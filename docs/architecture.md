@@ -69,29 +69,37 @@ There is no ambient `PackAccess.get`/`install`, no `AuthorityGate.default` or
 (`Law(packs)`, …). `Node`, `PackLoader`, `Lsp`, `Browser`, and `Cli` receive
 gates / contexts from composition roots (`examples.Main`, tests).
 
-`EffectContext.capabilities` grant-bundle threading remains a placeholder.
+`EffectContext.capabilities` is consulted first when non-empty: a covering
+grant is Kernel-checked without broad policy re-evaluation; empty
+capabilities fall back to Core `prove` → Kernel `checkProof`.
 
 ## Authority
 
 - **Live effect families (Meta-defined):** Filesystem, Workspace, Process,
-  Clock, Random, Terminal, Lsp, ExternalBackend. Each has an
-  `EffectMeta.EffectFamily` (Fragment + `requestActions` + derived
+  Clock, Random, Terminal, Lsp, ExternalBackend, Cas, LedgerTransport. Each
+  has an `EffectMeta.EffectFamily` (Fragment + `requestActions` + digest-bound
   `ActionKey` / `ResourceSchema`). Completeness is checked by
   `EffectMetaSuite`.
-- **Host-only bridges:** Cas (trait contract) and LedgerTransport
-  (`LedgerAppend` on `Node.append`) stay outside the Meta Request/Response
-  mechanism.
 - **Gating:** every live family’s `perform` is the sole public effect entry
   point; convenience methods are private (or documented ungated exceptions
-  such as pure `Filesystem.Resolve` and LSP test-fixture framing).
-- **Mode:** Enforce is live at composition roots. PackLoader uses a narrow
-  policy (`PolicyEval.packLoaderWorkspace`: subject `local`,
-  `WorkspaceRead`, resource `languages*`). Other roots still use allow-all
-  `bootstrapped()` until scoped.
+  such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas remains
+  a trait contract; LedgerTransport `append` is gated on `Node.append`.
+- **Mode:** Enforce is live at composition roots. Narrow deployment policies:
+  PackLoader (`packLoaderWorkspace`), ledger (`forLedger`), process
+  (`forProcess`), LSP (`forLsp`), backends (`forBackend`). `bootstrapped()`
+  remain for broad test wiring.
+- **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
+  accidental prefix of a non-wildcard path.
+- **Meta conditions:** known `meta:*` keys validate value shape fail-closed
+  (e.g. `meta:expiresAtEpochMillis = "banana"` does not match).
 - **Calculus:** fail-closed conditions; grant expiry/nonce; replay denial;
-  delegation chains; Kernel `AttenuationWitness`.
-- **Proofs:** Core `PolicyEval.prove` builds `AuthorizationProof`; Kernel
-  `checkProof` validates the witness. Minting requires prove → checkProof.
+  delegation chains (root policy ↔ root grantor; final grant covers grantee
+  request); Kernel `AttenuationWitness` checks `parentCanon` and forbids
+  subject changes except via Delegation.
+- **Proofs:** Core `PolicyEval.prove` / `proveDelegated` builds
+  `AuthorizationProof`; Kernel `checkProof` validates the witness. Proof
+  `canon` includes request, full cited policies, attenuation, and delegation
+  links so distinct proofs do not collide.
 
 ## Semantic repository spine
 
@@ -116,8 +124,7 @@ branch state
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
 Residuals: ledger `SetBranchHead` is still a separate publication path;
-change histories on branch refs are passed explicitly at merge time;
-grant-bundle threading via `EffectContext.capabilities` is still a placeholder.
+change histories on branch refs are passed explicitly at merge time.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -147,11 +154,10 @@ LeanCore `#check` envelope.
   handlers live in `user/`
 - **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports,
   `rosetta.Scaffold`) — documented compatibility shims
-- **Grant-bundle threading** — `EffectContext.capabilities` still empty
-- **Per-family restrictive policies** — only PackLoader workspace is narrow;
-  ledger / process / LSP still allow-all `bootstrapped()`
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
+- **Semantic merge residuals** — change histories supplied at merge time;
+  ledger `SetBranchHead` remains a separate publication path
 
 ## Final principle
 

@@ -23,10 +23,15 @@ object Authority:
     * [[EffectMeta.ResourceSchema.at]] so `kind` comes from the interface.
     */
   final case class Resource(kind: String, path: String):
-    /** Whether this concrete resource is allowed by `pattern` (exact / prefix / `*`). */
+    /** Whether this concrete resource is allowed by `pattern`.
+      * Exact path, full `*`, or explicit prefix pattern ending in `*` — never
+      * accidental prefix of a non-wildcard path (`/tmp/a` must not match `/tmp/abc`).
+      */
     def matches(pattern: Resource): Boolean =
       (pattern.kind == "*" || pattern.kind == kind) &&
-      (pattern.path == "*" || pattern.path == path || path.startsWith(pattern.path.stripSuffix("*")))
+      (pattern.path == "*" ||
+        pattern.path == path ||
+        (pattern.path.endsWith("*") && path.startsWith(pattern.path.dropRight(1))))
 
     /** True when `this` is at least as narrow as `broader` (non-widening). */
     def isAttenuationOf(broader: Resource): Boolean =
@@ -72,10 +77,12 @@ object Authority:
         case a: Effects.ActionKey => a == req.action
       subOk && actOk && req.resource.matches(resource) && conditionsHold(req)
 
-    /** Evaluate conditions fail-closed. */
+    /** Evaluate conditions fail-closed. Known `meta:*` keys validate **value**
+      * shape too (malformed expiry ⇒ no match ⇒ no unlimited grant).
+      */
     def conditionsHold(req: EffectRequest): Boolean =
       conditions.forall { case (key, expected) =>
-        if key.startsWith("meta:") then knownMetaCondition(key)
+        if key.startsWith("meta:") then knownMetaCondition(key, expected)
         else req.args.get(key).contains(expected)
       }
 
@@ -83,7 +90,7 @@ object Authority:
       conditions.get("meta:expiresAtEpochMillis").flatMap(s => s.toLongOption)
 
     def metaNonce: Option[String] =
-      conditions.get("meta:nonce")
+      conditions.get("meta:nonce").filter(_.nonEmpty)
 
     def canon: Canon = Canon.cmap(
       "id" -> Canon.CStr(id),
@@ -93,8 +100,12 @@ object Authority:
       "decision" -> Canon.CStr(decision.match { case Decision.Allow => "allow"; case Decision.Deny => "deny" }),
       "conditions" -> Canon.cmap(conditions.toSeq.map((k, v) => k -> Canon.CStr(v))*))
 
-  private def knownMetaCondition(key: String): Boolean =
-    key == "meta:expiresAtEpochMillis" || key == "meta:nonce"
+  /** Known meta keys fail closed on malformed values (not just unknown keys). */
+  private def knownMetaCondition(key: String, value: String): Boolean =
+    key match
+      case "meta:expiresAtEpochMillis" => value.toLongOption.isDefined
+      case "meta:nonce"                => value.nonEmpty
+      case _                           => false
 
   final case class CapabilityGrant(
       subject: Subject,
@@ -142,7 +153,11 @@ object Authority:
     def parent(w: AttenuationWitness): CapabilityGrant = w._1
     def child(w: AttenuationWitness): CapabilityGrant = w._2
 
-    /** Check non-widening attenuation and mint a witness on success. */
+    /** Check non-widening attenuation and mint a witness on success.
+      * Provenance: [[CapabilityGrant.parentCanon]] must equal `parent.canon`.
+      * Subject may change only when `child.delegatedBy` names the parent subject
+      * (ordinary attenuation keeps subject equal; Delegation validates hops).
+      */
     def check(parent: CapabilityGrant, child: CapabilityGrant): Either[String, AttenuationWitness] =
       if child.action != parent.action then
         Left(s"attenuation action mismatch: ${parent.action.id} → ${child.action.id}")
@@ -154,6 +169,10 @@ object Authority:
         Left("attenuation decreases delegation depth")
       else if parent.nonce.isDefined && child.nonce == parent.nonce then
         Left("attenuated child must not reuse parent nonce")
+      else if child.parentCanon != Some(parent.canon) then
+        Left("attenuation parentCanon mismatch")
+      else if child.subject != parent.subject && child.delegatedBy != Some(parent.subject) then
+        Left("attenuation cannot change subject without delegation")
       else Right((parent, child))
 
     def verify(w: AttenuationWitness, parent: CapabilityGrant, child: CapabilityGrant): Either[String, Unit] =
@@ -241,19 +260,35 @@ object Authority:
       attenuatedFrom: Option[(CapabilityGrant, AttenuationWitness)] = None,
       /** Optional A→B→C… chain whose final child equals [[grant]]. */
       delegationChain: List[Delegation] = Nil):
+    /** Full checked-witness canon — distinct proofs must not collide. */
     def canon: Canon = Canon.cmap(
+      "request" -> request.canon,
       "now" -> Canon.CInt(nowMillis),
-      "allows" -> Canon.cstrs(allowPolicies.map(_.id)),
+      "allows" -> Canon.CList(allowPolicies.map(_.canon)),
       "grant" -> grant.canon,
       "evidence" -> Canon.cmap(conditionEvidence.toSeq.map((k, v) => k -> Canon.CStr(v))*),
-      "attenuated" -> Canon.CStr(if attenuatedFrom.isDefined then "yes" else "no"),
-      "delegationHops" -> Canon.CInt(delegationChain.size))
+      "attenuatedFrom" -> attenuatedFrom.fold(Canon.CTag("none", Canon.CStr(""))) { (parent, w) =>
+        Canon.CTag("some", Canon.cmap(
+          "parent" -> parent.canon,
+          "witnessParent" -> AttenuationWitness.parent(w).canon,
+          "witnessChild" -> AttenuationWitness.child(w).canon))
+      },
+      "delegation" -> Canon.CList(delegationChain.map(delegationCanon)),
+      "requestId" -> optStr(request.requestId))
 
     /** Audit/event view of this allow proof. */
     def asDerivation(store: List[EffectPolicy]): AuthorizationDerivation =
       AuthorizationDerivation(
         request, store, Decision.Allow, Some(grant),
         s"allow by ${allowPolicies.map(_.id).mkString(",")}")
+
+  private def delegationCanon(d: Delegation): Canon = Canon.cmap(
+    "grantor" -> Canon.CStr(d.grantor.id),
+    "grantee" -> Canon.CStr(d.grantee.id),
+    "parent" -> d.parent.canon,
+    "child" -> d.child.canon,
+    "witnessParent" -> AttenuationWitness.parent(d.witness).canon,
+    "witnessChild" -> AttenuationWitness.child(d.witness).canon)
 
   /** Kernel-controlled authorization token — not publicly constructible. */
   opaque type AuthorizedRequest = EffectRequest
@@ -317,8 +352,9 @@ object Authority:
     *
     * Algorithm (no [[decide]] re-run as acceptance):
     *  1. Cited allow policies non-empty, present in store (id + equality), Decision.Allow
-    *  2. Each cited allow [[EffectPolicy.matches]] the request
-    *  3. Fail-closed: no store Deny matches the request
+    *  2. Each cited allow matches the *policy subject* of the proof:
+    *     root grantor (when [[delegationChain]] non-empty) else the request
+    *  3. Fail-closed: no store Deny matches the **final** request
     *  4. Condition evidence matches cited policy non-meta conditions and request args
     *  5. Grant subject/action/sourcePolicyIds/expiry/nonce justified by cited allows
     *  6. Grant [[CapabilityGrant.covers]] request at proof.nowMillis
@@ -333,7 +369,7 @@ object Authority:
     if proof.allowPolicies.isEmpty then Left("proof missing allow policies")
     else
       for
-        _ <- checkCitedAllows(proof.allowPolicies, store, req)
+        _ <- checkCitedAllows(proof.allowPolicies, store, policyMatchRequest(proof))
         _ <- checkNoStoreDeny(store, req)
         _ <- checkConditionEvidence(proof)
         _ <- checkGrantJustification(proof)
@@ -345,6 +381,16 @@ object Authority:
           else Right(())
       yield AuthorizedRequest.mint(req)
 
+  /** Capability-first accept: covering grant already in hand — no policy re-eval. */
+  def checkCapability(
+      req: EffectRequest,
+      grant: CapabilityGrant,
+      nowMillis: Long
+  ): Either[String, AuthorizedRequest] =
+    if !grant.covers(req, nowMillis) then Left("capability does not cover request")
+    else if grant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
+    else Right(AuthorizedRequest.mint(req))
+
   /** Alias for [[checkProof]]; uses [[AuthorizationProof.nowMillis]] unless overridden. */
   def validateProof(
       proof: AuthorizationProof,
@@ -355,10 +401,21 @@ object Authority:
       checkProof(proof.copy(nowMillis = nowMillis), policies)
     else checkProof(proof, policies)
 
+  /** Request shape against which cited root policies are matched.
+    * With a delegation chain, policies justify the **root grantor**, not the
+    * final grantee (Carol); the final grant must still [[CapabilityGrant.covers]]
+    * the real request.
+    */
+  private def policyMatchRequest(proof: AuthorizationProof): EffectRequest =
+    if proof.delegationChain.nonEmpty then
+      val root = proof.delegationChain.head.parent
+      proof.request.copy(subject = root.subject, action = root.action, resource = root.resource)
+    else proof.request
+
   private def checkCitedAllows(
       cited: List[EffectPolicy],
       store: List[EffectPolicy],
-      req: EffectRequest
+      matchReq: EffectRequest
   ): Either[String, Unit] =
     cited.foldLeft[Either[String, Unit]](Right(())) {
       case (Left(e), _) => Left(e)
@@ -368,7 +425,7 @@ object Authority:
           store.find(_.id == p.id) match
             case None => Left(s"cited policy ${p.id} not in store")
             case Some(inStore) if inStore != p => Left(s"cited policy ${p.id} does not match store")
-            case Some(_) if !p.matches(req) => Left(s"cited policy ${p.id} does not match request")
+            case Some(_) if !p.matches(matchReq) => Left(s"cited policy ${p.id} does not match request")
             case Some(_) => Right(())
     }
 

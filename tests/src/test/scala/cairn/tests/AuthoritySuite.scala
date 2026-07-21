@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.Authority.*
-import cairn.kernel.{EffectMeta, Effects}
+import cairn.kernel.{Canon, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.{AuthorityGate, EffectContext, Filesystem}
@@ -386,3 +386,119 @@ class AuthoritySuite extends munit.FunSuite:
     val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("allow", alice, fsRead)))
     assert(gate.check(readReq, nowMillis = 0).isRight)
     assert(gate.check(appendReq, nowMillis = 0).isLeft)
+
+  // ---- Resource matching / malformed expiry / capabilities / delegation auth ----
+
+  test("Resource.matches: exact vs wildcard prefix; /tmp/a does not match /tmp/abc"):
+    val exact = Resource("filesystem", "/tmp/a")
+    val other = Resource("filesystem", "/tmp/abc")
+    val prefix = Resource("filesystem", "/tmp*")
+    val star = Resource("filesystem", "*")
+    assert(exact.matches(exact))
+    assert(!other.matches(exact), "exact pattern must not prefix-match")
+    assert(other.matches(prefix))
+    assert(exact.matches(prefix))
+    assert(exact.matches(star))
+    assert(!Resource("filesystem", "/var/a").matches(prefix))
+    // attenuation uses fixed matches
+    assert(exact.isAttenuationOf(prefix))
+    assert(!other.isAttenuationOf(exact))
+
+  test("malformed meta:expiresAtEpochMillis fails closed (no unlimited grant)"):
+    val banana = EffectPolicy(
+      "bad-exp",
+      alice,
+      fsRead,
+      Resource("*", "*"),
+      Decision.Allow,
+      conditions = Map("meta:expiresAtEpochMillis" -> "banana"))
+    val req = readReq
+    val d = PolicyEval.propose(req, List(banana))
+    assertEquals(d.decision, Decision.Deny)
+    assert(PolicyEval.prove(req, List(banana), nowMillis = 0).isLeft)
+    val gate = AuthorityGate.enforcing(List(banana))
+    assert(gate.check(req, nowMillis = 0).isLeft)
+
+  test("EffectContext capabilities: covering grant authorizes without policy"):
+    val grant = CapabilityGrant(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
+    val emptyGate = AuthorityGate.enforcing(Nil) // no policies
+    val ctx = EffectContext(alice, emptyGate, capabilities = List(grant), clock = () => 0L)
+    val ok = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
+    assert(ok.isRight, ok.toString)
+    val miss = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/var/a"))
+    assert(miss.isLeft)
+    // empty capabilities fall back to policy path
+    val policyCtx = EffectContext(alice, AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead))))
+    assert(policyCtx.authorize(readReq).isRight)
+
+  test("delegation Alice→Bob→Carol authorizes Carol via checkProof"):
+    val bob = Subject("bob")
+    val carol = Subject("carol")
+    val rootPolicies = List(EffectPolicy(
+      "alice-data",
+      alice,
+      fsRead,
+      EffectMeta.filesystem.resource.at("/data*"),
+      Decision.Allow))
+    val root = CapabilityGrant(
+      alice, fsRead, EffectMeta.filesystem.resource.at("/data*"),
+      sourcePolicyIds = List("alice-data"))
+    val ab = PolicyEval.delegate(root, bob, EffectMeta.filesystem.resource.at("/data/b*")).toOption.get
+    val bc = PolicyEval.delegate(ab.child, carol, EffectMeta.filesystem.resource.at("/data/b/c")).toOption.get
+    val carolReq = EffectRequest(carol, fsRead, EffectMeta.filesystem.resource.at("/data/b/c"))
+    val proof = PolicyEval.proveDelegated(carolReq, rootPolicies, List(ab, bc), nowMillis = 0)
+    assert(proof.isRight, proof.toString)
+    assert(Authority.checkProof(proof.toOption.get, rootPolicies).isRight)
+    // Without delegation fix, citing Alice policy against Carol request would fail:
+    val naive = PolicyEval.prove(carolReq, rootPolicies, 0)
+    assert(naive.isLeft, "Carol is not in root policy")
+
+  test("attenuation parentCanon mismatch and illegal subject change rejected"):
+    val parent = CapabilityGrant(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
+    val narrow = EffectMeta.filesystem.resource.at("/tmp/a")
+    val (child, _) = PolicyEval.attenuate(parent, narrow).toOption.get
+    val badCanon = child.copy(parentCanon = Some(Canon.CStr("not-parent")))
+    assert(Authority.AttenuationWitness.check(parent, badCanon).isLeft)
+    val bob = Subject("bob")
+    val illegalSubject = child.copy(subject = bob, delegatedBy = None)
+    assert(Authority.AttenuationWitness.check(parent, illegalSubject).isLeft)
+    // legitimate subject change only via Delegation (delegatedBy set)
+    val viaDeleg = PolicyEval.delegate(parent, bob, narrow)
+    assert(viaDeleg.isRight, viaDeleg.toString)
+
+  test("AuthorizationProof.canon distinguishes materially different proofs"):
+    val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
+    val p1 = PolicyEval.prove(readReq, policies, nowMillis = 0).toOption.get
+    val p2 = PolicyEval.prove(readReq.copy(requestId = Some("r-1")), policies, nowMillis = 0).toOption.get
+    val p3 = PolicyEval.prove(
+      EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/b")),
+      policies, nowMillis = 0).toOption.get
+    val c1 = Canon.encode(p1.canon).toSeq
+    val c2 = Canon.encode(p2.canon).toSeq
+    val c3 = Canon.encode(p3.canon).toSeq
+    assert(c1 != c2, "requestId must affect canon")
+    assert(c1 != c3, "resource must affect canon")
+    val attenuated = PolicyEval.proveAttenuated(
+      p1.copy(grant = p1.grant.copy(resource = EffectMeta.filesystem.resource.at("/tmp*"))),
+      readReq.resource)
+    // may fail justification setup — build properly:
+    val broad = p1.copy(grant = p1.grant.copy(resource = EffectMeta.filesystem.resource.at("/tmp*")))
+    val att = PolicyEval.proveAttenuated(broad, readReq.resource).toOption.get
+    assert(Canon.encode(att.canon).toSeq != c1, "attenuation witness must affect canon")
+
+  test("narrow deployment policies: process/ledger/lsp deny out-of-scope"):
+    val proc = EffectContext.forProcess()
+    assert(proc.authorize(
+      EffectMeta.process.actionKey("run"),
+      EffectMeta.process.resource.at("scala-cli")).isRight)
+    assert(proc.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
+    val led = EffectContext.forLedger()
+    val authSubj = led.withSubject(Subject("alice"))
+    assert(authSubj.authorize(
+      EffectMeta.ledgerTransport.actionKey("append"),
+      EffectMeta.ledgerTransport.resource.at("/tmp/node")).isRight)
+    assert(authSubj.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
+    val lsp = EffectContext.forLsp()
+    assert(lsp.authorize(
+      EffectMeta.lsp.actionKey("read"), EffectMeta.lsp.resource.any).isRight)
+    assert(lsp.authorize(fsWrite, EffectMeta.filesystem.resource.at("/x")).isLeft)

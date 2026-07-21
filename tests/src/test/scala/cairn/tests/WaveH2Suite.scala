@@ -21,9 +21,9 @@ class WaveH2Suite extends munit.FunSuite:
   private val Riemann = cairn.examples.riemann.Riemann(packs)
   private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
   private val Unison = cairn.examples.unison.Unison(UnisonCore)
-  private val ledgerCtx = EffectContext.bootstrapped()
-  private val processCtx = EffectContext.bootstrapped()
-  private val lspCtx = EffectContext.bootstrapped()
+  private val ledgerCtx = EffectContext.forLedger()
+  private val processCtx = EffectContext.forProcess()
+  private val lspCtx = EffectContext.forLsp()
 
   // ---- M43: capability manifests ----
 

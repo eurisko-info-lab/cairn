@@ -64,6 +64,44 @@ object PolicyEval:
       base.copy(grant = child, attenuatedFrom = Some((base.grant, w)))
     }
 
+  /** Prove a final grantee's request via an Alice→…→Carol delegation chain.
+    *
+    * Root policies must match the root grantor; the chain is Kernel-validated;
+    * the final child must cover `req`. Cited allows justify the root, not Carol.
+    */
+  def proveDelegated(
+      req: EffectRequest,
+      policies: List[EffectPolicy],
+      chain: List[Delegation],
+      nowMillis: Long
+  ): Either[String, AuthorizationProof] =
+    if chain.isEmpty then Left("empty delegation chain")
+    else
+      Delegation.validateChain(chain).flatMap { finalGrant =>
+        if !finalGrant.covers(req, nowMillis) then Left("final grant does not cover request")
+        else if finalGrant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
+        else
+          val root = chain.head.parent
+          val rootReq = req.copy(subject = root.subject, action = root.action, resource = root.resource)
+          val matched = policies.filter(_.matches(rootReq))
+          val denies = matched.filter(_.decision == Decision.Deny)
+          if denies.nonEmpty then Left(s"deny by ${denies.map(_.id).mkString(",")}")
+          else
+            val allows = matched.filter(_.decision == Decision.Allow)
+            if allows.isEmpty then Left("no matching allow policy for root grantor")
+            else if allows.exists(p => !root.resource.matches(p.resource)) then
+              Left("root grant widens beyond cited policy resource")
+            else
+              val grant = finalGrant.copy(sourcePolicyIds = allows.map(_.id))
+              Right(AuthorizationProof(
+                request = req,
+                nowMillis = nowMillis,
+                allowPolicies = allows,
+                grant = grant,
+                conditionEvidence = conditionEvidence(req, allows),
+                delegationChain = chain))
+      }
+
   private def conditionEvidence(req: EffectRequest, allows: List[EffectPolicy]): Map[String, String] =
     allows.iterator
       .flatMap(_.conditions.iterator)
@@ -124,3 +162,45 @@ object PolicyEval:
       EffectMeta.workspace.actionKey("read"),
       EffectMeta.workspace.resource.at("languages*"),
       Decision.Allow))
+
+  /** Ledger append under a root-path pattern. Subject may be `"*"` so
+    * Node.append can authorize as the signing authority name.
+    */
+  def ledgerNode(subject: Subject | "*", rootPattern: String = "*"): List[EffectPolicy] =
+    List(EffectPolicy(
+      "ledger-append",
+      subject,
+      EffectMeta.ledgerTransport.actionKey("append"),
+      EffectMeta.ledgerTransport.resource.at(rootPattern),
+      Decision.Allow))
+
+  /** Process.run; optional command-name allow-list (exact, prefix `foo*`, or `*`). */
+  def processRunner(subject: Subject | "*", commands: List[String] = List("*")): List[EffectPolicy] =
+    commands.map(cmd => EffectPolicy(
+      s"process-run-$cmd",
+      subject,
+      EffectMeta.process.actionKey("run"),
+      EffectMeta.process.resource.at(cmd),
+      Decision.Allow))
+
+  /** LSP read/write (session-scoped `*`). */
+  def lspSession(subject: Subject | "*"): List[EffectPolicy] =
+    List(
+      EffectPolicy(
+        "lsp-read", subject, EffectMeta.lsp.actionKey("read"),
+        EffectMeta.lsp.resource.any, Decision.Allow),
+      EffectPolicy(
+        "lsp-write", subject, EffectMeta.lsp.actionKey("write"),
+        EffectMeta.lsp.resource.any, Decision.Allow))
+
+  /** External backend find/run; optional host patterns. */
+  def externalBackend(subject: Subject | "*", hosts: List[String] = List("*")): List[EffectPolicy] =
+    hosts.flatMap { host =>
+      List(
+        EffectPolicy(
+          s"backend-find-$host", subject, EffectMeta.externalBackend.actionKey("find"),
+          EffectMeta.externalBackend.resource.at(host), Decision.Allow),
+        EffectPolicy(
+          s"backend-run-$host", subject, EffectMeta.externalBackend.actionKey("run"),
+          EffectMeta.externalBackend.resource.at(host), Decision.Allow))
+    }

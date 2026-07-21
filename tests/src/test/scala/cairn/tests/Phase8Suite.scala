@@ -14,8 +14,8 @@ import cairn.examples.stlc.Stlc
 class Phase8Suite extends munit.FunSuite:
   private val packs = PackLoader(EffectContext.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
-  private val ledgerCtx = EffectContext.bootstrapped()
-  private val processCtx = EffectContext.bootstrapped()
+  private val ledgerCtx = EffectContext.forLedger()
+  private val processCtx = EffectContext.forProcess()
 
   test("mvp transcript runs from checkout (S46 acceptance, §9.9)"):
     val candidates = List("transcripts/mvp.cairn", "../transcripts/mvp.cairn").map(java.nio.file.Path.of(_))

@@ -10,8 +10,8 @@ import cairn.kernel.Effects
   * and must not hold a gate — they accept only [[AuthorizedEffect]].
   *
   * Carries [[subject]] + [[gate]] for the authorize step; [[capabilities]] is
-  * a placeholder until grant-bundle threading; [[clock]] supplies injectable
-  * time for grant expiry checks (defaults to wall clock).
+  * consulted first when non-empty (covering grant → Kernel check, no broad
+  * policy re-eval); [[clock]] supplies injectable time for grant expiry.
   */
 final case class EffectContext(
     subject: Subject,
@@ -23,6 +23,7 @@ final case class EffectContext(
   def withSubject(s: Subject): EffectContext = copy(subject = s)
   def withGate(g: AuthorityGate): EffectContext = copy(gate = g)
   def withClock(c: () => Long): EffectContext = copy(clock = c)
+  def withCapabilities(caps: List[CapabilityGrant]): EffectContext = copy(capabilities = caps)
 
   /** Build an [[EffectRequest]] using this context's subject. */
   def effectRequest(
@@ -33,12 +34,20 @@ final case class EffectContext(
   ): EffectRequest =
     EffectRequest(subject, action, resource, args, requestId)
 
-  /** Single authorize entry point: Core proof → Kernel check → [[AuthorizedEffect]].
-    * Narrow pack-loader, bootstrap allow-all, and Audit-mode pass-through all
-    * flow through here. Expiry uses [[clock]].
+  /** Single authorize entry point.
+    *
+    * When [[capabilities]] is non-empty: find a covering grant → Kernel
+    * [[Authority.checkCapability]] (no policy prove). When empty: fall back
+    * to Core prove → Kernel checkProof via the gate.
     */
   def authorize(req: EffectRequest): Either[String, AuthorizedEffect] =
-    gate.check(req, clock()).map(AuthorizedEffect.mint)
+    val now = clock()
+    if capabilities.nonEmpty then
+      capabilities.find(_.covers(req, now)) match
+        case Some(grant) => gate.checkCapability(req, grant, now).map(AuthorizedEffect.mint)
+        case None        => Left("no covering capability in context")
+    else
+      gate.check(req, now).map(AuthorizedEffect.mint)
 
   /** Authorize using this context's subject. */
   def authorize(
@@ -66,7 +75,7 @@ object EffectContext:
   def local(gate: AuthorityGate, audit: Audit = Audit.Local): EffectContext =
     EffectContext(Subject("local"), gate, Nil, audit)
 
-  /** Fresh allow-all Enforce gate + local subject (tests / non-pack-loader). */
+  /** Fresh allow-all Enforce gate + local subject (tests / broad wiring). */
   def bootstrapped(audit: Audit = Audit.Local): EffectContext =
     local(AuthorityGate.bootstrapped(), audit)
 
@@ -76,3 +85,24 @@ object EffectContext:
   def forPackLoader(audit: Audit = Audit.Local): EffectContext =
     val subject = Subject("local")
     EffectContext(subject, AuthorityGate.enforcing(PolicyEval.packLoaderWorkspace(subject)), Nil, audit)
+
+  /** Ledger composition root: append under any ledger root; subject `*` so
+    * [[cairn.systemhandler.Node.append]] can authorize as the signing authority.
+    */
+  def forLedger(audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.ledgerNode("*"), audit)
+
+  /** Process composition root: run any command (deployment may narrow further). */
+  def forProcess(audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.processRunner(Subject("local")), audit)
+
+  /** LSP composition root: session read/write. */
+  def forLsp(audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.lspSession(Subject("local")), audit)
+
+  /** External-backend composition root: find/run any host. */
+  def forBackend(audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.externalBackend(Subject("local")), audit)
+
+  private def localCtx(policies: List[Authority.EffectPolicy], audit: Audit): EffectContext =
+    EffectContext(Subject("local"), AuthorityGate.enforcing(policies), Nil, audit)

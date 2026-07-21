@@ -82,6 +82,41 @@ final class AuthorityGate(
                       Right(auth)
                 }
 
+  /** Capability-first path: validate a covering grant without policy prove. */
+  def checkCapability(
+      req: EffectRequest,
+      grant: CapabilityGrant,
+      nowMillis: Long = System.currentTimeMillis()
+  ): Either[String, AuthorizedRequest] =
+    mode match
+      case AuthorityGate.Mode.Audit =>
+        val would = grant.covers(req, nowMillis)
+        val derivation = AuthorizationDerivation(
+          req, policies,
+          if would then Decision.Allow else Decision.Deny,
+          if would then Some(grant) else None,
+          "capability")
+        synchronized { events += AuthorityEvent.Audited(derivation, would) }
+        Right(Authority.auditPass(req))
+      case AuthorityGate.Mode.Enforce =>
+        Authority.checkCapability(req, grant, nowMillis) match
+          case Left(err) =>
+            val derivation = AuthorizationDerivation(req, policies, Decision.Deny, None, err)
+            synchronized { events += AuthorityEvent.Rejected(derivation) }
+            Left(err)
+          case Right(auth) =>
+            val derivation = AuthorizationDerivation(
+              req, policies, Decision.Allow, Some(grant), "capability")
+            synchronized {
+              consumeReplay(derivation, req) match
+                case Left(err) =>
+                  events += AuthorityEvent.Rejected(derivation)
+                  Left(err)
+                case Right(()) =>
+                  events += AuthorityEvent.Enforced(derivation, Some(auth))
+                  Right(auth)
+            }
+
   private def consumeReplay(derivation: AuthorizationDerivation, req: EffectRequest): Either[String, Unit] =
     val afterNonce =
       derivation.grant.flatMap(_.nonce) match

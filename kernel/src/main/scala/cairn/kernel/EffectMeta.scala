@@ -16,32 +16,41 @@ package cairn.kernel
   */
 object EffectMeta:
 
-  /** Per-family resource language: kind + informal path grammar.
+  /** Per-family resource language: kind + informal path grammar, bound to the
+    * effect-interface Fragment digest when constructed from an [[EffectFamily]].
     * `pathPattern` documents how path values are shaped (`Path`, `Command`,
     * `Host`, `*` for unscoped families); matching still uses
-    * [[Authority.Resource.matches]] (exact / prefix / wildcard).
+    * [[Authority.Resource.matches]] (exact / prefix-wildcard / `*`).
     */
-  final case class ResourceSchema(kind: String, pathPattern: String):
+  final case class ResourceSchema(
+      kind: String,
+      pathPattern: String,
+      interfaceDigest: Option[Digest] = None):
     def at(path: String): Authority.Resource = Authority.Resource(kind, path)
     def any: Authority.Resource = Authority.Resource(kind, "*")
 
   /** Fragment + declared actions + resource schema + request→action grouping.
-    * Action keys and resources are derived from these declarations.
+    * Action keys and resources are derived from these declarations and bound
+    * to [[fragment]].digest.
     */
   final case class EffectFamily(
       fragment: Fragment,
       family: Effects.Family,
       /** Declared capability-class names (distinct [[Effects.ActionKey]] names). */
       actions: List[String],
-      resource: ResourceSchema,
+      resourceKind: String,
+      resourcePathPattern: String,
       /** Request ctor name → declared action name, or `None` if ungated. */
       requestActions: Map[String, Option[String]],
   ):
+    def resource: ResourceSchema =
+      ResourceSchema(resourceKind, resourcePathPattern, Some(fragment.digest))
+
     def actionKeys: Set[Effects.ActionKey] =
-      actions.map(Effects.ActionKey.of(family, _)).toSet
+      actions.map(actionKey).toSet
 
     def actionKey(name: String): Effects.ActionKey =
-      Effects.ActionKey.of(family, name)
+      Effects.ActionKey.bound(family, name, fragment.digest)
 
     /** Resolve a Request constructor to its derived action key, if gated. */
     def keyFor(ctor: String): Option[Effects.ActionKey] =
@@ -64,7 +73,8 @@ object EffectMeta:
     randomFragment,
     Effects.Family.Random,
     actions = List("bytes"),
-    resource = ResourceSchema("random", "*"),
+    resourceKind = "random",
+    resourcePathPattern = "*",
     requestActions = Map("bytes" -> Some("bytes")))
 
   private val clockFragment: Fragment = Fragment(
@@ -86,7 +96,8 @@ object EffectMeta:
     clockFragment,
     Effects.Family.Clock,
     actions = List("now", "timestampSlug"),
-    resource = ResourceSchema("clock", "*"),
+    resourceKind = "clock",
+    resourcePathPattern = "*",
     requestActions = Map(
       "now" -> Some("now"),
       "timestampSlug" -> Some("timestampSlug")))
@@ -109,7 +120,8 @@ object EffectMeta:
     processFragment,
     Effects.Family.Process,
     actions = List("run"),
-    resource = ResourceSchema("process", "Command"),
+    resourceKind = "process",
+    resourcePathPattern = "Command",
     requestActions = Map("run" -> Some("run")))
 
   private val externalBackendFragment: Fragment = Fragment(
@@ -132,7 +144,8 @@ object EffectMeta:
     externalBackendFragment,
     Effects.Family.ExternalBackend,
     actions = List("find", "run"),
-    resource = ResourceSchema("externalBackend", "Host"),
+    resourceKind = "externalBackend",
+    resourcePathPattern = "Host",
     requestActions = Map(
       "find" -> Some("find"),
       "run" -> Some("run")))
@@ -159,7 +172,8 @@ object EffectMeta:
     terminalFragment,
     Effects.Family.Terminal,
     actions = List("read", "write"),
-    resource = ResourceSchema("terminal", "*"),
+    resourceKind = "terminal",
+    resourcePathPattern = "*",
     requestActions = Map(
       "readLine" -> Some("read"),
       "write" -> Some("write"),
@@ -187,7 +201,8 @@ object EffectMeta:
     workspaceFragment,
     Effects.Family.Workspace,
     actions = List("read"),
-    resource = ResourceSchema("workspace", "Path"),
+    resourceKind = "workspace",
+    resourcePathPattern = "Path",
     requestActions = Map(
       "languageDirs" -> Some("read"),
       "listCairnFiles" -> Some("read"),
@@ -229,7 +244,8 @@ object EffectMeta:
     filesystemFragment,
     Effects.Family.Filesystem,
     actions = List("read", "write", "mkdirs"),
-    resource = ResourceSchema("filesystem", "Path"),
+    resourceKind = "filesystem",
+    resourcePathPattern = "Path",
     requestActions = Map(
       "read" -> Some("read"),
       "exists" -> Some("read"),
@@ -265,10 +281,61 @@ object EffectMeta:
     lspFragment,
     Effects.Family.Lsp,
     actions = List("read", "write"),
-    resource = ResourceSchema("lsp", "*"),
+    resourceKind = "lsp",
+    resourcePathPattern = "*",
     requestActions = Map(
       "readMessage" -> Some("read"),
       "writeMessage" -> Some("write")))
+
+  /** CAS put/get — Meta-defined interface over the trait contract. */
+  private val casFragment: Fragment = Fragment(
+    name = "effect.cas",
+    provides = List("effect.cas"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("put", "Request", List("Artifact")),
+      CtorDef("get", "Request", List("Digest")),
+      CtorDef("typedKey", "Response", List("TypedKey")),
+      CtorDef("artifact", "Response", List("Artifact")),
+      CtorDef("missing", "Error", List("Digest")),
+      CtorDef("io", "Error", List("Str"))))
+
+  val cas: EffectFamily = EffectFamily(
+    casFragment,
+    Effects.Family.Cas,
+    actions = List("put", "get"),
+    resourceKind = "cas",
+    resourcePathPattern = "*",
+    requestActions = Map(
+      "put" -> Some("put"),
+      "get" -> Some("get")))
+
+  /** Ledger transport append — Meta-defined over Node.append. */
+  private val ledgerTransportFragment: Fragment = Fragment(
+    name = "effect.ledgerTransport",
+    provides = List("effect.ledgerTransport"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("append", "Request", List("Authority", "Txs")),
+      CtorDef("block", "Response", List("Block")),
+      CtorDef("denied", "Error", List("Str")),
+      CtorDef("io", "Error", List("Str"))))
+
+  val ledgerTransport: EffectFamily = EffectFamily(
+    ledgerTransportFragment,
+    Effects.Family.LedgerTransport,
+    actions = List("append"),
+    resourceKind = "ledger",
+    resourcePathPattern = "Path",
+    requestActions = Map("append" -> Some("append")))
 
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
@@ -278,17 +345,19 @@ object EffectMeta:
     Effects.Family.Terminal -> terminal,
     Effects.Family.Workspace -> workspace,
     Effects.Family.Filesystem -> filesystem,
-    Effects.Family.Lsp -> lsp)
+    Effects.Family.Lsp -> lsp,
+    Effects.Family.Cas -> cas,
+    Effects.Family.LedgerTransport -> ledgerTransport)
 
   /** All action keys declared by Meta-defined families. */
   def derivedActionKeys: Set[Effects.ActionKey] =
     families.values.flatMap(_.actionKeys).toSet
 
-  /** Host-only keys (Cas / LedgerTransport) not yet Meta-defined. */
+  /** Formerly host-only Cas/Ledger; now empty — retained for migration checks. */
   def hostOnlyActionKeys: Set[Effects.ActionKey] =
-    Effects.Action.values.map(Effects.ActionKey.of).toSet -- derivedActionKeys
+    Effects.Action.values.map(_.key).toSet -- derivedActionKeys
 
-  /** Every known action key: derived + host-only bridge. */
+  /** Every known action key: derived + residual host-only bridge. */
   def allActionKeys: Set[Effects.ActionKey] =
     derivedActionKeys ++ hostOnlyActionKeys
 

@@ -233,12 +233,18 @@ class EffectMetaSuite extends munit.FunSuite:
     val fragmentReqCtors = EffectMeta.lsp.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
 
-  test("derived ActionKeys cover all host Actions for Meta families; host-only are Cas/Ledger"):
+  test("derived ActionKeys cover all host Actions; Cas/Ledger are Meta-defined"):
     val derived = EffectMeta.derivedActionKeys
     val hostOnly = EffectMeta.hostOnlyActionKeys
-    assertEquals(hostOnly.map(_.id), Set("Cas.put", "Cas.get", "LedgerTransport.append"))
+    assertEquals(hostOnly, Set.empty[Effects.ActionKey])
     assertEquals(EffectMeta.allActionKeys, Effects.Action.values.map(_.key).toSet)
     assert(derived.subsetOf(EffectMeta.allActionKeys))
+    assert(EffectMeta.families.contains(Effects.Family.Cas))
+    assert(EffectMeta.families.contains(Effects.Family.LedgerTransport))
     EffectMeta.families.values.foreach { f =>
       assertEquals(EffectMeta.completeness(f), Nil, clues(f.fragment.name))
+      f.actionKeys.foreach { k =>
+        assert(k.interfaceDigest.contains(f.fragment.digest), clues(k.id))
+      }
+      assertEquals(f.resource.interfaceDigest, Some(f.fragment.digest))
     }
