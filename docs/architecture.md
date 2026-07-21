@@ -57,19 +57,22 @@ and resource vocabularies instead of hand-maintaining them independently of
 each other, the way `core.Meta` already treats the Fragment IR as a Cairn
 language rather than an opaque Scala shape.
 
-- **`Random`** (template family, done): `kernel.EffectMeta.random` is a
-  Kernel-owned `Fragment` (sorts + constructors, no grammar — effect
-  requests are host-constructed, not user-typed source text) describing the
+- **`Random`, `Clock`** (done): `kernel.EffectMeta.{random,clock}` are
+  Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
+  requests are host-constructed, not user-typed source text) describing each
   family's `Request`/`Response`/`Error` shapes. `EffectMeta.actionsOf`
-  projects the family's rights vocabulary from that Fragment and is checked
-  against `kernel.Effects.Action`'s hand-tagged `Random` cases and against
-  `system-interface.Random.Request`'s actual Scala case names
-  (`EffectMetaSuite`) — both were previously free to drift independently
-  (confirmed already-drifted for `Clock`: 2 request shapes, 1 `Action`) and
-  now can't without failing a test.
-- **Remaining 12 families** (`Filesystem`, `Cas`, `Workspace`, `Process`,
-  `Crypto`, `Clock`, `Network`, `Http`, `LedgerTransport`, `Terminal`,
-  `Lsp`, `ExternalBackend`) — not yet converted; `Random` is the template,
+  projects a family's rights vocabulary from its Fragment and is checked
+  against `kernel.Effects.Action`'s hand-tagged cases and against the
+  matching `system-interface` object's actual Scala case names
+  (`EffectMetaSuite`) — both were previously free to drift independently.
+  `Clock` had already drifted before this mechanism existed: `Request` had 2
+  cases (`Now`, `TimestampSlug`) but `Action` had only 1 (`ClockNow`) —
+  `system-handler.Clock` was executing a request with no corresponding
+  right. Fixed by adding `ClockTimestampSlug` alongside introducing the
+  Fragment, and now caught by `EffectMetaSuite` going forward.
+- **Remaining 11 families** (`Filesystem`, `Cas`, `Workspace`, `Process`,
+  `Crypto`, `Network`, `Http`, `LedgerTransport`, `Terminal`, `Lsp`,
+  `ExternalBackend`) — not yet converted; `Random`/`Clock` are the template,
   each is a separate future slice. Same incremental-adoption shape as
   `AuthorityGate`'s per-family `Enforce` rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,

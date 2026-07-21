@@ -26,8 +26,24 @@ object EffectMeta:
       CtorDef("bytesValue", "Response", List("Bytes")),
       CtorDef("unavailable", "Error", List("Str"))))
 
+  val clock: Fragment = Fragment(
+    name = "effect.clock",
+    provides = List("effect.clock"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("now", "Request", Nil),
+      CtorDef("timestampSlug", "Request", Nil),
+      CtorDef("instant", "Response", List("Int")),
+      CtorDef("slug", "Response", List("Str")),
+      CtorDef("unavailable", "Error", List("Str"))))
+
   val fragments: Map[Effects.Family, Fragment] = Map(
-    Effects.Family.Random -> random)
+    Effects.Family.Random -> random,
+    Effects.Family.Clock -> clock)
 
   /** The rights vocabulary for a family, projected from its Fragment: every
     * declared [[Effects.Action]] whose name matches a `Request`-sorted

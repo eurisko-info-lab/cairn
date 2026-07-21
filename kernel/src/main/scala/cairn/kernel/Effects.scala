@@ -29,6 +29,7 @@ object Effects:
     case LedgerPublish    extends Action(Family.LedgerTransport, "publish")
     case BranchAdvance    extends Action(Family.LedgerTransport, "branch-advance")
     case ClockNow         extends Action(Family.Clock, "now")
+    case ClockTimestampSlug extends Action(Family.Clock, "timestampSlug")
     case RandomBytes      extends Action(Family.Random, "bytes")
     case TerminalWrite    extends Action(Family.Terminal, "write")
     case LspServe         extends Action(Family.Lsp, "serve")
