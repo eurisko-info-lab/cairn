@@ -29,6 +29,7 @@ kernel ← workbench ← {proof, compute} ← rosetta ← ledger ← surface ←
 system-interface → kernel
 system-handler   → kernel, system-interface
 core             → kernel
+workbench        → kernel, core, system-handler (in addition to the chain above)
 rosetta          → proof, compute, core (in addition to the chain above)
 ledger           → rosetta, system-interface, system-handler (in addition to the chain above)
 ```
@@ -62,10 +63,26 @@ same-module code. `core.TreeEngine` now keeps just the proposer/search half
 `compute` now holds only `NetBuilder`/`NetEngine` (interaction-net reduction,
 untouched — no coupling to any of the above).
 
+`core`/`system-handler` (Phase 2, third slice): `workbench.PackLoader` split
+along the "Placement of Meta" lines `MIGRATION-PLAN.md` §5 already names.
+`system-handler.PackFiles` does the raw filesystem work (listing `.cairn`
+files, reading text) — deliberately `Fragment`/`Meta`-agnostic, just
+`Path`/`String`. `core.PackCompose` holds the pure composition algorithm
+(`demote`/`bindSurface`/`bindPack`/`close`/`unmetRequires`), calling
+`kernel.Compose.compose`. `SurfacePack` (pure data) moved to `kernel` so
+`core.PackCompose.bindSurface` can reference it without `core` depending on
+`workbench`. `PackLoader` itself stays in `workbench` as a thin orchestrator
+combining both — there's no `runtime`/`user` composition-root module yet for
+that glue to live in — re-exporting the exact same public API (`requireOwn`,
+`requireClosed`, `loadRaw`, `bindSurface`, `demote`, `unmetRequires`,
+`surfacesFor`, `close`, `loadClosed`, `DefaultSurface`), so none of its ~25
+external call sites needed to change.
+
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
-only import updates at call sites. `user` and `runtime` do not exist yet;
-most of `workbench` and all of `rosetta`'s own projection engine still play
+only import updates at call sites (none at all for the third slice). `user`
+and `runtime` do not exist yet; most of `workbench` (`Meta`/`Grammar`/`Delta`/
+`Capabilities`) and all of `rosetta`'s own projection engine still play
 Core's role, unsplit. Every exemplar language and domain pack still lives
 under `examples/`.
 
@@ -96,7 +113,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Still pending within Phase 2: `workbench`'s Meta/grammar/Delta machinery, `rosetta`'s projection engine |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Still pending within Phase 2: `workbench`'s remaining Meta/Grammar/Delta/Capabilities machinery, `rosetta`'s projection engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |

@@ -1,14 +1,15 @@
-package cairn.workbench
+package cairn.kernel
 
-import cairn.kernel.*
-
-/** Concrete syntax pack bound to a semantic language (Phase 2/3).
+/** Concrete syntax pack bound to a semantic language (Phase 2/3). MIGRATION-
+  * PLAN.md Phase 2 (third slice): pure data, moved here from `workbench` so
+  * `core.PackCompose.bindSurface` can reference it without `core` depending
+  * on `workbench`.
   *
   * File layout:
   *   languages/<lang>/surfaces/<style>.cairn
   * with body `surface <style> for <lang> { fragment … { keyword/syntax/… } }`.
   * Fragment names match the language's semantic fragments; grammar is merged
-  * by [[PackLoader.bindSurface]].
+  * by [[cairn.core.PackCompose.bindSurface]].
   */
 final case class SurfacePack(
     name: String,

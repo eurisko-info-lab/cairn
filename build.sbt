@@ -26,8 +26,11 @@ lazy val core = project.in(file("core"))
   .dependsOn(kernel)
   .settings(libraryDependencies += munit)
 
+// MIGRATION-PLAN.md Phase 2 (third slice): PackLoader is a thin orchestrator
+// over core.PackCompose (pure) and system-handler.PackFiles (I/O) — see
+// docs/architecture.md.
 lazy val workbench = project.in(file("workbench"))
-  .dependsOn(kernel)
+  .dependsOn(kernel, core, systemHandler)
   .settings(libraryDependencies += munit)
 
 lazy val proof = project.in(file("proof"))

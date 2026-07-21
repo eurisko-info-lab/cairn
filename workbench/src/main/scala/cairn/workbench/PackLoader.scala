@@ -1,7 +1,9 @@
 package cairn.workbench
 
 import cairn.kernel.*
-import java.nio.file.{Files, Path}
+import cairn.core.PackCompose
+import cairn.systemhandler.PackFiles
+import java.nio.file.Path
 
 /** Runtime pack loader for checked-in `.cairn` languages (M42 + exemplar DAG).
   *
@@ -18,75 +20,49 @@ import java.nio.file.{Files, Path}
   * (`surface <style> for <name> { … }`). Closing a pack binds the requested surface
   * (default `"default"`) before compose. Fused packs (no `surfaces/` dir — e.g. meta)
   * keep grammar in the language file.
+  *
+  * MIGRATION-PLAN.md Phase 2 (third slice): this object is now a thin
+  * orchestrator over `system-handler.PackFiles` (raw I/O) and
+  * `core.PackCompose` (the pure composition algorithm) — its own public API
+  * is unchanged, so no external call site needed to change. It stays here,
+  * not in `core` or `system-handler`, because it inherently combines both:
+  * there's no `runtime`/`user` composition-root module yet for it to live in.
   */
 object PackLoader:
-  val DefaultSurface: String = "default"
+  export PackCompose.{DefaultSurface, demote, bindSurface, unmetRequires}
 
-  /** Strip leaf-only surface markers when a pack is used as a dependency. */
-  def demote(f: Fragment): Fragment =
-    f.copy(varCtor = None, grammar = f.grammar.copy(top = None))
-
-  /** Merge surface grammar onto semantic fragments by fragment name. */
-  def bindSurface(semantic: List[Fragment], surface: SurfacePack): List[Fragment] =
-    val byName = surface.fragments.map(f => f.name -> f.grammar).toMap
-    val unknown = byName.keySet -- semantic.map(_.name).toSet
-    if unknown.nonEmpty then
-      throw RuntimeException(
-        s"surface ${surface.language}/${surface.name} has fragments not in language: ${unknown.toList.sorted.mkString(", ")}")
-    semantic.map(f => f.copy(grammar = byName.getOrElse(f.name, f.grammar)))
-
-  def languageDirs: List[Path] =
-    List("languages", "../languages", "../../languages").map(Path.of(_))
-      .filter(Files.isDirectory(_))
+  def languageDirs: List[Path] = PackFiles.languageDirs
 
   /** Raw fragments per language file name (no composition / no dep resolution).
     * Parse failures are fatal — silent skips hide incomplete `.cairn` packs.
     */
   def loadRaw(dir: Path): Map[String, List[Fragment]] =
-    if !Files.exists(dir) then Map.empty
-    else
-      import scala.jdk.CollectionConverters.*
-      Files.list(dir).iterator.asScala
-        .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
-        .map { p =>
-          Meta.parseLanguageAst(Files.readString(p)) match
-            case Right((name, fs)) => name -> fs
-            case Left(err) =>
-              throw RuntimeException(s"failed to parse language pack $p: $err")
-        }
-        .toMap
+    PackFiles.listCairnFiles(dir).map { p =>
+      Meta.parseLanguageAst(PackFiles.readText(p)) match
+        case Right((name, fs)) => name -> fs
+        case Left(err) =>
+          throw RuntimeException(s"failed to parse language pack $p: $err")
+    }.toMap
 
   def loadRaw(): Map[String, List[Fragment]] =
     languageDirs.view.map(loadRaw).find(_.nonEmpty).getOrElse(Map.empty)
 
   /** Surfaces keyed by language name, then style name. */
   def loadSurfaces(dir: Path): Map[String, Map[String, SurfacePack]] =
-    if !Files.exists(dir) then Map.empty
-    else
-      import scala.jdk.CollectionConverters.*
-      Files.list(dir).iterator.asScala
-        .filter(Files.isDirectory(_))
-        .flatMap { langDir =>
-          val langName = langDir.getFileName.toString
-          val surfRoot = langDir.resolve("surfaces")
-          if !Files.isDirectory(surfRoot) then Iterator.empty
-          else
-            val packs = Files.list(surfRoot).iterator.asScala
-              .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
-              .map { p =>
-                Meta.parseSurfaceAst(Files.readString(p)) match
-                  case Right((style, lang, fs)) =>
-                    if lang != langName then
-                      throw RuntimeException(
-                        s"surface pack $p declares for '$lang' but lives under languages/$langName/")
-                    style -> SurfacePack(style, langName, fs)
-                  case Left(err) =>
-                    throw RuntimeException(s"failed to parse surface pack $p: $err")
-              }
-              .toMap
-            if packs.isEmpty then Iterator.empty else Iterator(langName -> packs)
-        }
-        .toMap
+    PackFiles.listSubdirs(dir).flatMap { langDir =>
+      val langName = langDir.getFileName.toString
+      val packs = PackFiles.listSurfaceCairnFiles(langDir).map { p =>
+        Meta.parseSurfaceAst(PackFiles.readText(p)) match
+          case Right((style, lang, fs)) =>
+            if lang != langName then
+              throw RuntimeException(
+                s"surface pack $p declares for '$lang' but lives under languages/$langName/")
+            style -> SurfacePack(style, langName, fs)
+          case Left(err) =>
+            throw RuntimeException(s"failed to parse surface pack $p: $err")
+      }.toMap
+      if packs.isEmpty then None else Some(langName -> packs)
+    }.toMap
 
   def loadSurfaces(): Map[String, Map[String, SurfacePack]] =
     languageDirs.view.map(loadSurfaces).find(_.nonEmpty).getOrElse(Map.empty)
@@ -94,56 +70,13 @@ object PackLoader:
   def surfacesFor(lang: String): Map[String, SurfacePack] =
     loadSurfaces().getOrElse(lang, Map.empty)
 
-  private def bindPack(
-      name: String,
-      fs: List[Fragment],
-      surfaces: Map[String, Map[String, SurfacePack]],
-      surfaceName: String,
-  ): List[Fragment] =
-    surfaces.get(name) match
-      case None => fs // fused: grammar lives in the language file
-      case Some(styles) =>
-        val style = if styles.contains(surfaceName) then surfaceName
-                    else if styles.contains(DefaultSurface) then DefaultSurface
-                    else styles.keys.toList.sorted.headOption.getOrElse(surfaceName)
-        styles.get(style) match
-          case Some(surf) => bindSurface(fs, surf)
-          case None =>
-            throw RuntimeException(
-              s"language '$name' has surfaces ${styles.keys.toList.sorted.mkString(", ")} but not '$surfaceName'")
-
-  /** Resolve transitive `requires` by pulling providing packs, then compose. */
   def close(
       name: String,
       packs: Map[String, List[Fragment]],
       surfaces: Map[String, Map[String, SurfacePack]] = Map.empty,
       surface: String = DefaultSurface,
   ): Either[List[ComposeError], ComposedLanguage] =
-    packs.get(name) match
-      case None =>
-        Left(List(ComposeError("pack", name, "-", s"language pack '$name' not found")))
-      case Some(own) =>
-        var selected = Map(name -> own)
-        var guard = 0
-        var progress = true
-        while progress && guard < 32 do
-          guard += 1
-          progress = false
-          val provided = selected.values.flatten.flatMap(_.provides).toSet
-          val needed = selected.values.flatten.flatMap(_.requires).filterNot(provided.contains).toSet
-          for iface <- needed do
-            packs.find { (n, fs) =>
-              !selected.contains(n) && fs.exists(_.provides.contains(iface))
-            } match
-              case Some((dep, fs)) =>
-                selected = selected + (dep -> fs)
-                progress = true
-              case None => ()
-        val fragments = selected.toList.flatMap { (n, fs) =>
-          val bound = bindPack(n, fs, surfaces, surface)
-          if n == name then bound else bound.map(demote)
-        }
-        Compose.compose(name, fragments)
+    PackCompose.close(name, packs, surfaces, surface)
 
   def close(name: String): Either[List[ComposeError], ComposedLanguage] =
     close(name, loadRaw(), loadSurfaces(), DefaultSurface)
@@ -171,11 +104,3 @@ object PackLoader:
 
   def loadClosed(): Map[String, ComposedLanguage] =
     languageDirs.view.map(d => loadClosed(d)).find(_.nonEmpty).getOrElse(Map.empty)
-
-  /** Interfaces this pack's own fragments still need after local provides. */
-  def unmetRequires(name: String, packs: Map[String, List[Fragment]]): Set[String] =
-    packs.get(name) match
-      case None => Set.empty
-      case Some(fs) =>
-        val provided = fs.flatMap(_.provides).toSet
-        fs.flatMap(_.requires).filterNot(provided.contains).toSet
