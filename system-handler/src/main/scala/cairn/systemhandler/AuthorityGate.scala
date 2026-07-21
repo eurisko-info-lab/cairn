@@ -53,3 +53,13 @@ object AuthorityGate:
       mode = Mode.Enforce
       body
     finally mode = prev
+
+  /** Check-then-run: denies map to the caller's own error type via
+    * `onDenied`, so handlers don't hand-roll the same check/map boilerplate.
+    * In `Audit` mode (the default everywhere today) `check` never returns
+    * `Left`, so `onDenied` only fires once a family opts into `Enforce`.
+    */
+  def checked[E, A](req: EffectRequest)(onDenied: String => E)(body: => Either[E, A]): Either[E, A] =
+    check(req) match
+      case Left(err) => Left(onDenied(err))
+      case Right(_)  => body

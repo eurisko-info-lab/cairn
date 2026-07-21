@@ -1,18 +1,27 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Random as Rnd
+import cairn.kernel.{Authority, Effects}
 import java.security.SecureRandom
 
-/** Secure-randomness handler (Phase 3). */
+/** Secure-randomness handler (Phase 3). `bytes` is private: `perform` is
+  * the only entry point, gated by [[AuthorityGate]] (Subject("local") is a
+  * placeholder — this family has no real multi-tenant identity yet).
+  */
 object Random:
   private val secure = new SecureRandom()
 
-  def bytes(n: Int): Array[Byte] =
+  private def bytes(n: Int): Array[Byte] =
     val out = new Array[Byte](n)
     secure.nextBytes(out)
     out
 
-  def perform(req: Rnd.Request): Either[Rnd.Error, Rnd.Response] = req match
-    case Rnd.Request.Bytes(n) =>
-      try Right(Rnd.Response.Bytes(bytes(n)))
+  def perform(req: Rnd.Request): Either[Rnd.Error, Rnd.Response] =
+    val action = req match
+      case Rnd.Request.Bytes(_) => Effects.Action.RandomBytes
+    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("random", "*"))
+    AuthorityGate.checked(authReq)(err => Rnd.Error.Unavailable(s"denied: $err")) {
+      try req match
+        case Rnd.Request.Bytes(n) => Right(Rnd.Response.Bytes(bytes(n)))
       catch case e: Exception => Left(Rnd.Error.Unavailable(e.getMessage))
+    }

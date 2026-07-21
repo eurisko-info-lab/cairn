@@ -166,6 +166,61 @@ language rather than an opaque Scala shape.
   replace it) and typed per-family resources (`Authority.Resource` is still
   one shared untyped `(kind, path)` shape across every family).
 
+## Capability-gating handler entry points (post-migration priority #3)
+
+Reassessment finding: `perform(req: X.Request)` — the typed entry point the
+Meta-definition work above builds rights for — had **zero callers anywhere**
+in the repo, for any of the 8 families. Every real call site used each
+handler's separate "convenience methods" instead (`Filesystem.writeFile`,
+`Random.bytes`, etc.), bypassing the Request/Response contract and any
+authorization hook entirely. `system-handler/Filesystem.scala`'s own
+docstring names the original intent — *"Convenience methods keep existing
+call sites compiling; perform is the typed effect entry point"* — Phase 3
+built `perform` as the intended future path, but the migration of real
+callers onto it never happened, and Phase 8's "Compatibility facades and
+cleanup" cleaned up module-level facades, not this one.
+
+A call-site audit found the 8 families split cleanly in two:
+
+| Family | Real external callers |
+| --- | --- |
+| `Filesystem` | 1 (`rosetta/Scaffold.scala`, `writeFile`) |
+| `Process` | 1 (`surface/Transcript.scala`, `run`) |
+| `PackFiles`/`Workspace` | 6, all in `runtime/PackLoader.scala` |
+| `LspTransport` | 2, both in `surface/Lsp.scala` |
+| `Random`, `Clock`, `ExternalBackend`, `Terminal` | **0 — fully dead** |
+
+**`Random`/`Clock`/`ExternalBackend`/`Terminal`** (done): for these four,
+"migrate callers onto `perform`" was vacuously already true — nothing
+called their convenience methods at all. Each now has its convenience
+method(s) made `private` (`bytes`; `nowMillis`/`timestampSlug`;
+`find`/`run`; `write`/`writeLine`/`readLine`) — Scala visibility now
+structurally enforces "quarantine the raw entry point," not just
+convention — and `perform` is gated via a new `AuthorityGate.checked`
+combinator (`system-handler/AuthorityGate.scala`), deriving the
+`Effects.Action` per `Request` case from the same groupings
+`kernel.EffectMeta` already declares. Stays in `Audit` mode (never blocks),
+same as every other family — this is the first time any family besides
+`LedgerAppend` calls `AuthorityGate` at all, but it doesn't yet change
+behavior for anyone. Verified zero regression: the compiler catching zero
+external breakage on privatization confirmed the call-site audit was
+complete.
+
+**Placeholder, flagged explicitly**: all four use `Authority.Subject("local")`
+and `Authority.Resource(<family>, "*")` — there's no real multi-tenant
+identity concept for local, non-ledger effects today (the whole system
+runs as one local process; only the ledger's PoA layer has real per-
+authority identity). Replacing this placeholder with real injected
+capabilities is the user's priority #2 ("replace ambient globals... with
+explicit runtime contexts and injected capabilities") — noted here as a
+forward pointer, not solved.
+
+**Remaining** (`Filesystem`, `Process`, `PackFiles`/`Workspace`,
+`LspTransport`): each has real external callers needing an actual
+call-site migration before gating — separate future slices, roughly
+ordered by call-site count (`LspTransport`/`Filesystem`/`Process`
+smallest, `PackFiles` largest).
+
 ## Forbidden-import rules (ModuleBoundarySuite)
 
 - `kernel` / `core`: no filesystem, networking, or process APIs
