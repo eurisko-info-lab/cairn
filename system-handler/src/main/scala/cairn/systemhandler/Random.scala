@@ -20,7 +20,7 @@ object Random:
     val action = req match
       case Rnd.Request.Bytes(_) => Effects.Action.RandomBytes
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("random", "*"))
-    AuthorityGate.checked(authReq)(err => Rnd.Error.Unavailable(s"denied: $err")) {
+    AuthorityGate.default.checked(authReq)(err => Rnd.Error.Unavailable(s"denied: $err")) {
       try req match
         case Rnd.Request.Bytes(n) => Right(Rnd.Response.Bytes(bytes(n)))
       catch case e: Exception => Left(Rnd.Error.Unavailable(e.getMessage))

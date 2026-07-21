@@ -6,50 +6,54 @@ import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.AuthorityGate
 
-/** Phase 4–5 authority: audit mode records decisions; enforce mode blocks. */
+/** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
+  * Each test constructs its own fresh `AuthorityGate` instance instead of
+  * resetting shared global state — no `beforeEach` needed, and no risk of
+  * one test's mode/policies leaking into another regardless of test
+  * execution order.
+  */
 class AuthoritySuite extends munit.FunSuite:
-
-  override def beforeEach(context: BeforeEach): Unit =
-    AuthorityGate.clearPolicies()
-    AuthorityGate.setMode(AuthorityGate.Mode.Audit)
-    AuthorityGate.drainEvents()
 
   private val alice = Subject("alice")
   private val readReq = EffectRequest(alice, Effects.Action.FsRead, Resource("file", "/tmp/a"))
   private val appendReq = EffectRequest(alice, Effects.Action.LedgerAppend, Resource("ledger", "/tmp/node"))
 
   test("Phase 4 audit mode never blocks and records would-permit"):
-    AuthorityGate.install(List(PolicyEval.allowAll("allow-read", alice, Effects.Action.FsRead)))
-    val auth = AuthorityGate.check(readReq)
+    val gate = AuthorityGate()
+    gate.install(List(PolicyEval.allowAll("allow-read", alice, Effects.Action.FsRead)))
+    val auth = gate.check(readReq)
     assert(auth.isRight)
-    val ev = AuthorityGate.drainEvents()
+    val ev = gate.drainEvents()
     assert(ev.exists {
       case AuthorityEvent.Audited(d, would) => d.decision == Decision.Allow && would
       case _ => false
     })
 
   test("Phase 4 audit records would-deny when no policy matches"):
-    val auth = AuthorityGate.check(readReq)
+    val gate = AuthorityGate()
+    val auth = gate.check(readReq)
     assert(auth.isRight) // audit never blocks
-    val ev = AuthorityGate.drainEvents()
+    val ev = gate.drainEvents()
     assert(ev.exists {
       case AuthorityEvent.Audited(_, would) => !would
       case _ => false
     })
 
   test("Phase 5 enforce mode rejects without allow policy"):
-    AuthorityGate.setMode(AuthorityGate.Mode.Enforce)
-    val denied = AuthorityGate.check(appendReq)
+    val gate = AuthorityGate()
+    gate.setMode(AuthorityGate.Mode.Enforce)
+    val denied = gate.check(appendReq)
     assert(denied.isLeft, denied.toString)
-    assert(AuthorityGate.drainEvents().exists {
+    assert(gate.drainEvents().exists {
       case AuthorityEvent.Rejected(_) => true
       case _ => false
     })
 
   test("Phase 5 enforce mode allows with matching policy"):
-    AuthorityGate.setMode(AuthorityGate.Mode.Enforce)
-    AuthorityGate.install(List(PolicyEval.allowAll("allow-append", alice, Effects.Action.LedgerAppend)))
-    val allowed = AuthorityGate.check(appendReq)
+    val gate = AuthorityGate()
+    gate.setMode(AuthorityGate.Mode.Enforce)
+    gate.install(List(PolicyEval.allowAll("allow-append", alice, Effects.Action.LedgerAppend)))
+    val allowed = gate.check(appendReq)
     assert(allowed.isRight, allowed.toString)
 
   test("Kernel validate rejects mismatched Core derivation"):

@@ -291,6 +291,40 @@ with the reasoning documented inline. All eight still run in `Audit` mode
 family to `Enforce`, and replacing that placeholder with real injected
 capabilities, remain open (the latter is priority #2's territory).
 
+## Replacing ambient globals (post-migration priority #2)
+
+Two ambient globals were named: `AuthorityGate` (mutable `@volatile`
+`mode`/`policies`/`events` on a singleton `object`, just wired into all 8
+gated handlers) and `PackAccess` (a process-global `Option[PackAccess]`
+with a classloader hack, read by 5 `user/` language packs). The user chose
+to start with `AuthorityGate` (smaller blast radius, more urgent) and to
+scope the first slice as "instantiable + a default instance" rather than
+full injection everywhere at once.
+
+**`AuthorityGate`** (done, first slice): converted from a singleton
+`object` with module-level `@volatile var mode`/`policies` into a `final
+class AuthorityGate`, matching the `Node`/`Cas`/`DiskCas`/`Branches`
+pattern already used elsewhere in `system-handler` (real, established
+precedent — these are already constructed instances, not singleton
+objects) — `mode`/`policies` are now constructor parameters, `events` an
+instance-level buffer, no shared mutable JVM-wide state. `AuthorityGate.
+default` is a process-wide instance the 9 existing call sites (all 8
+handlers + `Node.append`) now reach via `AuthorityGate.default.checked`/
+`.check` instead of the bare module-level call — a one-line change per
+file, no other logic touched. `AuthoritySuite`'s tests previously mutated
+the shared singleton via a `beforeEach` reset (`clearPolicies()`,
+`setMode(Audit)`, `drainEvents()`) — the textbook symptom of ambient
+global state, where tests must cooperatively reset a hidden shared thing.
+Each test now constructs its own local `AuthorityGate()` inline instead —
+genuinely isolated regardless of test execution order or grouping, not
+just reset-before by convention.
+
+**Explicitly not done**: full injection (every handler/`Node` receiving
+an `AuthorityGate` instance as an explicit parameter instead of reaching
+`AuthorityGate.default`) — a separate future slice. `PackAccess` — the
+second ambient global — remains untouched, deliberately deferred until
+`AuthorityGate`'s injection is further along.
+
 ## Forbidden-import rules (ModuleBoundarySuite)
 
 - `kernel` / `core`: no filesystem, networking, or process APIs

@@ -4,20 +4,25 @@ import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.kernel.Authority.*
 
-/** Authority gate (Phases 4–5). Starts in audit mode; enforcement is
-  * opt-in per family via [[enforce]]. Handlers call [[check]] before
-  * privileged work.
+/** Authority gate (Phases 4–5, priority #2 first slice). Starts in audit
+  * mode; enforcement is opt-in per family via [[enforce]]. Handlers call
+  * [[check]]/[[checked]] before privileged work.
+  *
+  * An instantiable class (not a singleton `object`) — matching the
+  * `Node`/`Cas`/`DiskCas`/`Branches` pattern already used elsewhere in
+  * `system-handler` — so authority state (`mode`/`policies`/`events`) is
+  * explicit and constructible rather than shared, hidden, JVM-wide mutable
+  * state. `AuthorityGate.default` is the process-wide instance the 8
+  * effect handlers and `Node.append` use today; full per-call injection
+  * (no default at all) is a separate future slice.
   */
-object AuthorityGate:
-  enum Mode:
-    case Audit, Enforce
-
-  @volatile private var mode: Mode = Mode.Audit
-  @volatile private var policies: List[EffectPolicy] = Nil
+final class AuthorityGate(
+    @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
+    @volatile private var policies: List[EffectPolicy] = Nil):
   private val events = scala.collection.mutable.ListBuffer[AuthorityEvent]()
 
-  def setMode(m: Mode): Unit = mode = m
-  def currentMode: Mode = mode
+  def setMode(m: AuthorityGate.Mode): Unit = mode = m
+  def currentMode: AuthorityGate.Mode = mode
   def install(ps: List[EffectPolicy]): Unit = policies = ps
   def clearPolicies(): Unit = policies = Nil
   def drainEvents(): List[AuthorityEvent] =
@@ -31,13 +36,13 @@ object AuthorityGate:
       : Either[String, AuthorizedRequest] =
     val derivation = PolicyEval.propose(req, policies)
     mode match
-      case Mode.Audit =>
+      case AuthorityGate.Mode.Audit =>
         val would = derivation.decision == Decision.Allow &&
           derivation.grant.exists(_.covers(req, nowMillis))
         synchronized { events += AuthorityEvent.Audited(derivation, would) }
         // audit never blocks
         Right(Authority.auditPass(req))
-      case Mode.Enforce =>
+      case AuthorityGate.Mode.Enforce =>
         Authority.validate(req, policies, derivation, nowMillis) match
           case Right(auth) =>
             synchronized { events += AuthorityEvent.Enforced(derivation, Some(auth)) }
@@ -50,7 +55,7 @@ object AuthorityGate:
   def enforcing[A](body: => Either[String, A]): Either[String, A] =
     val prev = mode
     try
-      mode = Mode.Enforce
+      mode = AuthorityGate.Mode.Enforce
       body
     finally mode = prev
 
@@ -63,3 +68,13 @@ object AuthorityGate:
     check(req) match
       case Left(err) => Left(onDenied(err))
       case Right(_)  => body
+
+object AuthorityGate:
+  enum Mode:
+    case Audit, Enforce
+
+  /** Process-wide default instance — the 8 effect handlers and `Node.append`
+    * use this today; full per-call injection is a follow-up (priority #2,
+    * next slice).
+    */
+  val default: AuthorityGate = new AuthorityGate()
