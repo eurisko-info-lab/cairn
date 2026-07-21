@@ -3,7 +3,7 @@ package cairn.examples.unison
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systeminterface.Cas
-import cairn.systemhandler.MemCas
+import cairn.systemhandler.{CasEffects, EffectContext, MemCas}
 
 /** Unison-inspired pack (M48, §5b, §2c): a name-independent definition store
   * over ALPHA-INVARIANT digests (M2). Definitions are identified by content;
@@ -18,28 +18,29 @@ import cairn.systemhandler.MemCas
   * its binders (`lam` plus `matchList`/`matchOption`'s pattern binders), not
   * just `lam`.
   *
-  * `Store` bodies live in `Cas` (the SAME generic content-store
-  * PKI/Law's `Module`-backed registries and Search's `putTerm` already use,
-  * §2c: no language reimplements its own storage) — `digests` is just a
-  * local index of which of THIS store's alpha-normalized terms have been
-  * added, not a second copy of the term bytes.
+  * `Store` bodies live in `Cas` via [[CasEffects]] (the SAME generic
+  * content-store PKI/Law's `Module`-backed registries and Search's `putTerm`
+  * already use, §2c: no language reimplements its own storage) — `digests` is
+  * just a local index of which of THIS store's alpha-normalized terms have
+  * been added, not a second copy of the term bytes.
   */
 final class Unison(core: UnisonCore):
   private val spec = core.language.binderSpec
   private val varCtor = core.language.varCtor.getOrElse("var")
 
-  final case class Store(cas: Cas, digests: Set[Digest]):
+  final case class Store(cas: Cas, digests: Set[Digest], ctx: EffectContext):
     def add(term: Cst): (Digest, Store) =
       val normalized = Alpha.normalize(spec, varCtor)(term)
-      val d = cas.put(Artifact(ArtifactKind.Term, Cst.toCanon(normalized))).valueHash
-      (d, Store(cas, digests + d))
+      val d = CasEffects.put(cas, Artifact(ArtifactKind.Term, Cst.toCanon(normalized)), ctx)
+        .fold(e => throw RuntimeException(e.toString), _.valueHash)
+      (d, Store(cas, digests + d, ctx))
     def get(d: Digest): Option[Cst] =
       if !digests.contains(d) then None
-      else cas.getByDigest(d).toOption.map(a => Cst.fromCanon(a.body))
+      else CasEffects.get(cas, d, ctx).toOption.map(a => Cst.fromCanon(a.body))
     def size: Int = digests.size
 
   object Store:
-    def empty: Store = Store(MemCas(), Set.empty)
+    def empty: Store = Store(MemCas(), Set.empty, EffectContext.forCas())
 
   /** The names language: name -> ref <digest>. Its ΔL is the patch language. */
   val namesFragment: Fragment = Fragment(

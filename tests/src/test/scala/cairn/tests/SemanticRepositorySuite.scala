@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.ledger.Keypair
-import cairn.systemhandler.{Branches, DiskCas, EffectContext, Provenance}
+import cairn.systemhandler.{Branches, CasEffects, DiskCas, EffectContext, Provenance}
 import java.nio.file.Files
 
 /** End-to-end semantic repository spine: Branches + ΔL + ChangeAlgebra +
@@ -153,7 +153,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.merge(lang, "main", m0, cA, cB) match
       case Right(Left(conflict)) =>
         assertEquals(conflict.overlap, Set("a"))
-        assert(cas.contains(conflict.artifact.digest))
+        assert(CasEffects.contains(cas, conflict.artifact.digest, casCtx).contains(true))
         assertEquals(branches.load("main").head, None)
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)

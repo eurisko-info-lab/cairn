@@ -2,11 +2,16 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{DiskCas, CasAdmin, Chunker, DigestMigration}
+import cairn.systemhandler.{CasAdmin, CasAdminEffects, CasEffects, Chunker, DigestMigration, DiskCas, EffectContext}
 import cairn.examples.stlc.Stlc
 
-/** Wave A acceptance (M1–M5). */
+/** Wave A acceptance (M1–M5).
+  *
+  * M3/M5 exercise gated admin/chunk paths. M4 algorithm agility remains a
+  * direct DiskCas trait contract (putBytesAlgo / getBytesKey).
+  */
 class WaveASuite extends munit.FunSuite:
+  private val casCtx = EffectContext.forCas()
 
   test("M1: distinct schemas => distinct type hashes"):
     import Canon.*
@@ -49,15 +54,15 @@ class WaveASuite extends munit.FunSuite:
   test("M3: fsck detects and quarantines corruption"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-fsck")
     val cas = DiskCas(dir)
-    val d = cas.putBytes("healthy".getBytes)
-    val d2 = cas.putBytes("to be corrupted".getBytes)
+    val d = CasEffects.putBytes(cas, "healthy".getBytes, casCtx).fold(e => fail(e.toString), identity)
+    val d2 = CasEffects.putBytes(cas, "to be corrupted".getBytes, casCtx).fold(e => fail(e.toString), identity)
     val victim = dir.resolve("objects").resolve(d2.hex.take(2)).resolve(d2.hex.drop(2))
     java.nio.file.Files.write(victim, "garbage".getBytes)
-    val report = CasAdmin.fsck(dir)
+    val report = CasAdminEffects.fsck(dir, casCtx).fold(e => fail(e.toString), identity)
     assertEquals(report.checked, 2)
     assertEquals(report.corrupt, List(d2))
-    assert(cas.contains(d))
-    assert(!cas.contains(d2)) // quarantined, not served
+    assert(CasEffects.contains(cas, d, casCtx).contains(true))
+    assert(CasEffects.contains(cas, d2, casCtx).contains(false)) // quarantined, not served
 
   test("M3: GC never collects a reachable blob (property over random graphs)"):
     val rnd = new scala.util.Random(42)
@@ -70,27 +75,31 @@ class WaveASuite extends munit.FunSuite:
         val refs = nodes.filter(_ => rnd.nextBoolean()).take(3)
         val a = Artifact(ArtifactKind.Ir, Canon.cmap(
           "n" -> Canon.CInt(i), "refs" -> Canon.cstrs(refs.map(_.hex))))
-        nodes = cas.put(a).valueHash :: nodes
+        nodes = CasEffects.put(cas, a, casCtx).fold(e => fail(e.toString), _.valueHash) :: nodes
       val root = nodes.head
       def reachable(d: Digest, acc: Set[String]): Set[String] =
         if acc.contains(d.hex) then acc
-        else cas.getBytes(d).toOption.map(CasAdmin.references)
+        else CasEffects.getBytes(cas, d, casCtx).toOption.map(CasAdmin.references)
           .getOrElse(Set.empty).foldLeft(acc + d.hex)((s, r) => reachable(r, s))
       val expected = reachable(root, Set.empty)
-      CasAdmin.gc(dir, Set(root))
-      for hex <- expected do assert(cas.contains(Digest(hex)), s"reachable $hex was collected")
+      CasAdminEffects.gc(dir, Set(root), casCtx).fold(e => fail(e.toString), identity)
+      for hex <- expected do
+        assert(CasEffects.contains(cas, Digest(hex), casCtx).contains(true),
+          s"reachable $hex was collected")
 
   test("M3: stats report objects by kind"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-stats")
     val cas = DiskCas(dir)
-    Stlc.fragments.foreach(f => cas.put(f.artifact))
-    cas.put(Stlc.language.artifact)
-    val s = CasAdmin.stats(dir)
+    Stlc.fragments.foreach(f =>
+      CasEffects.put(cas, f.artifact, casCtx).fold(e => fail(e.toString), identity))
+    CasEffects.put(cas, Stlc.language.artifact, casCtx).fold(e => fail(e.toString), identity)
+    val s = CasAdminEffects.stats(dir, casCtx).fold(e => fail(e.toString), identity)
     assertEquals(s.objects, 6)
     assertEquals(s.byKind.get("fragment"), Some(5))
     assertEquals(s.byKind.get("language"), Some(1))
 
   test("M4: self-describing keys readable across algorithms"):
+    // Intentional direct DiskCas trait contract for digest agility.
     val dir = java.nio.file.Files.createTempDirectory("cairn-algo")
     val cas = DiskCas(dir)
     val bs = "algorithm agility".getBytes
@@ -106,9 +115,10 @@ class WaveASuite extends munit.FunSuite:
     val dir = java.nio.file.Files.createTempDirectory("cairn-mig")
     val cas = DiskCas(dir)
     val blobs = List("one", "two", "three").map(_.getBytes)
-    blobs.foreach(cas.putBytes)
+    blobs.foreach(bs => CasEffects.putBytes(cas, bs, casCtx).fold(e => fail(e.toString), identity))
     val migration = DigestMigration.build(blobs)
-    val fetch = (hex: String) => Digest.parse(hex).flatMap(cas.getBytes)
+    val fetch = (hex: String) => Digest.parse(hex).flatMap(d =>
+      CasEffects.getBytes(cas, d, casCtx).left.map(_.toString))
     assertEquals(DigestMigration.validate(migration, fetch), Right(3))
     // tampered mapping fails
     import Canon.*
@@ -137,13 +147,13 @@ class WaveASuite extends munit.FunSuite:
         else
           val n = math.min(len.toLong, math.min(block.length - (i % block.length), total - i)).toInt
           System.arraycopy(block, (i % block.length).toInt, b, off, n); i += n; n
-    val manifest = Chunker.putStream(cas, stream())
+    val manifest = Chunker.putStream(cas, stream(), casCtx).fold(e => fail(e), identity)
     // round-trip: count bytes and re-hash while streaming out
     val outMd = java.security.MessageDigest.getInstance("SHA-256")
     val counter = new java.io.OutputStream:
       def write(b: Int): Unit = outMd.update(b.toByte)
       override def write(b: Array[Byte], off: Int, len: Int): Unit = outMd.update(b, off, len)
-    assertEquals(Chunker.getStream(cas, manifest, counter), Right(totalBlocks.toLong * block.length))
+    assertEquals(Chunker.getStream(cas, manifest, counter, casCtx), Right(totalBlocks.toLong * block.length))
     // content identical to the source stream
     val srcMd = java.security.MessageDigest.getInstance("SHA-256")
     val s = stream(); val buf = new Array[Byte](1 << 16)
@@ -151,5 +161,5 @@ class WaveASuite extends munit.FunSuite:
     while r >= 0 do { srcMd.update(buf, 0, r); r = s.read(buf, 0, buf.length) }
     assert(srcMd.digest.sameElements(outMd.digest))
     // dedup: repeating content must NOT store ~100 distinct MiBs of chunks
-    val stats = CasAdmin.stats(dir)
+    val stats = CasAdminEffects.stats(dir, casCtx).fold(e => fail(e.toString), identity)
     assert(stats.bytes < 60L * 1024 * 1024, s"dedup failed: ${stats.bytes} bytes stored")

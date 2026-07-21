@@ -240,12 +240,20 @@ class EffectMetaSuite extends munit.FunSuite:
       errs => fail(errs.map(_.render).mkString("\n")), identity)
     assertEquals(EffectMeta.completeness(EffectMeta.cas), Nil)
     def ctorNameOf(r: CasEffect.Request): String = r match
-      case CasEffect.Request.Put(_) => "put"
-      case CasEffect.Request.Get(_) => "get"
+      case CasEffect.Request.Put(_)       => "put"
+      case CasEffect.Request.Get(_)       => "get"
+      case CasEffect.Request.Contains(_)  => "contains"
+      case CasEffect.Request.Fsck(_)      => "fsck"
+      case CasEffect.Request.Gc(_, _)     => "gc"
+      case CasEffect.Request.Stats(_)     => "stats"
     val dummy = Artifact(ArtifactKind.Term, Canon.CStr("x"))
     val scalaReqCases = Set(
       ctorNameOf(CasEffect.Request.Put(dummy)),
-      ctorNameOf(CasEffect.Request.Get(Digest.ofBytes(Array.empty))))
+      ctorNameOf(CasEffect.Request.Get(Digest.ofBytes(Array.empty))),
+      ctorNameOf(CasEffect.Request.Contains(Digest.ofBytes(Array.empty))),
+      ctorNameOf(CasEffect.Request.Fsck("/tmp")),
+      ctorNameOf(CasEffect.Request.Gc("/tmp", Nil)),
+      ctorNameOf(CasEffect.Request.Stats("/tmp")))
     val fragmentReqCtors = EffectMeta.cas.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
 

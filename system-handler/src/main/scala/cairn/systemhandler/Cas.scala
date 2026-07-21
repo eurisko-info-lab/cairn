@@ -62,28 +62,43 @@ final class DiskCas(root: Path) extends Cas:
           if HashAlgo.hash(algo, bs) == hex then Right(bs)
           else Left(s"CAS corruption on $key") }
 
-/** Authorized CAS put/get over a store — same authorize →
+/** Authorized CAS put/get/contains over a store — same authorize →
   * [[AuthorizedEffect]] → perform spine as Filesystem / Workspace.
+  * Admin ops (fsck/gc/stats) live on [[CasAdminEffects]] (path-rooted).
   */
 object CasEffects:
   private val iface = EffectMeta.cas
 
   private def ctorName(req: Cas.Request): String = req match
-    case Cas.Request.Put(_) => "put"
-    case Cas.Request.Get(_) => "get"
+    case Cas.Request.Put(_)       => "put"
+    case Cas.Request.Get(_)       => "get"
+    case Cas.Request.Contains(_)  => "contains"
+    case Cas.Request.Fsck(_)      => "fsck"
+    case Cas.Request.Gc(_, _)     => "gc"
+    case Cas.Request.Stats(_)     => "stats"
 
   private def resourcePath(req: Cas.Request): String = req match
-    case Cas.Request.Put(a)  => a.digest.hex
-    case Cas.Request.Get(d)  => d.hex
+    case Cas.Request.Put(a)       => a.digest.hex
+    case Cas.Request.Get(d)       => d.hex
+    case Cas.Request.Contains(d)  => d.hex
+    case Cas.Request.Fsck(root)   => root
+    case Cas.Request.Gc(root, _)  => root
+    case Cas.Request.Stats(root)  => root
 
   def intent(req: Cas.Request): (Effects.ActionKey, Authority.Resource) =
     (iface.keyFor(ctorName(req)).get, iface.resource.at(resourcePath(req)))
 
+  /** Store-backed requests only (`put` / `get` / `contains`). Admin requests
+    * must go through [[CasAdminEffects]]. */
   def run(store: Cas, req: Cas.Request, ctx: EffectContext): Either[Cas.Error, Cas.Response] =
-    val (action, resource) = intent(req)
-    ctx.authorize(action, resource) match
-      case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
-      case Right(auth) => perform(store, req, auth)
+    req match
+      case _: Cas.Request.Fsck | _: Cas.Request.Gc | _: Cas.Request.Stats =>
+        Left(Cas.Error.Io(s"admin request ${ctorName(req)} requires CasAdminEffects"))
+      case _ =>
+        val (action, resource) = intent(req)
+        ctx.authorize(action, resource) match
+          case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
+          case Right(auth) => perform(store, req, auth)
 
   def perform(store: Cas, req: Cas.Request, auth: AuthorizedEffect): Either[Cas.Error, Cas.Response] =
     val (action, resource) = intent(req)
@@ -96,6 +111,10 @@ object CasEffects:
           store.getByDigest(digest) match
             case Right(a) => Right(Cas.Response.Stored(a))
             case Left(_)  => Left(Cas.Error.Missing(digest))
+        case Cas.Request.Contains(digest) =>
+          Right(Cas.Response.Present(store.contains(digest)))
+        case Cas.Request.Fsck(_) | Cas.Request.Gc(_, _) | Cas.Request.Stats(_) =>
+          Left(Cas.Error.Io(s"admin request ${ctorName(req)} requires CasAdminEffects"))
       catch case e: Exception => Left(Cas.Error.Io(e.getMessage))
 
   /** Convenience: authorize + put an artifact; returns its typed key. */
@@ -110,6 +129,13 @@ object CasEffects:
     run(store, Cas.Request.Get(digest), ctx).flatMap {
       case Cas.Response.Stored(a) => Right(a)
       case other                  => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
+
+  /** Authorize get-class existence check at `digest`. */
+  def contains(store: Cas, digest: Digest, ctx: EffectContext): Either[Cas.Error, Boolean] =
+    run(store, Cas.Request.Contains(digest), ctx).flatMap {
+      case Cas.Response.Present(p) => Right(p)
+      case other                   => Left(Cas.Error.Io(s"unexpected response: $other"))
     }
 
   /** Authorize put at the content digest, then store raw bytes (Sync path). */

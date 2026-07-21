@@ -104,9 +104,9 @@ object EffectContext:
   def forBackend(audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.externalBackend(Subject("local")), audit)
 
-  /** CAS composition root: put/get under any digest path. */
+  /** CAS composition root: put/get/stats plus admin fsck/gc. */
   def forCas(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.casStore(Subject("local")), audit)
+    localCtx(PolicyEval.casStore(Subject("local")) ++ PolicyEval.casAdmin(Subject("local")), audit)
 
   /** Filesystem composition root: read/write/mkdirs under a path pattern. */
   def forFilesystem(pathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =

@@ -55,7 +55,7 @@ object HttpSync:
     for
       chainTxt <- get(baseUrl, "/chain")
       remoteChain = new String(chainTxt).linesIterator.filter(_.nonEmpty).map(Digest(_)).toList
-      wantBlocks = remoteChain.filterNot(to.cas.contains)
+      wantBlocks = remoteChain.filter(d => CasEffects.contains(to.cas, d, to.ctx).forall(!_))
       fetched <- wantBlocks.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap { n =>
           get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
@@ -72,7 +72,7 @@ object HttpSync:
       publishedDigests = st.published.toList.flatMap(_.split(":") match
         case Array(_, value, _) => Digest.parse(value).toOption
         case _                  => None)
-      wantBlobs = publishedDigests.filterNot(to.cas.contains)
+      wantBlobs = publishedDigests.filter(d => CasEffects.contains(to.cas, d, to.ctx).forall(!_))
       fetchedBlobs <- wantBlobs.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap { n =>
           get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>

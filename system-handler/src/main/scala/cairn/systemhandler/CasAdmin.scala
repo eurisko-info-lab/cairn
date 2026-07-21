@@ -1,6 +1,7 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
+import cairn.systeminterface.Cas
 import java.io.{InputStream, OutputStream}
 import java.nio.file.{Files, Path}
 import java.security.MessageDigest
@@ -13,13 +14,16 @@ import scala.jdk.CollectionConverters.*
   * modules, and the plan's own Phase 1 text doesn't name this file at all.
   * `HashAlgo`/`DigestMigration` are themselves pure; not worth a second split
   * this phase didn't ask for.
+  *
+  * Public entry is [[CasAdminEffects]] (authorize → perform). The helpers
+  * below are the privileged implementation used only after authorization.
   */
 object CasAdmin:
   final case class FsckReport(checked: Int, corrupt: List[Digest])
   final case class GcReport(kept: Int, swept: Int)
   final case class Stats(objects: Int, bytes: Long, byKind: Map[String, Int])
 
-  private def objectFiles(root: Path): List[Path] =
+  private[systemhandler] def objectFiles(root: Path): List[Path] =
     val objs = root.resolve("objects")
     if !Files.exists(objs) then Nil
     else Files.walk(objs).iterator.asScala.filter(p => Files.isRegularFile(p) && !p.toString.endsWith(".corrupt")).toList
@@ -28,9 +32,9 @@ object CasAdmin:
     Digest(p.getParent.getFileName.toString + p.getFileName.toString)
 
   /** Re-hash every object; corrupted objects are quarantined (renamed `.corrupt`),
-    * never silently served or deleted.
+    * never silently served or deleted. Caller must have authorized `fsck`.
     */
-  def fsck(root: Path): FsckReport =
+  private[systemhandler] def fsck(root: Path): FsckReport =
     var checked = 0
     val corrupt = List.newBuilder[Digest]
     for p <- objectFiles(root) do
@@ -55,8 +59,10 @@ object CasAdmin:
       case _                               => Set.empty
     Canon.decode(bs).map(walk).getOrElse(Set.empty)
 
-  /** Mark/sweep from roots. Never collects a reachable blob. */
-  def gc(root: Path, roots: Set[Digest]): GcReport =
+  /** Mark/sweep from roots. Never collects a reachable blob. Caller must have
+    * authorized `gc`.
+    */
+  private[systemhandler] def gc(root: Path, roots: Set[Digest]): GcReport =
     val cas = DiskCas(root)
     val marked = scala.collection.mutable.Set[String]()
     def mark(d: Digest): Unit =
@@ -70,7 +76,7 @@ object CasAdmin:
         Files.delete(p); swept += 1
     GcReport(marked.size, swept)
 
-  def stats(root: Path): Stats =
+  private[systemhandler] def stats(root: Path): Stats =
     val files = objectFiles(root)
     val byKind = scala.collection.mutable.Map[String, Int]().withDefaultValue(0)
     var bytes = 0L
@@ -79,6 +85,57 @@ object CasAdmin:
       bytes += bs.length
       Artifact.decode(bs).foreach(a => byKind(a.kind.name) += 1)
     Stats(files.size, bytes, byKind.toMap)
+
+/** Authorized CAS admin (fsck/gc/stats) — path-rooted, same authorize →
+  * [[AuthorizedEffect]] → perform spine as [[CasEffects]].
+  */
+object CasAdminEffects:
+  private val iface = EffectMeta.cas
+
+  private def rootPath(root: Path): String = root.toAbsolutePath.toString
+
+  def run(req: Cas.Request, ctx: EffectContext): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = CasEffects.intent(req)
+    ctx.authorize(action, resource) match
+      case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
+      case Right(auth) => perform(req, auth)
+
+  def perform(req: Cas.Request, auth: AuthorizedEffect): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = CasEffects.intent(req)
+    if !auth.covers(action, resource) then Left(Cas.Error.Io("authorized effect does not cover request"))
+    else
+      try req match
+        case Cas.Request.Fsck(root) =>
+          val r = CasAdmin.fsck(Path.of(root))
+          Right(Cas.Response.FsckReport(r.checked, r.corrupt))
+        case Cas.Request.Gc(root, roots) =>
+          val r = CasAdmin.gc(Path.of(root), roots.toSet)
+          Right(Cas.Response.GcReport(r.kept, r.swept))
+        case Cas.Request.Stats(root) =>
+          val r = CasAdmin.stats(Path.of(root))
+          Right(Cas.Response.StatsReport(r.objects, r.bytes, r.byKind))
+        case other =>
+          Left(Cas.Error.Io(s"store request $other requires CasEffects"))
+      catch case e: Exception => Left(Cas.Error.Io(Option(e.getMessage).getOrElse(e.toString)))
+
+  def fsck(root: Path, ctx: EffectContext): Either[Cas.Error, CasAdmin.FsckReport] =
+    run(Cas.Request.Fsck(rootPath(root)), ctx).flatMap {
+      case Cas.Response.FsckReport(checked, corrupt) => Right(CasAdmin.FsckReport(checked, corrupt))
+      case other => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
+
+  def gc(root: Path, roots: Set[Digest], ctx: EffectContext): Either[Cas.Error, CasAdmin.GcReport] =
+    run(Cas.Request.Gc(rootPath(root), roots.toList), ctx).flatMap {
+      case Cas.Response.GcReport(kept, swept) => Right(CasAdmin.GcReport(kept, swept))
+      case other => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
+
+  def stats(root: Path, ctx: EffectContext): Either[Cas.Error, CasAdmin.Stats] =
+    run(Cas.Request.Stats(rootPath(root)), ctx).flatMap {
+      case Cas.Response.StatsReport(objects, bytes, byKind) =>
+        Right(CasAdmin.Stats(objects, bytes, byKind))
+      case other => Left(Cas.Error.Io(s"unexpected response: $other"))
+    }
 
 /** Digest agility (M4): self-describing algorithm-prefixed digests alongside
   * the default sha-256, plus kernel-validated migration artifacts mapping
@@ -125,6 +182,7 @@ object DigestMigration:
 
 /** Content-defined chunking for large blobs (M5): rolling-sum boundaries,
   * bounded-memory streaming, chunk-level dedup, Merkle-list manifests.
+  * Puts/gets authorize through [[CasEffects]].
   */
 object Chunker:
   val MinChunk = 64 * 1024
@@ -132,36 +190,48 @@ object Chunker:
   val BoundaryMask = (1 << 20) - 1 // ~1 MiB average
 
   /** Stream `in` into the CAS as chunks; returns the manifest artifact digest. */
-  def putStream(cas: DiskCas, in: InputStream): Digest =
+  def putStream(cas: Cas, in: InputStream, ctx: EffectContext): Either[String, Digest] =
     val chunks = List.newBuilder[(Digest, Long)]
     val buf = new java.io.ByteArrayOutputStream(MaxChunk)
     var rolling = 0
     var b = in.read()
-    def flush(): Unit =
-      if buf.size > 0 then
+    def flush(): Either[String, Unit] =
+      if buf.size == 0 then Right(())
+      else
         val bs = buf.toByteArray
-        chunks += ((cas.putBytes(bs), bs.length.toLong))
-        buf.reset(); rolling = 0
-    while b >= 0 do
-      buf.write(b)
-      rolling = (rolling << 1) + (b & 0xff) + (rolling >>> 24) // cheap rolling sum
-      if buf.size >= MaxChunk || (buf.size >= MinChunk && (rolling & BoundaryMask) == 0) then flush()
-      b = in.read()
-    flush()
-    val manifest = Artifact(ArtifactKind.ChunkedBlob, Canon.CList(chunks.result().map { (d, n) =>
-      Canon.cmap("chunk" -> Canon.CStr(d.hex), "size" -> Canon.CInt(n)) }))
-    cas.put(manifest).valueHash
+        CasEffects.putBytes(cas, bs, ctx).left.map(_.toString).map { d =>
+          chunks += ((d, bs.length.toLong))
+          buf.reset(); rolling = 0
+        }
+    def loop(): Either[String, Unit] =
+      if b < 0 then flush()
+      else
+        buf.write(b)
+        rolling = (rolling << 1) + (b & 0xff) + (rolling >>> 24)
+        b = in.read()
+        if buf.size >= MaxChunk || (buf.size >= MinChunk && (rolling & BoundaryMask) == 0) then
+          flush().flatMap(_ => loop())
+        else loop()
+    loop().flatMap { _ =>
+      val manifest = Artifact(ArtifactKind.ChunkedBlob, Canon.CList(chunks.result().map { (d, n) =>
+        Canon.cmap("chunk" -> Canon.CStr(d.hex), "size" -> Canon.CInt(n)) }))
+      CasEffects.put(cas, manifest, ctx).left.map(_.toString).map(_.valueHash)
+    }
 
   /** Stream a chunked blob back out; memory bounded by max chunk size. */
-  def getStream(cas: DiskCas, manifest: Digest, out: OutputStream): Either[String, Long] =
-    cas.getByDigest(manifest).flatMap { a =>
+  def getStream(cas: Cas, manifest: Digest, out: OutputStream, ctx: EffectContext): Either[String, Long] =
+    CasEffects.get(cas, manifest, ctx).left.map(_.toString).flatMap { a =>
       if a.kind != ArtifactKind.ChunkedBlob then Left(s"${manifest.short} is not a chunked blob")
       else
         import Canon.*
         a.body.asList.foldLeft[Either[String, Long]](Right(0L)) { (acc, e) =>
           acc.flatMap { total =>
-            cas.getBytes(Digest(e.field("chunk").asStr)).map { bs => out.write(bs); total + bs.length } } }
+            CasEffects.getBytes(cas, Digest(e.field("chunk").asStr), ctx).left.map(_.toString).map { bs =>
+              out.write(bs); total + bs.length
+            }
+          }
+        }
     }
 
-  def chunkCount(cas: DiskCas, manifest: Digest): Either[String, Int] =
-    cas.getByDigest(manifest).map(_.body.asList.size)
+  def chunkCount(cas: Cas, manifest: Digest, ctx: EffectContext): Either[String, Int] =
+    CasEffects.get(cas, manifest, ctx).left.map(_.toString).map(_.body.asList.size)

@@ -2,19 +2,25 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{MemCas, DiskCas, Branches, EffectContext}
+import cairn.systemhandler.{MemCas, DiskCas, Branches, CasEffects, EffectContext}
 import cairn.core.TreeEngine
 import cairn.examples.stlc.Stlc
 
-/** Phase 0 acceptance (S2–S6): store/load round-trip, golden digests. */
+/** Phase 0 acceptance (S2–S6): store/load round-trip, golden digests.
+  *
+  * Low-level MemCas/DiskCas put/get here are intentional **trait contract**
+  * tests (no authority surface). Composition and branch seeds use [[CasEffects]].
+  */
 class Phase0Suite extends munit.FunSuite:
   test("CAS put/get round-trip, digest verified (S4)"):
+    // Intentional direct MemCas trait contract (no EffectContext).
     val cas = MemCas()
     val a = Stlc.base.artifact
     val key = cas.put(a)
     assertEquals(cas.get(key), Right(a))
 
   test("disk CAS detects corruption (S4)"):
+    // Intentional direct DiskCas trait contract (corruption check on read).
     val dir = java.nio.file.Files.createTempDirectory("cairn-cas")
     val cas = DiskCas(dir)
     val d = cas.putBytes("hello cairn".getBytes)
@@ -24,6 +30,7 @@ class Phase0Suite extends munit.FunSuite:
     assert(cas.getBytes(d).swap.exists(_.contains("corruption")))
 
   test("fragment artifacts round-trip through CAS (S7)"):
+    // Intentional direct MemCas trait contract for fragment codec bytes.
     val cas = MemCas()
     for f <- Stlc.fragments do
       val key = cas.put(f.artifact)
@@ -171,8 +178,8 @@ class BranchSuite extends munit.FunSuite:
     val dir = java.nio.file.Files.createTempDirectory("cairn-branches")
     val cas = DiskCas(dir)
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
-    val k1 = cas.put(Stlc.base.artifact)
-    val k2 = cas.put(Stlc.types.artifact)
+    val k1 = CasEffects.put(cas, Stlc.base.artifact, casCtx).fold(e => fail(e.toString), identity)
+    val k2 = CasEffects.put(cas, Stlc.types.artifact, casCtx).fold(e => fail(e.toString), identity)
     branches.advance("main", k1)
     branches.advance("main", k2)
     // fresh instances = process restart

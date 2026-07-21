@@ -83,8 +83,9 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
 - **Gating:** every live family’s `perform` is the sole public effect entry
   point; convenience methods are private (or documented ungated exceptions
   such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas trait
-  put/get go through `CasEffects`; LedgerTransport `append` through
-  `LedgerTransport.run` (`Node.append` is a thin adapter).
+  put/get/contains go through `CasEffects`; admin fsck/gc/stats through
+  `CasAdminEffects`; LedgerTransport `append` through `LedgerTransport.run`
+  (`Node.append` is a thin adapter).
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
   PackLoader (`packLoaderWorkspace`), ledger+CAS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
@@ -130,7 +131,8 @@ Residuals: everyday path uses `commitTip` + `mergeBranches` (tip sidecar +
 `mergeBranches` composes full stacked histories from a shared oldest base).
 Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
 `merge(..., publish = Some(...))` — accept does not auto-publish. `Branches`
-CAS put/get go through `CasEffects` + `EffectContext`; refs FS stays ungated.
+CAS put/get/contains go through `CasEffects` + `EffectContext`; admin via
+`CasAdminEffects`; refs FS stays ungated.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -162,12 +164,15 @@ LeanCore `#check` envelope.
   `rosetta.Scaffold`) — documented compatibility shims
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
-- **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
+-   **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
   (compose stacked `.changes` histories from a shared base; tip sidecar for
   `loadTip`); `merge(..., changeOurs, changeTheirs)` for callers that already
   hold CSTs. Ledger publish is **opt-in** (`publishHead` or
-  `publish = Some(...)` on merge) — not the default on accept. Low-level CAS
-  contract tests (`MemCas`/`DiskCas` put/get) and `CasAdmin` remain ungated.
+  `publish = Some(...)` on merge) — not the default on accept.
+- **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
+  trait-contract tests (no authority surface). Branch seeds, admin, chunking,
+  Unison host glue, sync `contains`, and Browser stats go through
+  `CasEffects` / `CasAdminEffects`.
 
 ## Final principle
 

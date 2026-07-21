@@ -66,7 +66,9 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   Ledger `SetBranchHead` is opt-in via
   `Branches.publishHead` (or `publish = Some(...)` on merge) — not automatic
   on accept. `Branches` CAS put/get authorize via `EffectContext`; refs FS
-  remains ungated.
+  remains ungated. CAS `contains` / admin / chunking / Unison store are
+  gated (`CasEffects` / `CasAdminEffects`); Phase0 trait-contract and WaveA
+  M4 algo-agility tests stay direct by design.
 - **M31**: signatures/declarations are fully grammatical; expression BODIES are
   verbatim single-line regions inside the file grammars (rendered by one shared
   fold, not per-host string soup). Whole-file byte fixpoint still enforced.

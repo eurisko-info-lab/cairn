@@ -205,7 +205,10 @@ object PolicyEval:
           EffectMeta.externalBackend.resource.at(host), Decision.Allow))
     }
 
-  /** CAS put/get under a digest-path pattern (default `*` = whole store). */
+  /** CAS put/get/stats under a digest-or-root path pattern (default `*`).
+    * `contains` authorizes as `get`. Destructive admin (`fsck`/`gc`) is
+    * [[casAdmin]] — not included here.
+    */
   def casStore(subject: Subject | "*", pathPattern: String = "*"): List[EffectPolicy] =
     List(
       EffectPolicy(
@@ -213,6 +216,19 @@ object PolicyEval:
         EffectMeta.cas.resource.at(pathPattern), Decision.Allow),
       EffectPolicy(
         "cas-get", subject, EffectMeta.cas.actionKey("get"),
+        EffectMeta.cas.resource.at(pathPattern), Decision.Allow),
+      EffectPolicy(
+        "cas-stats", subject, EffectMeta.cas.actionKey("stats"),
+        EffectMeta.cas.resource.at(pathPattern), Decision.Allow))
+
+  /** CAS maintenance: fsck (quarantine) and mark/sweep GC. */
+  def casAdmin(subject: Subject | "*", pathPattern: String = "*"): List[EffectPolicy] =
+    List(
+      EffectPolicy(
+        "cas-fsck", subject, EffectMeta.cas.actionKey("fsck"),
+        EffectMeta.cas.resource.at(pathPattern), Decision.Allow),
+      EffectPolicy(
+        "cas-gc", subject, EffectMeta.cas.actionKey("gc"),
         EffectMeta.cas.resource.at(pathPattern), Decision.Allow))
 
   /** Filesystem read/write/mkdirs under a path pattern (default `*` = whole FS).

@@ -2,7 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasAdmin, CasEffects}
+import cairn.systemhandler.{CasAdminEffects, CasEffects}
 import cairn.ledger.Node
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress
@@ -175,11 +175,13 @@ final class BrowserServer(
             case Left(e)  => err(ex, 404, e)
             case Right(j) => json(ex, 200, j)
         case ("GET", "cas/stats") =>
-          val st = CasAdmin.stats(node.root)
-          json(ex, 200, Json.obj(
-            "objects" -> Json.num(st.objects.toLong),
-            "bytes" -> Json.num(st.bytes),
-            "byKind" -> Json.obj(st.byKind.toList.sortBy(_._1).map((k, n) => k -> Json.num(n.toLong))*)))
+          CasAdminEffects.stats(node.root, node.ctx) match
+            case Left(e) => err(ex, 403, e.toString)
+            case Right(st) =>
+              json(ex, 200, Json.obj(
+                "objects" -> Json.num(st.objects.toLong),
+                "bytes" -> Json.num(st.bytes),
+                "byKind" -> Json.obj(st.byKind.toList.sortBy(_._1).map((k, n) => k -> Json.num(n.toLong))*)))
         case ("POST", "parse") =>
           val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
           parseEditor(body) match
@@ -191,17 +193,18 @@ final class BrowserServer(
 
   private def overviewJson: String =
     val chain = node.chainDigests
-    val stats = CasAdmin.stats(node.root)
+    val stats = CasAdminEffects.stats(node.root, node.ctx).toOption
     val last = node.blocks.toOption.flatMap(_.lastOption)
     Json.obj(
       "root" -> Json.str(node.root.toAbsolutePath.toString),
       "chainLength" -> Json.num(chain.length.toLong),
       "headDigest" -> chain.lastOption.fold(Json.nul)(d => Json.str(d.hex)),
       "lastHeight" -> last.fold(Json.nul)(b => Json.num(b.height)),
-      "casObjects" -> Json.num(stats.objects.toLong),
-      "casBytes" -> Json.num(stats.bytes),
+      "casObjects" -> stats.fold(Json.nul)(s => Json.num(s.objects.toLong)),
+      "casBytes" -> stats.fold(Json.nul)(s => Json.num(s.bytes)),
       "languages" -> Json.arr(languages.keys.toList.sorted.map(Json.str)),
-      "byKind" -> Json.obj(stats.byKind.toList.sortBy(_._1).map((k, n) => k -> Json.num(n.toLong))*))
+      "byKind" -> stats.fold(Json.obj())(s =>
+        Json.obj(s.byKind.toList.sortBy(_._1).map((k, n) => k -> Json.num(n.toLong))*)))
 
   private def blockSummary(b: Block): String =
     Json.obj(

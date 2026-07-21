@@ -287,7 +287,7 @@ object EffectMeta:
       "readMessage" -> Some("read"),
       "writeMessage" -> Some("write")))
 
-  /** CAS put/get — Meta-defined interface over the trait contract. */
+  /** CAS put/get/contains + admin (fsck/gc/stats) — Meta-defined interface. */
   private val casFragment: Fragment = Fragment(
     name = "effect.cas",
     provides = List("effect.cas"),
@@ -299,20 +299,32 @@ object EffectMeta:
     constructors = List(
       CtorDef("put", "Request", List("Artifact")),
       CtorDef("get", "Request", List("Digest")),
+      CtorDef("contains", "Request", List("Digest")),
+      CtorDef("fsck", "Request", List("Path")),
+      CtorDef("gc", "Request", List("Path", "Digests")),
+      CtorDef("stats", "Request", List("Path")),
       CtorDef("typedKey", "Response", List("TypedKey")),
       CtorDef("artifact", "Response", List("Artifact")),
+      CtorDef("bool", "Response", List("Bool")),
+      CtorDef("fsckReport", "Response", List("FsckReport")),
+      CtorDef("gcReport", "Response", List("GcReport")),
+      CtorDef("statsReport", "Response", List("Stats")),
       CtorDef("missing", "Error", List("Digest")),
       CtorDef("io", "Error", List("Str"))))
 
   val cas: EffectFamily = EffectFamily(
     casFragment,
     Effects.Family.Cas,
-    actions = List("put", "get"),
+    actions = List("put", "get", "fsck", "gc", "stats"),
     resourceKind = "cas",
     resourcePathPattern = "*",
     requestActions = Map(
       "put" -> Some("put"),
-      "get" -> Some("get")))
+      "get" -> Some("get"),
+      "contains" -> Some("get"),
+      "fsck" -> Some("fsck"),
+      "gc" -> Some("gc"),
+      "stats" -> Some("stats")))
 
   /** Ledger transport append — Meta-defined over Node.append. */
   private val ledgerTransportFragment: Fragment = Fragment(

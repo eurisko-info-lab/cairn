@@ -4,7 +4,7 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, CasEffects, EffectContext, Filesystem, Keypair, MemCas}
+import cairn.systemhandler.{AuthorityGate, CasAdminEffects, CasEffects, EffectContext, Filesystem, Keypair, MemCas}
 import cairn.systeminterface.Cas
 import cairn.kernel.Tx
 
@@ -518,7 +518,7 @@ class AuthoritySuite extends munit.FunSuite:
       EffectMeta.ledgerTransport.actionKey("append"),
       EffectMeta.ledgerTransport.resource.at("/tmp")).isLeft)
 
-  test("CasEffects: authorize → perform put/get over MemCas"):
+  test("CasEffects: authorize → perform put/get/contains over MemCas"):
     val store = MemCas()
     val ctx = EffectContext.forCas()
     val art = Artifact(ArtifactKind.Term, Canon.CStr("hello-cas"))
@@ -532,7 +532,16 @@ class AuthoritySuite extends munit.FunSuite:
       case Cas.Response.Stored(a) => a.digest
       case _ => Digest.ofBytes(Array.empty)
     }, Right(art.digest))
+    assertEquals(CasEffects.contains(store, key.valueHash, ctx), Right(true))
     val denied = CasEffects.run(store, Cas.Request.Get(key.valueHash), EffectContext.forPackLoader())
+    assert(denied.isLeft, denied.toString)
+    assert(CasEffects.contains(store, key.valueHash, EffectContext.forPackLoader()).isLeft)
+
+  test("CasAdminEffects: stats authorized under forCas; denied under forPackLoader"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-cas-admin")
+    val ok = CasAdminEffects.stats(dir, EffectContext.forCas())
+    assert(ok.isRight, ok.toString)
+    val denied = CasAdminEffects.stats(dir, EffectContext.forPackLoader())
     assert(denied.isLeft, denied.toString)
 
   test("LedgerTransport: authorize → perform append over Node"):

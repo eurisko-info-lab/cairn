@@ -56,7 +56,8 @@ object Sync:
     yield
       val fetched = List.newBuilder[Digest]
       def fetch(d: Digest): Unit =
-        if !to.cas.contains(d) then
+        val missing = CasEffects.contains(to.cas, d, to.ctx).forall(!_)
+        if missing then
           CasEffects.getBytes(from.cas, d, from.ctx).foreach { bs =>
             CasEffects.putBytes(to.cas, bs, to.ctx).foreach { _ => fetched += d }
           }

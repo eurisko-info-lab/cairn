@@ -33,12 +33,21 @@ object Cas:
   enum Request:
     case Put(artifact: Artifact)
     case Get(digest: Digest)
+    case Contains(digest: Digest)
+    case Fsck(root: String)
+    case Gc(root: String, roots: List[Digest])
+    case Stats(root: String)
 
-  /** Response ctors mirror Meta (`typedKey` / `artifact`) by role; Scala
-    * names avoid shadowing [[cairn.kernel.TypedKey]] / [[Artifact]]. */
+  /** Response ctors mirror Meta (`typedKey` / `artifact` / `bool` / admin
+    * reports) by role; Scala names avoid shadowing [[cairn.kernel.TypedKey]] /
+    * [[Artifact]]. Admin report payloads are opaque host values. */
   enum Response:
     case Key(key: TypedKey)
     case Stored(artifact: Artifact)
+    case Present(present: Boolean)
+    case FsckReport(checked: Int, corrupt: List[Digest])
+    case GcReport(kept: Int, swept: Int)
+    case StatsReport(objects: Int, bytes: Long, byKind: Map[String, Int])
 
   enum Error:
     case Missing(digest: Digest)
