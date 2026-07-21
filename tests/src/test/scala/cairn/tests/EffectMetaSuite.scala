@@ -6,13 +6,14 @@ import cairn.systeminterface.Clock as ClockEffect
 import cairn.systeminterface.Process as ProcessEffect
 import cairn.systeminterface.ExternalBackend as BackendEffect
 import cairn.systeminterface.Terminal as TerminalEffect
+import cairn.systeminterface.Workspace as WorkspaceEffect
 
 /** Meta-defined effect interfaces (post-migration priority #1): `Random`,
-  * `Clock`, `Process`, `ExternalBackend`, and `Terminal` are Fragment-defined
-  * families, using EffectMeta's many-to-one requestActions grouping (`Terminal`
-  * is the first real, non-retrofitted use — `write`/`writeLine` share one
-  * right). These are mechanical drift guards, same spirit as
-  * `ModuleBoundarySuite`.
+  * `Clock`, `Process`, `ExternalBackend`, `Terminal`, and `Workspace` are
+  * Fragment-defined families, using EffectMeta's many-to-one requestActions
+  * grouping (`Terminal`'s `write`/`writeLine` share one right; `Workspace`'s
+  * 5 requests all share one). These are mechanical drift guards, same
+  * spirit as `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -120,4 +121,33 @@ class EffectMetaSuite extends munit.FunSuite:
       ctorNameOf(TerminalEffect.Request.Write("")),
       ctorNameOf(TerminalEffect.Request.WriteLine("")))
     val fragmentReqCtors = EffectMeta.terminal.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.workspace composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.workspace", List(EffectMeta.workspace.fragment)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("EffectMeta.workspace's requestActions is complete and matches the hand-tagged actions (no drift, 5-to-1)"):
+    assertEquals(EffectMeta.completeness(EffectMeta.workspace, Effects.Family.Workspace), Nil)
+    val derived = EffectMeta.actions(EffectMeta.workspace)
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Workspace).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 1) // all 5 requests share WorkspaceRead
+
+  test("system-interface.Workspace.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    // LanguageDirs is parameterless; the other four take a Filesystem.Path.
+    def ctorNameOf(r: WorkspaceEffect.Request): String = r match
+      case WorkspaceEffect.Request.LanguageDirs               => "languageDirs"
+      case WorkspaceEffect.Request.ListCairnFiles(_)          => "listCairnFiles"
+      case WorkspaceEffect.Request.ListSubdirs(_)             => "listSubdirs"
+      case WorkspaceEffect.Request.ListSurfaceCairnFiles(_)   => "listSurfaceCairnFiles"
+      case WorkspaceEffect.Request.ReadText(_)                => "readText"
+    val dummyPath = cairn.systeminterface.Filesystem.Path("")
+    val scalaReqCases = Set(
+      ctorNameOf(WorkspaceEffect.Request.LanguageDirs),
+      ctorNameOf(WorkspaceEffect.Request.ListCairnFiles(dummyPath)),
+      ctorNameOf(WorkspaceEffect.Request.ListSubdirs(dummyPath)),
+      ctorNameOf(WorkspaceEffect.Request.ListSurfaceCairnFiles(dummyPath)),
+      ctorNameOf(WorkspaceEffect.Request.ReadText(dummyPath)))
+    val fragmentReqCtors = EffectMeta.workspace.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)

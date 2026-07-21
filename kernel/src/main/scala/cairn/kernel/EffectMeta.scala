@@ -130,12 +130,43 @@ object EffectMeta:
     "write" -> Effects.Action.TerminalWrite,
     "writeLine" -> Effects.Action.TerminalWrite))
 
+  private val workspaceFragment: Fragment = Fragment(
+    name = "effect.workspace",
+    provides = List("effect.workspace"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("languageDirs", "Request", Nil),
+      CtorDef("listCairnFiles", "Request", List("Path")),
+      CtorDef("listSubdirs", "Request", List("Path")),
+      CtorDef("listSurfaceCairnFiles", "Request", List("Path")),
+      CtorDef("readText", "Request", List("Path")),
+      CtorDef("paths", "Response", List("Paths")),
+      CtorDef("text", "Response", List("Str")),
+      CtorDef("io", "Error", List("Str"))))
+
+  /** All 5 requests are read-only discovery/reading (confirmed via
+    * `system-handler.PackFiles.perform` — nothing mutates), so all 5 map to
+    * the single existing `WorkspaceRead` right — a genuine 5-to-1 grouping,
+    * unlike `Terminal`'s 2-to-1, with no drift to fix.
+    */
+  val workspace: EffectFamily = EffectFamily(workspaceFragment, Map(
+    "languageDirs" -> Effects.Action.WorkspaceRead,
+    "listCairnFiles" -> Effects.Action.WorkspaceRead,
+    "listSubdirs" -> Effects.Action.WorkspaceRead,
+    "listSurfaceCairnFiles" -> Effects.Action.WorkspaceRead,
+    "readText" -> Effects.Action.WorkspaceRead))
+
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
     Effects.Family.Clock -> clock,
     Effects.Family.Process -> process,
     Effects.Family.ExternalBackend -> externalBackend,
-    Effects.Family.Terminal -> terminal)
+    Effects.Family.Terminal -> terminal,
+    Effects.Family.Workspace -> workspace)
 
   /** The rights vocabulary for a family: every distinct [[Effects.Action]]
     * its `requestActions` grouping declares.

@@ -110,6 +110,10 @@ language rather than an opaque Scala shape.
   existing `TerminalWrite` right; `ReadLine` had no right at all
   (`system-handler.Terminal.perform` executed it directly), fixed by adding
   `TerminalRead`.
+- **`Workspace`** (done): the cleanest many-to-one case so far — all 5
+  `Request` constructors are read-only discovery/reading (confirmed via
+  `system-handler.PackFiles.perform`: nothing mutates), so all 5 map to the
+  single existing `WorkspaceRead` right. No new `Action`, no drift.
 - **Vestigial families** (found while scoping the `ExternalBackend` slice,
   by checking for a `def perform(req: X.Request)` entry point in
   `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
@@ -124,14 +128,14 @@ language rather than an opaque Scala shape.
   decision for later, not made here). `Cas` is a trait-based contract, not a
   Request/Response enum family, and is out of scope for this mechanism as
   designed.
-- **Remaining live families** (`Filesystem`, `Workspace`,
-  `Lsp`) — not yet converted, now unblocked by the many-to-one mechanism
-  above. Each still needs its own per-family judgment call about which
-  requests belong to which capability class (e.g. is `Filesystem.Delete` a
-  `FsWrite` operation or does it deserve its own right? is
-  `CreateTempDirectory` a `FsMkdirs` operation? does `Lsp` need new,
-  per-message actions, or is `LspServe` intentionally a session-level gate?)
-  — real design work per family, each a separate future slice. Same
+- **Remaining live families** (`Filesystem`, `Lsp`) — not yet converted, now
+  unblocked by the many-to-one mechanism above. `Filesystem` needs its own
+  per-family judgment call about which requests belong to which capability
+  class (e.g. is `Filesystem.Delete` a `FsWrite` operation or does it
+  deserve its own right? is `CreateTempDirectory` a `FsMkdirs` operation?);
+  `Lsp` needs a decision on whether it needs new, per-message actions, or
+  whether `LspServe` is intentionally a session-level gate — real design
+  work per family, each a separate future slice. Same
   incremental-adoption shape as `AuthorityGate`'s per-family `Enforce`
   rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
