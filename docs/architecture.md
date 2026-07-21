@@ -49,6 +49,34 @@ tests               → examples, runtime, user
 | 7 | Done | MetaValidate (kernel) + MetaActivation (handler); core.Meta stays pure |
 | 8 | Done | `runtime.PackLoader`; façades; docs |
 
+## Effect interfaces: Meta-definition status
+
+Post-migration priority #1 (distinct from `MIGRATION-PLAN.md`, now fully
+landed above): make effect interfaces Meta-defined — generate typed rights
+and resource vocabularies instead of hand-maintaining them independently of
+each other, the way `core.Meta` already treats the Fragment IR as a Cairn
+language rather than an opaque Scala shape.
+
+- **`Random`** (template family, done): `kernel.EffectMeta.random` is a
+  Kernel-owned `Fragment` (sorts + constructors, no grammar — effect
+  requests are host-constructed, not user-typed source text) describing the
+  family's `Request`/`Response`/`Error` shapes. `EffectMeta.actionsOf`
+  projects the family's rights vocabulary from that Fragment and is checked
+  against `kernel.Effects.Action`'s hand-tagged `Random` cases and against
+  `system-interface.Random.Request`'s actual Scala case names
+  (`EffectMetaSuite`) — both were previously free to drift independently
+  (confirmed already-drifted for `Clock`: 2 request shapes, 1 `Action`) and
+  now can't without failing a test.
+- **Remaining 12 families** (`Filesystem`, `Cas`, `Workspace`, `Process`,
+  `Crypto`, `Clock`, `Network`, `Http`, `LedgerTransport`, `Terminal`,
+  `Lsp`, `ExternalBackend`) — not yet converted; `Random` is the template,
+  each is a separate future slice. Same incremental-adoption shape as
+  `AuthorityGate`'s per-family `Enforce` rollout below.
+- **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
+  hand-written Scala enum — `EffectMeta.actionsOf` checks it, doesn't
+  replace it) and typed per-family resources (`Authority.Resource` is still
+  one shared untyped `(kind, path)` shape across every family).
+
 ## Forbidden-import rules (ModuleBoundarySuite)
 
 - `kernel` / `core`: no filesystem, networking, or process APIs
