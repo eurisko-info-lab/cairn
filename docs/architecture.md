@@ -78,13 +78,30 @@ that glue to live in — re-exporting the exact same public API (`requireOwn`,
 `surfacesFor`, `close`, `loadClosed`, `DefaultSurface`), so none of its ~25
 external call sites needed to change.
 
+`system-handler` (Phase 2, fourth slice): `rosetta.Scaffold`'s file I/O
+(`Files.createDirectories`/`Files.writeString`, scaffolding Lean/Haskell/Rust
+host projects from Rosetta port output) extracted to a small, generic
+`system-handler.Filesystem` (`mkdirs`/`writeFile`) — the first cut of Phase
+3's eventual "filesystem" effect family. `Scaffold` itself gained a private
+`plan` (pure: every `Project` record + every `(path, content)` write,
+computed with zero disk access) with `emitAll` shrunk to a thin executor
+over `Filesystem`. `plan` stays in `rosetta`, **not** `core`: it calls
+`obligationsManifest`, which needs `cairn.workbench.JsonSurface`, and `core`
+cannot depend on `workbench` (the dependency runs the other way) — moving it
+would cycle. Unlike the first three slices, this one is an intentionally
+partial win: the pure/impure boundary is now explicit and the I/O primitive
+is now generic and reusable, but the *pure* half couldn't fully migrate to
+`core` today. A future slice could revisit once `JsonSurface` (confirmed
+I/O-free) has its own Core/Kernel-reachable home.
+
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
-only import updates at call sites (none at all for the third slice). `user`
-and `runtime` do not exist yet; most of `workbench` (`Meta`/`Grammar`/`Delta`/
-`Capabilities`) and all of `rosetta`'s own projection engine still play
-Core's role, unsplit. Every exemplar language and domain pack still lives
-under `examples/`.
+only import updates at call sites (none at all for the third or fourth
+slice). `user` and `runtime` do not exist yet; most of `workbench`
+(`Meta`/`Grammar`/`Delta`/`Capabilities`) and `rosetta`'s own port-generation
+engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`, confirmed I/O-free
+but not yet relocated) still play Core's role, unsplit. Every exemplar
+language and domain pack still lives under `examples/`.
 
 ## Forbidden-import rules
 
@@ -113,7 +130,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Still pending within Phase 2: `workbench`'s remaining Meta/Grammar/Delta/Capabilities machinery, `rosetta`'s projection engine |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Still pending within Phase 2: `workbench`'s remaining Meta/Grammar/Delta/Capabilities machinery, `rosetta`'s port-generation engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |
