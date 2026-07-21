@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.ledger.Keypair
-import cairn.systemhandler.{Branches, CasEffects, DiskCas, EffectContext, Provenance}
+import cairn.systemhandler.{Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Provenance}
 import java.nio.file.Files
 
 /** End-to-end semantic repository spine: Branches + ΔL + ChangeAlgebra +
@@ -189,6 +189,37 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.commitTip("feat", tip)
     assertEquals(branches.recoverPendingAccepts(), Right(Nil))
     assert(branches.headModule("feat").isRight)
+
+  test("Branches.reclaimOrphanBlobs: sweeps unreferenced put; keeps live tip"):
+    val dir = Files.createTempDirectory("cairn-reclaim")
+    val casRoot = dir.resolve("cas")
+    val cas = DiskCas(casRoot)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
+      .fold(e => fail(e), identity)
+    branches.commitTip("feat", tip)
+    val orphan = Artifact(ArtifactKind.Claim, Canon.CStr("orphan-accept-blob"))
+    val orphanDig = CasEffects.put(cas, orphan, casCtx).fold(e => fail(e.toString), _.valueHash)
+    assert(CasEffects.contains(cas, orphanDig, casCtx).contains(true))
+    val before = CasAdminEffects.stats(casRoot, casCtx).fold(e => fail(e.toString), identity)
+    val report = branches.reclaimOrphanBlobs(casRoot).fold(e => fail(e), identity)
+    assert(report.gc.swept >= 1, report.toString)
+    assert(CasEffects.contains(cas, orphanDig, casCtx).contains(false))
+    assert(branches.headModule("feat").isRight)
+    val after = CasAdminEffects.stats(casRoot, casCtx).fold(e => fail(e.toString), identity)
+    assert(after.objects < before.objects)
+
+  test("Branches.merge: conflict writes .conflict sidecar as live root"):
+    val dir = Files.createTempDirectory("cairn-conflict-root")
+    val branches = branchesAt(dir)
+    val cA = parseChange("{ replace a = false ; }")
+    val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
+    branches.merge(lang, "main", m0, cA, cB) match
+      case Right(Left(conflict)) =>
+        val roots = branches.liveCasRoots().fold(e => fail(e), identity)
+        assert(roots.contains(conflict.artifact.digest), roots.toString)
+      case Right(Right(_)) => fail("expected conflict")
+      case Left(e) => fail(e)
 
   test("Branches.mergeBranches: causal LCA by shared result (not only identical changes)"):
     // Two histories that reach the same intermediate module via different

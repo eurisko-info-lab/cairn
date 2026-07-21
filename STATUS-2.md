@@ -8,7 +8,8 @@ the S1–S50 base, plus a **top-level parity pass** (constitution §4.16), an
 `ValidatedChangeSet`, `VerifiedCapability`, BranchManifest causal digests,
 agreement envelope digests) and a **deferred-trust follow-on** (issuer-scoped
 `ReplayStore`, journaled transactional accept, CAS-pinned effect interfaces,
-causal-LCA merge). Full suite: **455 tests green** (+2 skipped;
+causal-LCA merge) plus **reclaim / sync** (`reclaimOrphanBlobs`, CAS
+`replay-snapshot` merge). Full suite: **458 tests green** (+2 skipped;
 `tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
 round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 
@@ -158,8 +159,8 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Sync | `Sync.pull` / `HttpSync.pull` abort on authorized CAS failure; chain not advanced |
 | Delegation | Root grant expiry/nonce/resource justified before hop validation |
 | Tips / ΔL | Opaque `ValidatedTip` + `ValidatedChangeSet`; Branches accepts only checked tips; loads replay |
-| Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS, shareable) |
-| BranchManifest | Causal digests; sidecars kept; causal-LCA merge by shared module results; journaled accept (CAS+refs+optional ledger) |
+| Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS; CAS `replay-snapshot` publish/merge) |
+| BranchManifest | Causal digests; sidecars kept; causal-LCA merge by shared module results; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
 | Agreement | Certificate carries `envelopeDigest` + `nativeEvidence` |
 | Effect interfaces | `ActionKey` digest-bound; CAS-pinned `effect-interface` via `PinnedInterface` / `ActionKey.fromPinned`; host Meta remains bootstrap |
 
@@ -175,5 +176,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - BFT / gossip daemon / public ledger (explicitly deferred).
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.
-- Crash may leave unreferenced CAS blobs until GC; multi-node shared replay
-  replication beyond a single durable filesystem store.
+- Crash may leave unreferenced CAS blobs until `reclaimOrphanBlobs`;
+  multi-node replay is digest-merge only (not consensus / BFT).
+- HVM surface exporter (agreement classical-IC goldens until then).
+- GRANITE SDS depth / Lean proof bodies / BFT — see above.

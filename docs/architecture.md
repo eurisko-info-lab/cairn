@@ -76,6 +76,8 @@ without broad policy re-evaluation; empty capabilities fall back to Core
 proof / delegation building — it cannot enter `withCapabilities`.
 Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
 (default in-memory; durable `ReplayStore.filesystem` may be shared across gates).
+Snapshots publish as CAS `replay-snapshot` digests (`ReplayStore.publish` /
+`mergeFromCas`) for multi-node absorb — not distributed consensus.
 
 ## Authority
 
@@ -153,7 +155,9 @@ compat. `mergeBranches` finds a causal LCA by shared module-result digests
 (not only identical linear change prefixes), then merges divergent suffixes.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
-Unreferenced CAS blobs after a crash remain until GC.
+`Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via
+`liveCasRoots` (refs, change/conflict sidecars, pending journals). Crash
+before the journal is written leaves unreferenced blobs until reclaim.
 
 Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
 `merge(..., publish = Some(...))`. `Branches` CAS / refs FS go through
@@ -195,12 +199,15 @@ LeanCore `#check` envelope.
   `mergeBranches` (causal LCA by shared module-result digests; replay-checked
   histories; causal digests on `BranchManifest`). Ledger publish remains
   **opt-in**. Accepts are journaled across CAS + refs + optional ledger
-  (`recoverPendingAccepts`); crash may still leave unreferenced CAS blobs.
+  (`recoverPendingAccepts`); `reclaimOrphanBlobs` is the mark/sweep reclaim
+  path for unreferenced accept blobs (`liveCasRoots`).
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
   `ActionKey.fromPinned`). Host-embedded Meta fragments remain the bootstrap
   vocabulary.
+- **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
+  (issuer-scoped absorb). Not multi-node consensus / BFT.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches

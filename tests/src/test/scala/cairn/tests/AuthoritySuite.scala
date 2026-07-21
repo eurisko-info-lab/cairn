@@ -288,6 +288,23 @@ class AuthoritySuite extends munit.FunSuite:
     assert(snap.nonces.get(alice.id).exists(_.contains("shared-n")))
     assert(snap.nonces.get(bob.id).exists(_.contains("shared-n")))
 
+  test("ReplayStore: CAS publish/merge syncs issuer-scoped snapshots across stores"):
+    val cas = MemCas()
+    val casCtx = EffectContext.forCas()
+    val a = ReplayStore.memory()
+    val b = ReplayStore.memory()
+    assert(a.consumeNonce("alice", "n1").isRight)
+    assert(a.consumeRequestId("alice", "r1").isRight)
+    val dig = ReplayStore.publish(a, cas, casCtx).fold(e => fail(e.toString), identity)
+    assert(ReplayStore.mergeFromCas(b, cas, dig, casCtx).isRight)
+    assert(b.consumeNonce("alice", "n1").isLeft, "merged nonce denied")
+    assert(b.consumeRequestId("alice", "r1").isLeft, "merged requestId denied")
+    assert(b.consumeNonce("alice", "n2").isRight, "unseen token ok")
+    // Round-trip artifact kind
+    val art = a.snapshot.artifact
+    assertEquals(art.kind, ArtifactKind.ReplaySnapshot)
+    assertEquals(ReplayStore.Snapshot.fromArtifact(art).map(_.flatNonces), Right(Set("n1")))
+
   test("attenuation: Kernel witness allows narrower path; rejects widening"):
     val parent = CapabilityGrant(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
     val narrow = EffectMeta.filesystem.resource.at("/tmp/a")

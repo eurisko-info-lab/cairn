@@ -32,8 +32,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    provenance). Everyday branch path persists `ValidatedTip` via `commitTip`
    (opaque tip + replay-checked change-sets; tip sidecar + `.changes` history;
    causal digests on `BranchManifest`) and merges via `mergeBranches`
-   (causal LCA by shared module-result digests) / `loadTip`. Accepts are
-   journaled (CAS → journal → refs → optional ledger). Ledger `SetBranchHead`
+   (causal LCA by shared module-result digests) / `loadTip`.    Accepts are
+   journaled (CAS → journal → refs → optional ledger).
+   `Branches.reclaimOrphanBlobs` recovers then GCs with `liveCasRoots`.
+   Ledger `SetBranchHead`
    is opt-in (`Branches.publishHead` or `publish = Some(...)` on merge) —
    accept stays local by default. `Branches` CAS and refs FS are gated
    (`EffectContext.forBranches`). Node / Sync / HttpSync chain files are gated
@@ -43,7 +45,8 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    Browser board inventory use `CasEffects` / `CasAdminEffects`; Phase0
    MemCas/DiskCas and WaveA M4 algo tests remain intentional trait-contract
    exceptions. Capability nonce/requestId replay uses issuer-scoped
-   `ReplayStore` (memory or durable filesystem), shareable across gates.
+   `ReplayStore` (memory or durable filesystem), shareable across gates;
+   snapshots sync via CAS `replay-snapshot` digests (`publish` / `mergeFromCas`).
    Effect interfaces pin as CAS `effect-interface` artifacts
    (`PinnedInterface` / `ActionKey.fromPinned`).
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's

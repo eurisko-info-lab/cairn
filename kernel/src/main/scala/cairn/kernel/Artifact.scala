@@ -54,6 +54,7 @@ enum ArtifactKind(val name: String):
   case Capability     extends ArtifactKind("capability-manifest")
   case Policy         extends ArtifactKind("policy")
   case QueryResult    extends ArtifactKind("query-result")
+  case ReplaySnapshot extends ArtifactKind("replay-snapshot")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =

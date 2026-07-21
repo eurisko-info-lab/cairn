@@ -178,9 +178,10 @@ object CasEffects:
   *
   * Accepts use a journaled transactional path: CAS blobs → accept journal →
   * refs (history + tip + branch) → optional ledger publish → journal clear.
-  * [[recoverPendingAccepts]] rolls forward interrupted accepts. Crash may still
-  * leave unreferenced CAS blobs until GC; refs + optional ledger are
-  * all-or-nothing relative to the journal.
+  * [[recoverPendingAccepts]] rolls forward interrupted accepts.
+  * [[reclaimOrphanBlobs]] recovers then mark/sweeps CAS with [[liveCasRoots]]
+  * (branch refs, change history, pending journals) — the reclaim path for
+  * unreferenced accept blobs left by a crash before the journal was written.
   *
   * Ledger `SetBranchHead` remains opt-in via [[publishHead]] or
   * `publish = Some(...)` on merge.
@@ -253,8 +254,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private def acceptJournalPath(branch: String): Path =
     refsDir.resolve(s"$branch.accepting")
 
+  /** Sidecar: conflict artifact digest when merge left the head unchanged. */
+  private def conflictRefPath(branch: String): Path =
+    refsDir.resolve(s"$branch.conflict")
+
   private def isSidecar(name: String): Boolean =
-    name.endsWith(".change") || name.endsWith(".changes") || name.endsWith(".accepting")
+    name.endsWith(".change") || name.endsWith(".changes") ||
+      name.endsWith(".accepting") || name.endsWith(".conflict")
 
   /** Journaled accept intent (CAS digests + intended ref / ledger steps). */
   private final case class AcceptJournal(
@@ -265,7 +271,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       causalHistoryRoot: Option[Digest],
       historyAppend: Boolean,
       phase: String, // "cas" | "refs" | "publish" | "done"
+      /** Provisional digests (provenance, tip base, …) protected as GC roots. */
+      extras: List[Digest] = Nil,
   ):
+    def rootDigests: List[Digest] =
+      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras
+
     def encode: String =
       val lines = List(
         s"branch=$branch",
@@ -274,7 +285,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         s"parents=${parents.map(_.hex).mkString(",")}",
         s"causal=${causalHistoryRoot.map(_.hex).getOrElse("")}",
         s"historyAppend=$historyAppend",
-        s"phase=$phase")
+        s"phase=$phase",
+        s"extras=${extras.map(_.hex).mkString(",")}")
       lines.mkString("\n")
 
   private object AcceptJournal:
@@ -292,7 +304,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         causal = m.get("causal").filter(_.nonEmpty).map(Digest(_))
         histAppend = m.get("historyAppend").forall(_ != "false")
         phase <- m.get("phase").toRight("accept journal: missing phase")
-      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase)
+        extras = m.getOrElse("extras", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
+      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras)
 
   private def writeJournal(j: AcceptJournal): Unit =
     refsMkdirs()
@@ -300,6 +313,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   private def clearJournal(branch: String): Unit =
     refsDelete(acceptJournalPath(branch))
+
+  private def clearConflict(branch: String): Unit =
+    refsDelete(conflictRefPath(branch))
 
   /** Optional ledger publish after a local accept. */
   final case class Publish(
@@ -337,13 +353,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       historyAppend: Boolean = true,
       extraPuts: List[Artifact] = Nil,
   ): Either[String, BranchManifest] =
-    extraPuts.foreach(putArt)
+    val extraKeys = extraPuts.map(putArt)
     val vcsKey = putArt(vcs.artifact)
     val modKey = putArt(module.artifact)
-    Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
-      .fold(e => throw RuntimeException(casErr(e)), identity)
+    val provDig =
+      Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
+        .fold(e => throw RuntimeException(casErr(e)), identity)
+    val extras = extraKeys.map(_.valueHash) :+ provDig
     var journal = AcceptJournal(
-      branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas")
+      branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras)
     writeJournal(journal)
     val manifest = applyRefs(journal)
     journal = journal.copy(phase = "refs")
@@ -351,6 +369,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     publish match
       case None =>
         clearJournal(branch)
+        clearConflict(branch)
         Right(manifest)
       case Some(p) =>
         journal = journal.copy(phase = "publish")
@@ -359,9 +378,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           case Left(err) => Left(err)
           case Right(_) =>
             clearJournal(branch)
+            clearConflict(branch)
             Right(manifest)
 
-  /** Roll forward interrupted accepts (refs and/or ledger publish). */
+  /** Roll forward interrupted accepts (refs and/or ledger publish).
+    * Phase=`cas` with missing journal blobs abandons the journal (orphans are
+    * then reclaimable via [[reclaimOrphanBlobs]]); other failures stay Left.
+    */
   def recoverPendingAccepts(
       publish: Option[Publish] = None
   ): Either[String, List[String]] =
@@ -378,9 +401,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               AcceptJournal.parse(text).flatMap { j =>
                 j.phase match
                   case "cas" =>
-                    applyRefs(j)
-                    clearJournal(branch)
-                    Right(done :+ branch)
+                    tryApplyRefs(j) match
+                      case Right(_) =>
+                        clearJournal(branch)
+                        Right(done :+ branch)
+                      case Left(err) if err.contains("not in CAS") || err.contains("Missing") =>
+                        // Incomplete put before crash — drop journal; GC reclaims orphans.
+                        clearJournal(branch)
+                        Right(done :+ branch)
+                      case Left(err) => Left(err)
                   case "refs" =>
                     clearJournal(branch)
                     Right(done :+ branch)
@@ -398,6 +427,87 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             }
           }
         case other => Left(s"unexpected fs response: $other")
+
+  private def tryApplyRefs(j: AcceptJournal): Either[String, BranchManifest] =
+    getByDigest(j.moduleDigest).flatMap { _ =>
+      getByDigest(j.vcsDigest).map { _ =>
+        applyRefs(j)
+      }
+    }
+
+  /** Digests that must survive CAS GC: branch heads, change sidecars /
+    * histories, conflict sidecars, pending accept-journal digests, and
+    * causal digests reachable from stored [[BranchManifest]]s.
+    */
+  def liveCasRoots(): Either[String, Set[Digest]] =
+    if !refsExists(refsDir) then Right(Set.empty)
+    else
+      fsRun(Fs.Request.List(fsAbs(refsDir))) match
+        case Left(e) => Left(e)
+        case Right(Fs.Response.Entries(names)) =>
+          val roots = scala.collection.mutable.Set[Digest]()
+          def addHex(s: String): Unit =
+            val t = s.trim
+            if t.nonEmpty then
+              Digest.parse(t).foreach(roots += _)
+          for name <- names do
+            val p = refsDir.resolve(name)
+            if name.endsWith(".accepting") then
+              AcceptJournal.parse(refsRead(p)).foreach(j => j.rootDigests.foreach(roots += _))
+            else if name.endsWith(".changes") then
+              refsRead(p).linesIterator.foreach(addHex)
+            else if name.endsWith(".change") || name.endsWith(".conflict") then
+              addHex(refsRead(p))
+            else if !name.contains('.') then
+              val hex = refsRead(p).trim
+              addHex(hex)
+              Digest.parse(hex).foreach { d =>
+                getByDigest(d).foreach { a =>
+                  if a.kind == ArtifactKind.BranchManifest then
+                    val m = BranchManifest.fromCanon(a.body)
+                    m.head.foreach(k => roots += k.valueHash)
+                    m.acceptedChange.foreach(roots += _)
+                    m.causalHistoryRoot.foreach(roots += _)
+                    m.conflictState.foreach(roots += _)
+                    m.parents.foreach(roots += _)
+                    m.history.foreach(k => roots += k.valueHash)
+                }
+              }
+          Right(roots.toSet)
+        case other => Left(s"unexpected fs response: $other")
+
+  final case class ReclaimReport(
+      recovered: List[String],
+      gc: CasAdmin.GcReport,
+      roots: Int,
+  )
+
+  /** Recover pending accepts, then mark/sweep the disk CAS using
+    * [[liveCasRoots]] plus provenance records that cite those roots.
+    * Call after a crash (or periodically) to drop unreferenced accept blobs.
+    * Requires a [[DiskCas]] root path.
+    */
+  def reclaimOrphanBlobs(
+      casRoot: Path,
+      publish: Option[Publish] = None,
+  ): Either[String, ReclaimReport] =
+    recoverPendingAccepts(publish).flatMap { recovered =>
+      liveCasRoots().flatMap { roots =>
+        val withProv = roots ++ provenanceRoots(casRoot, roots)
+        CasAdminEffects.gc(casRoot, withProv, ctx).left.map(casErr).map { report =>
+          ReclaimReport(recovered, report, withProv.size)
+        }
+      }
+    }
+
+  /** Keep provenance artifacts whose output/inputs intersect live roots. */
+  private def provenanceRoots(casRoot: Path, roots: Set[Digest]): Set[Digest] =
+    CasAdmin.objectFiles(casRoot).flatMap { p =>
+      val dig = Digest(p.getParent.getFileName.toString + p.getFileName.toString)
+      Artifact.decode(Files.readAllBytes(p)).toOption.flatMap(Provenance.fromArtifact).collect {
+        case r if roots.contains(r.output) || r.inputs.exists(roots.contains) => dig
+      }
+    }.toSet
 
   private def persistChange(branch: String, vcsKey: TypedKey): Unit =
     refsMkdirs()
@@ -597,7 +707,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         val marked = BranchManifest(
           into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
           cur.acceptedChange, conflictState = Some(conflictKey.valueHash))
-        putArt(marked.artifact) // record conflict digest in CAS; head unchanged
+        putArt(marked.artifact) // conflictState recorded; head unchanged
+        refsMkdirs()
+        refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
         Right(Left(conflict))
       case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
         val parentDigests =
