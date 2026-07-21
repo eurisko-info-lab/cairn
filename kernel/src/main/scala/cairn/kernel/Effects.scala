@@ -32,6 +32,7 @@ object Effects:
     case ClockTimestampSlug extends Action(Family.Clock, "timestampSlug")
     case RandomBytes      extends Action(Family.Random, "bytes")
     case TerminalWrite    extends Action(Family.Terminal, "write")
+    case TerminalRead     extends Action(Family.Terminal, "read")
     case LspServe         extends Action(Family.Lsp, "serve")
     case BackendRun       extends Action(Family.ExternalBackend, "run")
     case BackendFind      extends Action(Family.ExternalBackend, "find")

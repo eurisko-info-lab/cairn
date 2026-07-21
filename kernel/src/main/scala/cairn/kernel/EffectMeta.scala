@@ -102,11 +102,40 @@ object EffectMeta:
     "find" -> Effects.Action.BackendFind,
     "run" -> Effects.Action.BackendRun))
 
+  private val terminalFragment: Fragment = Fragment(
+    name = "effect.terminal",
+    provides = List("effect.terminal"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("readLine", "Request", Nil),
+      CtorDef("write", "Request", List("Str")),
+      CtorDef("writeLine", "Request", List("Str")),
+      CtorDef("line", "Response", List("Str")),
+      CtorDef("eof", "Response", Nil),
+      CtorDef("ok", "Response", Nil),
+      CtorDef("closed", "Error", Nil),
+      CtorDef("io", "Error", List("Str"))))
+
+  /** `write` and `writeLine` are both terminal-output operations, gated by
+    * the same right — the first non-retrofitted use of the many-to-one
+    * grouping (contrast with random/clock/process/externalBackend above,
+    * each of which happened to be 1:1).
+    */
+  val terminal: EffectFamily = EffectFamily(terminalFragment, Map(
+    "readLine" -> Effects.Action.TerminalRead,
+    "write" -> Effects.Action.TerminalWrite,
+    "writeLine" -> Effects.Action.TerminalWrite))
+
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
     Effects.Family.Clock -> clock,
     Effects.Family.Process -> process,
-    Effects.Family.ExternalBackend -> externalBackend)
+    Effects.Family.ExternalBackend -> externalBackend,
+    Effects.Family.Terminal -> terminal)
 
   /** The rights vocabulary for a family: every distinct [[Effects.Action]]
     * its `requestActions` grouping declares.

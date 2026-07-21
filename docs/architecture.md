@@ -105,6 +105,11 @@ language rather than an opaque Scala shape.
   `EffectMeta.completeness` verifies every `Request` constructor has an
   entry, every entry names a real constructor, and every mapped `Action`
   belongs to the right family.
+- **`Terminal`** (done): the first real (non-retrofitted) many-to-one
+  grouping — `Write`/`WriteLine` (both terminal-output operations) share the
+  existing `TerminalWrite` right; `ReadLine` had no right at all
+  (`system-handler.Terminal.perform` executed it directly), fixed by adding
+  `TerminalRead`.
 - **Vestigial families** (found while scoping the `ExternalBackend` slice,
   by checking for a `def perform(req: X.Request)` entry point in
   `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
@@ -119,7 +124,7 @@ language rather than an opaque Scala shape.
   decision for later, not made here). `Cas` is a trait-based contract, not a
   Request/Response enum family, and is out of scope for this mechanism as
   designed.
-- **Remaining live families** (`Filesystem`, `Workspace`, `Terminal`,
+- **Remaining live families** (`Filesystem`, `Workspace`,
   `Lsp`) — not yet converted, now unblocked by the many-to-one mechanism
   above. Each still needs its own per-family judgment call about which
   requests belong to which capability class (e.g. is `Filesystem.Delete` a

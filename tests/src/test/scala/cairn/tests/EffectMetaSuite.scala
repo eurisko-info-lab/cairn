@@ -5,12 +5,14 @@ import cairn.systeminterface.Random as RandomEffect
 import cairn.systeminterface.Clock as ClockEffect
 import cairn.systeminterface.Process as ProcessEffect
 import cairn.systeminterface.ExternalBackend as BackendEffect
+import cairn.systeminterface.Terminal as TerminalEffect
 
 /** Meta-defined effect interfaces (post-migration priority #1): `Random`,
-  * `Clock`, `Process`, and `ExternalBackend` are Fragment-defined template
-  * families, using EffectMeta's many-to-one requestActions grouping (even
-  * though each of these four happens to be 1:1). These are mechanical
-  * drift guards, same spirit as `ModuleBoundarySuite`.
+  * `Clock`, `Process`, `ExternalBackend`, and `Terminal` are Fragment-defined
+  * families, using EffectMeta's many-to-one requestActions grouping (`Terminal`
+  * is the first real, non-retrofitted use — `write`/`writeLine` share one
+  * right). These are mechanical drift guards, same spirit as
+  * `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -93,4 +95,29 @@ class EffectMetaSuite extends munit.FunSuite:
       ctorNameOf(BackendEffect.Request.Find(BackendEffect.Host.ScalaCli)),
       ctorNameOf(BackendEffect.Request.Run(BackendEffect.Host.ScalaCli, Nil)))
     val fragmentReqCtors = EffectMeta.externalBackend.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.terminal composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.terminal", List(EffectMeta.terminal.fragment)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("EffectMeta.terminal's requestActions is complete and matches the hand-tagged actions (incl. the fixed drift)"):
+    assertEquals(EffectMeta.completeness(EffectMeta.terminal, Effects.Family.Terminal), Nil)
+    val derived = EffectMeta.actions(EffectMeta.terminal)
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Terminal).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 2) // TerminalRead + TerminalWrite — was 1 (write only) before this slice
+
+  test("system-interface.Terminal.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    // Write/WriteLine take parameters; ReadLine doesn't — one exhaustive
+    // match covers all three, same style as Random/Process/ExternalBackend.
+    def ctorNameOf(r: TerminalEffect.Request): String = r match
+      case TerminalEffect.Request.ReadLine       => "readLine"
+      case TerminalEffect.Request.Write(_)       => "write"
+      case TerminalEffect.Request.WriteLine(_)   => "writeLine"
+    val scalaReqCases = Set(
+      ctorNameOf(TerminalEffect.Request.ReadLine),
+      ctorNameOf(TerminalEffect.Request.Write("")),
+      ctorNameOf(TerminalEffect.Request.WriteLine("")))
+    val fragmentReqCtors = EffectMeta.terminal.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
