@@ -2,6 +2,7 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systeminterface.Cas
 import cairn.ledger.Provenance
 import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite, CheckerCfg, Checker, Derivation}
 import cairn.proof.{Search as DerivSearch}

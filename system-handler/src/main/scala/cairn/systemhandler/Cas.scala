@@ -1,27 +1,15 @@
-package cairn.workbench
+package cairn.systemhandler
 
 import cairn.kernel.*
+import cairn.systeminterface.Cas
 import java.nio.file.{Files, Path}
 
-/** Local content-addressed store (S4). Bodies are canonical artifact bytes;
-  * keys are content digests. Local-first: the working store, not the ledger (§4.9).
+/** MIGRATION-PLAN.md Phase 1: the System Handler half of the old
+  * `workbench.Cas.scala` — concrete, effectful `Cas` implementations plus
+  * the filesystem-backed branch-ref store. The pure `Cas` contract lives in
+  * `system-interface`; `BranchManifest` (pure data, its validity is a
+  * Kernel concern) lives in `kernel`.
   */
-trait Cas:
-  def putBytes(bs: Array[Byte]): Digest
-  def getBytes(d: Digest): Either[String, Array[Byte]]
-  def contains(d: Digest): Boolean
-
-  def put(a: Artifact): TypedKey =
-    putBytes(Canon.encode(a.canon)); a.key
-  def get(key: TypedKey): Either[String, Artifact] =
-    for
-      bs <- getBytes(key.valueHash)
-      a <- Artifact.decode(bs)
-      _ <- TypedKey.check(key, a.key)
-    yield a
-  def getByDigest(d: Digest): Either[String, Artifact] =
-    getBytes(d).flatMap(Artifact.decode)
-
 final class MemCas extends Cas:
   private val store = scala.collection.mutable.Map[String, Array[Byte]]()
   def putBytes(bs: Array[Byte]): Digest =
@@ -72,33 +60,6 @@ final class DiskCas(root: Path) extends Cas:
           val bs = Files.readAllBytes(p)
           if HashAlgo.hash(algo, bs) == hex then Right(bs)
           else Left(s"CAS corruption on $key") }
-
-/** Branch manifests + append-only history (S18). Heads are stable typed keys
-  * stored as named refs; every head update appends, never overwrites history.
-  */
-final case class BranchManifest(branch: String, head: Option[TypedKey], history: List[TypedKey]):
-  def canon: Canon = Canon.cmap(
-    "branch" -> Canon.CStr(branch),
-    "head" -> head.fold(Canon.CTag("none", Canon.CInt(0)))(k => Canon.CTag("some", keyCanon(k))),
-    "history" -> Canon.CList(history.map(keyCanon)))
-  def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
-  private def keyCanon(k: TypedKey): Canon = Canon.cmap(
-    "kind" -> Canon.CStr(k.kind.name),
-    "value" -> Canon.CStr(k.valueHash.hex),
-    "type" -> Canon.CStr(k.typeHash.hex))
-
-object BranchManifest:
-  def fromCanon(c: Canon): BranchManifest =
-    import Canon.*
-    def key(k: Canon): TypedKey = TypedKey(
-      ArtifactKind.parse(k.field("kind").asStr).toOption.get,
-      Digest(k.field("value").asStr), Digest(k.field("type").asStr))
-    BranchManifest(
-      c.field("branch").asStr,
-      c.field("head") match
-        case CTag("some", k) => Some(key(k))
-        case _               => None,
-      c.field("history").asList.map(key))
 
 /** Named branch refs over a CAS; ref file stores the manifest digest. */
 final class Branches(cas: Cas, refsDir: Path):

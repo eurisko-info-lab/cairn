@@ -143,7 +143,7 @@ object Provenance:
       "tool" -> Canon.CStr(tool)))
     def artifact: Artifact = Artifact(ArtifactKind.Provenance, canon)
 
-  def record(cas: cairn.workbench.Cas, output: Digest, inputs: List[Digest], tool: String): Digest =
+  def record(cas: cairn.systeminterface.Cas, output: Digest, inputs: List[Digest], tool: String): Digest =
     cas.put(Record(output, inputs, tool).artifact).valueHash
 
   def fromArtifact(a: Artifact): Option[Record] =

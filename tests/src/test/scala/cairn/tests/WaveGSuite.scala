@@ -179,7 +179,7 @@ class WaveGSuite extends munit.FunSuite:
 
   test("M40: `why` walks 4 provenance hops from port text back to fragments"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-prov")
-    val cas = cairn.workbench.DiskCas(dir)
+    val cas = cairn.systemhandler.DiskCas(dir)
     val lang = Stlc.language
     // hop 1: fragments -> language (compose)
     Stlc.fragments.foreach(f => cas.put(f.artifact))

@@ -2,6 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systemhandler.DiskCas
 import cairn.compute.TreeEngine
 import cairn.ledger.*
 import java.nio.file.{Files, Path}

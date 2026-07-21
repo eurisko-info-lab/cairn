@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systemhandler.{MemCas, DiskCas, Branches}
 import cairn.compute.*
 import cairn.examples.stlc.Stlc
 

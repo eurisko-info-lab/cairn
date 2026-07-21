@@ -1,4 +1,4 @@
-package cairn.workbench
+package cairn.systemhandler
 
 import cairn.kernel.*
 import java.io.{InputStream, OutputStream}
@@ -6,7 +6,14 @@ import java.nio.file.{Files, Path}
 import java.security.MessageDigest
 import scala.jdk.CollectionConverters.*
 
-/** CAS maintenance (M3): fsck, root-tracked mark/sweep GC, stats. */
+/** CAS maintenance (M3): fsck, root-tracked mark/sweep GC, stats. MIGRATION-
+  * PLAN.md Phase 1: moved here wholesale alongside `DiskCas` (`Cas.scala`,
+  * same module) rather than split further — `DiskCas.putBytesAlgo` already
+  * depends on this file's `HashAlgo`, so they can't live in different
+  * modules, and the plan's own Phase 1 text doesn't name this file at all.
+  * `HashAlgo`/`DigestMigration` are themselves pure; not worth a second split
+  * this phase didn't ask for.
+  */
 object CasAdmin:
   final case class FsckReport(checked: Int, corrupt: List[Digest])
   final case class GcReport(kept: Int, swept: Int)

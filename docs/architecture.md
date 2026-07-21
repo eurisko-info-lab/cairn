@@ -22,17 +22,25 @@ checker" pattern already used throughout the proof/derivation machinery
 
 ## Current module graph
 
-As of this revision, the pre-migration linear chain, unchanged:
+As of this revision:
 
 ```text
 kernel ← workbench ← {proof, compute} ← rosetta ← ledger ← surface ← examples ← tests
+system-interface → kernel
+system-handler   → kernel, system-interface
+ledger           → rosetta, system-interface, system-handler (in addition to the chain above)
 ```
 
-No `system-interface`, `system-handler`, `core`, `user`, or `runtime` modules
-exist yet — `workbench/Cas.scala` still bundles the `Cas` interface, its
-filesystem-backed implementations (`MemCas`/`DiskCas`), and the repository-
-domain `BranchManifest`/`Branches` types in one file, one module. Every
-exemplar language and domain pack lives under `examples/`.
+`system-interface`/`system-handler` are the first migration slice: the `Cas`
+trait lives in `system-interface` (pure — only `cairn.kernel.*`); `MemCas`,
+`DiskCas`, `Branches`, and CAS maintenance (`CasAdmin`/`Chunker`/`HashAlgo`/
+`DigestMigration`) live in `system-handler` (filesystem I/O). `BranchManifest`
+moved to `kernel` (pure data; its validity is a Kernel concern per the
+migration plan's own mapping). `surface`/`examples`/`tests` see the new
+modules transitively through `ledger` — no `build.sbt` changes were needed
+there. `core`, `user`, and `runtime` do not exist yet — `workbench`/`proof`/
+`compute`/`rosetta` still play Core's role, unsplit. Every exemplar language
+and domain pack still lives under `examples/`.
 
 ## Forbidden-import rules
 
@@ -60,7 +68,7 @@ they constrain don't exist yet:
 | Phase | Status | What landed |
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
-| 1. Split System Interface from System Handler | Not started | Planned: `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
+| 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
 | 2. Introduce Core | Not started | |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |

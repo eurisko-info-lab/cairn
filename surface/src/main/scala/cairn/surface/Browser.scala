@@ -2,6 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systemhandler.CasAdmin
 import cairn.ledger.Node
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress

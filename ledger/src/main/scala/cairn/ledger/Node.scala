@@ -1,7 +1,8 @@
 package cairn.ledger
 
 import cairn.kernel.*
-import cairn.workbench.{Cas, DiskCas}
+import cairn.systeminterface.Cas
+import cairn.systemhandler.DiskCas
 import java.nio.file.{Files, Path}
 import java.security.{KeyFactory, KeyPairGenerator, PrivateKey, PublicKey, Signature}
 import java.security.spec.X509EncodedKeySpec

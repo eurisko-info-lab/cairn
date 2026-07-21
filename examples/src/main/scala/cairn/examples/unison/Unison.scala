@@ -2,6 +2,8 @@ package cairn.examples.unison
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systeminterface.Cas
+import cairn.systemhandler.MemCas
 
 /** Unison-inspired pack (M48, §5b, §2c): a name-independent definition store
   * over ALPHA-INVARIANT digests (M2). Definitions are identified by content;

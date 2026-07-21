@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systemhandler.{DiskCas, CasAdmin, Chunker, DigestMigration}
 import cairn.examples.stlc.Stlc
 
 /** Wave A acceptance (M1–M5). */

@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.systemhandler.DiskCas
 import cairn.ledger.Provenance
 import cairn.proof.{Checker, Derivation}
 import cairn.examples.search.{Search, SearchTutorial}

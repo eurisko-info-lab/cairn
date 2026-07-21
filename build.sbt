@@ -8,6 +8,17 @@ val munit = "org.scalameta" %% "munit" % "1.0.2" % Test
 lazy val kernel = project.in(file("kernel"))
   .settings(libraryDependencies += munit)
 
+// MIGRATION-PLAN.md Phase 1: the first System split slice. Pure effect
+// contracts (system-interface) vs. their concrete, effectful implementations
+// (system-handler) — see docs/architecture.md.
+lazy val systemInterface = project.in(file("system-interface"))
+  .dependsOn(kernel)
+  .settings(libraryDependencies += munit)
+
+lazy val systemHandler = project.in(file("system-handler"))
+  .dependsOn(kernel, systemInterface)
+  .settings(libraryDependencies += munit)
+
 lazy val workbench = project.in(file("workbench"))
   .dependsOn(kernel)
   .settings(libraryDependencies += munit)
@@ -25,7 +36,7 @@ lazy val rosetta = project.in(file("rosetta"))
   .settings(libraryDependencies += munit)
 
 lazy val ledger = project.in(file("ledger"))
-  .dependsOn(rosetta)
+  .dependsOn(rosetta, systemInterface, systemHandler)
   .settings(libraryDependencies += munit)
 
 lazy val surface = project.in(file("surface"))
@@ -43,5 +54,5 @@ lazy val tests = project.in(file("tests"))
   .settings(libraryDependencies += munit)
 
 lazy val root = project.in(file("."))
-  .aggregate(kernel, workbench, proof, compute, rosetta, ledger, surface, examples, tests)
+  .aggregate(kernel, systemInterface, systemHandler, workbench, proof, compute, rosetta, ledger, surface, examples, tests)
   .settings(publish / skip := true)
