@@ -1,10 +1,18 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Lsp as LspIface
+import cairn.kernel.{Authority, Effects}
 import java.io.{InputStream, OutputStream}
 
 /** LSP Content-Length framing transport (Phase 3 lsp family). Message
   * semantics stay in `surface.LspServer`; this only does bytes on the wire.
+  * `readMessage`/`writeMessage` stay public: they're pure framing over
+  * whatever stream is passed in (no I/O of their own beyond that stream),
+  * so a caller building fixture bytes over a `ByteArrayOutputStream` (as
+  * `WaveH2Suite` does) has no real-world effect to gate — the same
+  * reasoning as `Filesystem.Resolve`. `perform` is where the actual
+  * session I/O happens and is gated by [[AuthorityGate]] (Subject("local")
+  * is a placeholder — this family has no real multi-tenant identity yet).
   */
 object LspTransport:
   def readMessage(in: InputStream): Option[String] =
@@ -34,13 +42,19 @@ object LspTransport:
 
   def perform(req: LspIface.Request, in: InputStream, out: OutputStream)
       : Either[LspIface.Error, LspIface.Response] =
-    try req match
-      case LspIface.Request.ReadMessage =>
-        readMessage(in) match
-          case Some(p) => Right(LspIface.Response.Message(p))
-          case None    => Right(LspIface.Response.SessionEnded)
-      case LspIface.Request.WriteMessage(payload) =>
-        writeMessage(out, payload); Right(LspIface.Response.Ok)
-    catch
-      case _: java.io.IOException => Left(LspIface.Error.Closed)
-      case e: Exception           => Left(LspIface.Error.Framing(e.getMessage))
+    val action = req match
+      case LspIface.Request.ReadMessage     => Effects.Action.LspRead
+      case LspIface.Request.WriteMessage(_) => Effects.Action.LspWrite
+    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("lsp", "*"))
+    AuthorityGate.checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
+      try req match
+        case LspIface.Request.ReadMessage =>
+          readMessage(in) match
+            case Some(p) => Right(LspIface.Response.Message(p))
+            case None    => Right(LspIface.Response.SessionEnded)
+        case LspIface.Request.WriteMessage(payload) =>
+          writeMessage(out, payload); Right(LspIface.Response.Ok)
+      catch
+        case _: java.io.IOException => Left(LspIface.Error.Closed)
+        case e: Exception           => Left(LspIface.Error.Framing(e.getMessage))
+    }

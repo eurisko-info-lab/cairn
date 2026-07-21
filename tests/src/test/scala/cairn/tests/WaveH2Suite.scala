@@ -219,8 +219,8 @@ class WaveH2Suite extends munit.FunSuite:
     val request = """{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}"""
     val exitNote = """{"jsonrpc": "2.0", "method": "exit"}"""
     val inBytes = new java.io.ByteArrayOutputStream()
-    Lsp.writeMessage(inBytes, request)
-    Lsp.writeMessage(inBytes, exitNote)
+    cairn.systemhandler.LspTransport.writeMessage(inBytes, request)
+    cairn.systemhandler.LspTransport.writeMessage(inBytes, exitNote)
     val out = new java.io.ByteArrayOutputStream()
     Lsp.serve(lspCfg, new java.io.ByteArrayInputStream(inBytes.toByteArray), out)
     val response = out.toString

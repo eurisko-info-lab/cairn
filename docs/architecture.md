@@ -215,11 +215,26 @@ capabilities is the user's priority #2 ("replace ambient globals... with
 explicit runtime contexts and injected capabilities") — noted here as a
 forward pointer, not solved.
 
-**Remaining** (`Filesystem`, `Process`, `PackFiles`/`Workspace`,
-`LspTransport`): each has real external callers needing an actual
-call-site migration before gating — separate future slices, roughly
-ordered by call-site count (`LspTransport`/`Filesystem`/`Process`
-smallest, `PackFiles` largest).
+**`LspTransport`** (done): the first family with real callers to be
+migrated. `surface.Lsp.serve`'s session loop — the actual live effect path,
+reading/writing real stdio during an LSP session — now calls
+`LspTransport.perform` instead of the raw `readMessage`/`writeMessage`,
+gated the same way as the four above. Its `export
+cairn.systemhandler.LspTransport.{readMessage, writeMessage}` line was
+removed (re-exporting a raw primitive under the `Lsp` surface name is
+exactly the pattern this priority moves away from). Unlike the four
+fully-dead families, `readMessage`/`writeMessage` themselves were **not**
+made `private`: `tests/WaveH2Suite.scala` legitimately calls
+`LspTransport.writeMessage` directly on a `ByteArrayOutputStream` to build
+framed test-fixture bytes — pure byte-buffer construction with no
+real-world effect, the same reasoning as `Filesystem.Resolve` needing no
+right at all. That test now calls `LspTransport.writeMessage` by its real
+name instead of through the removed re-export.
+
+**Remaining** (`Filesystem`, `Process`, `PackFiles`/`Workspace`): each has
+real external callers needing an actual call-site migration before
+gating — separate future slices, roughly ordered by call-site count
+(`Filesystem`/`Process` smallest, `PackFiles` largest at 6 sites).
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 

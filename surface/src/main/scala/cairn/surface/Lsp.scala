@@ -261,18 +261,19 @@ object Lsp:
     val server = LspServer(cfg)
     var running = true
     while running do
-      cairn.systemhandler.LspTransport.readMessage(in) match
-        case None => running = false
-        case Some(text) =>
+      cairn.systemhandler.LspTransport.perform(cairn.systeminterface.Lsp.Request.ReadMessage, in, out) match
+        case Right(cairn.systeminterface.Lsp.Response.Message(text)) =>
           JsonSurface.decodeRaw(text) match
             case Right(msg) =>
               val method = J.fields(msg).get("method").flatMap(J.asStr)
               if method.contains("exit") then running = false
               else server.handle(msg).foreach(m =>
-                cairn.systemhandler.LspTransport.writeMessage(out, J.print(m)))
+                cairn.systemhandler.LspTransport.perform(
+                  cairn.systeminterface.Lsp.Request.WriteMessage(J.print(m)), in, out))
             case Left(_) => ()
-
-  export cairn.systemhandler.LspTransport.{readMessage, writeMessage}
+        case Right(cairn.systeminterface.Lsp.Response.SessionEnded) => running = false
+        case Right(cairn.systeminterface.Lsp.Response.Ok) => () // WriteMessage's response shape; unreachable here
+        case Left(_) => running = false // framing/closed/denied error ends the session
 
 /** M44: a REPL over any registered language. */
 final class Repl(l: ComposedLanguage):
