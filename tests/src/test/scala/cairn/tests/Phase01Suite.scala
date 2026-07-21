@@ -2,7 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{MemCas, DiskCas, Branches}
+import cairn.systemhandler.{MemCas, DiskCas, Branches, EffectContext}
 import cairn.core.TreeEngine
 import cairn.examples.stlc.Stlc
 
@@ -165,16 +165,18 @@ class DeltaSuite extends munit.FunSuite:
     RoundTrip.check(dl.grammar, t).fold(e => fail(e), identity)
 
 class BranchSuite extends munit.FunSuite:
+  private val casCtx = EffectContext.forCas()
+
   test("branch manifests: append-only history surviving restart (S18)"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-branches")
     val cas = DiskCas(dir)
-    val branches = Branches(cas, dir.resolve("refs"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val k1 = cas.put(Stlc.base.artifact)
     val k2 = cas.put(Stlc.types.artifact)
     branches.advance("main", k1)
     branches.advance("main", k2)
     // fresh instances = process restart
-    val branches2 = Branches(DiskCas(dir), dir.resolve("refs"))
+    val branches2 = Branches(DiskCas(dir), dir.resolve("refs"), casCtx)
     val m = branches2.load("main")
     assertEquals(m.head, Some(k2))
     assertEquals(m.history, List(k1))

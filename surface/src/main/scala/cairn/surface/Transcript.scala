@@ -3,7 +3,7 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.{DiskCas, EffectContext}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
 import cairn.core.TreeEngine
 import cairn.ledger.*
 import cairn.runtime.PackLoader
@@ -164,23 +164,30 @@ object Transcript:
     def need: Either[String, ComposedLanguage] = lang.toRight("no language selected (use `lang NAME ;` first)")
     def parseIn(l: ComposedLanguage, s: String): Either[String, Cst] = Parser.parse(l.grammar, s)
 
+    def casPut(node: Node, art: Artifact): Either[String, Unit] =
+      CasEffects.put(node.cas, art, node.ctx).left.map {
+        case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+        case cairn.systeminterface.Cas.Error.Io(m)      => m
+      }.map(_ => ())
+
     def publishTo(node: Node, branch: String): Either[String, Unit] =
       need.flatMap { l =>
-        l.fragments.foreach(f => node.cas.put(f.artifact))
-        node.cas.put(l.artifact)
-        node.cas.put(module.artifact)
-        val txs =
-          List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))) ++
-          l.fragments.map(f => authority.signTx(Tx.PublishArtifact(f.artifact.key))) ++
-          List(
-            authority.signTx(Tx.PublishArtifact(l.artifact.key)),
-            authority.signTx(Tx.PublishArtifact(module.artifact.key)),
-            authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
-        node.append(authority, authorities, txs)
-          .map { b =>
-            log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}"
-            log += s"blockchain node: ${node.root.toAbsolutePath.normalize}"
-          }
+        for
+          _ <- l.fragments.foldLeft[Either[String, Unit]](Right(()))((acc, f) =>
+            acc.flatMap(_ => casPut(node, f.artifact)))
+          _ <- casPut(node, l.artifact)
+          _ <- casPut(node, module.artifact)
+          txs =
+            List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))) ++
+            l.fragments.map(f => authority.signTx(Tx.PublishArtifact(f.artifact.key))) ++
+            List(
+              authority.signTx(Tx.PublishArtifact(l.artifact.key)),
+              authority.signTx(Tx.PublishArtifact(module.artifact.key)),
+              authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
+          b <- node.append(authority, authorities, txs)
+        yield
+          log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}"
+          log += s"blockchain node: ${node.root.toAbsolutePath.normalize}"
       }
 
     def fetchBetween(branch: String, fromN: String, toN: String): Either[String, Unit] =
@@ -188,7 +195,10 @@ object Transcript:
         _ <- Sync.pull(nodeOf(fromN), nodeOf(toN), authorities)
         st <- nodeOf(toN).state(authorities)
         head <- st.heads.get(branch).toRight(s"branch '$branch' not on ledger")
-        art <- nodeOf(toN).cas.get(head)
+        art <- CasEffects.get(nodeOf(toN).cas, head.valueHash, nodeOf(toN).ctx).left.map {
+          case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+          case cairn.systeminterface.Cas.Error.Io(m)      => m
+        }
       yield log += s"fetched $branch head ${art.digest.short} on $toN"
 
     def runStep(step: Cst): Either[String, Unit] =
@@ -367,9 +377,17 @@ object Cli:
         Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)
       case List("put", file) =>
         val bs = Files.readAllBytes(Path.of(file))
-        Right(cas.putBytes(bs).hex)
+        CasEffects.putBytes(cas, bs, ledgerCtx).left.map {
+          case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+          case cairn.systeminterface.Cas.Error.Io(m)      => m
+        }.map(_.hex)
       case List("get", hex) =>
-        Digest.parse(hex).flatMap(d => cas.getBytes(d)).map(bs => new String(bs, "UTF-8"))
+        Digest.parse(hex).flatMap { d =>
+          CasEffects.getBytes(cas, d, ledgerCtx).left.map {
+            case cairn.systeminterface.Cas.Error.Missing(_) => s"blob ${d.short} not in CAS"
+            case cairn.systeminterface.Cas.Error.Io(m)      => m
+          }
+        }.map(bs => new String(bs, "UTF-8"))
       case List("canon", file) =>
         val bs = Files.readAllBytes(Path.of(file))
         Canon.decode(bs).map(c => Digest.of(c).hex)
@@ -401,7 +419,7 @@ object Cli:
       case "repo" :: rest =>
         // Semantic repository surface: Branches + SemanticRepository spine.
         val refs = home.resolve("refs")
-        val branches = cairn.systemhandler.Branches(cas, refs)
+        val branches = cairn.systemhandler.Branches(cas, refs, ledgerCtx)
         rest match
           case List("branches") | Nil =>
             val names = branches.list()

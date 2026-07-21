@@ -14,9 +14,13 @@ class SemanticRepositorySuite extends munit.FunSuite:
   val lang = Stlc.language
   val dl = Delta.deltaOf(lang).toOption.get
   val m0 = Module(List("a" -> Stlc.tru, "b" -> Stlc.fls))
+  private val casCtx = EffectContext.forCas()
 
   def parseChange(src: String): Cst =
     Parser.parse(dl.grammar, src).fold(e => fail(e), identity)
+
+  def branchesAt(dir: java.nio.file.Path): Branches =
+    Branches(DiskCas(dir.resolve("cas")), dir.resolve("refs"), casCtx)
 
   test("spine: commit → tip → commute → integrate → accepted head"):
     val cA = parseChange("{ replace a = false ; add fromA = true ; }")
@@ -51,7 +55,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
   test("Branches.merge: disjoint tips advance into a queryable new head"):
     val dir = Files.createTempDirectory("cairn-semrepo")
     val cas = DiskCas(dir.resolve("cas"))
-    val branches = Branches(cas, dir.resolve("refs"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; add fromA = true ; }")
     val cB = parseChange("{ replace b = true ; add fromB = false ; }")
     branches.commitModule("base", m0)
@@ -76,7 +80,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
   test("Branches.publishHead: optional ledger SetBranchHead after accept"):
     val dir = Files.createTempDirectory("cairn-semrepo-pub")
     val cas = DiskCas(dir.resolve("cas"))
-    val branches = Branches(cas, dir.resolve("refs"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     branches.commitTip("feat", lang.digest, tipA)
@@ -99,7 +103,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
   test("Branches.loadTip / loadChangeHistory reconstruct from sidecars"):
     val dir = Files.createTempDirectory("cairn-semrepo-hist")
     val cas = DiskCas(dir.resolve("cas"))
-    val branches = Branches(cas, dir.resolve("refs"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val c1 = parseChange("{ replace a = false ; }")
     val tip1 = SemanticRepository.tipAfter(lang, m0, c1).fold(e => fail(e), identity)
     branches.commitTip("feat", lang.digest, tip1)
@@ -114,10 +118,36 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assertEquals(hist.length, 2)
     assertEquals(hist.last.result, tip2.tipDigest)
 
+  test("Branches.mergeBranches: stacked histories compose (not tip-only)"):
+    val dir = Files.createTempDirectory("cairn-semrepo-stack")
+    val branches = branchesAt(dir)
+    val cA1 = parseChange("{ replace a = false ; }")
+    val cA2 = parseChange("{ add fromA = true ; }")
+    val cB1 = parseChange("{ replace b = true ; }")
+    val cB2 = parseChange("{ add fromB = false ; }")
+    val tipA1 = SemanticRepository.tipAfter(lang, m0, cA1).fold(e => fail(e), identity)
+    val tipA2 = SemanticRepository.tipAfter(lang, tipA1.tip, cA2).fold(e => fail(e), identity)
+    val tipB1 = SemanticRepository.tipAfter(lang, m0, cB1).fold(e => fail(e), identity)
+    val tipB2 = SemanticRepository.tipAfter(lang, tipB1.tip, cB2).fold(e => fail(e), identity)
+    branches.commitTip("feat-a", lang.digest, tipA1)
+    branches.commitTip("feat-a", lang.digest, tipA2)
+    branches.commitTip("feat-b", lang.digest, tipB1)
+    branches.commitTip("feat-b", lang.digest, tipB2)
+    // Tip-only would fail: tipA2.base = tipA1.tip ≠ tipB2.base = tipB1.tip
+    assertNotEquals(tipA2.baseDigest, tipB2.baseDigest)
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
+      case Right(Right(_)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.get("a"), Some(Stlc.fls))
+        assertEquals(head.get("b"), Some(Stlc.tru))
+        assert(head.get("fromA").isDefined && head.get("fromB").isDefined)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
   test("Branches.merge: conflict persists artifact and leaves target head unset"):
     val dir = Files.createTempDirectory("cairn-semrepo-conflict")
     val cas = DiskCas(dir.resolve("cas"))
-    val branches = Branches(cas, dir.resolve("refs"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
     branches.merge(lang, "main", m0, cA, cB) match

@@ -30,9 +30,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    exists (M17) and `Branches.merge` is merge-aware through
    `SemanticRepository` (conflict → CAS artifact, accept → new head +
    provenance). Everyday branch path persists change-sets with `commitTip`
-   (tip sidecar + `.changes` history) and merges via `mergeBranches` /
-   `loadTip`. Ledger `SetBranchHead` is opt-in (`Branches.publishHead` or
-   `publish = Some(...)` on merge) — accept stays local by default.
+   (tip sidecar + `.changes` history) and merges via `mergeBranches` (composes
+   stacked histories from a shared oldest base) / `loadTip`. Ledger
+   `SetBranchHead` is opt-in (`Branches.publishHead` or `publish = Some(...)`
+   on merge) — accept stays local by default. `Branches` CAS is gated;
+   refs store is not.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

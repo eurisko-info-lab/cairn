@@ -1,6 +1,6 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, EffectContext}
 import cairn.kernel.*
 import cairn.ledger.*
 import cairn.examples.stlc.Stlc
@@ -12,6 +12,15 @@ import cairn.examples.stlc.Stlc
 class Phase5Suite extends munit.FunSuite:
   val alice = Keypair.dev("alice")
   def authorities = Map("alice" -> alice.publicBytes)
+
+  private def casPut(node: Node, art: Artifact): Unit =
+    CasEffects.put(node.cas, art, node.ctx).fold(e => fail(e.toString), identity)
+
+  private def casGet(node: Node, key: TypedKey): Artifact =
+    CasEffects.get(node.cas, key.valueHash, node.ctx).fold(e => throw AssertionError(e.toString), identity)
+
+  private def casGetDigest(node: Node, d: Digest): Either[String, Artifact] =
+    CasEffects.get(node.cas, d, node.ctx).left.map(_.toString)
 
   test("tx digests are stable canonical values (S35)"):
     val tx = Tx.PublishArtifact(Stlc.base.artifact.key)
@@ -39,8 +48,8 @@ class Phase5Suite extends munit.FunSuite:
   def publishStlc(node: Node): Block =
     val lang = Stlc.language
     // ledger records digests + heads; bodies go to CAS (§4.9)
-    Stlc.fragments.foreach(f => node.cas.put(f.artifact))
-    node.cas.put(lang.artifact)
+    Stlc.fragments.foreach(f => casPut(node, f.artifact))
+    casPut(node, lang.artifact)
     val txs = List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))) ++
       Stlc.fragments.map(f => alice.signTx(Tx.PublishArtifact(f.artifact.key))) ++
@@ -75,11 +84,11 @@ class Phase5Suite extends munit.FunSuite:
     val head = st.heads("main")
     assertEquals(head, Stlc.language.artifact.key)
     // and materializes the artifact body from its own CAS by digest
-    val art = nodeB.cas.get(head).fold(e => throw AssertionError(e), identity)
+    val art = casGet(nodeB, head)
     assertEquals(art.digest, Stlc.language.digest)
     // fragments are retrievable by digest too
     for f <- Stlc.fragments do
-      assertEquals(nodeB.cas.getByDigest(f.artifact.digest).map(_.digest), Right(f.artifact.digest))
+      assertEquals(casGetDigest(nodeB, f.artifact.digest).map(_.digest), Right(f.artifact.digest))
 
   test("two nodes converge on a published head (S41 acceptance)"):
     val a = Node(java.nio.file.Files.createTempDirectory("cairn-a"), EffectContext.forLedger())

@@ -22,7 +22,7 @@ final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
       reply(ex, 200, node.chainDigests.map(_.hex).mkString("\n").getBytes))
     s.createContext("/blob/", ex =>
       val hex = ex.getRequestURI.getPath.stripPrefix("/blob/")
-      Digest.parse(hex).flatMap(node.cas.getBytes) match
+      Digest.parse(hex).flatMap(d => CasEffects.getBytes(node.cas, d, node.ctx).left.map(_.toString)) match
         case Right(bs) => reply(ex, 200, bs)
         case Left(e)   => reply(ex, 404, e.getBytes))
     s.createContext("/heads", ex =>
@@ -47,6 +47,10 @@ object HttpSync:
 
   final case class PullReport(fetchedBlocks: Int, fetchedBlobs: Int, alreadyHad: Int)
 
+  private def casErr(e: cairn.systeminterface.Cas.Error): String = e match
+    case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+    case cairn.systeminterface.Cas.Error.Io(m)      => m
+
   def pull(baseUrl: String, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, PullReport] =
     for
       chainTxt <- get(baseUrl, "/chain")
@@ -55,13 +59,15 @@ object HttpSync:
       fetched <- wantBlocks.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap { n =>
           get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
-            val actual = to.cas.putBytes(bs)
-            if actual == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}")
+            CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
+              if actual == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}")
+            }
           }
         }
       }
       blocks <- remoteChain.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
-        acc.flatMap(bs => to.cas.getByDigest(d).map(a => bs :+ Block.fromCanon(a.body))) }
+        acc.flatMap(bs =>
+          CasEffects.get(to.cas, d, to.ctx).left.map(casErr).map(a => bs :+ Block.fromCanon(a.body))) }
       st <- LedgerKernel.replay(authorities, blocks, Ed25519.verify)
       publishedDigests = st.published.toList.flatMap(_.split(":") match
         case Array(_, value, _) => Digest.parse(value).toOption
@@ -70,7 +76,10 @@ object HttpSync:
       fetchedBlobs <- wantBlobs.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap { n =>
           get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
-            if to.cas.putBytes(bs) == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}") }
+            CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
+              if actual == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}")
+            }
+          }
         }
       }
     yield
@@ -120,8 +129,14 @@ object Provenance:
       "tool" -> Canon.CStr(tool)))
     def artifact: Artifact = Artifact(ArtifactKind.Provenance, canon)
 
-  def record(cas: cairn.systeminterface.Cas, output: Digest, inputs: List[Digest], tool: String): Digest =
-    cas.put(Record(output, inputs, tool).artifact).valueHash
+  def record(
+      cas: cairn.systeminterface.Cas,
+      output: Digest,
+      inputs: List[Digest],
+      tool: String,
+      ctx: EffectContext,
+  ): Either[cairn.systeminterface.Cas.Error, Digest] =
+    CasEffects.put(cas, Record(output, inputs, tool).artifact, ctx).map(_.valueHash)
 
   def fromArtifact(a: Artifact): Option[Record] =
     if a.kind != ArtifactKind.Provenance then None

@@ -1,6 +1,7 @@
 package cairn.tests
 
 import cairn.systemhandler.EffectContext
+import cairn.systemhandler.CasEffects
 import cairn.kernel.*
 import cairn.core.*
 import cairn.ledger.*
@@ -15,7 +16,7 @@ class Phase7Suite extends munit.FunSuite:
     val alice = Keypair.dev("alice")
     val auth = Map("alice" -> alice.publicBytes)
     val node = Node(java.nio.file.Files.createTempDirectory("cairn-agree"), EffectContext.forLedger())
-    node.cas.put(Stlc.base.artifact)
+    CasEffects.put(node.cas, Stlc.base.artifact, node.ctx).fold(e => fail(e.toString), identity)
     val txs = List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(Stlc.base.artifact.key)),

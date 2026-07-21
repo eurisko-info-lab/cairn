@@ -2,6 +2,7 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.systeminterface.{Cas, PackAccess}
+import cairn.systemhandler.{CasEffects, EffectContext}
 import cairn.ledger.Provenance
 import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
 import cairn.core.{Search as DerivSearch, Module, Delta}
@@ -125,15 +126,18 @@ final class Search(packs: PackAccess):
       cas: Cas,
       factTerm: Cst,
       intentDigest: Digest,
-      tool: String = "explore"
+      tool: String = "explore",
+      ctx: EffectContext = EffectContext.forCas(),
   ): Digest =
     val art = Artifact(ArtifactKind.Term, Cst.toCanon(factTerm))
-    val d = cas.put(art).valueHash
-    Provenance.record(cas, d, List(intentDigest), tool)
+    val d = CasEffects.put(cas, art, ctx).fold(e => throw RuntimeException(e.toString), _.valueHash)
+    Provenance.record(cas, d, List(intentDigest), tool, ctx)
+      .fold(e => throw RuntimeException(e.toString), identity)
     d
 
-  def putTerm(cas: Cas, term: Cst): Digest =
-    cas.put(Artifact(ArtifactKind.Term, Cst.toCanon(term))).valueHash
+  def putTerm(cas: Cas, term: Cst, ctx: EffectContext = EffectContext.forCas()): Digest =
+    CasEffects.put(cas, Artifact(ArtifactKind.Term, Cst.toCanon(term)), ctx)
+      .fold(e => throw RuntimeException(e.toString), _.valueHash)
 
   /** Evidence digests carried by a certified board edge. */
   final case class EdgeCert(
@@ -153,7 +157,8 @@ final class Search(packs: PackAccess):
       board: Module,
       edgeName: String,
       factDigest: Digest,
-      tool: String = "supports"
+      tool: String = "supports",
+      ctx: EffectContext = EffectContext.forCas(),
   ): Either[String, EdgeCert] =
     wellFormed(board).flatMap { _ =>
       board.get(edgeName).toRight(s"no edge named '$edgeName'").flatMap {
@@ -175,12 +180,14 @@ final class Search(packs: PackAccess):
               if known.contains(x) && known.contains(y) then Right(Cst.node("ok"))
               else Left(s"dangling edge endpoint(s): $x, $y")
             case other => Left(s"unexpected edge check term: ${other.render}")
-          Certify.byTests(claim, suite, eval).map { cert =>
-            val claimDig = cas.put(claim.artifact).valueHash
-            val suiteDig = cas.put(suite.artifact).valueHash
-            val certDig = cas.put(cert.artifact).valueHash
-            Provenance.record(cas, certDig, List(factDigest, claimDig, suiteDig), tool)
-            EdgeCert(claim, cert, claimDig, certDig, suiteDig)
+          Certify.byTests(claim, suite, eval).flatMap { cert =>
+            for
+              claimDig <- CasEffects.put(cas, claim.artifact, ctx).left.map(_.toString).map(_.valueHash)
+              suiteDig <- CasEffects.put(cas, suite.artifact, ctx).left.map(_.toString).map(_.valueHash)
+              certDig <- CasEffects.put(cas, cert.artifact, ctx).left.map(_.toString).map(_.valueHash)
+              _ <- Provenance.record(cas, certDig, List(factDigest, claimDig, suiteDig), tool, ctx)
+                .left.map(_.toString)
+            yield EdgeCert(claim, cert, claimDig, certDig, suiteDig)
           }
         case other =>
           Left(s"'$edgeName' is not a supports/spawns edge: ${other.render}")

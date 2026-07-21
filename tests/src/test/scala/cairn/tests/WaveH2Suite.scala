@@ -1,9 +1,8 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.systemhandler.DiskCas
 import cairn.surface.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
@@ -270,10 +269,11 @@ class WaveH2Suite extends munit.FunSuite:
     // 3. CAS: artifacts by kind
     val dir = java.nio.file.Files.createTempDirectory("cairn-query")
     val cas = DiskCas(dir)
+    val casCtx = EffectContext.forCas()
     val claimArt = cairn.proof.Claim("c1", Cst.node("x"), Stlc.language.digest).artifact
     val baseArt = Stlc.base.artifact
-    cas.put(claimArt)
-    cas.put(baseArt)
+    CasEffects.put(cas, claimArt, casCtx).fold(e => fail(e.toString), identity)
+    CasEffects.put(cas, baseArt, casCtx).fold(e => fail(e.toString), identity)
     val q3 = Query.parse("artifacts kind claim").fold(e => fail(e), identity)
     val r3 = Query.run(q3, Module(Nil), artifacts = Some(List(claimArt, baseArt))).fold(e => fail(e), identity)
     assertEquals(r3.hits.length, 1)
@@ -379,7 +379,7 @@ class WaveH2Suite extends munit.FunSuite:
     // ledger publish
     val alice = Keypair.dev("alice")
     val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerCtx)
-    node.cas.put(m2.artifact)
+    CasEffects.put(node.cas, m2.artifact, node.ctx).fold(e => fail(e.toString), identity)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(m2.artifact.key)),

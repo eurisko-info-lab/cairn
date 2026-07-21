@@ -1,6 +1,6 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, EffectContext}
 import cairn.kernel.*
 import cairn.ledger.{Keypair, Node}
 import cairn.surface.BrowserServer
@@ -15,6 +15,9 @@ class BrowserSuite extends munit.FunSuite:
   private val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
 
+  private def casPut(node: Node, art: Artifact): Unit =
+    CasEffects.put(node.cas, art, node.ctx).fold(e => fail(e.toString), identity)
+
   private def get(port: Int, path: String): (Int, String) =
     val resp = client.send(
       HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port$path")).GET().build(),
@@ -27,7 +30,7 @@ class BrowserSuite extends munit.FunSuite:
     val alice = Keypair.dev("alice")
     val auth = Map(alice.name -> alice.publicBytes)
     val term = Artifact(ArtifactKind.Term, Cst.toCanon(Cst.Leaf("true")))
-    node.cas.put(term)
+    casPut(node, term)
     node.append(alice, auth, List(
       alice.signTx(Tx.RegisterIdentity(alice.name, alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(term.key)),
@@ -99,7 +102,7 @@ class BrowserSuite extends munit.FunSuite:
       "f" -> Cst.node("fact", Cst.Leaf("found")),
       "e" -> Cst.node("supports", Cst.Leaf("i"), Cst.Leaf("f"))
     )).sorted
-    node.cas.put(board.artifact)
+    casPut(node, board.artifact)
     val langs = Map("search" -> Search.language)
     val srv = BrowserServer(node, langs, 0)
     val port = srv.start()

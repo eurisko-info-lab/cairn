@@ -2,7 +2,7 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.core.{Parser, Module, Delta}
-import cairn.systemhandler.DiskCas
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
 import cairn.ledger.Provenance
 import java.nio.file.{Files, Path}
 
@@ -27,6 +27,7 @@ object SearchTutorial:
     val Search = cairn.examples.search.Search(
       cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
     val cas = DiskCas(workDir.resolve("cas"))
+    val casCtx = EffectContext.forCas()
     val lang = Search.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet
@@ -55,13 +56,15 @@ object SearchTutorial:
     Search.wellFormed(board).fold(e => throw RuntimeException(e), identity)
 
     val factTerm = board.get("finding").get
-    val factDig = Search.putFact(cas, factTerm, intentDig, "explore")
-    val edgeCert = Search.certifyEdge(cas, board, "link", factDig)
+    val factDig = Search.putFact(cas, factTerm, intentDig, "explore", casCtx)
+    val edgeCert = Search.certifyEdge(cas, board, "link", factDig, ctx = casCtx)
       .fold(e => throw RuntimeException(e), identity)
 
-    cas.put(lang.artifact)
-    val boardArt = cas.put(board.artifact)
-    Provenance.record(cas, boardArt.valueHash, List(lang.digest, factDig, intentDig, edgeCert.certDigest), "search-board")
+    CasEffects.put(cas, lang.artifact, casCtx).fold(e => throw RuntimeException(e.toString), identity)
+    val boardArt = CasEffects.put(cas, board.artifact, casCtx)
+      .fold(e => throw RuntimeException(e.toString), identity)
+    Provenance.record(cas, boardArt.valueHash, List(lang.digest, factDig, intentDig, edgeCert.certDigest), "search-board", casCtx)
+      .fold(e => throw RuntimeException(e.toString), identity)
 
     val hops = Provenance.why(workDir.resolve("cas"), edgeCert.certDigest)
     Report(

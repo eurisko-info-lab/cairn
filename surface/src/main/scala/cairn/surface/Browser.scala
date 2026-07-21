@@ -2,7 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.CasAdmin
+import cairn.systemhandler.{CasAdmin, CasEffects}
 import cairn.ledger.Node
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress
@@ -262,7 +262,12 @@ final class BrowserServer(
     }
 
   private def loadArtifact(hex: String): Either[String, Artifact] =
-    Digest.parse(hex).flatMap(node.cas.getByDigest)
+    Digest.parse(hex).flatMap { d =>
+      CasEffects.get(node.cas, d, node.ctx).left.map {
+        case cairn.systeminterface.Cas.Error.Missing(_) => s"blob ${d.short} not in CAS"
+        case cairn.systeminterface.Cas.Error.Io(m)      => m
+      }
+    }
 
   private def artifactJson(hex: String): Either[String, String] =
     loadArtifact(hex).map { a =>

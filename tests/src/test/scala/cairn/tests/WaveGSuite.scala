@@ -1,6 +1,6 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{CasEffects, EffectContext}
 import cairn.kernel.*
 import cairn.core.Module
 import cairn.core.{Parser, RoundTrip}
@@ -14,6 +14,9 @@ class WaveGSuite extends munit.FunSuite:
   val carol = Keypair.dev("carol")
   def bootAuth = Map("alice" -> alice.publicBytes)
 
+  private def casPut(node: Node, art: Artifact): Unit =
+    CasEffects.put(node.cas, art, node.ctx).fold(e => fail(e.toString), identity)
+
   def register(node: Node): Unit =
     node.append(alice, bootAuth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)))).fold(
       e => throw AssertionError(e), identity)
@@ -22,7 +25,7 @@ class WaveGSuite extends munit.FunSuite:
 
   test("M35: inclusion proof verifies against root without full state"):
     val node = Node(java.nio.file.Files.createTempDirectory("cairn-merkle"), EffectContext.forLedger())
-    node.cas.put(Stlc.base.artifact)
+    casPut(node, Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     node.append(alice, bootAuth, List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
@@ -109,7 +112,7 @@ class WaveGSuite extends munit.FunSuite:
 
   test("M37: head update violating policy rejected with policy cited"):
     val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"), EffectContext.forLedger())
-    node.cas.put(Stlc.base.artifact)
+    casPut(node, Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     val certDigest = Digest.of(Canon.CStr("some-proof-cert"))
     val policy = PolicyLang.parse("branch main requires method proof_term from alice").toOption.get
@@ -135,8 +138,8 @@ class WaveGSuite extends munit.FunSuite:
 
   test("M38: two nodes sync over localhost HTTP; interrupted pull resumes"):
     val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-a"), EffectContext.forLedger())
-    a.cas.put(Stlc.language.artifact)
-    Stlc.fragments.foreach(f => a.cas.put(f.artifact))
+    casPut(a, Stlc.language.artifact)
+    Stlc.fragments.foreach(f => casPut(a, f.artifact))
     a.append(alice, bootAuth,
       List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))) ++
       Stlc.fragments.map(f => alice.signTx(Tx.PublishArtifact(f.artifact.key))) ++
@@ -182,27 +185,34 @@ class WaveGSuite extends munit.FunSuite:
   test("M40: `why` walks 4 provenance hops from port text back to fragments"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-prov")
     val cas = cairn.systemhandler.DiskCas(dir)
+    val ctx = EffectContext.forCas()
     val lang = Stlc.language
+    def put(art: Artifact): Unit =
+      CasEffects.put(cas, art, ctx).fold(e => fail(e.toString), identity)
+    def putBs(bs: Array[Byte]): Digest =
+      CasEffects.putBytes(cas, bs, ctx).fold(e => fail(e.toString), identity)
+    def record(out: Digest, inputs: List[Digest], tool: String): Unit =
+      Provenance.record(cas, out, inputs, tool, ctx).fold(e => fail(e.toString), identity)
     // hop 1: fragments -> language (compose)
-    Stlc.fragments.foreach(f => cas.put(f.artifact))
-    cas.put(lang.artifact)
-    Provenance.record(cas, lang.digest, Stlc.fragments.map(_.digest), "compose")
+    Stlc.fragments.foreach(f => put(f.artifact))
+    put(lang.artifact)
+    record(lang.digest, Stlc.fragments.map(_.digest), "compose")
     // hop 2: language + change -> module (delta)
     val dl = cairn.core.Delta.deltaOf(lang).toOption.get
     val change = Parser.parse(dl.grammar, "{ add id = fun x : Bool . x ; }").toOption.get
     val Right((module, vcs)) = cairn.core.Delta.apply(lang, Module(Nil), change): @unchecked
-    cas.put(module.artifact)
-    cas.put(vcs.artifact)
-    Provenance.record(cas, module.digest, List(lang.digest, vcs.artifact.digest), "delta")
+    put(module.artifact)
+    put(vcs.artifact)
+    record(module.digest, List(lang.digest, vcs.artifact.digest), "delta")
     // hop 3: module -> rosetta artifact
     val rosettaArt = cairn.examples.quicksort.QuickSort2.module.artifact
-    cas.put(rosettaArt)
-    Provenance.record(cas, rosettaArt.digest, List(module.digest), "rosetta-model")
+    put(rosettaArt)
+    record(rosettaArt.digest, List(module.digest), "rosetta-model")
     // hop 4: rosetta artifact -> emitted port text
     val portText = cairn.core.PortV2.verified(cairn.core.Ports2.ScalaPort2,
       cairn.examples.quicksort.QuickSort2.module).toOption.get.text
-    val portDigest = cas.putBytes(portText.getBytes)
-    Provenance.record(cas, portDigest, List(rosettaArt.digest), "port-scala")
+    val portDigest = putBs(portText.getBytes)
+    record(portDigest, List(rosettaArt.digest), "port-scala")
     // why?
     val hops = Provenance.why(dir, portDigest)
     assertEquals(hops.map(_.record.tool).sorted, List("compose", "delta", "port-scala", "rosetta-model"))

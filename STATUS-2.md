@@ -62,9 +62,11 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   (conflict artifacts persist to CAS without advancing the head; clean merges
   advance and record provenance). `commitTip` persists ValidatedChangeSet
   tip sidecars plus a `.changes` history log (`loadTip` /
-  `loadChangeHistory`); ledger `SetBranchHead` is opt-in via
+  `loadChangeHistory`); `mergeBranches` composes full stacked histories.
+  Ledger `SetBranchHead` is opt-in via
   `Branches.publishHead` (or `publish = Some(...)` on merge) — not automatic
-  on accept.
+  on accept. `Branches` CAS put/get authorize via `EffectContext`; refs FS
+  remains ungated.
 - **M31**: signatures/declarations are fully grammatical; expression BODIES are
   verbatim single-line regions inside the file grammars (rendered by one shared
   fold, not per-host string soup). Whole-file byte fixpoint still enforced.

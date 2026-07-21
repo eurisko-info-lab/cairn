@@ -88,7 +88,8 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
   PackLoader (`packLoaderWorkspace`), ledger+CAS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
-  filesystem (`forFilesystem`). `bootstrapped()` remain for broad test wiring.
+  filesystem (`forFilesystem`). `bootstrapped()` remains available for rare
+  allow-all fixtures; composition roots and suites use narrow gates.
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
   accidental prefix of a non-wildcard path.
 - **Meta conditions:** known `meta:*` keys validate value shape fail-closed
@@ -125,9 +126,11 @@ branch state
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
 Residuals: everyday path uses `commitTip` + `mergeBranches` (tip sidecar +
-`.changes` history log; `loadTip` / `loadChangeHistory` reconstruct). Ledger
-`SetBranchHead` is **opt-in** via `Branches.publishHead` or
-`merge(..., publish = Some(...))` — accept does not auto-publish.
+`.changes` history log; `loadTip` / `loadChangeHistory` reconstruct;
+`mergeBranches` composes full stacked histories from a shared oldest base).
+Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
+`merge(..., publish = Some(...))` — accept does not auto-publish. `Branches`
+CAS put/get go through `CasEffects` + `EffectContext`; refs FS stays ungated.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -160,9 +163,11 @@ LeanCore `#check` envelope.
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
 - **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
-  (`loadTip` / change-history log); `merge(..., changeOurs, changeTheirs)` for
-  callers that already hold CSTs. Ledger publish is **opt-in**
-  (`publishHead` or `publish = Some(...)` on merge) — not the default on accept
+  (compose stacked `.changes` histories from a shared base; tip sidecar for
+  `loadTip`); `merge(..., changeOurs, changeTheirs)` for callers that already
+  hold CSTs. Ledger publish is **opt-in** (`publishHead` or
+  `publish = Some(...)` on merge) — not the default on accept. Low-level CAS
+  contract tests (`MemCas`/`DiskCas` put/get) and `CasAdmin` remain ungated.
 
 ## Final principle
 
