@@ -46,19 +46,28 @@ object Filesystem:
     Files.createTempDirectory(prefix)
 
   def perform(req: Fs.Request): Either[Fs.Error, Fs.Response] =
-    val action: Option[Effects.Action] = req match
-      case Fs.Request.Read(_) | Fs.Request.Exists(_) | Fs.Request.IsDirectory(_) |
-           Fs.Request.IsRegularFile(_) | Fs.Request.IsExecutable(_) | Fs.Request.List(_) =>
-        Some(Effects.Action.FsRead)
-      case Fs.Request.Write(_, _) | Fs.Request.WriteBytes(_, _) | Fs.Request.Delete(_) =>
-        Some(Effects.Action.FsWrite)
-      case Fs.Request.Mkdirs(_) | Fs.Request.CreateTempDirectory(_) =>
-        Some(Effects.Action.FsMkdirs)
-      case Fs.Request.Resolve(_, _) => None
+    // Resource path is the real target of the request (or, for
+    // CreateTempDirectory, its prefix — the closest thing to a target it
+    // has, since the actual path is OS-generated after the fact) rather
+    // than a wildcard, so path-scoped policies (already supported by
+    // Authority.Resource.matches) have real data to match against.
+    val (action, resourcePath): (Option[Effects.Action], String) = req match
+      case Fs.Request.Read(p)                     => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.Exists(p)                    => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsDirectory(p)               => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsRegularFile(p)              => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.IsExecutable(p)               => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.List(p)                       => (Some(Effects.Action.FsRead), p.value)
+      case Fs.Request.Write(p, _)                   => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.WriteBytes(p, _)               => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.Delete(p)                     => (Some(Effects.Action.FsWrite), p.value)
+      case Fs.Request.Mkdirs(p)                      => (Some(Effects.Action.FsMkdirs), p.value)
+      case Fs.Request.CreateTempDirectory(prefix)    => (Some(Effects.Action.FsMkdirs), prefix)
+      case Fs.Request.Resolve(_, _)                  => (None, "*")
     action match
       case None => performRaw(req)
       case Some(a) =>
-        val authReq = Authority.EffectRequest(Authority.Subject("local"), a, Authority.Resource("filesystem", "*"))
+        val authReq = Authority.EffectRequest(Authority.Subject("local"), a, Authority.Resource("filesystem", resourcePath))
         AuthorityGate.default.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
 
   private def performRaw(req: Fs.Request): Either[Fs.Error, Fs.Response] =

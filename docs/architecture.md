@@ -169,8 +169,28 @@ language rather than an opaque Scala shape.
   items below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
   hand-written Scala enum — `EffectMeta.completeness` checks it, doesn't
-  replace it) and typed per-family resources (`Authority.Resource` is still
-  one shared untyped `(kind, path)` shape across every family).
+  replace it).
+- **Typed per-family resources — first slice (`Filesystem`)**:
+  `Authority.Resource(kind, path)`'s `matches` already supports path-prefix
+  scoping, and `AuthoritySuite`'s own tests already construct example
+  policies against real paths — but every gated handler was constructing
+  its `Resource` with a hardcoded wildcard path (`Resource("filesystem",
+  "*")`, etc.), never threading the real target of the request in at all.
+  So no policy could ever restrict *which* file/command/resource was
+  touched, only *which action* — the matching machinery existed and was
+  tested, just never fed real data. `Filesystem.perform` now extracts the
+  real `Fs.Path` (or, for `CreateTempDirectory`, its `prefix` — the
+  closest thing to a target it has) from each request into
+  `Resource("filesystem", <realPath>)`. The bootstrap policy (previous
+  slice) still uses a wildcard resource, so this doesn't change behavior
+  yet — it makes the *data* real, proving the prefix-matching machinery
+  against real paths for the first time; a genuinely restrictive
+  path-scoped policy is a separate, later exercise once real identity
+  exists. The other 7 families remain: `Workspace`/`ExternalBackend` have
+  real per-request paths too (natural next candidates); `Clock`/`Random`/
+  `Terminal`/`Lsp`/`Process` don't have an obvious per-request resource
+  identifier and need their own judgment call, same as `Filesystem`'s own
+  `Delete`/`Mkdirs` categorization needed one two slices ago.
 
 ## Capability-gating handler entry points (post-migration priority #3)
 
