@@ -133,6 +133,16 @@ language rather than an opaque Scala shape.
   type with every existing entry wrapped in `Some(...)` — mechanical, zero
   semantic change. No new `Action` was needed for `Filesystem`: the existing
   3 already cover all 11 authorized requests.
+- **`Lsp`** (done): the last live family — completes conversion of all 8. Its
+  existing `Action` (`LspServe`) had been a naming mismatch, not a
+  deliberate session-level gate: `ReadMessage`/`WriteMessage` are symmetric
+  Content-Length-framed stdio operations, structurally identical to
+  `Terminal.ReadLine`/`Write`, and `system-handler.LspTransport.perform`
+  executes both directly (no separate "start serving" request exists,
+  unlike `Http.Request.Serve`, which actually opens a listening socket).
+  `LspServe` was referenced nowhere outside its own declaration — a
+  confirmed orphan. Asked the user directly rather than deciding silently:
+  replaced it with `LspRead`/`LspWrite`, mirroring `Terminal` exactly.
 - **Vestigial families** (found while scoping the `ExternalBackend` slice,
   by checking for a `def perform(req: X.Request)` entry point in
   `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
@@ -147,12 +157,10 @@ language rather than an opaque Scala shape.
   decision for later, not made here). `Cas` is a trait-based contract, not a
   Request/Response enum family, and is out of scope for this mechanism as
   designed.
-- **Remaining live family** (`Lsp`) — not yet converted, now unblocked by
-  the many-to-one mechanism above. Needs a decision on whether it needs new,
-  per-message actions, or whether `LspServe` is intentionally a
-  session-level gate — real design work, its own future slice. Same
-  incremental-adoption shape as `AuthorityGate`'s per-family `Enforce`
-  rollout below.
+- **All 8 live families are now Meta-defined.** What's left of this
+  priority: the vestigial families above (convert for completeness, or
+  remove — a call for the user) and the two "not yet attempted" items
+  below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
   hand-written Scala enum — `EffectMeta.completeness` checks it, doesn't
   replace it) and typed per-family resources (`Authority.Resource` is still

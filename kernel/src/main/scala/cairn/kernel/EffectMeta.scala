@@ -17,8 +17,11 @@ package cairn.kernel
   * work for the first four families because each had ≤2 distinct request
   * shapes.
   *
-  * `random`/`clock`/`process`/`externalBackend`/`terminal`/`workspace`/
-  * `filesystem` are converted; `Lsp` remains — see `docs/architecture.md`.
+  * All 8 live families (`random`/`clock`/`process`/`externalBackend`/
+  * `terminal`/`workspace`/`filesystem`/`lsp`) are converted. The vestigial
+  * families (`Http`/`Network`/`Crypto`/`LedgerTransport`, no handler
+  * implementation at all) and `Cas` (a trait, not this shape) remain a
+  * separate decision — see `docs/architecture.md`.
   */
 object EffectMeta:
   /** A Fragment paired with the explicit constructor-name → Action grouping
@@ -219,6 +222,33 @@ object EffectMeta:
     "createTempDirectory" -> Some(Effects.Action.FsMkdirs),
     "resolve" -> None))
 
+  private val lspFragment: Fragment = Fragment(
+    name = "effect.lsp",
+    provides = List("effect.lsp"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("readMessage", "Request", Nil),
+      CtorDef("writeMessage", "Request", List("Str")),
+      CtorDef("message", "Response", List("Str")),
+      CtorDef("sessionEnded", "Response", Nil),
+      CtorDef("ok", "Response", Nil),
+      CtorDef("framing", "Error", List("Str")),
+      CtorDef("closed", "Error", Nil)))
+
+  /** `ReadMessage`/`WriteMessage` are symmetric Content-Length-framed stdio
+    * operations, structurally identical to `Terminal.ReadLine`/`Write` — not
+    * a session-establishment concept. The prior `Action` (`LspServe`) was a
+    * confirmed orphan (referenced nowhere outside its own declaration, not
+    * matching either Request case), replaced with `LspRead`/`LspWrite`.
+    */
+  val lsp: EffectFamily = EffectFamily(lspFragment, Map(
+    "readMessage" -> Some(Effects.Action.LspRead),
+    "writeMessage" -> Some(Effects.Action.LspWrite)))
+
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
     Effects.Family.Clock -> clock,
@@ -226,7 +256,8 @@ object EffectMeta:
     Effects.Family.ExternalBackend -> externalBackend,
     Effects.Family.Terminal -> terminal,
     Effects.Family.Workspace -> workspace,
-    Effects.Family.Filesystem -> filesystem)
+    Effects.Family.Filesystem -> filesystem,
+    Effects.Family.Lsp -> lsp)
 
   /** The rights vocabulary for a family: every distinct [[Effects.Action]]
     * its `requestActions` grouping declares (`None` entries contribute

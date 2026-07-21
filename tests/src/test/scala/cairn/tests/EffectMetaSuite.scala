@@ -8,14 +8,15 @@ import cairn.systeminterface.ExternalBackend as BackendEffect
 import cairn.systeminterface.Terminal as TerminalEffect
 import cairn.systeminterface.Workspace as WorkspaceEffect
 import cairn.systeminterface.Filesystem as FsEffect
+import cairn.systeminterface.Lsp as LspEffect
 
-/** Meta-defined effect interfaces (post-migration priority #1): `Random`,
-  * `Clock`, `Process`, `ExternalBackend`, `Terminal`, `Workspace`, and
-  * `Filesystem` are Fragment-defined families, using EffectMeta's
-  * many-to-one requestActions grouping (`Terminal`'s `write`/`writeLine`
-  * share one right; `Workspace`'s 5 requests all share one; `Filesystem`'s
-  * 12 reduce to 3, with `resolve` needing none at all). These are
-  * mechanical drift guards, same spirit as `ModuleBoundarySuite`.
+/** Meta-defined effect interfaces (post-migration priority #1): all 8 live
+  * effect families (`Random`, `Clock`, `Process`, `ExternalBackend`,
+  * `Terminal`, `Workspace`, `Filesystem`, `Lsp`) are Fragment-defined,
+  * using EffectMeta's many-to-one requestActions grouping (`Terminal`'s
+  * `write`/`writeLine` share one right; `Workspace`'s 5 requests all share
+  * one; `Filesystem`'s 12 reduce to 3, with `resolve` needing none at all).
+  * These are mechanical drift guards, same spirit as `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -199,4 +200,26 @@ class EffectMetaSuite extends munit.FunSuite:
       ctorNameOf(FsEffect.Request.CreateTempDirectory("")),
       ctorNameOf(FsEffect.Request.Resolve(p, p)))
     val fragmentReqCtors = EffectMeta.filesystem.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.lsp composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.lsp", List(EffectMeta.lsp.fragment)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("EffectMeta.lsp's requestActions is complete and matches the hand-tagged actions (LspServe orphan replaced)"):
+    assertEquals(EffectMeta.completeness(EffectMeta.lsp, Effects.Family.Lsp), Nil)
+    val derived = EffectMeta.actions(EffectMeta.lsp)
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Lsp).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 2) // LspRead + LspWrite — replaces the orphaned LspServe
+
+  test("system-interface.Lsp.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    // ReadMessage is parameterless; WriteMessage takes a payload.
+    def ctorNameOf(r: LspEffect.Request): String = r match
+      case LspEffect.Request.ReadMessage      => "readMessage"
+      case LspEffect.Request.WriteMessage(_)  => "writeMessage"
+    val scalaReqCases = Set(
+      ctorNameOf(LspEffect.Request.ReadMessage),
+      ctorNameOf(LspEffect.Request.WriteMessage("")))
+    val fragmentReqCtors = EffectMeta.lsp.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
