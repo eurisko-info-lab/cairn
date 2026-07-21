@@ -1,6 +1,7 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
+import cairn.core.{LangMigration, Merge, Module}
 import cairn.systeminterface.Cas
 import java.nio.file.{Files, Path}
 
@@ -61,7 +62,12 @@ final class DiskCas(root: Path) extends Cas:
           if HashAlgo.hash(algo, bs) == hex then Right(bs)
           else Left(s"CAS corruption on $key") }
 
-/** Named branch refs over a CAS; ref file stores the manifest digest. */
+/** Named branch refs over a CAS; ref file stores the manifest digest.
+  *
+  * Merge-aware (M17): [[merge]] runs [[cairn.core.SemanticRepository.integrate]]
+  * then either advances the target head with the accepted module or persists
+  * the conflict artifact without advancing.
+  */
 final class Branches(cas: Cas, refsDir: Path):
   private def refPath(branch: String): Path =
     require(branch.nonEmpty && branch.forall(c => c.isLetterOrDigit || c == '-' || c == '_'), s"bad branch name '$branch'")
@@ -86,3 +92,44 @@ final class Branches(cas: Cas, refsDir: Path):
   def list(): List[String] =
     if !Files.exists(refsDir) then Nil
     else Files.list(refsDir).map(_.getFileName.toString).toArray.toList.map(_.toString).sorted
+
+  /** Load the module at a branch head (heads are [[ArtifactKind.Ir]] modules). */
+  def headModule(branch: String): Either[String, Module] =
+    load(branch).head.toRight(s"branch '$branch' has no head").flatMap { key =>
+      cas.get(key).flatMap { a =>
+        if a.kind != ArtifactKind.Ir then Left(s"branch '$branch' head is ${a.kind.name}, not a module")
+        else Right(Module.fromCanon(a.body))
+      }
+    }
+
+  /** Seed or advance a branch to a module tip; returns the new manifest. */
+  def commitModule(branch: String, module: Module): BranchManifest =
+    advance(branch, cas.put(module.artifact))
+
+  /** Semantic merge into `into`: integrate two change histories relative to
+    * `base`, persist the ValidatedChangeSet + provenance, and advance `into`
+    * on success. On conflict, the conflict artifact is stored in CAS and the
+    * branch head is left unchanged.
+    *
+    * @return `Right(manifest)` on accept, `Left(conflict)` on overlap.
+    */
+  def merge(
+      language: ComposedLanguage,
+      into: String,
+      base: Module,
+      changeOurs: Cst,
+      changeTheirs: Cst,
+      migration: Option[(LangMigration, ComposedLanguage)] = None,
+  ): Either[String, Either[Merge.Conflict, BranchManifest]] =
+    import cairn.core.SemanticRepository
+    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).map {
+      case SemanticRepository.Outcome.Conflicted(conflict) =>
+        cas.put(conflict.artifact)
+        Left(conflict)
+      case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
+        val vcsKey = cas.put(vcs.artifact)
+        val modKey = cas.put(module.artifact)
+        Provenance.record(cas, module.digest,
+          List(base.digest, vcsKey.valueHash), "semantic-merge")
+        Right(advance(into, modKey))
+    }

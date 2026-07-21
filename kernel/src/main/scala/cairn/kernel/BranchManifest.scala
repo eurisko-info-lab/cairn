@@ -2,10 +2,12 @@ package cairn.kernel
 
 /** Branch manifests + append-only history (S18). Heads are stable typed keys
   * stored as named refs; every head update appends, never overwrites history.
-  * Pure data — MIGRATION-PLAN.md Phase 1 moves it here (not `system-
-  * interface`, where the `Cas` trait it's stored through lives) because its
-  * validity is meant to affect accepted repository state, which is a Kernel
-  * concern.
+  * Merge acceptance advances the head via `system-handler.Branches.merge`
+  * (M17 / SemanticRepository); this type remains the pure Kernel record of
+  * accepted state. Pure data — MIGRATION-PLAN.md Phase 1 moves it here (not
+  * `system-interface`, where the `Cas` trait it's stored through lives)
+  * because its validity is meant to affect accepted repository state, which
+  * is a Kernel concern.
   */
 final case class BranchManifest(branch: String, head: Option[TypedKey], history: List[TypedKey]):
   def canon: Canon = Canon.cmap(

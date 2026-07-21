@@ -312,7 +312,8 @@ object Transcript:
       nodes.toList.map((n, node) => (n, node.root.toAbsolutePath.normalize))))
 
 /** Generic CLI (S6, M40, M42, M43, M44): hash / put / get / canon over a disk
-  * CAS, transcripts, provenance walking, capability manifests, REPL, and LSP.
+  * CAS, transcripts, provenance walking, capability manifests, REPL, LSP,
+  * and the semantic-repository surface (`repo branches` / `repo demo`).
   * Language packs come from the caller AND from `.cairn` files (M42: adding a
   * language requires no recompilation).
   */
@@ -397,6 +398,45 @@ object Cli:
           }.map(_.render)
       case List("languages") =>
         Right(packs.toList.sortBy(_._1).map((n, l) => s"$n ${l.digest.hex}").mkString("\n"))
+      case "repo" :: rest =>
+        // Semantic repository surface: Branches + SemanticRepository spine.
+        val refs = home.resolve("refs")
+        val branches = cairn.systemhandler.Branches(cas, refs)
+        rest match
+          case List("branches") | Nil =>
+            val names = branches.list()
+            if names.isEmpty then Right("(no local branch refs under CAIRN_HOME/refs)")
+            else Right(names.map { n =>
+              val m = branches.load(n)
+              s"$n head=${m.head.map(_.valueHash.short).getOrElse("-")} history=${m.history.length}"
+            }.mkString("\n"))
+          case List("demo") =>
+            // Minimal e2e story so the spine is reachable outside tests.
+            packs.get("stlc").toRight("stlc language pack required for repo demo").flatMap { lang =>
+              Delta.deltaOf(lang).left.map(_.map(_.render).mkString("; ")).flatMap { d =>
+                def parse(src: String) = Parser.parse(d.grammar, src)
+                val m0 = Module(List("a" -> Cst.Node("true", Nil), "b" -> Cst.Node("false", Nil)))
+                for
+                  cA <- parse("{ replace a = false ; add fromA = true ; }")
+                  cB <- parse("{ replace b = true ; add fromB = false ; }")
+                  _ = branches.commitModule("demo-base", m0)
+                  tipA <- SemanticRepository.tipAfter(lang, m0, cA)
+                  tipB <- SemanticRepository.tipAfter(lang, m0, cB)
+                  _ = branches.commitModule("demo-a", tipA.tip)
+                  _ = branches.commitModule("demo-b", tipB.tip)
+                  outcome <- branches.merge(lang, "demo-main", m0, cA, cB)
+                yield outcome match
+                  case Left(conflict) =>
+                    s"conflict: ${conflict.render}"
+                  case Right(manifest) =>
+                    val defs = branches.headModule("demo-main")
+                      .map(m => m.defs.map(_._1).sorted.mkString(","))
+                      .getOrElse("?")
+                    s"accepted demo-main head=${manifest.head.map(_.valueHash.short).getOrElse("-")} defs=$defs"
+              }
+            }
+          case other =>
+            Left(s"usage: cairn repo [branches|demo]  (got: repo ${other.mkString(" ")})")
       case List("repl", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'").map { l =>
           val repl = Repl(l)
@@ -433,4 +473,4 @@ object Cli:
         scala.io.StdIn.readLine()
         Right("ui stopped")
       case _ =>
-        Left("usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repl|lsp|ui] <arg>")
+        Left("usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|repl|lsp|ui] <arg>")

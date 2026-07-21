@@ -41,7 +41,7 @@ tests               → examples, runtime, user
 | ----- | ------ | ------- |
 | 0 | Done | architecture.md; ModuleBoundarySuite |
 | 1 | Done | Cas → system-interface; MemCas/DiskCas/Branches → system-handler; BranchManifest → kernel |
-| 2 | Done | Core holds Search/Tactics, TreeEngine, PackCompose, Grammar, Meta, Surfaces, Delta, ChangeAlgebra, Rosetta engine, ScaffoldPlan, NetEngine |
+| 2 | Done | Core holds Search/Tactics, TreeEngine, PackCompose, Grammar, Meta, Surfaces, Delta, ChangeAlgebra, Rosetta engine, ScaffoldPlan, NetEngine; SemanticRepository spine |
 | 3 | Done | Full effect-family contracts + handlers (fs, workspace, process, crypto, clock, random, network, http, ledger transport, terminal, lsp, external backend) |
 | 4 | Done | Kernel Authority models; Core PolicyEval; AuthorityGate audit mode |
 | 5 | Done | Enforce mode + LedgerAppend gate on Node.append; AuthoritySuite |
@@ -527,6 +527,37 @@ continuing to pass, not by reproducing the failure mode itself.
 
 - `kernel` / `core`: no filesystem, networking, or process APIs
 - `user`: no `cairn.systemhandler`, no `java.nio.file` / net / process
+
+## Semantic repository spine
+
+Cairn's native repository layer is now an integrated operational story, not
+only a bag of engines:
+
+```text
+branch state
+→ causal semantic change   (Delta.apply / SemanticRepository.commit)
+→ dependency validation    (ValidatedChangeSet)
+→ commutation              (ChangeAlgebra.commutes)
+→ merge                    (Merge.threeWay)
+→ conflict artifact        (Merge.Conflict → CAS)
+→ migration                (Migrate, optional)
+→ accepted new branch state (Branches.merge → BranchManifest head)
+```
+
+| Piece | Module | Role |
+| ----- | ------ | ---- |
+| `SemanticRepository` | `core` | Pure orchestration of the story above |
+| `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Existing engines composed, not rewritten |
+| `BranchManifest` | `kernel` | Accepted branch state record |
+| `Branches` | `system-handler` | Effectful refs + merge-aware advance / conflict persist |
+| `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
+| CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
+
+Residuals: ledger `SetBranchHead` is still a separate publication path (not
+yet auto-wired through `Branches.merge`); change histories on branch refs are
+passed explicitly at merge time rather than reconstructed from manifest
+history alone; `EffectContext.capabilities` grant-bundle threading remains a
+placeholder.
 
 ## Intentional residuals
 

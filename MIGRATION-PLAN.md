@@ -351,6 +351,11 @@ the Rosetta port-generation engine, and the optional `Scaffold.plan` revisit
 thin I/O façade). **Phase 2 Core introduction is complete.** `workbench` holds
 only `PackLoader`; `rosetta` holds only `Scaffold` emit over Filesystem.
 
+**Post-Phase-2 summit (semantic repository):** `core.SemanticRepository`
+composes Delta/ChangeAlgebra/Merge/Migrate into one operational story;
+`system-handler.Branches` is merge-aware (`merge` / `commitModule` /
+`headModule`). See `docs/architecture.md` § Semantic repository spine.
+
 Likely destinations:
 
 ### From `workbench`

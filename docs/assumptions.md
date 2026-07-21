@@ -26,8 +26,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    RoundTrip still gates trust — derivation is not trusted alone.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
    are name-reference sets via the language's variable constructor. Change
-   composition/inverses/commutation exist (M16); `Branches` refs are not yet
-   merge-aware (module-level three-way merge is, M17).
+   composition/inverses/commutation exist (M16); three-way semantic merge
+   exists (M17) and `Branches.merge` is merge-aware through
+   `SemanticRepository` (conflict → CAS artifact, accept → new head +
+   provenance). Ledger publication of heads remains a separate path.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.
