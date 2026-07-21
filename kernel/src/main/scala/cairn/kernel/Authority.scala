@@ -1,7 +1,8 @@
 package cairn.kernel
 
 /** Phase 4–5 authority models. Handlers must eventually accept only
-  * [[AuthorizedRequest]]; Core proposes grants; Kernel validates.
+  * [[AuthorizedRequest]]; Core constructs [[AuthorizationProof]]; Kernel
+  * [[checkProof]]s the witness (does not re-run [[decide]] as acceptance).
   *
   * Distinct from branch-policy CSTs (`ArtifactKind.Policy` language packs) and
   * language capability manifests (`ArtifactKind.Capability` / `core.Capabilities`).
@@ -11,8 +12,7 @@ package cairn.kernel
   *
   * Calculus dimensions (priority #5): policy [[EffectPolicy.conditions]], grant
   * expiry / nonce, replay sets, [[Delegation]] chains, and Kernel-minted
-  * [[AttenuationWitness]]. Priority #6 (Core-generated proof objects) is hooked
-  * via [[AuthorizationProof]] but not yet the primary validate path.
+  * [[AttenuationWitness]]. Priority #6: Core-generated structured proofs.
   */
 object Authority:
 
@@ -221,15 +221,39 @@ object Authority:
       "reason" -> Canon.CStr(reason),
       "grant" -> grant.fold(Canon.CTag("none", Canon.CStr("")))(g => Canon.CTag("some", g.canon)))
 
-  /** Hook for priority #6: Core-generated, Kernel-checked auth proof objects.
-    * Today Core still emits [[AuthorizationDerivation]] and Kernel re-decides;
-    * [[validateProof]] bridges until proofs replace re-decide.
+  /** Structured Core-generated witness that a request is authorized.
+    *
+    * Kernel [[checkProof]] validates this algebraically against the policy
+    * store: cited allows match, conditions/expiry/nonce obligations hold at
+    * [[nowMillis]], grant covers the request, optional attenuation/delegation
+    * witnesses check, and no store Deny matches. Acceptance is not
+    * "re-run [[decide]] and compare".
     */
-  trait AuthorizationProof:
-    def derivation: AuthorizationDerivation
-    def canon: Canon = derivation.canon
+  final case class AuthorizationProof(
+      request: EffectRequest,
+      nowMillis: Long,
+      /** Allow policies cited as matching; each must be in the store. */
+      allowPolicies: List[EffectPolicy],
+      grant: CapabilityGrant,
+      /** Non-meta condition keys → request arg values that satisfied them. */
+      conditionEvidence: Map[String, String],
+      /** When set, [[grant]] is a Kernel-checked attenuation of the parent. */
+      attenuatedFrom: Option[(CapabilityGrant, AttenuationWitness)] = None,
+      /** Optional A→B→C… chain whose final child equals [[grant]]. */
+      delegationChain: List[Delegation] = Nil):
+    def canon: Canon = Canon.cmap(
+      "now" -> Canon.CInt(nowMillis),
+      "allows" -> Canon.cstrs(allowPolicies.map(_.id)),
+      "grant" -> grant.canon,
+      "evidence" -> Canon.cmap(conditionEvidence.toSeq.map((k, v) => k -> Canon.CStr(v))*),
+      "attenuated" -> Canon.CStr(if attenuatedFrom.isDefined then "yes" else "no"),
+      "delegationHops" -> Canon.CInt(delegationChain.size))
 
-  final case class DerivationAsProof(derivation: AuthorizationDerivation) extends AuthorizationProof
+    /** Audit/event view of this allow proof. */
+    def asDerivation(store: List[EffectPolicy]): AuthorizationDerivation =
+      AuthorizationDerivation(
+        request, store, Decision.Allow, Some(grant),
+        s"allow by ${allowPolicies.map(_.id).mkString(",")}")
 
   /** Kernel-controlled authorization token — not publicly constructible. */
   opaque type AuthorizedRequest = EffectRequest
@@ -256,7 +280,9 @@ object Authority:
   private def optLong(o: Option[Long]): Canon =
     o.fold(Canon.CTag("none", Canon.CStr("")))(n => Canon.CTag("some", Canon.CInt(n)))
 
-  /** Independent Kernel check of a Core-proposed derivation. */
+  /** Independent Kernel check of a Core-proposed derivation.
+    * Prefer [[checkProof]] for the primary authorize path.
+    */
   def validate(
       req: EffectRequest,
       policies: List[EffectPolicy],
@@ -266,48 +292,142 @@ object Authority:
     if derivation.request != req then Left("derivation request mismatch")
     else if derivation.policies.map(_.id).sorted != policies.map(_.id).sorted then
       Left("derivation policy set mismatch")
-    else
-      val expected = decide(req, policies)
-      if expected.decision != derivation.decision then
-        Left(s"decision mismatch: kernel=${expected.decision}, derivation=${derivation.decision}")
-      else expected.decision match
-        case Decision.Deny => Left(s"denied: ${expected.reason}")
-        case Decision.Allow =>
-          (expected.grant, derivation.grant) match
-            case (None, _) => Left("allow without grant")
-            case (Some(kernelGrant), None) => Left("allow without grant")
-            case (Some(kernelGrant), Some(coreGrant)) =>
-              validateProposedGrant(req, kernelGrant, coreGrant, nowMillis).map(_ =>
-                AuthorizedRequest.mint(req))
+    else derivation.decision match
+      case Decision.Deny => Left(s"denied: ${derivation.reason}")
+      case Decision.Allow =>
+        derivation.grant match
+          case None => Left("allow without grant")
+          case Some(g) =>
+            // Re-check via structured proof — do not accept by re-running decide.
+            val proof = AuthorizationProof(
+              request = req,
+              nowMillis = nowMillis,
+              allowPolicies = policies.filter(p => g.sourcePolicyIds.contains(p.id) && p.decision == Decision.Allow),
+              grant = g,
+              conditionEvidence = conditionEvidenceFor(req, policies.filter(p => g.sourcePolicyIds.contains(p.id))))
+            checkProof(proof, policies)
 
-  /** Accept Core's grant when it equals Kernel's, or is a Kernel-witnessed
-    * attenuation that still covers the request (no widening). */
-  private def validateProposedGrant(
-      req: EffectRequest,
-      kernelGrant: CapabilityGrant,
-      coreGrant: CapabilityGrant,
-      nowMillis: Long
-  ): Either[String, Unit] =
-    if kernelGrant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
-    else if !kernelGrant.covers(req, nowMillis) then Left("grant does not cover request")
-    else if coreGrant == kernelGrant then Right(())
-    else if coreGrant.canon == kernelGrant.canon then Right(())
-    else
-      AttenuationWitness.check(kernelGrant, coreGrant).flatMap { _ =>
-        if coreGrant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
-        else if !coreGrant.covers(req, nowMillis) then Left("attenuated grant does not cover request")
-        else Right(())
-      }
+  private def conditionEvidenceFor(req: EffectRequest, allows: List[EffectPolicy]): Map[String, String] =
+    allows.iterator
+      .flatMap(_.conditions.iterator)
+      .collect { case (k, _) if !k.startsWith("meta:") => k -> req.args.getOrElse(k, "") }
+      .toMap
 
-  /** Bridge for priority #6 proofs — currently delegates to [[validate]]. */
+  /** Check a Core-constructed [[AuthorizationProof]] against the policy store.
+    *
+    * Algorithm (no [[decide]] re-run as acceptance):
+    *  1. Cited allow policies non-empty, present in store (id + equality), Decision.Allow
+    *  2. Each cited allow [[EffectPolicy.matches]] the request
+    *  3. Fail-closed: no store Deny matches the request
+    *  4. Condition evidence matches cited policy non-meta conditions and request args
+    *  5. Grant subject/action/sourcePolicyIds/expiry/nonce justified by cited allows
+    *  6. Grant [[CapabilityGrant.covers]] request at proof.nowMillis
+    *  7. Optional attenuation / delegation witnesses via shared pure checkers
+    */
+  def checkProof(
+      proof: AuthorizationProof,
+      store: List[EffectPolicy]
+  ): Either[String, AuthorizedRequest] =
+    val req = proof.request
+    val now = proof.nowMillis
+    if proof.allowPolicies.isEmpty then Left("proof missing allow policies")
+    else
+      for
+        _ <- checkCitedAllows(proof.allowPolicies, store, req)
+        _ <- checkNoStoreDeny(store, req)
+        _ <- checkConditionEvidence(proof)
+        _ <- checkGrantJustification(proof)
+        _ <- checkAttenuation(proof)
+        _ <- checkDelegation(proof)
+        _ <-
+          if !proof.grant.covers(req, now) then Left("grant does not cover request")
+          else if proof.grant.expiresAtEpochMillis.exists(_ < now) then Left("grant expired")
+          else Right(())
+      yield AuthorizedRequest.mint(req)
+
+  /** Alias for [[checkProof]]; uses [[AuthorizationProof.nowMillis]] unless overridden. */
   def validateProof(
       proof: AuthorizationProof,
       policies: List[EffectPolicy],
       nowMillis: Long = Long.MaxValue
   ): Either[String, AuthorizedRequest] =
-    validate(proof.derivation.request, policies, proof.derivation, nowMillis)
+    if nowMillis != Long.MaxValue && nowMillis != proof.nowMillis then
+      checkProof(proof.copy(nowMillis = nowMillis), policies)
+    else checkProof(proof, policies)
 
-  /** Deterministic policy decision: deny overrides allow; no match ⇒ deny. */
+  private def checkCitedAllows(
+      cited: List[EffectPolicy],
+      store: List[EffectPolicy],
+      req: EffectRequest
+  ): Either[String, Unit] =
+    cited.foldLeft[Either[String, Unit]](Right(())) {
+      case (Left(e), _) => Left(e)
+      case (Right(()), p) =>
+        if p.decision != Decision.Allow then Left(s"cited policy ${p.id} is not Allow")
+        else
+          store.find(_.id == p.id) match
+            case None => Left(s"cited policy ${p.id} not in store")
+            case Some(inStore) if inStore != p => Left(s"cited policy ${p.id} does not match store")
+            case Some(_) if !p.matches(req) => Left(s"cited policy ${p.id} does not match request")
+            case Some(_) => Right(())
+    }
+
+  private def checkNoStoreDeny(store: List[EffectPolicy], req: EffectRequest): Either[String, Unit] =
+    val denies = store.filter(p => p.decision == Decision.Deny && p.matches(req))
+    if denies.nonEmpty then Left(s"deny by ${denies.map(_.id).mkString(",")}")
+    else Right(())
+
+  private def checkConditionEvidence(proof: AuthorizationProof): Either[String, Unit] =
+    val required =
+      proof.allowPolicies.iterator
+        .flatMap(_.conditions.iterator)
+        .collect { case (k, expected) if !k.startsWith("meta:") => k -> expected }
+        .toMap
+    required.foldLeft[Either[String, Unit]](Right(())) {
+      case (Left(e), _) => Left(e)
+      case (Right(()), (k, expected)) =>
+        if !proof.conditionEvidence.get(k).contains(expected) then
+          Left(s"condition evidence missing or wrong for $k")
+        else if !proof.request.args.get(k).contains(expected) then
+          Left(s"request args do not satisfy condition $k")
+        else Right(())
+    }
+
+  private def checkGrantJustification(proof: AuthorizationProof): Either[String, Unit] =
+    val g = proof.grant
+    val allows = proof.allowPolicies
+    if g.subject != proof.request.subject then Left("grant subject mismatch")
+    else if g.action != proof.request.action then Left("grant action mismatch")
+    else if g.sourcePolicyIds.sorted != allows.map(_.id).sorted then Left("grant sourcePolicyIds mismatch")
+    else if allows.exists(p => !g.resource.matches(p.resource)) then
+      Left("grant widens beyond cited policy resource")
+    else if proof.attenuatedFrom.isEmpty && proof.delegationChain.isEmpty then
+      val expectedExpiry = allows.flatMap(_.metaExpiresAt).minOption
+      val expectedNonce =
+        proof.request.args.get("nonce").orElse(allows.flatMap(_.metaNonce).headOption)
+      if g.resource != proof.request.resource then Left("grant resource mismatch")
+      else if g.expiresAtEpochMillis != expectedExpiry then Left("grant expiry mismatch")
+      else if g.nonce != expectedNonce then Left("grant nonce mismatch")
+      else Right(())
+    else Right(())
+
+  private def checkAttenuation(proof: AuthorizationProof): Either[String, Unit] =
+    proof.attenuatedFrom match
+      case None => Right(())
+      case Some((parent, witness)) =>
+        AttenuationWitness.verify(witness, parent, proof.grant)
+
+  private def checkDelegation(proof: AuthorizationProof): Either[String, Unit] =
+    if proof.delegationChain.isEmpty then Right(())
+    else
+      Delegation.validateChain(proof.delegationChain).flatMap { finalGrant =>
+        if finalGrant != proof.grant then Left("delegation chain does not end at proof grant")
+        else Right(())
+      }
+
+  /** Deterministic policy decision: deny overrides allow; no match ⇒ deny.
+    * Used by Core when constructing proofs / audit; not the Kernel accept path.
+    */
   def decide(req: EffectRequest, policies: List[EffectPolicy]): AuthorizationDerivation =
     val matched = policies.filter(_.matches(req))
     val denies = matched.filter(_.decision == Decision.Deny)

@@ -5,9 +5,12 @@ import cairn.kernel.Authority
 import cairn.kernel.Authority.*
 import cairn.kernel.EffectMeta
 
-/** Authority gate (Phases 4–5, priority #2/#5). Composition roots authorize via
+/** Authority gate (Phases 4–5, priority #2/#5/#6). Composition roots authorize via
   * [[EffectContext.authorize]] (which calls [[check]]); handlers accept only
   * [[AuthorizedEffect]] and must not call [[check]]/[[checked]] themselves.
+  *
+  * Enforce path: Core [[PolicyEval.prove]] → Kernel [[Authority.checkProof]] →
+  * mint [[AuthorizedRequest]]. Audit path records [[PolicyEval.propose]] without blocking.
   *
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
@@ -43,34 +46,41 @@ final class AuthorityGate(
 
   /** Check authorization. In Audit mode always returns the request wrapped as
     * authorized (after recording whether it *would* be permitted). In Enforce
-    * mode, only Kernel-validated allows proceed; nonces / request ids are
-    * consumed so replays are denied.
+    * mode: Core [[PolicyEval.prove]] → Kernel [[Authority.checkProof]] → mint;
+    * nonces / request ids are consumed so replays are denied.
     */
   def check(req: EffectRequest, nowMillis: Long = System.currentTimeMillis())
       : Either[String, AuthorizedRequest] =
-    val derivation = PolicyEval.propose(req, policies)
     mode match
       case AuthorityGate.Mode.Audit =>
+        val derivation = PolicyEval.propose(req, policies)
         val would = derivation.decision == Decision.Allow &&
           derivation.grant.exists(_.covers(req, nowMillis))
         synchronized { events += AuthorityEvent.Audited(derivation, would) }
         // audit never blocks
         Right(Authority.auditPass(req))
       case AuthorityGate.Mode.Enforce =>
-        Authority.validate(req, policies, derivation, nowMillis) match
+        PolicyEval.prove(req, policies, nowMillis) match
           case Left(err) =>
+            val derivation = PolicyEval.propose(req, policies)
             synchronized { events += AuthorityEvent.Rejected(derivation) }
             Left(err)
-          case Right(auth) =>
-            synchronized {
-              consumeReplay(derivation, req) match
-                case Left(err) =>
-                  events += AuthorityEvent.Rejected(derivation)
-                  Left(err)
-                case Right(()) =>
-                  events += AuthorityEvent.Enforced(derivation, Some(auth))
-                  Right(auth)
-            }
+          case Right(proof) =>
+            Authority.checkProof(proof, policies) match
+              case Left(err) =>
+                synchronized { events += AuthorityEvent.Rejected(proof.asDerivation(policies)) }
+                Left(err)
+              case Right(auth) =>
+                val derivation = proof.asDerivation(policies)
+                synchronized {
+                  consumeReplay(derivation, req) match
+                    case Left(err) =>
+                      events += AuthorityEvent.Rejected(derivation)
+                      Left(err)
+                    case Right(()) =>
+                      events += AuthorityEvent.Enforced(derivation, Some(auth))
+                      Right(auth)
+                }
 
   private def consumeReplay(derivation: AuthorizationDerivation, req: EffectRequest): Either[String, Unit] =
     val afterNonce =

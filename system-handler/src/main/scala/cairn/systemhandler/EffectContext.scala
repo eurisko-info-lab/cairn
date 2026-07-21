@@ -33,7 +33,7 @@ final case class EffectContext(
   ): EffectRequest =
     EffectRequest(subject, action, resource, args, requestId)
 
-  /** Single authorize entry point: gate check → Kernel token → [[AuthorizedEffect]].
+  /** Single authorize entry point: Core proof → Kernel check → [[AuthorizedEffect]].
     * Narrow pack-loader, bootstrap allow-all, and Audit-mode pass-through all
     * flow through here. Expiry uses [[clock]].
     */

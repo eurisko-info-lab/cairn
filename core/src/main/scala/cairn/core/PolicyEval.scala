@@ -5,24 +5,70 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{EffectMeta, Effects}
 
 /** Core policy evaluation and capability attenuation (Phase 4).
-  * Kernel [[Authority.validate]] independently checks every proposal.
+  *
+  * Core **constructs** [[AuthorizationProof]] witnesses; Kernel
+  * [[Authority.checkProof]] validates them (shared pure checkers for covers /
+  * attenuation). [[propose]] / [[decide]] remain for audit and tests.
   *
   * Policies reference [[Effects.ActionKey]] / [[EffectMeta.ResourceSchema]]
   * derived from effect-interface artifacts.
   *
   * Attenuation and delegation are Core optimizations; Kernel mints/checks
   * [[AttenuationWitness]] so child grants cannot widen parent authority.
-  * Priority #6 will replace re-decide with Core-generated [[AuthorizationProof]]s.
   */
 object PolicyEval:
 
-  /** Propose an authorization derivation for `req` under `policies`. */
+  /** Propose an authorization derivation for `req` under `policies` (audit / tests). */
   def propose(req: EffectRequest, policies: List[EffectPolicy]): AuthorizationDerivation =
     Authority.decide(req, policies)
 
-  /** Wrap a derivation as a priority-#6 proof hook (still re-checked via decide). */
-  def asProof(derivation: AuthorizationDerivation): AuthorizationProof =
-    DerivationAsProof(derivation)
+  /** Construct a structured allow proof, or Left with a deny reason.
+    * Does not mint authority — Kernel must [[Authority.checkProof]].
+    */
+  def prove(
+      req: EffectRequest,
+      policies: List[EffectPolicy],
+      nowMillis: Long
+  ): Either[String, AuthorizationProof] =
+    val matched = policies.filter(_.matches(req))
+    val denies = matched.filter(_.decision == Decision.Deny)
+    if denies.nonEmpty then Left(s"deny by ${denies.map(_.id).mkString(",")}")
+    else
+      val allows = matched.filter(_.decision == Decision.Allow)
+      if allows.isEmpty then Left("no matching allow policy")
+      else
+        val expires = allows.flatMap(_.metaExpiresAt).minOption
+        if expires.exists(_ < nowMillis) then Left("grant expired")
+        else
+          val nonce = req.args.get("nonce").orElse(allows.flatMap(_.metaNonce).headOption)
+          val grant = CapabilityGrant(
+            req.subject, req.action, req.resource,
+            expiresAtEpochMillis = expires,
+            nonce = nonce,
+            sourcePolicyIds = allows.map(_.id))
+          if !grant.covers(req, nowMillis) then Left("grant does not cover request")
+          else
+            Right(AuthorizationProof(
+              request = req,
+              nowMillis = nowMillis,
+              allowPolicies = allows,
+              grant = grant,
+              conditionEvidence = conditionEvidence(req, allows)))
+
+  /** Attach a Kernel-checked attenuation step to an existing allow proof. */
+  def proveAttenuated(
+      base: AuthorizationProof,
+      narrower: Resource
+  ): Either[String, AuthorizationProof] =
+    attenuate(base.grant, narrower).map { (child, w) =>
+      base.copy(grant = child, attenuatedFrom = Some((base.grant, w)))
+    }
+
+  private def conditionEvidence(req: EffectRequest, allows: List[EffectPolicy]): Map[String, String] =
+    allows.iterator
+      .flatMap(_.conditions.iterator)
+      .collect { case (k, _) if !k.startsWith("meta:") => k -> req.args.getOrElse(k, "") }
+      .toMap
 
   /** Attenuate a grant to a narrower resource scope. Returns the child grant
     * plus a Kernel-checked [[AttenuationWitness]] (fails if widening).

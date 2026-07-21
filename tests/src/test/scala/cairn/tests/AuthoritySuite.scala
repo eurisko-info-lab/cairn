@@ -310,10 +310,79 @@ class AuthoritySuite extends munit.FunSuite:
       Authority.AttenuationWitness.check(root, badChild).toOption.get)
     assert(Authority.Delegation.validate(d).isLeft, "delegation requires exact +1 depth")
 
-  test("priority #6 proof hook still validates via Kernel re-decide"):
+  // ---- Priority #6: Core-constructed proofs, Kernel-checked ----
+
+  test("valid AuthorizationProof accepts via checkProof"):
     val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
-    val proof = PolicyEval.asProof(PolicyEval.propose(readReq, policies))
-    assert(Authority.validateProof(proof, policies, nowMillis = 0).isRight)
-    val lie = PolicyEval.asProof(
-      AuthorizationDerivation(readReq, policies, Decision.Deny, None, "lie"))
-    assert(Authority.validateProof(lie, policies, nowMillis = 0).isLeft)
+    val proof = PolicyEval.prove(readReq, policies, nowMillis = 0)
+    assert(proof.isRight, proof.toString)
+    assert(Authority.checkProof(proof.toOption.get, policies).isRight)
+
+  test("tampered proof: widened grant resource rejected"):
+    val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
+    val proof = PolicyEval.prove(readReq, policies, nowMillis = 0).toOption.get
+    val widened = proof.copy(grant = proof.grant.copy(resource = Resource("*", "*")))
+    assert(Authority.checkProof(widened, policies).isLeft)
+
+  test("tampered proof: forged Allow with store Deny rejected"):
+    val policies = List(
+      PolicyEval.allowAll("allow", alice, fsRead),
+      PolicyEval.denyAll("deny", alice, fsRead))
+    val forged = PolicyEval.prove(readReq, List(policies.head), nowMillis = 0).toOption.get
+    assert(Authority.checkProof(forged, policies).isLeft)
+
+  test("missing allow policies in proof rejected"):
+    val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
+    val proof = PolicyEval.prove(readReq, policies, nowMillis = 0).toOption.get
+    val missing = proof.copy(allowPolicies = Nil, grant = proof.grant.copy(sourcePolicyIds = Nil))
+    assert(Authority.checkProof(missing, policies).isLeft)
+
+  test("cited policy not in store rejected"):
+    val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
+    val proof = PolicyEval.prove(readReq, policies, nowMillis = 0).toOption.get
+    val alien = proof.allowPolicies.head.copy(id = "not-in-store")
+    val bad = proof.copy(
+      allowPolicies = List(alien),
+      grant = proof.grant.copy(sourcePolicyIds = List("not-in-store")))
+    assert(Authority.checkProof(bad, policies).isLeft)
+
+  test("widened attenuation in proof rejected"):
+    val policies = List(PolicyEval.allowAll("allow", alice, fsRead))
+    val base = PolicyEval.prove(readReq, policies, nowMillis = 0).toOption.get
+    val parent = base.grant.copy(resource = EffectMeta.filesystem.resource.at("/tmp*"))
+    val wideChild = parent.copy(resource = Resource("*", "/"), parentCanon = Some(parent.canon))
+    // Forge a witness by bypassing check — use a valid witness for a different pair if possible.
+    // AttenuationWitness is opaque; only mintable via check. So attach a valid narrow witness
+    // then swap grant to a wider child.
+    val narrow = EffectMeta.filesystem.resource.at("/tmp/a")
+    val (child, w) = PolicyEval.attenuate(parent, narrow).toOption.get
+    val tampered = base.copy(
+      grant = wideChild.copy(sourcePolicyIds = base.grant.sourcePolicyIds),
+      attenuatedFrom = Some((parent, w)))
+    assert(Authority.checkProof(tampered, policies).isLeft)
+
+  test("proveAttenuated narrow proof still covers request and checks"):
+    val policies = List(EffectPolicy(
+      "tmp",
+      alice,
+      fsRead,
+      EffectMeta.filesystem.resource.at("/tmp*"),
+      Decision.Allow))
+    val req = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
+    val base = PolicyEval.prove(req, policies, nowMillis = 0).toOption.get
+    // base grant resource is request path; attenuate is no-op-ish if already exact.
+    // Build from a broader parent grant first:
+    val broadGrant = base.grant.copy(resource = EffectMeta.filesystem.resource.at("/tmp*"))
+    val broadProof = base.copy(grant = broadGrant)
+    // Direct broad grant fails justification (resource != request) unless attenuated:
+    assert(Authority.checkProof(broadProof, policies).isLeft)
+    val attenuated = PolicyEval.proveAttenuated(
+      broadProof.copy(grant = broadGrant),
+      req.resource)
+    assert(attenuated.isRight, attenuated.toString)
+    assert(Authority.checkProof(attenuated.toOption.get, policies).isRight)
+
+  test("gate Enforce path: Core prove → Kernel checkProof"):
+    val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("allow", alice, fsRead)))
+    assert(gate.check(readReq, nowMillis = 0).isRight)
+    assert(gate.check(appendReq, nowMillis = 0).isLeft)

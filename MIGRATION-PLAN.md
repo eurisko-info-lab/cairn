@@ -508,9 +508,15 @@ Cas/Ledger and completeness checks — not the policy-boundary type.
 and canonicalized; grant expiry + nonce in canon; gate replay sets for nonce /
 `requestId`; delegation chains validated; Kernel `AttenuationWitness` for
 non-widening attenuation/delegation. Injectable `EffectContext.clock` for
-expiry tests. **Priority #6 residual:** Core still proposes via re-decide;
-`AuthorizationProof` / `validateProof` are hooks only — not yet
-Core-generated proof objects checked without recomputing the decision.
+expiry tests.
+
+**Core-generated authorization proofs (priority #6) — DONE.** Core
+`PolicyEval.prove` constructs structured `AuthorizationProof` witnesses;
+Kernel `Authority.checkProof` validates them (cited allows in store + match,
+no matching Deny, condition evidence, grant justification, optional
+attenuation/delegation) without accepting via re-run of `decide`.
+`AuthorityGate` Enforce: prove → checkProof → mint `AuthorizedRequest`.
+Residual: `EffectContext.capabilities` grant-bundle threading still empty.
 
 ## 7. Concrete old-to-new mapping
 
