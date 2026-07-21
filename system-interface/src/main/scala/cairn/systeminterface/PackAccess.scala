@@ -23,6 +23,19 @@ object PackAccess:
   def install(access: PackAccess): Unit = current = Some(access)
 
   def get: PackAccess =
-    current.getOrElse(
-      throw RuntimeException(
-        "PackAccess not installed — ensure cairn.runtime.PackLoader is on the classpath"))
+    current match
+      case Some(a) => a
+      case None =>
+        // Forces runtime.PackLoader's class init (and its `install(this)`
+        // side effect) without system-interface depending on runtime at
+        // compile time — the only such mechanism available given that
+        // constraint. Removed once on the mistaken belief every real call
+        // path already triggers this some other way; restored once a full
+        // call-graph audit found the real mechanism was accidental
+        // JVM-wide class-init ordering (e.g. one test class happening to
+        // touch PackLoader before another needs it), not a real guarantee.
+        try Class.forName("cairn.runtime.PackLoader$")
+        catch case _: ClassNotFoundException => ()
+        current.getOrElse(
+          throw RuntimeException(
+            "PackAccess not installed — ensure cairn.runtime.PackLoader is on the classpath"))

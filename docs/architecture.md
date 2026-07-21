@@ -454,12 +454,30 @@ done**: the cost (rewriting test suites that don't exercise authority at
 all) didn't match the benefit over this registry. Available as separate
 future work if still wanted.
 
-**`PackAccess`: composition-root bug — not yet fixed this round.** The
-accidental-ordering problem above is real and worth fixing properly
-(making `PackLoader`'s installation explicit and guaranteed rather than a
-side effect of unrelated class-init order), but is independent enough
-from the `AuthorityGate` registry work to be its own slice — tracked here
-so it isn't lost, not silently skipped.
+**`PackAccess`: composition-root bug — fixed, correcting an earlier
+mistake.** Two slices ago ("PackAccess — remove reflection bootstrap and
+dead escape hatch," commit `7251f34`), the `Class.forName("cairn.runtime.
+PackLoader$")` fallback in `PackAccess.get` was removed as apparently-dead
+code — an empirical check (full suite, both transcripts, an isolated run
+of the three `user/`-dependent test suites) all passed without it. That
+check was **not actually testing the failure mode**: every real call path
+in the repo happens to have *something else* touch `PackLoader` first
+(accidental JVM-wide class-init ordering within the one shared `sbt test`
+JVM), so removing the fallback couldn't have failed any existing test —
+it just removed the one thing that made correctness *not* depend on that
+accident. The `Class.forName` fallback is the **only** available
+mechanism for forcing `PackLoader`'s installation without
+`system-interface` depending on `runtime` at compile time (the dependency
+must run the other way, per `PackAccess`'s own docstring) — restored,
+with the real mechanism now documented in place of the original
+"composition-root bootstrap" hand-waving. `withInstalled` (the *other*
+thing removed in that slice) stays removed — confirmed genuinely dead,
+no ordering-safety role. Honest limitation: this fix can't be verified
+against a truly cold JVM within the existing single-JVM test harness (see
+`tests/FuzzSuite.scala`, which has no `PackLoader` reference of its own at
+all and only worked by luck of test-class ordering) — verified by code
+inspection (restoring the exact prior mechanism) and the full suite
+continuing to pass, not by reproducing the failure mode itself.
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 
