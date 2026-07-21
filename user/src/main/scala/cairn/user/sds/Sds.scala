@@ -14,6 +14,8 @@ import cairn.core.*
   * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
   * Phrase staleness (official corpus vs free-text restale) lives in the
   * examples host machine — see `cairn.examples.sds.PhraseStaleness`.
+  * Regulatory section numbering (EU-CLP 1..16 + ordering) lives in
+  * `cairn.examples.sds.SectionNumbering`.
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")

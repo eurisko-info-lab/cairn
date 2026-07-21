@@ -171,3 +171,46 @@ class ExemplarPackSuite extends munit.FunSuite:
     // matching hash keeps FR fresh
     val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Acetone Cleaner"))
     assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
+
+  test("SDS section numbering: EU-CLP has exactly sections 1..16 in order"):
+    import cairn.examples.sds.SectionNumbering
+    assertEquals(SectionNumbering.numbers, (1 to 16).toList)
+    assertEquals(SectionNumbering.euClp.map(_.number), (1 to 16).toList)
+    assertEquals(SectionNumbering.titleOf(1), Right("Identification"))
+    assertEquals(SectionNumbering.titleOf(16), Right("Other information"))
+    assert(SectionNumbering.titleOf(0).isLeft)
+    assert(SectionNumbering.titleOf(17).isLeft)
+    assert(SectionNumbering.parseNumber("9").contains(9))
+    assert(SectionNumbering.parseNumber("0").isLeft)
+    assert(SectionNumbering.parseNumber("x").isLeft)
+
+  test("SDS section numbering: outline rejects bad title, duplicate, out-of-order"):
+    import cairn.examples.sds.SectionNumbering
+    import SectionNumbering.{OutlineEntry, OutlineError}
+    val ok = SectionNumbering.validateOutline(SectionNumbering.acetoneSparseOutline)
+    assertEquals(ok.map(_.map(_.number)), Right(List(2, 3)))
+    val badTitle = SectionNumbering.validateOutline(List(
+      OutlineEntry(2, "Wrong heading")))
+    assert(badTitle.swap.exists(_.exists {
+      case OutlineError.TitleMismatch(2, "Wrong heading", "Hazards identification") => true
+      case _ => false
+    }))
+    val dup = SectionNumbering.validateOutline(List(
+      OutlineEntry(2, "Hazards identification"),
+      OutlineEntry(2, "Hazards identification")))
+    assert(dup.swap.exists(_.exists {
+      case OutlineError.Duplicate(2) => true
+      case _ => false
+    }))
+    val unordered = SectionNumbering.validateOutline(List(
+      OutlineEntry(3, "Composition/information on ingredients"),
+      OutlineEntry(2, "Hazards identification")))
+    assert(unordered.swap.exists(_.exists {
+      case OutlineError.OutOfOrder(List(3, 2)) => true
+      case _ => false
+    }))
+    // order() sorts a bag into ascending SectionDefs
+    assertEquals(
+      SectionNumbering.order(List(16, 1, 2)).map(_.map(_.number)),
+      Right(List(1, 2, 16)))
+    assert(SectionNumbering.order(List(1, 99)).isLeft)

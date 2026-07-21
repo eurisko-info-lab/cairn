@@ -46,7 +46,7 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
 
 `languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` +
-`PhraseStaleness` + `SdsTutorial`):
+`PhraseStaleness` + `SectionNumbering` + `SdsTutorial`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
   `basis`); rendered document is a compiled bidirectional view.
@@ -57,12 +57,16 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   never stales; free-text `phrase` translations restale to
   `StaleBecauseSourceChanged` when the English source hash drifts (GRANITE
   Multilingual.restale). State is projected, not Studio-persisted.
+- Regulatory section numbering stub (`SectionNumbering`): EU-CLP / REACH Annex II
+  sections 1..16 with canonical titles; sparse outlines must be ascending, unique,
+  and title-matched (gaps allowed). Acetone demonstrates a 2+3 sparse outline —
+  not a full 16-section chemicals document.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
-Remaining gaps vs GRANITE: full chemicals corpus, regulatory section numbering,
+Remaining gaps vs GRANITE: full chemicals corpus (all 16 sections populated),
 full phrase-corpus / Studio-persisted staleness UI, SDS Studio UI (deferred).
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)

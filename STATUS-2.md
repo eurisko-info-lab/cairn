@@ -12,10 +12,11 @@ causal-LCA merge) plus **reclaim / sync** (`reclaimOrphanBlobs`, CAS
 `replay-snapshot` merge) and an **HVM surface exporter** (`HvmSurface` HVM2
 books + live `hvm` when on PATH), plus a **Lean agreement expansion**
 (`natRec` ι corpus + live `#check` stdout digests), plus an **SDS
-phrase-staleness stub** (`corpusPhrase` + `PhraseStaleness.restale`). Full
-suite: **464 tests green** (+2 skipped; `tests` module; `sbt test`), including
-a 100 000-term fuzz corpus with zero round-trip failures, `ParitySuite`, and
-`ExemplarPackSuite`.
+phrase-staleness stub** (`corpusPhrase` + `PhraseStaleness.restale`) and an
+**SDS regulatory section-numbering stub** (`SectionNumbering` EU-CLP 1..16).
+Full suite: **466 tests green** (+2 skipped; `tests` module; `sbt test`),
+including a 100 000-term fuzz corpus with zero round-trip failures,
+`ParitySuite`, and `ExemplarPackSuite`.
 
 ## Story scorecard
 
@@ -136,7 +137,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | parity | parity | Waves A–C, H1; `languages/meta.cairn` fixpoint |
 | GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | partial | **parity** | `languages/pki.cairn` + glue; `PkiMax`/`DemoPki`/`PkiTutorial`; ParitySuite |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | missing | **parity** | `ledger/Encryption.scala`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law); `CompositionSealing`/`PhraseStaleness`/`SdsTutorial`; ExemplarPackSuite |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law); `CompositionSealing`/`PhraseStaleness`/`SectionNumbering`/`SdsTutorial`; ExemplarPackSuite |
 | GRANITE | Law pack (PKI→Law→SDS) | missing | **parity** (thin) | `languages/law.cairn` (requires cert); `enactedBy`; LawTutorial |
 | GRANITE | Computation / Bend profile | partial | parity | `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / auth web app | N/A | **N/A deferred** | §8 anti-goal (full IDE/studio) |
@@ -170,9 +171,11 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 
 ### Remaining honest gaps
 
-- GRANITE SDS depth beyond the spine: full chemicals corpus, section numbering,
-  Studio-persisted phrase-corpus UI. Phrase-staleness *machine stub* landed
-  (`corpusPhrase` + `PhraseStaleness.restale`; projected state, not Studio).
+- GRANITE SDS depth beyond the spine: full chemicals corpus (all 16 sections
+  populated), Studio-persisted phrase-corpus UI. Phrase-staleness *machine
+  stub* landed (`corpusPhrase` + `PhraseStaleness.restale`; projected state,
+  not Studio). Section-numbering *machine stub* landed (`SectionNumbering`
+  EU-CLP 1..16 + sparse-outline ordering; not a full chemicals document).
   Studio UI still deferred.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
