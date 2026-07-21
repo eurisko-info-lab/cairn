@@ -31,9 +31,6 @@ object Stlc:
         ConstructorSpec("app", List(Elem.Tok("("), Elem.Cat("term"), Elem.Cat("term"), Elem.Tok(")"))),
         ConstructorSpec("$group", List(Elem.Tok("("), Elem.Cat("term"), Elem.Tok(")"))),
         ConstructorSpec("var", List(Elem.NameLeaf))))),
-      printRules = List(
-        PrintRule("app", List(PrintSeg.Lit("("), PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(")"))),
-        PrintRule("var", List(PrintSeg.Field(0)))),
       top = Some("term")))
 
   /** Simple types: Bool and the arrow (right-associative infix). */
@@ -52,9 +49,7 @@ object Stlc:
         ConstructorSpec("tyBool", List(Elem.Tok("Bool"))),
         ConstructorSpec("$group", List(Elem.Tok("("), Elem.Cat("type"), Elem.Tok(")")))))),
       precCategories = List(PrecCategory("type", "typeAtom", List(
-        InfixOp("->", "arrow", 1, rightAssoc = true)))),
-      printRules = List(
-        PrintRule("tyBool", List(PrintSeg.Lit("Bool"))))))
+        InfixOp("->", "arrow", 1, rightAssoc = true))))))
 
   /** Lambda: abstraction + β-reduction; binder declared as data. */
   val lambda: Fragment = Fragment(
@@ -69,12 +64,7 @@ object Stlc:
       categories = List(CategorySpec("term", List(
         ConstructorSpec("lam", List(
           Elem.Tok("fun"), Elem.NameLeaf, Elem.Tok(":"), Elem.Cat("type"),
-          Elem.Tok("."), Elem.Cat("term")))))),
-      printRules = List(
-        PrintRule("lam", List(
-          PrintSeg.Lit("fun"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-          PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
-          PrintSeg.Lit("."), PrintSeg.Space, PrintSeg.Field(2))))),
+          Elem.Tok("."), Elem.Cat("term"))))))),
     rewriteRules = List(
       RewriteRule("beta",
         pattern = n("app", n("lam", mv("x"), mv("T"), mv("b")), mv("v")),
@@ -96,14 +86,7 @@ object Stlc:
         ConstructorSpec("false", List(Elem.Tok("false"))),
         ConstructorSpec("if", List(
           Elem.Tok("if"), Elem.Cat("term"), Elem.Tok("then"), Elem.Cat("term"),
-          Elem.Tok("else"), Elem.Cat("term")))))),
-      printRules = List(
-        PrintRule("true", List(PrintSeg.Lit("true"))),
-        PrintRule("false", List(PrintSeg.Lit("false"))),
-        PrintRule("if", List(
-          PrintSeg.Lit("if"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-          PrintSeg.Lit("then"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
-          PrintSeg.Lit("else"), PrintSeg.Space, PrintSeg.Field(2))))),
+          Elem.Tok("else"), Elem.Cat("term"))))))),
     rewriteRules = List(
       RewriteRule("if-true", n("if", n("true"), mv("a"), mv("b")), mv("a")),
       RewriteRule("if-false", n("if", n("false"), mv("a"), mv("b")), mv("b"))))

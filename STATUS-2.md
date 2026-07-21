@@ -72,6 +72,10 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
 - **M41 source-of-truth**: STLC/meta `.cairn` are checked-in canonical mirrors
   from the Scala seed (`emit-languages`), not yet the runtime load path;
   exemplar packs (PKI/Law/SDS/Search) *are* `.cairn` source of truth.
+- **Print derivation (Phase 1)**: `PrintDerive` fills default print rules from
+  `syntax` at compose; explicit `print tag : …` overrides win. Redundant prints
+  dropped from search/pki/law/sds/stlc. Language digests still include grammar
+  until Phase 2 (surface-file split). RoundTrip laws remain the trust gate.
 
 ## Success criteria (§9) — re-verified at maximal level
 

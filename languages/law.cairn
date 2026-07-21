@@ -18,9 +18,6 @@ language law {
     syntax lawObj += section : tok "section" str tok "heading" str tok "text" str;
     syntax lawObj += statute : tok "statute" str tok "sections" tok "(" sepby1 name "," tok ")";
     syntax lawObj += enactedBy : tok "enactedBy" name tok "cert" name;
-    print section : lit "section" sp strfield 0 sp lit "heading" sp strfield 1 sp lit "text" sp strfield 2;
-    print statute : lit "statute" sp strfield 0 sp lit "sections (" field 1 lit ")";
-    print enactedBy : lit "enactedBy" sp field 0 sp lit "cert" sp field 1;
     top lawObj;
   }
 }

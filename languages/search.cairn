@@ -33,14 +33,6 @@ language search {
     syntax searchObj += supports : tok "supports" name name;
     syntax searchObj += spawns : tok "spawns" name name;
     syntax searchObj += board : tok "board" tok "(" sepby1 name "," tok ")";
-    print origin : lit "origin" sp strfield 0;
-    print goal : lit "goal" sp strfield 0;
-    print fact : lit "fact" sp strfield 0;
-    print intent : lit "intent" sp strfield 0;
-    print hint : lit "hint" sp strfield 0;
-    print supports : lit "supports" sp field 0 sp field 1;
-    print spawns : lit "spawns" sp field 0 sp field 1;
-    print board : lit "board (" field 0 lit ")";
     judgment wellFormed {
       rule wf-origin :  |- wellFormed($ctx, origin($t)) where $neq($t, "");
       rule wf-fact :  |- wellFormed($ctx, fact($t)) where $neq($t, "");

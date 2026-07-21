@@ -34,13 +34,6 @@ language sds {
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
     syntax sdsObj += basis : tok "basis" name tok "section" str;
     syntax component += component : name tok "pct" num;
-    print substance : lit "substance" sp strfield 0 sp strfield 1;
-    print phrase : lit "phrase" sp field 0 sp lit "lang" sp field 1 sp lit "text" sp strfield 2;
-    print mixture : lit "mixture of (" field 0 lit ")";
-    print component : field 0 sp lit "pct" sp field 1;
-    print product : lit "product" sp strfield 0 sp lit "uses" sp field 1 sp lit "phrases (" field 2 lit ")";
-    print shadow : lit "shadow" sp field 0 sp lit "overrides" sp field 1 sp lit "with" sp strfield 2;
-    print basis : lit "basis" sp field 0 sp lit "section" sp strfield 1;
     top sdsObj;
   }
 }

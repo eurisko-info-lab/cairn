@@ -52,6 +52,68 @@ enum PrintSeg:
 
 final case class PrintRule(tag: String, segs: List[PrintSeg])
 
+/** Default print rules from syntax productions. Explicit `print` lines are
+  * overrides that win over derivation (see [[complete]]). Infix ops stay
+  * printer-special (no derived rule). Sugar tags (`$…`) are skipped.
+  */
+object PrintDerive:
+  private val tightOpen  = Set("(", "[", "{")
+  private val tightClose = Set(")", "]", "}", ";")
+
+  private def tokText(e: Elem): Option[String] = e match
+    case Elem.Tok(t)      => Some(t)
+    case Elem.TokField(t) => Some(t)
+    case _                => None
+
+  private def isTightOpen(e: Elem): Boolean  = tokText(e).exists(tightOpen.contains)
+  private def isTightClose(e: Elem): Boolean = tokText(e).exists(tightClose.contains)
+
+  /** Field-producing elems (Tok is discarded at parse time). */
+  private def elemSegs(e: Elem, fieldIdx: Int): (List[PrintSeg], Int) = e match
+    case Elem.Tok(t)      => (List(PrintSeg.Lit(t)), fieldIdx)
+    case Elem.TokField(t) => (List(PrintSeg.Lit(t)), fieldIdx + 1) // child kept; lit mirrors fixed text
+    case Elem.StrLeaf     => (List(PrintSeg.StrField(fieldIdx)), fieldIdx + 1)
+    case _                => (List(PrintSeg.Field(fieldIdx)), fieldIdx + 1)
+
+  /** Invert a production into print segments with the default spacing policy:
+    * space between adjacent elems, except no space after `(`/`[`/`{` and no
+    * space before `)`/`]`/`}`/`;`.
+    */
+  def segs(elems: List[Elem]): List[PrintSeg] =
+    val out = List.newBuilder[PrintSeg]
+    var fieldIdx = 0
+    var prev: Option[Elem] = None
+    for e <- elems do
+      val (ss, nextIdx) = elemSegs(e, fieldIdx)
+      if ss.nonEmpty then
+        val space =
+          prev.isDefined && !isTightOpen(prev.get) && !isTightClose(e)
+        if space then out += PrintSeg.Space
+        out ++= ss
+        prev = Some(e)
+        fieldIdx = nextIdx
+    out.result()
+
+  def derive(
+      categories: List[CategorySpec],
+      precCategories: List[PrecCategory] = Nil,
+  ): List[PrintRule] =
+    val infixTags = precCategories.flatMap(_.ops).map(_.tag).toSet
+    categories.flatMap(_.ctors).collect {
+      case cs if !cs.tag.startsWith("$") && !infixTags.contains(cs.tag) =>
+        PrintRule(cs.tag, segs(cs.elems))
+    }
+
+  /** Derived rules filled in; explicit overrides win on tag collision. */
+  def complete(
+      categories: List[CategorySpec],
+      precCategories: List[PrecCategory],
+      overrides: List[PrintRule],
+  ): List[PrintRule] =
+    val over = overrides.map(r => r.tag -> r).toMap
+    val der = derive(categories, precCategories).map(r => r.tag -> r).toMap
+    (der.keySet ++ over.keySet).toList.sorted.map(t => over.getOrElse(t, der(t)))
+
 final case class GrammarSpec(
     name: String,
     tokens: TokenSpec,

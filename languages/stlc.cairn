@@ -9,8 +9,6 @@ language stlc {
     syntax term += app : tok "(" cat term cat term tok ")";
     syntax term += group : tok "(" cat term tok ")";
     syntax term += var : name;
-    print app : lit "(" field 0 sp field 1 lit ")";
-    print var : field 0;
     top term;
   }
   fragment types provides type {
@@ -24,7 +22,6 @@ language stlc {
     syntax typeAtom += tyBool : tok "Bool";
     syntax typeAtom += group : tok "(" cat type tok ")";
     infix type over typeAtom : "->" tag arrow prec 1 right;
-    print tyBool : lit "Bool";
   }
   fragment lambda provides lambda requires term, type {
     ctor lam : Term(Name, Type, Term) binds 0 in 2;
@@ -32,7 +29,6 @@ language stlc {
     punct ":";
     punct ".";
     syntax term += lam : tok "fun" name tok ":" cat type tok "." cat term;
-    print lam : lit "fun" sp field 0 sp lit ":" sp field 1 sp lit "." sp field 2;
     rule beta : app(lam($x, $T, $b), $v) => $subst($b, $x, $v);
   }
   fragment booleans provides booleans requires term, type {
@@ -47,9 +43,6 @@ language stlc {
     syntax term += true : tok "true";
     syntax term += false : tok "false";
     syntax term += if : tok "if" cat term tok "then" cat term tok "else" cat term;
-    print true : lit "true";
-    print false : lit "false";
-    print if : lit "if" sp field 0 sp lit "then" sp field 1 sp lit "else" sp field 2;
     rule if-true : if(true(), $a, $b) => $a;
     rule if-false : if(false(), $a, $b) => $b;
   }

@@ -161,12 +161,14 @@ object Compose:
         puncts = fragments.flatMap(_.grammar.puncts).distinct.sortBy(p => (-p.length, p)),
         lineComment = Some("--"),
         identContExtra = "_'" + fragments.flatMap(_.grammar.identContExtra).distinct.sorted.mkString)
+      val categories = cats.values.toList.sortBy(_.name)
+      val precCategories = precs.values.toList.sortBy(_.name)
       val grammar = GrammarSpec(
         name = name,
         tokens = tokens,
-        categories = cats.values.toList.sortBy(_.name),
-        precCategories = precs.values.toList.sortBy(_.name),
-        printRules = prules.values.toList.sortBy(_.tag),
+        categories = categories,
+        precCategories = precCategories,
+        printRules = PrintDerive.complete(categories, precCategories, prules.values.toList),
         top = tops.headOption.getOrElse(""))
       // M9: static grammar analysis runs on every composed grammar
       val lintErrors = GrammarLint.errors(grammar).map(i =>

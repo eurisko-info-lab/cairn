@@ -21,7 +21,9 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    `RoundTrip.put` / `Concrete.put` (M7) for format-preserving subtree edits.
    General dirty-subtree re-association is not implemented; `put`/`splice` only
    replace one recorded span. Format-preserving ΔL `remove`/`rename` are still
-   absent (rename needs leaf-name spans).
+   absent (rename needs leaf-name spans). Default print rules are derived from
+   syntax productions (`PrintDerive`); an explicit `print` line is an override.
+   RoundTrip still gates trust — derivation is not trusted alone.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
    are name-reference sets via the language's variable constructor. Change
    composition/inverses/commutation exist (M16); `Branches` refs are not yet
@@ -45,7 +47,8 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     source-of-truth migration remain host-backed: STLC/meta `.cairn` are
     checked-in canonical mirrors from Scala via `emit-languages`. Exemplar
     packs (PKI/Law/SDS/Search) are `.cairn` source of truth and load at
-    runtime. A separate `grammar.cairn` split is deferred.
+    runtime. A separate `grammar.cairn` / surface-file split is deferred
+    (Phase 2); Phase 1 derives default print from syntax at compose.
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental
