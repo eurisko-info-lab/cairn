@@ -23,6 +23,9 @@ object Terminal:
       case Term.Request.ReadLine     => Effects.Action.TerminalRead
       case Term.Request.Write(_)     => Effects.Action.TerminalWrite
       case Term.Request.WriteLine(_) => Effects.Action.TerminalWrite
+    // "*" is honestly correct here, not a placeholder: stdio is a
+    // session-level resource, not a per-request one — there's no "which
+    // terminal" to scope by.
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("terminal", "*"))
     AuthorityGate.forFamily(Effects.Family.Terminal).checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
       try req match

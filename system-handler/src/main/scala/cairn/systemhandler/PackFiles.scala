@@ -35,8 +35,18 @@ object Workspace:
       .toList
 
   def perform(req: Ws.Request): Either[Ws.Error, Ws.Response] =
+    // Real request target, not a wildcard, so path-scoped policies have
+    // real data to match against (same pattern as Filesystem). LanguageDirs
+    // takes no input — it discovers the dirs rather than targeting one —
+    // so "*" there is honestly correct, not a placeholder.
+    val resourcePath = req match
+      case Ws.Request.LanguageDirs                  => "*"
+      case Ws.Request.ListCairnFiles(dir)           => dir.value
+      case Ws.Request.ListSubdirs(dir)              => dir.value
+      case Ws.Request.ListSurfaceCairnFiles(langDir) => langDir.value
+      case Ws.Request.ReadText(path)                => path.value
     val authReq = Authority.EffectRequest(
-      Authority.Subject("local"), Effects.Action.WorkspaceRead, Authority.Resource("workspace", "*"))
+      Authority.Subject("local"), Effects.Action.WorkspaceRead, Authority.Resource("workspace", resourcePath))
     AuthorityGate.forFamily(Effects.Family.Workspace).checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
       try req match
         case Ws.Request.LanguageDirs =>

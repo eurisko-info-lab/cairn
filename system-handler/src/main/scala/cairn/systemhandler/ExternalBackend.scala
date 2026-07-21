@@ -30,10 +30,13 @@ object ExternalBackend:
           .left.map(e => EB.Error.Io(e.toString))
 
   def perform(req: EB.Request): Either[EB.Error, EB.Response] =
-    val action = req match
-      case EB.Request.Find(_)   => Effects.Action.BackendFind
-      case EB.Request.Run(_, _, _) => Effects.Action.BackendRun
-    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("externalBackend", "*"))
+    // The Host being invoked is the natural resource identifier — there's
+    // no path to scope by until `find` resolves one, and the tool itself
+    // is what a policy would actually want to restrict.
+    val (action, resourcePath) = req match
+      case EB.Request.Find(host)      => (Effects.Action.BackendFind, host.toString)
+      case EB.Request.Run(host, _, _) => (Effects.Action.BackendRun, host.toString)
+    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("externalBackend", resourcePath))
     AuthorityGate.forFamily(Effects.Family.ExternalBackend).checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
       req match
         case EB.Request.Find(host) =>

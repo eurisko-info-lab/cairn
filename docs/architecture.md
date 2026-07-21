@@ -186,11 +186,25 @@ language rather than an opaque Scala shape.
   yet — it makes the *data* real, proving the prefix-matching machinery
   against real paths for the first time; a genuinely restrictive
   path-scoped policy is a separate, later exercise once real identity
-  exists. The other 7 families remain: `Workspace`/`ExternalBackend` have
-  real per-request paths too (natural next candidates); `Clock`/`Random`/
-  `Terminal`/`Lsp`/`Process` don't have an obvious per-request resource
-  identifier and need their own judgment call, same as `Filesystem`'s own
-  `Delete`/`Mkdirs` categorization needed one two slices ago.
+  exists.
+- **Typed per-family resources — remaining 7 families, closed out.**
+  `Workspace`, `ExternalBackend`, and `Process` had a natural per-request
+  resource identifier and now thread it through, same pattern as
+  `Filesystem`: `Workspace.perform` uses the real `dir`/`langDir`/`path`
+  per request (`LanguageDirs` takes no input at all, so `"*"` there is
+  honestly correct, not a placeholder); `ExternalBackend.perform` uses the
+  `Host` being invoked (`ScalaCli`/`Cargo`/`Runghc`/`Lake`) — there's no
+  path to scope by until `find` resolves one, and the tool itself is what
+  a policy would actually want to restrict; `Process.perform` uses the
+  executable name (`command.headOption`). `Clock`, `Random`, `Terminal`,
+  and `Lsp` genuinely have **no** per-request resource to thread —
+  wall-clock time, randomness, and stdio/LSP session transport aren't
+  scoped to any target a policy could restrict by (`Random.Bytes(n)`'s `n`
+  is a quantity, not something to restrict; a terminal/LSP session isn't
+  "which terminal", there's only one). Each of those 4 handlers now has an
+  inline comment stating this explicitly, so a `"*"` resource reads as a
+  documented judgment call rather than unfinished work. All 8 families'
+  resource-path status is now settled one way or the other.
 
 ## Capability-gating handler entry points (post-migration priority #3)
 

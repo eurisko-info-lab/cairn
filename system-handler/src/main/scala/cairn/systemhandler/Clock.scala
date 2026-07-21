@@ -21,6 +21,8 @@ object Clock:
     val action = req match
       case Clk.Request.Now           => Effects.Action.ClockNow
       case Clk.Request.TimestampSlug => Effects.Action.ClockTimestampSlug
+    // "*" is honestly correct here, not a placeholder: wall-clock time
+    // isn't scoped to any target a policy could restrict by.
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("clock", "*"))
     AuthorityGate.forFamily(Effects.Family.Clock).checked(authReq)(err => Clk.Error.Unavailable(s"denied: $err")) {
       try req match

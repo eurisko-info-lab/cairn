@@ -31,9 +31,10 @@ object Process:
           Left(Proc.Error.Io(e.getMessage))
 
   def perform(req: Proc.Request): Either[Proc.Error, Proc.Result] =
-    val action = req match
-      case Proc.Request.Run(_, _, _) => Effects.Action.ProcessRun
-    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("process", "*"))
+    // The executable being run is the natural resource identifier.
+    val (action, resourcePath) = req match
+      case Proc.Request.Run(command, _, _) => (Effects.Action.ProcessRun, command.headOption.getOrElse("*"))
+    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("process", resourcePath))
     AuthorityGate.forFamily(Effects.Family.Process).checked(authReq)(err => Proc.Error.Io(s"denied: $err")) {
       req match
         case Proc.Request.Run(cmd, cwd, merge) =>

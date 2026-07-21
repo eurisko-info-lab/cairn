@@ -45,6 +45,8 @@ object LspTransport:
     val action = req match
       case LspIface.Request.ReadMessage     => Effects.Action.LspRead
       case LspIface.Request.WriteMessage(_) => Effects.Action.LspWrite
+    // "*" is honestly correct here, not a placeholder: an LSP session's
+    // transport isn't scoped per-message — same reasoning as Terminal.
     val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("lsp", "*"))
     AuthorityGate.forFamily(Effects.Family.Lsp).checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
       try req match
