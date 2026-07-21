@@ -25,15 +25,17 @@ are optional.
 |---|---|
 | **Cairn side** | `LeanCore` — MiniTT + `Eq`/`refl`/`subst` + opaque checked decls |
 | **Native side** | Lean 4 `#check` on a *tiny projected fragment* (not Rosetta `LeanPort`) |
-| **Claims** | Closed fragment: `sort0`/`sort1`, `Nat`+`zero`/`succ`/`natRec`, Π/λ/app, `Eq`/`refl`/`subst`. Cairn `hasType` agrees with projected `#check`. `subst(P, refl(a), px) ⇝ px` matches Lean `Eq.ndrec` (Type-level ι; `Eq.subst` is Prop-sorted) on that fragment. |
+| **Claims** | Closed fragment: `sort0`/`sort1`, `Nat`+`zero`/`succ`/`natRec`, Π/λ/app, `Eq`/`refl`/`subst`. Cairn `hasType` agrees with projected `#check`. `subst(P, refl(a), px) ⇝ px` matches Lean `Eq.ndrec` (Type-level ι; `Eq.subst` is Prop-sorted). `natRec` ι-zero / ι-succ for identity-on-`Nat` agree with Lean `N.rec` definitional equalities on the corpus. |
 | **Does NOT claim** | Lean 4 kernel/elaborator/tactics; Lean surface / import / mathlib; full CIC (universe polymorphism, user inductives, `J`, delta-unfolding `def`s); Rosetta theorem bodies (`sorry` obligations stay obligations — §4.10). |
 
 ### How tests run
 
 1. **Always:** Cairn `check` / `normalize` on the corpus → `cairnResult` digest.
-2. **If `lean` on PATH:** write the projected snippet, run `lean`, import ok/fail → `live:lean:…`.
+2. **If `lean` on PATH:** write the projected snippet, run `lean`, import ok/fail → `live:lean:exit=…;out=<stdout-digest>`.
 3. **Else:** compare against recorded golden outcomes → `golden` (CI stays green).
 4. **Never:** pretend Rosetta Lean ports are kernel-checked.
+
+Corpus cases: `refl-zero`, `refl-bad`, `subst-refl`, `natrec-zero`, `natrec-succ`.
 
 ## HVM / IC envelope (`hvm-ic`)
 

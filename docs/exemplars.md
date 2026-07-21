@@ -190,8 +190,9 @@ Remaining: full path-induction `J`; delta-unfolding `def`s; universe
 polymorphism; user-declarable inductives; a real Lean import/export surface.
 
 **Agreement envelope** (not Lean-kernel compatibility): closed LeanCore fragment
-vs native Lean `#check` when `lean` is on PATH, else goldens — see
-[agreement.md](agreement.md). Rosetta LeanPort obligations stay separate (§4.10).
+(`Eq`/`refl`/`subst` + `natRec` ι) vs native Lean `#check` when `lean` is on
+PATH (live stdout digests), else goldens — see [agreement.md](agreement.md).
+Rosetta LeanPort obligations stay separate (§4.10).
 
 ## Rosetta QuickSort — on par with ROSETTA entrypoints
 

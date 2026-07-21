@@ -33,7 +33,8 @@ object Agreement:
     claims = List(
       "Closed LeanCore fragment: sort0/sort1, Nat+zero/succ/natRec, Π/λ/app, Eq/refl/subst",
       "hasType(ctx, term, ty) via Cairn Checker agrees with projected Lean #check on the envelope corpus",
-      "ι-rule subst(P, refl(a), px) ⇝ px matches Lean Eq.ndrec (Type-level; Eq.subst is Prop-sorted)"),
+      "ι-rule subst(P, refl(a), px) ⇝ px matches Lean Eq.ndrec (Type-level; Eq.subst is Prop-sorted)",
+      "ι-rules natRec(_, z, s, zero) ⇝ z and natRec on succ agree with Lean N.rec definitional equalities (id-Nat corpus)"),
     excludes = List(
       "Lean 4 kernel / elaborator / tactic-engine compatibility",
       "Lean surface syntax, import/export, mathlib",

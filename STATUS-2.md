@@ -10,9 +10,11 @@ agreement envelope digests) and a **deferred-trust follow-on** (issuer-scoped
 `ReplayStore`, journaled transactional accept, CAS-pinned effect interfaces,
 causal-LCA merge) plus **reclaim / sync** (`reclaimOrphanBlobs`, CAS
 `replay-snapshot` merge) and an **HVM surface exporter** (`HvmSurface` HVM2
-books + live `hvm` when on PATH). Full suite: **460 tests green** (+1 skipped;
-`tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
-round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
+books + live `hvm` when on PATH), plus a **Lean agreement expansion**
+(`natRec` ι corpus + live `#check` stdout digests). Full suite: **461 tests
+green** (+2 skipped; `tests` module; `sbt test`), including a 100 000-term
+fuzz corpus with zero round-trip failures, `ParitySuite`, and
+`ExemplarPackSuite`.
 
 ## Story scorecard
 
@@ -162,7 +164,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Tips / ΔL | Opaque `ValidatedTip` + `ValidatedChangeSet`; Branches accepts only checked tips; loads replay |
 | Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS; CAS `replay-snapshot` publish/merge) |
 | BranchManifest | Causal digests; sidecars kept; causal-LCA merge by shared module results; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
-| Agreement | Certificate carries `envelopeDigest` + `nativeEvidence` |
+| Agreement | Certificate carries `envelopeDigest` + `nativeEvidence`; Lean `natRec` ι + live stdout digests |
 | Effect interfaces | `ActionKey` digest-bound; CAS-pinned `effect-interface` via `PinnedInterface` / `ActionKey.fromPinned`; host Meta remains bootstrap |
 
 ### Remaining honest gaps
@@ -171,7 +173,8 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   phrase-staleness machine, Studio UI.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
-  `#check` ([docs/agreement.md](docs/agreement.md)), not full kernel compatibility.
+  `#check` (refl/subst/`natRec` ι corpus; live stdout digests when `lean` on
+  PATH — [docs/agreement.md](docs/agreement.md)), not full kernel compatibility.
 - HVM live differential: `HvmSurface` exports HVM2 CON/DUP/ERA books for the
   envelope corpus; live `hvm run` when on PATH. Still not full HVM ABI / Bend /
   HVM5 / labelled-konst isomorphism outside the corpus.

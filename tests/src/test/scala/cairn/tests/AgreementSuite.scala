@@ -62,6 +62,7 @@ class AgreementSuite extends munit.FunSuite:
               s"hvm result '$res' rejected for expectation '$expectation' ($detail)")
             (golden, NativeSource.Live("hvm", s"$detail;result=$res"))
 
+  /** Projected Lean snippet: exit code + stdout digest when `lean` is on PATH. */
   private def leanCheck(caseName: String, body: String): (Int, NativeSource) =
     onPath("lean") match
       case None => (-1, NativeSource.Golden)
@@ -78,8 +79,9 @@ class AgreementSuite extends munit.FunSuite:
              |
              |""".stripMargin + body
         Files.writeString(f, src)
-        val (code, _) = runCmd(List(lean.toString, f.toString))
-        (code, NativeSource.Live("lean", s"exit=$code"))
+        val (code, out) = runCmd(List(lean.toString, f.toString))
+        val outDig = Digest.of(Canon.CStr(out.trim)).short
+        (code, NativeSource.Live("lean", s"exit=$code;out=$outDig"))
 
   private def certify(
       env: Agreement.Envelope,
@@ -157,6 +159,55 @@ class AgreementSuite extends munit.FunSuite:
       case _                       => ()
     val c = certify(Agreement.leanCore, "subst-refl",
       Digest.of(Cst.toCanon(term)), cairn, Agreement.outcome("ok", Cst.toCanon(zero)), src)
+    assert(c.agreed)
+
+  /** Identity via natRec — envelope already claims Nat+natRec; corpus covers ι. */
+  private def natRecId(n: Cst): Cst =
+    import LeanCore.*
+    val mo = lam("_", natTy, natTy)
+    val step = lam("k", natTy, lam("ih", natTy, succ(v("ih"))))
+    natRec(mo, zero, step, n)
+
+  test("lean-core: natRec ι-zero (id Nat)"):
+    import LeanCore.*
+    val term = natRecId(zero)
+    assert(check(ctxNil, term, natTy).isRight)
+    assertEquals(normalize(term).fold(e => fail(e), identity), zero)
+    val cairn = Agreement.outcome("ok", Cst.toCanon(zero))
+    val (code, src) = leanCheck("natrec-zero",
+      """theorem id_z :
+        |  N.rec (motive := fun _ => N) N.z (fun _ ih => N.s ih) N.z = N.z := rfl
+        |#check id_z
+        |""".stripMargin)
+    src match
+      case NativeSource.Live(_, detail) =>
+        assertEquals(code, 0)
+        assert(detail.contains("out="), detail)
+      case _ => ()
+    val c = certify(Agreement.leanCore, "natrec-zero",
+      Digest.of(Cst.toCanon(term)), cairn, Agreement.outcome("ok", Cst.toCanon(zero)), src)
+    assert(c.agreed)
+    assert(c.source.startsWith("golden") || c.source.startsWith("live:lean:"))
+
+  test("lean-core: natRec ι-succ (id Nat)"):
+    import LeanCore.*
+    val one = succ(zero)
+    val term = natRecId(one)
+    assert(check(ctxNil, term, natTy).isRight)
+    assertEquals(normalize(term).fold(e => fail(e), identity), one)
+    val cairn = Agreement.outcome("ok", Cst.toCanon(one))
+    val (code, src) = leanCheck("natrec-succ",
+      """theorem id_sz :
+        |  N.rec (motive := fun _ => N) N.z (fun _ ih => N.s ih) (N.s N.z) = N.s N.z := rfl
+        |#check id_sz
+        |""".stripMargin)
+    src match
+      case NativeSource.Live(_, detail) =>
+        assertEquals(code, 0)
+        assert(detail.contains("out="), detail)
+      case _ => ()
+    val c = certify(Agreement.leanCore, "natrec-succ",
+      Digest.of(Cst.toCanon(term)), cairn, Agreement.outcome("ok", Cst.toCanon(one)), src)
     assert(c.agreed)
 
   // ---- HVM / IC envelope ---------------------------------------------------
