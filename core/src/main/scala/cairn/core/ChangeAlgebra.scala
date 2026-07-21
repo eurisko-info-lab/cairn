@@ -1,7 +1,6 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.{Delta, Module}
 
 /** M16: algebra of validated changes — composition, inverses (relative to a
   * base module), and footprint commutation. M17: three-way semantic merge

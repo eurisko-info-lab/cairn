@@ -339,11 +339,12 @@ Acceptance:
 
 Create `core/` and migrate pure proposal machinery.
 
-**Progress (ground truth in `docs/architecture.md`):** slices 1–7 landed —
+**Progress (ground truth in `docs/architecture.md`):** slices 1–8 landed —
 Search/Tactics, TreeEngine, PackCompose, Filesystem extraction, Grammar, Meta/
-Surfaces, and Delta/ModuleSurface/Capabilities+Query. Remaining Phase 2
-candidates from the lists below: `ChangeAlgebra`/`Merge`/`Migrate` (workbench),
-rosetta port-generation engine, optional Scaffold.plan revisit.
+Surfaces, Delta/ModuleSurface/Capabilities+Query, and ChangeAlgebra/Merge/
+Migrate. Remaining Phase 2 candidates from the lists below: rosetta
+port-generation engine, optional Scaffold.plan revisit. `workbench` now holds
+only `PackLoader` (composition-root orchestrator).
 
 Likely destinations:
 

@@ -129,10 +129,10 @@ once compiled), 2 needed an added import (`tests/MetaPreserveFormatSuite.scala`,
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
 only import updates at call sites. `user` and `runtime` do not exist yet;
-`workbench.ChangeAlgebra`/`Merge`/`Migrate` and `rosetta`'s own
-port-generation engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`,
-confirmed I/O-free but not yet relocated) still play Core's role, unsplit.
-Every exemplar language and domain pack still lives under `examples/`.
+`rosetta`'s own port-generation engine (`Rosetta.scala`/`Rosetta2.scala`/
+`Ports2.scala`, confirmed I/O-free but not yet relocated) still plays Core's
+role, unsplit. Every exemplar language and domain pack still lives under
+`examples/`. `workbench` retains only `PackLoader`.
 
 `core` (Phase 2, seventh slice): `workbench.Delta` (Module + ΔL derivation/
 apply/compose/flatten/format-preserving apply, 456 lines),
@@ -142,10 +142,16 @@ apply/compose/flatten/format-preserving apply, 456 lines),
 Delta/ModuleSurface; Query's `run` had a filesystem CAS walk for
 `artifacts kind` — purified by taking a preloaded `List[Artifact]` instead of
 a `Path` (one WaveH2Suite call site updated to pass artifacts it already
-`cas.put`). No `build.sbt` change. `ChangeAlgebra`/`Merge`/`Migrate` stay in
-`workbench` for now (import `cairn.core.{Delta, Module}`); they are the
-natural next workbench follow-on, not part of this slice. `ModuleBoundarySuite`
-now also enforces the core no-filesystem/networking/process rule.
+`cas.put`). No `build.sbt` change. `ModuleBoundarySuite` now also enforces
+the core no-filesystem/networking/process rule.
+
+`core` (Phase 2, eighth slice): `workbench.ChangeAlgebra`/`Merge`/`Migrate`
+(+ `LangMigration`, ~177 lines) moved wholesale to `core.ChangeAlgebra`.
+Pure code motion — already depended only on `cairn.kernel.*` and
+`cairn.core.{Delta, Module}`. No `build.sbt` change; call sites already had
+`import cairn.core.*` and picked up the relocated symbols with no edits.
+`workbench` now contains only `PackLoader.scala` (I/O + pure orchestration
+seam awaiting a future `runtime`/`user` composition root).
 
 ## Forbidden-import rules
 
@@ -175,7 +181,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First–sixth slices as previously recorded. Seventh slice: `workbench.Delta`/`ModuleSurface`/`Capabilities`+`Query` → `core` (Query.kind purified off the filesystem). Still pending within Phase 2: `workbench.ChangeAlgebra`/`Merge`/`Migrate`, `rosetta`'s port-generation engine, optional `Scaffold.plan` revisit |
+| 2. Introduce Core | In progress | First–seventh slices as previously recorded. Eighth slice: `workbench.ChangeAlgebra`/`Merge`/`Migrate` → `core`. Still pending within Phase 2: `rosetta`'s port-generation engine, optional `Scaffold.plan` revisit. `workbench` is down to `PackLoader` only |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |
