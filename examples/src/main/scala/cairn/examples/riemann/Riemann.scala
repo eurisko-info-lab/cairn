@@ -1,10 +1,11 @@
 package cairn.examples.riemann
 
 import cairn.kernel.*
-import cairn.systeminterface.PackAccess
+import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systeminterface.{Filesystem as Fs, PackAccess}
 import cairn.core.*
 import cairn.proof.Claim
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** Riemann Hypothesis pack — an open mathematical claim, not a parity item.
   *
@@ -181,14 +182,21 @@ final class Riemann(packs: PackAccess):
       Cst.node("artifact", Cst.Leaf(claim.artifact.digest.hex)))
     JsonSurface.encode(Cst.node("obligations", Cst.Node("list", List(entry))))
 
-  def writeArtifacts(dir: Path): Either[String, (Path, Path)] =
+  def writeArtifacts(
+      dir: Path,
+      ctx: EffectContext = EffectContext.forFilesystem(),
+  ): Either[String, (Path, Path)] =
+    def fsPath(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
+    def fsMkdirs(p: Path): Either[String, Unit] =
+      Filesystem.run(Fs.Request.Mkdirs(fsPath(p)), ctx).map(_ => ()).left.map(_.toString)
+    def fsWrite(p: Path, text: String): Either[String, Unit] =
+      Filesystem.run(Fs.Request.Write(fsPath(p), text), ctx).map(_ => ()).left.map(_.toString)
+    val leanF = dir.resolve("Riemann.lean")
+    val manF = dir.resolve("obligations.json")
     for
       leanText <- LeanPort.emit(riemannHypothesisClaim)
       manifest <- obligationsManifest(riemannHypothesisClaim, "Riemann.lean")
-    yield
-      Files.createDirectories(dir)
-      val leanF = dir.resolve("Riemann.lean")
-      val manF = dir.resolve("obligations.json")
-      Files.writeString(leanF, leanText)
-      Files.writeString(manF, manifest)
-      (leanF, manF)
+      _ <- fsMkdirs(dir)
+      _ <- fsWrite(leanF, leanText)
+      _ <- fsWrite(manF, manifest)
+    yield (leanF, manF)

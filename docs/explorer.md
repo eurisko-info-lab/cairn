@@ -15,8 +15,8 @@ transactions, and view **typed** artifacts with kind-specific surfaces.
 Transcripts write a **fresh run** under `$CAIRN_HOME/runs/<timestamp>/` and print
 absolute node paths plus a copy-paste `ui` command. Bare `ui` follows
 `$CAIRN_HOME/LATEST` → that run’s `nodeA`. Home/run/ui path I/O, CLI
-hash/put/canon/transcript source reads, and load-language are authorized
-via `Filesystem` (`EffectContext.forFilesystem`). Board discovery uses
+hash/put/canon/transcript source reads, load-language, and emit-languages are
+authorized via `Filesystem` (`EffectContext.forFilesystem`). Board discovery uses
 `CasAdminEffects.artifacts` (CAS `stats` gate).
 
 ```bash

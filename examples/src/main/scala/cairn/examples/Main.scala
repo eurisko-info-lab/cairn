@@ -2,7 +2,9 @@ package cairn.examples
 
 import cairn.runtime.PackLoader
 import cairn.surface.Cli
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systeminterface.Filesystem as Fs
+import java.nio.file.Path
 
 /** The `cairn` command-line entry point: the generic surface CLI wired with
   * the shipped example language packs (packs are injected here so the surface
@@ -64,20 +66,36 @@ import cairn.systemhandler.EffectContext
         //
         // Both fall back to a full canonical reprint when there's nothing to
         // compare against (new file, or git/the repo unavailable).
-        val dir = java.nio.file.Path.of("languages")
-        java.nio.file.Files.createDirectories(dir)
-
-        def onDisk(path: java.nio.file.Path): Option[String] =
-          if java.nio.file.Files.exists(path) then Some(java.nio.file.Files.readString(path)) else None
-        def gitHeadVersion(path: java.nio.file.Path): Option[String] =
+        // Path I/O is gated through Filesystem (`forFilesystem`).
+        val dir = Path.of("languages")
+        def fsPath(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
+        def fsFail(e: Fs.Error): Nothing =
+          System.err.println(e); sys.exit(1)
+        def fsMkdirs(p: Path): Unit =
+          Filesystem.run(Fs.Request.Mkdirs(fsPath(p)), fsCtx).fold(fsFail, _ => ())
+        def fsWrite(p: Path, text: String): Unit =
+          Filesystem.run(Fs.Request.Write(fsPath(p), text), fsCtx).fold(fsFail, _ => ())
+        def onDisk(path: Path): Option[String] =
+          Filesystem.run(Fs.Request.Exists(fsPath(path)), fsCtx) match
+            case Right(Fs.Response.Bool(true)) =>
+              Filesystem.run(Fs.Request.Read(fsPath(path)), fsCtx) match
+                case Right(Fs.Response.Text(s)) => Some(s)
+                case Left(e)                    => fsFail(e)
+                case Right(other)               => System.err.println(s"unexpected fs: $other"); sys.exit(1)
+            case Right(Fs.Response.Bool(false)) => None
+            case Left(e)                        => fsFail(e)
+            case Right(other)                   => System.err.println(s"unexpected fs: $other"); sys.exit(1)
+        def gitHeadVersion(path: Path): Option[String] =
           // Quietly miss when the path isn't in HEAD yet (new surface files).
           scala.util.Try(
             scala.sys.process.Process(Seq("git", "show", s"HEAD:$path"))
               .!!(scala.sys.process.ProcessLogger(_ => (), _ => ()))
           ).toOption
 
-        def writeFromFragments(path: java.nio.file.Path, name: String, fragments: List[cairn.kernel.Fragment]): String =
-          java.nio.file.Files.createDirectories(path.getParent)
+        fsMkdirs(dir)
+
+        def writeFromFragments(path: Path, name: String, fragments: List[cairn.kernel.Fragment]): String =
+          Option(path.getParent).foreach(fsMkdirs)
           val text = onDisk(path) match
             case Some(existing) =>
               cairn.core.Meta.printLanguagePreservingFormat(name, fragments, existing)
@@ -85,13 +103,13 @@ import cairn.systemhandler.EffectContext
             case None =>
               cairn.core.Meta.printLanguage(name, fragments)
                 .fold(e => { System.err.println(e); sys.exit(1) }, identity)
-          java.nio.file.Files.writeString(path, text)
+          fsWrite(path, text)
           text
 
         def writeFromSurface(
-            path: java.nio.file.Path, style: String, language: String, fragments: List[cairn.kernel.Fragment],
+            path: Path, style: String, language: String, fragments: List[cairn.kernel.Fragment],
         ): String =
-          java.nio.file.Files.createDirectories(path.getParent)
+          Option(path.getParent).foreach(fsMkdirs)
           val text = onDisk(path) match
             case Some(existing) =>
               cairn.core.Meta.printSurfacePreservingFormat(style, language, fragments, existing)
@@ -99,7 +117,7 @@ import cairn.systemhandler.EffectContext
             case None =>
               cairn.core.Meta.printSurface(style, language, fragments)
                 .fold(e => { System.err.println(e); sys.exit(1) }, identity)
-          java.nio.file.Files.writeString(path, text)
+          fsWrite(path, text)
           text
 
         /** Exemplar packs: semantic `languages/<name>.cairn` + surface under
@@ -109,7 +127,7 @@ import cairn.systemhandler.EffectContext
         def writeExemplarPair(name: String): (String, String) =
           val semPath = dir.resolve(s"$name.cairn")
           val surfPath = dir.resolve(name).resolve("surfaces").resolve("default.cairn")
-          def rewriteLanguage(path: java.nio.file.Path, langName: String): String =
+          def rewriteLanguage(path: Path, langName: String): String =
             val working = onDisk(path).getOrElse(
               throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
             val text = gitHeadVersion(path) match
@@ -121,9 +139,9 @@ import cairn.systemhandler.EffectContext
                   case Right((n, fs)) =>
                     cairn.core.Meta.printLanguage(n, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
                   case Left(e) => System.err.println(e); sys.exit(1)
-            java.nio.file.Files.writeString(path, text)
+            fsWrite(path, text)
             text
-          def rewriteSurface(path: java.nio.file.Path, style: String, language: String): String =
+          def rewriteSurface(path: Path, style: String, language: String): String =
             val working = onDisk(path).getOrElse(
               throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
             val text = gitHeadVersion(path) match
@@ -135,7 +153,7 @@ import cairn.systemhandler.EffectContext
                   case Right((n, l, fs)) =>
                     cairn.core.Meta.printSurface(n, l, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
                   case Left(e) => System.err.println(e); sys.exit(1)
-            java.nio.file.Files.writeString(path, text)
+            fsWrite(path, text)
             text
           (rewriteLanguage(semPath, name), rewriteSurface(surfPath, "default", name))
 

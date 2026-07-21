@@ -2,9 +2,10 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.core.{Parser, Module, Delta}
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
+import cairn.systeminterface.Filesystem as Fs
 import cairn.ledger.Provenance
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** Thin Search tutorial: seed origin+goal, ΔL-add Intent and Fact into CAS,
   * record Intent→Fact provenance. No LLM / dispatcher.
@@ -22,12 +23,16 @@ object SearchTutorial:
       boardDigest: String
   )
 
-  def run(workDir: Path = Files.createTempDirectory("cairn-search")): Report =
-    Files.createDirectories(workDir)
+  def run(
+      workDir: Path,
+      fsCtx: EffectContext = EffectContext.forFilesystem(),
+      casCtx: EffectContext = EffectContext.forCas(),
+  ): Report =
+    Filesystem.run(Fs.Request.Mkdirs(Fs.Path(workDir.toAbsolutePath.normalize.toString)), fsCtx)
+      .fold(e => throw RuntimeException(e.toString), _ => ())
     val Search = cairn.examples.search.Search(
       cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
     val cas = DiskCas(workDir.resolve("cas"))
-    val casCtx = EffectContext.forCas()
     val lang = Search.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet
@@ -44,7 +49,7 @@ object SearchTutorial:
       .fold(e => throw RuntimeException(e), identity)
 
     val intentTerm = withIntent.get("explore").get
-    val intentDig = Search.putTerm(cas, intentTerm)
+    val intentDig = Search.putTerm(cas, intentTerm, casCtx)
 
     val addFact = Parser.parse(dl.grammar,
       """{ add finding = fact "evidence confirms the finding" ;

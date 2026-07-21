@@ -1,11 +1,12 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
+import cairn.systemhandler.{EffectContext, Filesystem}
 import cairn.runtime.PackLoader
 import cairn.kernel.*
 import cairn.core.*
 import cairn.ledger.*
 import cairn.surface.Transcript
+import cairn.systeminterface.Filesystem as Fs
 import cairn.examples.stlc.Stlc
 
 /** Phase 8 acceptance (S46–S47): transcript DSL runs the MVP end-to-end;
@@ -18,10 +19,25 @@ class Phase8Suite extends munit.FunSuite:
   private val processCtx = EffectContext.forProcess()
   private val fsCtx = EffectContext.forFilesystem()
 
+  private def readTranscriptSource(candidates: List[String], missing: String): String =
+    val paths = candidates.map(java.nio.file.Path.of(_))
+    val path = paths.view
+      .flatMap { p =>
+        Filesystem.run(Fs.Request.Exists(Fs.Path(p.toString)), fsCtx) match
+          case Right(Fs.Response.Bool(true)) => Some(p)
+          case _                             => None
+      }
+      .headOption
+      .getOrElse(fail(missing))
+    Filesystem.run(Fs.Request.Read(Fs.Path(path.toString)), fsCtx) match
+      case Right(Fs.Response.Text(s)) => s
+      case Left(e)                    => fail(e.toString)
+      case Right(other)               => fail(s"unexpected fs: $other")
+
   test("mvp transcript runs from checkout (S46 acceptance, §9.9)"):
-    val candidates = List("transcripts/mvp.cairn", "../transcripts/mvp.cairn").map(java.nio.file.Path.of(_))
-    val path = candidates.find(java.nio.file.Files.exists(_)).getOrElse(fail("transcripts/mvp.cairn not found"))
-    val src = java.nio.file.Files.readString(path)
+    val src = readTranscriptSource(
+      List("transcripts/mvp.cairn", "../transcripts/mvp.cairn"),
+      "transcripts/mvp.cairn not found")
     val work = java.nio.file.Files.createTempDirectory("cairn-mvp")
     Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
       case Right(report) =>

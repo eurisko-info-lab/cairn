@@ -68,9 +68,11 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   on accept. `Branches` CAS put/get authorize via `EffectContext`; refs FS
   is gated through `Filesystem` (`EffectContext.forBranches`). Node/Sync/HttpSync
   chain-file I/O is gated through `Filesystem` (`EffectContext.forLedger`). CLI
-  Transcript/Cli home/run/ui paths, hash/put/canon/transcript source, and
-  load-language are gated through `Filesystem` (`EffectContext.forFilesystem`).
-  Browser board CAS inventory authorizes via `CasAdminEffects.artifacts`; UI
+  Transcript/Cli home/run/ui paths, hash/put/canon/transcript source,
+  load-language, and `emit-languages` are gated through `Filesystem`
+  (`EffectContext.forFilesystem`). Riemann/Search tutorial artifact I/O uses
+  `forFilesystem`; Search CAS puts stay on `CasEffects`. Browser board CAS
+  inventory authorizes via `CasAdminEffects.artifacts`; UI
   filesystem fallback uses `forFilesystem`. CAS
   `contains` / admin / chunking / Unison store are gated (`CasEffects` /
   `CasAdminEffects`); provenance `index`/`why` authorize CAS `stats` then walk.

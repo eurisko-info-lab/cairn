@@ -1,10 +1,11 @@
 package cairn.tests
 
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.surface.*
 import cairn.core.*
+import cairn.systeminterface.Filesystem as Fs
 import cairn.examples.stlc.Stlc
 import cairn.examples.pki.PkiMax
 import cairn.ledger.Keypair
@@ -24,6 +25,21 @@ class WaveH2Suite extends munit.FunSuite:
   private val processCtx = EffectContext.forProcess()
   private val lspCtx = EffectContext.forLsp()
   private val fsCtx = EffectContext.forFilesystem()
+
+  private def readTranscriptSource(candidates: List[String], missing: String): String =
+    val paths = candidates.map(java.nio.file.Path.of(_))
+    val path = paths.view
+      .flatMap { p =>
+        Filesystem.run(Fs.Request.Exists(Fs.Path(p.toString)), fsCtx) match
+          case Right(Fs.Response.Bool(true)) => Some(p)
+          case _                             => None
+      }
+      .headOption
+      .getOrElse(fail(missing))
+    Filesystem.run(Fs.Request.Read(Fs.Path(path.toString)), fsCtx) match
+      case Right(Fs.Response.Text(s)) => s
+      case Left(e)                    => fail(e.toString)
+      case Right(other)               => fail(s"unexpected fs: $other")
 
   // ---- M43: capability manifests ----
 
@@ -414,9 +430,9 @@ class WaveH2Suite extends munit.FunSuite:
   // ---- M49: the max transcript ----
 
   test("M49: transcripts/max.cairn runs end-to-end (3 nodes, gossip, ports, queries)"):
-    val candidates = List("transcripts/max.cairn", "../transcripts/max.cairn").map(java.nio.file.Path.of(_))
-    val path = candidates.find(java.nio.file.Files.exists(_)).getOrElse(fail("max.cairn missing"))
-    val src = java.nio.file.Files.readString(path)
+    val src = readTranscriptSource(
+      List("transcripts/max.cairn", "../transcripts/max.cairn"),
+      "max.cairn missing")
     val work = java.nio.file.Files.createTempDirectory("cairn-max")
     Transcript.run(src,
       Map("stlc" -> Stlc.language),

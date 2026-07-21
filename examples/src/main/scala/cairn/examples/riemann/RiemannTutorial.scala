@@ -1,7 +1,9 @@
 package cairn.examples.riemann
 
 import cairn.core.*
-import java.nio.file.{Files, Path}
+import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systeminterface.Filesystem as Fs
+import java.nio.file.Path
 
 /** Thin Riemann tutorial: load the standalone analytic-claims language,
   * build the Riemann Hypothesis as a proof-free Claim, project it to Lean
@@ -21,7 +23,7 @@ object RiemannTutorial:
       certificateExists: Boolean
   )
 
-  def run(dir: Path): Report =
+  def run(dir: Path, fsCtx: EffectContext = EffectContext.forFilesystem()): Report =
     val Riemann = cairn.examples.riemann.Riemann(
       cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
     val lang = Riemann.language
@@ -30,10 +32,15 @@ object RiemannTutorial:
     val met = requires.subsetOf(provides)
     val claim = Riemann.riemannHypothesisClaim
     val roundTrips = RoundTrip.check(lang.grammar, claim.statement).isRight
-    val (leanFile, manifestFile) = Riemann.writeArtifacts(dir)
+    val (leanFile, manifestFile) = Riemann.writeArtifacts(dir, fsCtx)
       .fold(e => throw RuntimeException(e), identity)
-    val leanText = Files.readString(leanFile)
-    val manifestText = Files.readString(manifestFile)
+    def fsRead(p: Path): String =
+      Filesystem.run(Fs.Request.Read(Fs.Path(p.toAbsolutePath.normalize.toString)), fsCtx) match
+        case Right(Fs.Response.Text(s)) => s
+        case Left(e)                    => throw RuntimeException(e.toString)
+        case Right(other)               => throw RuntimeException(s"unexpected fs: $other")
+    val leanText = fsRead(leanFile)
+    val manifestText = fsRead(manifestFile)
     // banner comment lines explain the absence of sorry/theorem in prose —
     // only the generated code region matters for this check
     val code = leanText.linesIterator.filterNot(_.stripLeading.startsWith("--")).mkString("\n")
