@@ -17,9 +17,8 @@ package cairn.kernel
   * work for the first four families because each had ≤2 distinct request
   * shapes.
   *
-  * `random`/`clock`/`process`/`externalBackend` are the converted families;
-  * the remaining live ones (`Filesystem`, `Workspace`, `Terminal`, `Lsp`)
-  * are follow-on slices — see `docs/architecture.md`.
+  * `random`/`clock`/`process`/`externalBackend`/`terminal`/`workspace`/
+  * `filesystem` are converted; `Lsp` remains — see `docs/architecture.md`.
   */
 object EffectMeta:
   /** A Fragment paired with the explicit constructor-name → Action grouping
@@ -27,8 +26,13 @@ object EffectMeta:
     * (widening it to fully mint cases from the Fragment is a separate,
     * larger move) — this makes the grouping authoritative and checked
     * ([[completeness]]) rather than replacing `Action` outright.
+    *
+    * A `None` entry is an explicit, checked declaration that a request
+    * needs no authorization at all (e.g. `Filesystem.Resolve`, pure
+    * path-string arithmetic with zero I/O) — distinct from an omitted
+    * entry, which `completeness` still flags as an ungated request.
     */
-  final case class EffectFamily(fragment: Fragment, requestActions: Map[String, Effects.Action])
+  final case class EffectFamily(fragment: Fragment, requestActions: Map[String, Option[Effects.Action]])
 
   private val randomFragment: Fragment = Fragment(
     name = "effect.random",
@@ -44,7 +48,7 @@ object EffectMeta:
       CtorDef("unavailable", "Error", List("Str"))))
 
   val random: EffectFamily = EffectFamily(randomFragment, Map(
-    "bytes" -> Effects.Action.RandomBytes))
+    "bytes" -> Some(Effects.Action.RandomBytes)))
 
   private val clockFragment: Fragment = Fragment(
     name = "effect.clock",
@@ -62,8 +66,8 @@ object EffectMeta:
       CtorDef("unavailable", "Error", List("Str"))))
 
   val clock: EffectFamily = EffectFamily(clockFragment, Map(
-    "now" -> Effects.Action.ClockNow,
-    "timestampSlug" -> Effects.Action.ClockTimestampSlug))
+    "now" -> Some(Effects.Action.ClockNow),
+    "timestampSlug" -> Some(Effects.Action.ClockTimestampSlug)))
 
   private val processFragment: Fragment = Fragment(
     name = "effect.process",
@@ -80,7 +84,7 @@ object EffectMeta:
       CtorDef("io", "Error", List("Str"))))
 
   val process: EffectFamily = EffectFamily(processFragment, Map(
-    "run" -> Effects.Action.ProcessRun))
+    "run" -> Some(Effects.Action.ProcessRun)))
 
   private val externalBackendFragment: Fragment = Fragment(
     name = "effect.externalBackend",
@@ -99,8 +103,8 @@ object EffectMeta:
       CtorDef("io", "Error", List("Str"))))
 
   val externalBackend: EffectFamily = EffectFamily(externalBackendFragment, Map(
-    "find" -> Effects.Action.BackendFind,
-    "run" -> Effects.Action.BackendRun))
+    "find" -> Some(Effects.Action.BackendFind),
+    "run" -> Some(Effects.Action.BackendRun)))
 
   private val terminalFragment: Fragment = Fragment(
     name = "effect.terminal",
@@ -126,9 +130,9 @@ object EffectMeta:
     * each of which happened to be 1:1).
     */
   val terminal: EffectFamily = EffectFamily(terminalFragment, Map(
-    "readLine" -> Effects.Action.TerminalRead,
-    "write" -> Effects.Action.TerminalWrite,
-    "writeLine" -> Effects.Action.TerminalWrite))
+    "readLine" -> Some(Effects.Action.TerminalRead),
+    "write" -> Some(Effects.Action.TerminalWrite),
+    "writeLine" -> Some(Effects.Action.TerminalWrite)))
 
   private val workspaceFragment: Fragment = Fragment(
     name = "effect.workspace",
@@ -154,11 +158,66 @@ object EffectMeta:
     * unlike `Terminal`'s 2-to-1, with no drift to fix.
     */
   val workspace: EffectFamily = EffectFamily(workspaceFragment, Map(
-    "languageDirs" -> Effects.Action.WorkspaceRead,
-    "listCairnFiles" -> Effects.Action.WorkspaceRead,
-    "listSubdirs" -> Effects.Action.WorkspaceRead,
-    "listSurfaceCairnFiles" -> Effects.Action.WorkspaceRead,
-    "readText" -> Effects.Action.WorkspaceRead))
+    "languageDirs" -> Some(Effects.Action.WorkspaceRead),
+    "listCairnFiles" -> Some(Effects.Action.WorkspaceRead),
+    "listSubdirs" -> Some(Effects.Action.WorkspaceRead),
+    "listSurfaceCairnFiles" -> Some(Effects.Action.WorkspaceRead),
+    "readText" -> Some(Effects.Action.WorkspaceRead)))
+
+  private val filesystemFragment: Fragment = Fragment(
+    name = "effect.filesystem",
+    provides = List("effect.filesystem"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("read", "Request", List("Path")),
+      CtorDef("write", "Request", List("Path", "Str")),
+      CtorDef("writeBytes", "Request", List("Path", "Bytes")),
+      CtorDef("mkdirs", "Request", List("Path")),
+      CtorDef("exists", "Request", List("Path")),
+      CtorDef("isDirectory", "Request", List("Path")),
+      CtorDef("isRegularFile", "Request", List("Path")),
+      CtorDef("isExecutable", "Request", List("Path")),
+      CtorDef("list", "Request", List("Path")),
+      CtorDef("delete", "Request", List("Path")),
+      CtorDef("createTempDirectory", "Request", List("Str")),
+      CtorDef("resolve", "Request", List("Path", "Path")),
+      CtorDef("text", "Response", List("Str")),
+      CtorDef("bytes", "Response", List("Bytes")),
+      CtorDef("ok", "Response", Nil),
+      CtorDef("bool", "Response", List("Bool")),
+      CtorDef("entries", "Response", List("Paths")),
+      CtorDef("pathValue", "Response", List("Path")),
+      CtorDef("notFound", "Error", List("Path")),
+      CtorDef("io", "Error", List("Str"))))
+
+  /** Three judgment calls, made explicitly rather than guessed at (asked of
+    * the user directly): `delete` groups under the existing `FsWrite`
+    * (mutating, like write/writeBytes — no family has finer-grained rights
+    * than broad classes yet); `createTempDirectory` groups under `FsMkdirs`
+    * (it creates a directory, regardless of the path being system-chosen);
+    * `resolve` needs no right at all — confirmed via
+    * `system-handler.Filesystem.perform`, it's pure path-string arithmetic
+    * with zero `Files.*` calls, so it can't leak, corrupt, or touch
+    * anything. No new `Action` needed: the existing 3 (`FsRead`/`FsWrite`/
+    * `FsMkdirs`) already cover all 11 authorized requests.
+    */
+  val filesystem: EffectFamily = EffectFamily(filesystemFragment, Map(
+    "read" -> Some(Effects.Action.FsRead),
+    "exists" -> Some(Effects.Action.FsRead),
+    "isDirectory" -> Some(Effects.Action.FsRead),
+    "isRegularFile" -> Some(Effects.Action.FsRead),
+    "isExecutable" -> Some(Effects.Action.FsRead),
+    "list" -> Some(Effects.Action.FsRead),
+    "write" -> Some(Effects.Action.FsWrite),
+    "writeBytes" -> Some(Effects.Action.FsWrite),
+    "delete" -> Some(Effects.Action.FsWrite),
+    "mkdirs" -> Some(Effects.Action.FsMkdirs),
+    "createTempDirectory" -> Some(Effects.Action.FsMkdirs),
+    "resolve" -> None))
 
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
@@ -166,18 +225,21 @@ object EffectMeta:
     Effects.Family.Process -> process,
     Effects.Family.ExternalBackend -> externalBackend,
     Effects.Family.Terminal -> terminal,
-    Effects.Family.Workspace -> workspace)
+    Effects.Family.Workspace -> workspace,
+    Effects.Family.Filesystem -> filesystem)
 
   /** The rights vocabulary for a family: every distinct [[Effects.Action]]
-    * its `requestActions` grouping declares.
+    * its `requestActions` grouping declares (`None` entries contribute
+    * nothing — they declare "no right needed," not a right).
     */
-  def actions(family: EffectFamily): Set[Effects.Action] = family.requestActions.values.toSet
+  def actions(family: EffectFamily): Set[Effects.Action] = family.requestActions.values.flatten.toSet
 
   /** Checked correspondence between a family's Fragment and its grouping:
     * every `Request`-sorted constructor must have a `requestActions` entry
-    * (no ungated request), every entry must name a real constructor (no
-    * dangling grouping), and every mapped `Action` must actually belong to
-    * `expected` (no cross-family mistagging). Empty result = consistent.
+    * (no ungated request — though the entry may explicitly be `None`),
+    * every entry must name a real constructor (no dangling grouping), and
+    * every `Some`-mapped `Action` must actually belong to `expected` (no
+    * cross-family mistagging). Empty result = consistent.
     */
   def completeness(family: EffectFamily, expected: Effects.Family): List[String] =
     val reqCtorNames = family.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
@@ -187,7 +249,7 @@ object EffectMeta:
     val dangling = mappedNames.diff(reqCtorNames).toList.map(n =>
       s"requestActions entry '$n' has no matching Request constructor")
     val misfamily = family.requestActions.toList.collect {
-      case (n, a) if a.family != expected =>
+      case (n, Some(a)) if a.family != expected =>
         s"requestActions('$n') = $a is tagged ${a.family}, not $expected"
     }
     missing ++ dangling ++ misfamily

@@ -114,6 +114,25 @@ language rather than an opaque Scala shape.
   `Request` constructors are read-only discovery/reading (confirmed via
   `system-handler.PackFiles.perform`: nothing mutates), so all 5 map to the
   single existing `WorkspaceRead` right. No new `Action`, no drift.
+- **`Filesystem`** (done): the last big live family — 12 `Request`
+  constructors, 3 existing `Action`s (`FsRead`/`FsWrite`/`FsMkdirs`). Three
+  requests were genuinely ambiguous and were put to the user directly
+  (`AskUserQuestion`) rather than decided silently: `Delete` → grouped under
+  `FsWrite` (mutating, like `Write`/`WriteBytes`; no family has finer-grained
+  rights than broad classes yet); `CreateTempDirectory` → grouped under
+  `FsMkdirs` (it creates a directory regardless of the path being
+  system-chosen); `Resolve` → **no right required at all**, confirmed by
+  reading `system-handler.Filesystem.perform`: it's pure path-string
+  arithmetic (`toNio(base).resolve(rel.value)`) with zero `Files.*` calls,
+  so it can't leak, corrupt, or touch anything. This is a new case the
+  mechanism hadn't needed before, so `EffectFamily.requestActions` widened
+  from `Map[String, Effects.Action]` to `Map[String, Option[Effects.Action]]`
+  — `None` is an explicit, checked declaration of "no authorization needed,"
+  distinct from an omitted entry (which `completeness` still flags as an
+  ungated request). The six prior families were retrofitted onto the wider
+  type with every existing entry wrapped in `Some(...)` — mechanical, zero
+  semantic change. No new `Action` was needed for `Filesystem`: the existing
+  3 already cover all 11 authorized requests.
 - **Vestigial families** (found while scoping the `ExternalBackend` slice,
   by checking for a `def perform(req: X.Request)` entry point in
   `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
@@ -128,14 +147,10 @@ language rather than an opaque Scala shape.
   decision for later, not made here). `Cas` is a trait-based contract, not a
   Request/Response enum family, and is out of scope for this mechanism as
   designed.
-- **Remaining live families** (`Filesystem`, `Lsp`) — not yet converted, now
-  unblocked by the many-to-one mechanism above. `Filesystem` needs its own
-  per-family judgment call about which requests belong to which capability
-  class (e.g. is `Filesystem.Delete` a `FsWrite` operation or does it
-  deserve its own right? is `CreateTempDirectory` a `FsMkdirs` operation?);
-  `Lsp` needs a decision on whether it needs new, per-message actions, or
-  whether `LspServe` is intentionally a session-level gate — real design
-  work per family, each a separate future slice. Same
+- **Remaining live family** (`Lsp`) — not yet converted, now unblocked by
+  the many-to-one mechanism above. Needs a decision on whether it needs new,
+  per-message actions, or whether `LspServe` is intentionally a
+  session-level gate — real design work, its own future slice. Same
   incremental-adoption shape as `AuthorityGate`'s per-family `Enforce`
   rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,

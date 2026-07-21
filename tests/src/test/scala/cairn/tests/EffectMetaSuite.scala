@@ -7,13 +7,15 @@ import cairn.systeminterface.Process as ProcessEffect
 import cairn.systeminterface.ExternalBackend as BackendEffect
 import cairn.systeminterface.Terminal as TerminalEffect
 import cairn.systeminterface.Workspace as WorkspaceEffect
+import cairn.systeminterface.Filesystem as FsEffect
 
 /** Meta-defined effect interfaces (post-migration priority #1): `Random`,
-  * `Clock`, `Process`, `ExternalBackend`, `Terminal`, and `Workspace` are
-  * Fragment-defined families, using EffectMeta's many-to-one requestActions
-  * grouping (`Terminal`'s `write`/`writeLine` share one right; `Workspace`'s
-  * 5 requests all share one). These are mechanical drift guards, same
-  * spirit as `ModuleBoundarySuite`.
+  * `Clock`, `Process`, `ExternalBackend`, `Terminal`, `Workspace`, and
+  * `Filesystem` are Fragment-defined families, using EffectMeta's
+  * many-to-one requestActions grouping (`Terminal`'s `write`/`writeLine`
+  * share one right; `Workspace`'s 5 requests all share one; `Filesystem`'s
+  * 12 reduce to 3, with `resolve` needing none at all). These are
+  * mechanical drift guards, same spirit as `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -150,4 +152,51 @@ class EffectMetaSuite extends munit.FunSuite:
       ctorNameOf(WorkspaceEffect.Request.ListSurfaceCairnFiles(dummyPath)),
       ctorNameOf(WorkspaceEffect.Request.ReadText(dummyPath)))
     val fragmentReqCtors = EffectMeta.workspace.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.filesystem composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.filesystem", List(EffectMeta.filesystem.fragment)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("EffectMeta.filesystem's requestActions is complete and matches the hand-tagged actions (no new action, 12-to-3)"):
+    assertEquals(EffectMeta.completeness(EffectMeta.filesystem, Effects.Family.Filesystem), Nil)
+    val derived = EffectMeta.actions(EffectMeta.filesystem)
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Filesystem).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 3) // FsRead, FsWrite, FsMkdirs — unchanged from before this slice
+
+  test("EffectMeta.filesystem's resolve constructor explicitly requires no right"):
+    // The mechanism's new case: an entry may be None (no authorization
+    // needed), distinct from a missing entry (which completeness flags).
+    assertEquals(EffectMeta.filesystem.requestActions("resolve"), None)
+
+  test("system-interface.Filesystem.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    def ctorNameOf(r: FsEffect.Request): String = r match
+      case FsEffect.Request.Read(_)                => "read"
+      case FsEffect.Request.Write(_, _)             => "write"
+      case FsEffect.Request.WriteBytes(_, _)        => "writeBytes"
+      case FsEffect.Request.Mkdirs(_)                => "mkdirs"
+      case FsEffect.Request.Exists(_)                => "exists"
+      case FsEffect.Request.IsDirectory(_)           => "isDirectory"
+      case FsEffect.Request.IsRegularFile(_)         => "isRegularFile"
+      case FsEffect.Request.IsExecutable(_)          => "isExecutable"
+      case FsEffect.Request.List(_)                  => "list"
+      case FsEffect.Request.Delete(_)                => "delete"
+      case FsEffect.Request.CreateTempDirectory(_)   => "createTempDirectory"
+      case FsEffect.Request.Resolve(_, _)            => "resolve"
+    val p = FsEffect.Path("")
+    val scalaReqCases = Set(
+      ctorNameOf(FsEffect.Request.Read(p)),
+      ctorNameOf(FsEffect.Request.Write(p, "")),
+      ctorNameOf(FsEffect.Request.WriteBytes(p, Array.empty)),
+      ctorNameOf(FsEffect.Request.Mkdirs(p)),
+      ctorNameOf(FsEffect.Request.Exists(p)),
+      ctorNameOf(FsEffect.Request.IsDirectory(p)),
+      ctorNameOf(FsEffect.Request.IsRegularFile(p)),
+      ctorNameOf(FsEffect.Request.IsExecutable(p)),
+      ctorNameOf(FsEffect.Request.List(p)),
+      ctorNameOf(FsEffect.Request.Delete(p)),
+      ctorNameOf(FsEffect.Request.CreateTempDirectory("")),
+      ctorNameOf(FsEffect.Request.Resolve(p, p)))
+    val fragmentReqCtors = EffectMeta.filesystem.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
