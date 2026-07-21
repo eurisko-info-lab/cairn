@@ -15,23 +15,32 @@ class WaveCSuite extends munit.FunSuite:
 
   test("M13: fragments compose along a declared rename span"):
     // a fragment defining the same constructor under a different name
+    val boolG = Stlc.booleansSurface.grammar
     val altBooleans = Stlc.booleans.copy(name = "alt-booleans",
       constructors = Stlc.booleans.constructors.map(c =>
         if c.name == "true" then c.copy(name = "verum") else c),
-      grammar = Stlc.booleans.grammar.copy(
-        categories = List(CategorySpec("term", Stlc.booleans.grammar.categories.head.ctors.map(cs =>
+      grammar = boolG.copy(
+        categories = List(CategorySpec("term", boolG.categories.head.ctors.map(cs =>
           if cs.tag == "true" then cs.copy(tag = "verum") else cs))),
-        printRules = Stlc.booleans.grammar.printRules.map(pr =>
+        printRules = boolG.printRules.map(pr =>
           if pr.tag == "true" then pr.copy(tag = "verum") else pr)),
       rewriteRules = Stlc.booleans.rewriteRules.map(r =>
         RewriteRule(r.name, Rename.cst(r.pattern, Map("true" -> "verum")), Rename.cst(r.template, Map("true" -> "verum")))))
     // without a rename: conflict (same grammar alternative tag space, different defs)
-    val direct = Compose.compose("clash", List(Stlc.base, Stlc.types, Stlc.lambda, altBooleans, Stlc.booleans))
+    val direct = Compose.compose("clash", List(
+      Stlc.base.copy(grammar = Stlc.baseSurface.grammar),
+      Stlc.types.copy(grammar = Stlc.typesSurface.grammar),
+      Stlc.lambda.copy(grammar = Stlc.lambdaSurface.grammar),
+      altBooleans, Stlc.booleans.copy(grammar = boolG)))
     assert(direct.isLeft)
     // with the morphism verum -> true, the two fragments unify (diamond)
     val merged = ComposeImports.compose("stlc", List(
-      Import(Stlc.base), Import(Stlc.types), Import(Stlc.lambda), Import(Stlc.typing),
-      Import(altBooleans, Map("verum" -> "true")), Import(Stlc.booleans)))
+      Import(Stlc.base.copy(grammar = Stlc.baseSurface.grammar)),
+      Import(Stlc.types.copy(grammar = Stlc.typesSurface.grammar)),
+      Import(Stlc.lambda.copy(grammar = Stlc.lambdaSurface.grammar)),
+      Import(Stlc.typing),
+      Import(altBooleans, Map("verum" -> "true")),
+      Import(Stlc.booleans.copy(grammar = boolG))))
     merged match
       case Left(errs) =>
         // the alt fragment renamed is IDENTICAL to booleans except fragment name;
@@ -42,7 +51,7 @@ class WaveCSuite extends munit.FunSuite:
         assert(!l.constructors.contains("verum"))
 
   test("M13: digest independent of rename spelling"):
-    val a = ComposeImports.compose("stlc", Stlc.fragments.map(Import(_))).toOption.get
+    val a = ComposeImports.compose("stlc", Stlc.boundFragments.map(Import(_))).toOption.get
     assertEquals(a.digest, Stlc.language.digest)
 
   // ---- M14: parameterized fragments ----
@@ -162,16 +171,21 @@ class WaveCSuite extends munit.FunSuite:
 
   test("M18: module transports across a ctor rename + arity change"):
     // v2 language: `if` renamed to `cond` with a 4th child (an else-label leaf)
+    val boolG = Stlc.booleansSurface.grammar
     val boolsV2 = Stlc.booleans.copy(name = "booleans",
       constructors = Stlc.booleans.constructors.map(c =>
         if c.name == "if" then CtorDef("cond", "Term", List("Term", "Term", "Term", "Name")) else c),
-      grammar = Stlc.booleans.grammar.copy(
-        categories = List(CategorySpec("term", Stlc.booleans.grammar.categories.head.ctors.map(cs =>
+      grammar = boolG.copy(
+        categories = List(CategorySpec("term", boolG.categories.head.ctors.map(cs =>
           if cs.tag == "if" then ConstructorSpec("cond", cs.elems :+ Elem.Opt(Elem.NameLeaf)) else cs))),
-        printRules = Stlc.booleans.grammar.printRules.map(pr =>
+        printRules = boolG.printRules.map(pr =>
           if pr.tag == "if" then PrintRule("cond", pr.segs :+ PrintSeg.Field(3)) else pr)),
       rewriteRules = Nil)
-    val v2 = Compose.compose("stlc2", List(Stlc.base, Stlc.types, Stlc.lambda, boolsV2)).fold(
+    val v2 = Compose.compose("stlc2", List(
+      Stlc.base.copy(grammar = Stlc.baseSurface.grammar),
+      Stlc.types.copy(grammar = Stlc.typesSurface.grammar),
+      Stlc.lambda.copy(grammar = Stlc.lambdaSurface.grammar),
+      boolsV2)).fold(
       e => fail(e.map(_.render).mkString("\n")), identity)
     val mig = LangMigration(lang.digest, v2.digest,
       ctorRenames = Map("if" -> "cond"),

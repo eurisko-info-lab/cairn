@@ -42,8 +42,8 @@ class Phase1Suite extends munit.FunSuite:
   val g = lang.grammar
 
   test("composition is order-independent (S12/S13)"):
-    val l1 = Compose.compose("stlc", Stlc.fragments).toOption.get
-    val l2 = Compose.compose("stlc", Stlc.fragments.reverse).toOption.get
+    val l1 = Compose.compose("stlc", Stlc.boundFragments).toOption.get
+    val l2 = Compose.compose("stlc", Stlc.boundFragments.reverse).toOption.get
     assertEquals(l1.digest, l2.digest)
     assertEquals(l1.grammar, l2.grammar)
 

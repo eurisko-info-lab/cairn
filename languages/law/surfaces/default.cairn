@@ -1,0 +1,18 @@
+language default {
+  fragment statutes {
+    keyword section;
+    keyword heading;
+    keyword text;
+    keyword statute;
+    keyword sections;
+    keyword enactedBy;
+    keyword cert;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax lawObj += section : tok "section" str tok "heading" str tok "text" str;
+    syntax lawObj += statute : tok "statute" str tok "sections" tok "(" sepby1 name "," tok ")";
+    syntax lawObj += enactedBy : tok "enactedBy" name tok "cert" name;
+    top lawObj;
+  }
+}

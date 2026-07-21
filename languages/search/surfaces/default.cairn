@@ -1,0 +1,24 @@
+language default {
+  fragment board {
+    keyword origin;
+    keyword goal;
+    keyword fact;
+    keyword intent;
+    keyword hint;
+    keyword supports;
+    keyword spawns;
+    keyword board;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax searchObj += origin : tok "origin" str;
+    syntax searchObj += goal : tok "goal" str;
+    syntax searchObj += fact : tok "fact" str;
+    syntax searchObj += intent : tok "intent" str;
+    syntax searchObj += hint : tok "hint" str;
+    syntax searchObj += supports : tok "supports" name name;
+    syntax searchObj += spawns : tok "spawns" name name;
+    syntax searchObj += board : tok "board" tok "(" sepby1 name "," tok ")";
+    top searchObj;
+  }
+}

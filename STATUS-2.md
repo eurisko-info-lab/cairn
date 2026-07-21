@@ -74,8 +74,13 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   exemplar packs (PKI/Law/SDS/Search) *are* `.cairn` source of truth.
 - **Print derivation (Phase 1)**: `PrintDerive` fills default print rules from
   `syntax` at compose; explicit `print tag : …` overrides win. Redundant prints
-  dropped from search/pki/law/sds/stlc. Language digests still include grammar
-  until Phase 2 (surface-file split). RoundTrip laws remain the trust gate.
+  dropped from search/pki/law/sds/stlc. RoundTrip laws remain the trust gate.
+- **Surface split (Phase 2)**: semantic language files exclude grammar from
+  fragment/language digests. Concrete syntax for stlc/search/pki/law/sds lives
+  under `languages/<name>/surfaces/default.cairn`; `PackLoader.bindSurface` /
+  `requireClosed` attach the default surface. Capability `grammar` digests the
+  bound `GrammarSpec`; `surfaces` digests registered `SurfacePack`s. **Meta
+  stays fused** (bootstrap fixpoint) until Phase 3 adds a Meta `surface` top.
 
 ## Success criteria (§9) — re-verified at maximal level
 

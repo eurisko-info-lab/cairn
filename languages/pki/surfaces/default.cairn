@@ -1,0 +1,16 @@
+language default {
+  fragment certs {
+    keyword cert;
+    keyword key;
+    keyword issuer;
+    keyword sig;
+    keyword from;
+    keyword until;
+    keyword revoked;
+    keyword reason;
+    keyword at;
+    syntax registryItem += cert : tok "cert" name tok "key" str tok "issuer" name tok "sig" str tok "from" str tok "until" str;
+    syntax registryItem += revocation : tok "revoked" name tok "reason" str tok "at" str;
+    top registryItem;
+  }
+}

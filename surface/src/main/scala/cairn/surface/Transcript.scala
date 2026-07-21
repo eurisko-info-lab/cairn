@@ -183,7 +183,14 @@ object Transcript:
           val p = Path.of(file)
           val src = if Files.exists(p) then Right(Files.readString(p))
                     else Left(s"no such language file: $file")
-          src.flatMap(Meta.parseFile).map { l =>
+          src.flatMap { text =>
+            Meta.parseLanguageAst(text).flatMap { (name, fs) =>
+              val dir = Option(p.toAbsolutePath.normalize.getParent).getOrElse(Path.of("."))
+              val packsHere = PackLoader.loadRaw(dir) + (name -> fs)
+              val surfaces = PackLoader.loadSurfaces(dir)
+              PackLoader.close(name, packsHere, surfaces).left.map(_.map(_.render).mkString("\n"))
+            }
+          }.map { l =>
             packs = packs + (l.name -> l)
             log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
         case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
@@ -358,7 +365,10 @@ object Cli:
           else hops.map(h => s"${"  " * h.depth}${h.record.output.short} <- ${h.record.tool}(${h.record.inputs.map(_.short).mkString(", ")})").mkString("\n") }
       case List("capabilities", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'")
-          .flatMap(l => Capabilities.build(l, Map.empty)).map(_.render)
+          .flatMap { l =>
+            val surfDigests = PackLoader.surfacesFor(langName).map((n, s) => n -> s.digest)
+            Capabilities.build(l, Map.empty, surfDigests)
+          }.map(_.render)
       case List("languages") =>
         Right(packs.toList.sortBy(_._1).map((n, l) => s"$n ${l.digest.hex}").mkString("\n"))
       case List("repl", langName) =>

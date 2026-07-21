@@ -20,13 +20,15 @@ class WaveH2Suite extends munit.FunSuite:
   test("M43: manifests for shipped languages, lint enforced"):
     for l <- List(Stlc.language, cairn.examples.pki.Pki.language, Sds.language,
                   Query.language, cairn.ledger.PolicyLang.language) do
-      val m = Capabilities.build(l, Map.empty).fold(e => fail(e), identity)
+      val surf = PackLoader.surfacesFor(l.name).map((n, s) => n -> s.digest)
+      val m = Capabilities.build(l, Map.empty, surf).fold(e => fail(e), identity)
       assertEquals(m.artifact.kind, ArtifactKind.Capability)
       assertEquals(Capabilities.requiredRows.toSet, m.rows.keySet)
       // STLC has rules + judgments; PKI/SDS/policy at least grammar + ΔL
       assert(m.render.contains("changes"))
     // lint fails on undeclared/missing rows
-    val stlcM = Capabilities.build(Stlc.language, Map.empty).toOption.get
+    val stlcM = Capabilities.build(Stlc.language, Map.empty,
+      PackLoader.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows - "traces")).isLeft)
     assert(Capabilities.lint(stlcM.copy(rows = stlcM.rows + ("bogus" -> Capabilities.Row.Deferred("x")))).isLeft)
 
@@ -55,10 +57,12 @@ class WaveH2Suite extends munit.FunSuite:
       "search.cairn declares wellFormed/goalMet judgments")
 
   test("M43: interpreters/judgments present for stlc; platform vs deferred honest"):
-    val m = Capabilities.build(Stlc.language, Map.empty).toOption.get
+    val m = Capabilities.build(Stlc.language, Map.empty,
+      PackLoader.surfacesFor("stlc").map((n, s) => n -> s.digest)).toOption.get
     assert(m.rows("interpreters").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("judgments").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("grammar").isInstanceOf[Capabilities.Row.Present])
+    assert(m.rows("surfaces").isInstanceOf[Capabilities.Row.Present])
     assert(m.rows("changes").isInstanceOf[Capabilities.Row.Present])
     m.rows("traces") match
       case Capabilities.Row.PlatformProvided("eval-trace", _) => ()

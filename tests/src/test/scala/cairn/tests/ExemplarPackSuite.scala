@@ -72,6 +72,20 @@ class ExemplarPackSuite extends munit.FunSuite:
       val back = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
       assertEquals(back._1, name)
       assertEquals(back._2.map(_.digest), fs.map(_.digest))
+      val surf = PackLoader.requireSurface(name)
+      val sText = Meta.printLanguage(surf.name, surf.fragments).fold(e => fail(e), identity)
+      val sBack = Meta.parseLanguageAst(sText).fold(e => fail(e), identity)
+      assertEquals(sBack._1, surf.name)
+      assertEquals(sBack._2.map(_.digest), surf.fragments.map(_.digest))
+
+  test("language digest ignores surface edits"):
+    val lang = PackLoader.requireClosed("search")
+    val surf = PackLoader.requireSurface("search")
+    // rebinding the same surface is identity on language digest
+    val rebound = Compose.compose("search",
+      PackLoader.bindSurface(PackLoader.requireOwn("search"), surf)).fold(e => fail(e.map(_.render).mkString), identity)
+    assertEquals(rebound.digest, lang.digest)
+    assertEquals(rebound.grammar, lang.grammar)
 
   test("free ΔL is derived only — add/remove via Delta.deltaOf, not on disk"):
     val dl = Delta.deltaOf(Pki.language).fold(e => fail(e.map(_.render).mkString), identity)

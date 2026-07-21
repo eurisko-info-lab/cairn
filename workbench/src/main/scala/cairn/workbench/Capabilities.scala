@@ -43,20 +43,27 @@ object Capabilities:
           case Row.Deferred(n)                   => f"  $k%-14s deferred: $n")).mkString("\n")
 
   /** Rows every language gets automatically from the platform. */
-  def auto(l: ComposedLanguage): Map[String, Row] =
+  def auto(l: ComposedLanguage, surfaceDigests: Map[String, Digest] = Map.empty): Map[String, Row] =
     val deltaDigest = Delta.deltaOf(l).toOption.map(_.digest)
     def platform(id: String): Row.PlatformProvided =
       Row.PlatformProvided(id, Digest.of(Canon.cmap(
         "capability" -> Canon.CStr(id), "language" -> Canon.CStr(l.digest.hex))))
+    val surfaceRow =
+      if surfaceDigests.nonEmpty then
+        Row.Present(Digest.of(Canon.CMap(surfaceDigests.toList.sortBy(_._1).map((n, d) =>
+          n -> Canon.CStr(d.hex)))))
+      else
+        // encodings only (text/json/canon) when no named syntax surfaces are registered
+        Row.Present(Digest.of(Canon.cstrs(Surfaces.forLanguage(l).keys.toList.sorted)))
     Map(
       "grammar" -> Row.Present(GrammarSpec.artifact(l.grammar).digest),
-      "surfaces" -> Row.Present(Digest.of(Canon.cstrs(Surfaces.forLanguage(l).keys.toList.sorted))),
+      "surfaces" -> surfaceRow,
       "interpreters" -> (if l.rewriteRules.nonEmpty then Row.Present(l.digest) else Row.Deferred("no rewrite rules")),
       "changes" -> deltaDigest.fold(Row.Deferred("ΔL underivable"))(Row.Present.apply),
       "judgments" -> (if l.judgments.nonEmpty then
         Row.Present(Digest.of(Canon.cstrs(l.judgments.keys.toList.sorted))) else Row.Deferred("none declared")),
       // generic platform mechanisms — not CAS-resolvable artifact keys:
-      "traces" -> (if l.rewriteRules.nonEmpty then platform("eval-trace") // TreeEngine.normalizeTraced + TraceChecker
+      "traces" -> (if l.rewriteRules.nonEmpty then platform("eval-trace") // core.TreeEngine.normalizeTraced + kernel.TraceChecker
                    else Row.Deferred("no rewrite rules to trace")),
       "migrations" -> platform("lang-migration"),   // Migrate.module/changeset
       "queries" -> Row.Present(Query.language.digest),          // Query.run over any module
@@ -70,9 +77,10 @@ object Capabilities:
       "workflows" -> Row.Deferred("transcripts are global, not language-scoped"),
       "import-export" -> Row.Present(Digest.of(Canon.cstrs(List("text", "json", "canon")))))
 
-  def build(l: ComposedLanguage, extra: Map[String, Row]): Either[String, Manifest] =
+  def build(l: ComposedLanguage, extra: Map[String, Row] = Map.empty,
+            surfaceDigests: Map[String, Digest] = Map.empty): Either[String, Manifest] =
     val rows = requiredRows.map(r =>
-      r -> (extra.get(r).orElse(auto(l).get(r)).getOrElse(Row.Deferred("not yet modeled")))).toMap
+      r -> (extra.get(r).orElse(auto(l, surfaceDigests).get(r)).getOrElse(Row.Deferred("not yet modeled")))).toMap
     lint(Manifest(l.digest, rows)).map(_ => Manifest(l.digest, rows))
 
   /** Lint (M43 AC): every required row is Present, PlatformProvided, or Deferred. */

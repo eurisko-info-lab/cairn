@@ -47,8 +47,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     source-of-truth migration remain host-backed: STLC/meta `.cairn` are
     checked-in canonical mirrors from Scala via `emit-languages`. Exemplar
     packs (PKI/Law/SDS/Search) are `.cairn` source of truth and load at
-    runtime. A separate `grammar.cairn` / surface-file split is deferred
-    (Phase 2); Phase 1 derives default print from syntax at compose.
+    runtime. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds:
+    semantic `languages/<name>.cairn` + `languages/<name>/surfaces/default.cairn`.
+    Meta remains fused until a Meta `surface` top (Phase 3) without breaking
+    the bootstrap fixpoint.
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental

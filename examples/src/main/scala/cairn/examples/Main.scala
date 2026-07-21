@@ -57,10 +57,14 @@ import cairn.surface.Cli
       def onDisk(path: java.nio.file.Path): Option[String] =
         if java.nio.file.Files.exists(path) then Some(java.nio.file.Files.readString(path)) else None
       def gitHeadVersion(path: java.nio.file.Path): Option[String] =
-        scala.util.Try(scala.sys.process.Process(Seq("git", "show", s"HEAD:$path")).!!).toOption
+        // Quietly miss when the path isn't in HEAD yet (new surface files).
+        scala.util.Try(
+          scala.sys.process.Process(Seq("git", "show", s"HEAD:$path"))
+            .!!(scala.sys.process.ProcessLogger(_ => (), _ => ()))
+        ).toOption
 
-      def writeFromFragments(name: String, fragments: List[cairn.kernel.Fragment]): String =
-        val path = dir.resolve(s"$name.cairn")
+      def writeFromFragments(path: java.nio.file.Path, name: String, fragments: List[cairn.kernel.Fragment]): String =
+        java.nio.file.Files.createDirectories(path.getParent)
         val text = onDisk(path) match
           case Some(existing) =>
             cairn.workbench.Meta.printLanguagePreservingFormat(name, fragments, existing)
@@ -71,26 +75,40 @@ import cairn.surface.Cli
         java.nio.file.Files.writeString(path, text)
         text
 
-      def writeExemplar(name: String): String =
-        val path = dir.resolve(s"$name.cairn")
-        val working = onDisk(path).getOrElse(
-          throw RuntimeException(s"languages/$name.cairn must already exist (exemplar packs have no other source)"))
-        val text = gitHeadVersion(path) match
-          case Some(headText) =>
-            cairn.workbench.Meta.printLanguagePreservingFormatVsReference(name, working, headText)
-              .fold(e => { System.err.println(e); sys.exit(1) }, identity)
-          case None =>
-            val fs = cairn.workbench.PackLoader.requireOwn(name)
-            cairn.workbench.Meta.printLanguage(name, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
-        java.nio.file.Files.writeString(path, text)
-        text
+      /** Exemplar packs: semantic `languages/<name>.cairn` + surface under
+        * `languages/<name>/surfaces/default.cairn`. Format-preserve each against
+        * git HEAD so CI's `git diff languages/` stays meaningful.
+        */
+      def writeExemplarPair(name: String): (String, String) =
+        val semPath = dir.resolve(s"$name.cairn")
+        val surfPath = dir.resolve(name).resolve("surfaces").resolve("default.cairn")
+        def rewrite(path: java.nio.file.Path, langName: String): String =
+          val working = onDisk(path).getOrElse(
+            throw RuntimeException(s"$path must already exist (exemplar packs have no other source)"))
+          val text = gitHeadVersion(path) match
+            case Some(headText) =>
+              cairn.workbench.Meta.printLanguagePreservingFormatVsReference(langName, working, headText)
+                .fold(e => { System.err.println(e); sys.exit(1) }, identity)
+            case None =>
+              cairn.workbench.Meta.parseLanguageAst(working) match
+                case Right((n, fs)) =>
+                  cairn.workbench.Meta.printLanguage(n, fs).fold(e => { System.err.println(e); sys.exit(1) }, identity)
+                case Left(e) => System.err.println(e); sys.exit(1)
+          java.nio.file.Files.writeString(path, text)
+          text
+        (rewrite(semPath, name), rewrite(surfPath, "default"))
 
-      val stlcText = writeFromFragments("stlc", cairn.examples.stlc.Stlc.fragments)
-      val metaText = writeFromFragments("meta", List(cairn.workbench.Meta.fragment))
+      val stlcText = writeFromFragments(dir.resolve("stlc.cairn"), "stlc", cairn.examples.stlc.Stlc.fragments)
+      val stlcSurf = writeFromFragments(
+        dir.resolve("stlc").resolve("surfaces").resolve("default.cairn"),
+        "default",
+        cairn.examples.stlc.Stlc.surfaceFragments)
+      val metaText = writeFromFragments(dir.resolve("meta.cairn"), "meta", List(cairn.workbench.Meta.fragment))
       for name <- List("pki", "law", "sds", "search") do
-        val text = writeExemplar(name)
-        println(s"wrote languages/$name.cairn (${text.length} bytes)")
-      println(s"wrote languages/stlc.cairn (${stlcText.length} bytes) and languages/meta.cairn (${metaText.length} bytes)")
+        val (sem, surf) = writeExemplarPair(name)
+        println(s"wrote languages/$name.cairn (${sem.length} bytes) + surfaces/default.cairn (${surf.length} bytes)")
+      println(s"wrote languages/stlc.cairn (${stlcText.length} bytes) + surfaces/default.cairn (${stlcSurf.length} bytes)")
+      println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; surface split deferred)")
     case other =>
       Cli.main(other, packs, portModules) match
         case Right(out) => println(out)

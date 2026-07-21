@@ -60,9 +60,13 @@ final case class Fragment(
     judgments: List[JudgmentDef] = Nil,
     varCtor: Option[String] = None,
 ):
+  /** Semantic identity only — grammar/surface is excluded (Phase 2). */
   def canon: Canon = FragmentCodec.toCanon(this)
   def digest: Digest = artifact.digest
   def artifact: Artifact = Artifact(ArtifactKind.Fragment, canon)
+  def stripGrammar: Fragment = copy(grammar = GrammarPart())
+  def grammarOnly: Fragment =
+    Fragment(name = name, provides = Nil, requires = Nil, grammar = grammar)
 
 /** Structured composition error (§7: cite fragment names, paths, digests). */
 final case class ComposeError(path: String, fragmentA: String, fragmentB: String, detail: String):
@@ -186,6 +190,15 @@ object FragmentCodec:
   private def ruleFromCanon(c: Canon): RewriteRule =
     RewriteRule(c.field("name").asStr, Cst.fromCanon(c.field("pattern")), Cst.fromCanon(c.field("template")))
 
+  /** Empty grammar stub kept in the map shape for schema stability; surface
+    * grammar lives in [[cairn.workbench.SurfacePack]] / [[GrammarSpec]] digests.
+    */
+  private val emptyGrammarCanon: Canon = Canon.cmap(
+    "keywords" -> Canon.cstrs(Nil),
+    "puncts" -> Canon.cstrs(Nil),
+    "identContExtra" -> CStr(""),
+    "spec" -> GrammarSpec.toCanon(GrammarSpec("", TokenSpec(Nil, Nil, None), Nil, Nil, Nil, "")))
+
   def toCanon(f: Fragment): Canon = Canon.cmap(
     "name" -> CStr(f.name),
     "provides" -> Canon.cstrs(f.provides),
@@ -198,13 +211,7 @@ object FragmentCodec:
       "argSorts" -> Canon.cstrs(c.argSorts),
       "binders" -> CList(c.binders.map((b, sc) => Canon.cmap(
         "binder" -> CInt(b), "scope" -> CList(sc.map(i => CInt(i))))))))),
-    "grammar" -> Canon.cmap(
-      "keywords" -> Canon.cstrs(f.grammar.keywords),
-      "puncts" -> Canon.cstrs(f.grammar.puncts),
-      "identContExtra" -> CStr(f.grammar.identContExtra),
-      "spec" -> GrammarSpec.toCanon(GrammarSpec("", TokenSpec(Nil, Nil, None),
-        f.grammar.categories, f.grammar.precCategories, f.grammar.printRules,
-        f.grammar.top.getOrElse("")))),
+    "grammar" -> emptyGrammarCanon,
     "rewriteRules" -> CList(f.rewriteRules.map(ruleToCanon)),
     "judgments" -> CList(f.judgments.map(j => Canon.cmap(
       "name" -> CStr(j.name),
@@ -216,8 +223,7 @@ object FragmentCodec:
     "varCtor" -> f.varCtor.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))))
 
   def fromCanon(c: Canon): Fragment =
-    val g = c.field("grammar")
-    val spec = GrammarSpec.fromCanon(g.field("spec"))
+    // Grammar in fragment canon is ignored (Phase 2); bind a SurfacePack for parse/print.
     Fragment(
       name = c.field("name").asStr,
       provides = c.field("provides").asList.map(_.asStr),
@@ -230,14 +236,7 @@ object FragmentCodec:
         k.field("argSorts").asList.map(_.asStr),
         k.field("binders").asList.map(b =>
           (b.field("binder").asInt.toInt, b.field("scope").asList.map(_.asInt.toInt))))),
-      grammar = GrammarPart(
-        keywords = g.field("keywords").asList.map(_.asStr),
-        puncts = g.field("puncts").asList.map(_.asStr),
-        categories = spec.categories,
-        precCategories = spec.precCategories,
-        printRules = spec.printRules,
-        top = Option(spec.top).filter(_.nonEmpty),
-        identContExtra = g.field("identContExtra").asStr),
+      grammar = GrammarPart(),
       rewriteRules = c.field("rewriteRules").asList.map(ruleFromCanon),
       judgments = c.field("judgments").asList.map(j => JudgmentDef(
         j.field("name").asStr,

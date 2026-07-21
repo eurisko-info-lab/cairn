@@ -11,9 +11,12 @@ class WaveH1Suite extends munit.FunSuite:
     val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)
     val fromText = Meta.parseFile(text).fold(e => fail(e), identity)
     assertEquals(fromText.digest, Stlc.language.digest)
-    assertEquals(fromText.grammar, Stlc.language.grammar)
+    // grammar lives on the surface pack; semantic print has no syntax
     assertEquals(fromText.rewriteRules, Stlc.language.rewriteRules)
     assertEquals(fromText.judgments.keySet, Stlc.language.judgments.keySet)
+    val bound = Compose.compose("stlc",
+      PackLoader.bindSurface(fromText.fragments, Stlc.defaultSurface)).fold(e => fail(e.map(_.render).mkString), identity)
+    assertEquals(bound.grammar, Stlc.language.grammar)
 
   test("M41: reconstructed judgments agree with the original — check, not just digest"):
     // Digest/grammar/rule equality (above) is structural. This is the
@@ -41,7 +44,7 @@ class WaveH1Suite extends munit.FunSuite:
     assert(Checker.check(fromText.judgments.values.toList, tampered).isLeft)
 
   test("M41: grammar productions, print rules, infix, rules, judgments all round-trip encode/elaborate"):
-    for f <- Stlc.fragments do
+    for f <- Stlc.fragments ++ Stlc.surfaceFragments do
       val cst = Meta.encode(f)
       Meta.elaborateFragment(cst) match
         case Right(back) => assertEquals(back, f, s"fragment ${f.name}")
@@ -68,12 +71,9 @@ class WaveH1Suite extends munit.FunSuite:
       case other => fail(s"unexpected: ${other.render}")
 
   test("M42: checked-in language files load at runtime (no recompile)"):
-    val stlcFile = java.nio.file.Path.of("languages/stlc.cairn")
-    val stlcFile2 = java.nio.file.Path.of("../languages/stlc.cairn")
-    val p = if java.nio.file.Files.exists(stlcFile) then stlcFile else stlcFile2
-    assume(java.nio.file.Files.exists(p), "languages/stlc.cairn not generated yet")
-    val lang = Meta.parseFile(java.nio.file.Files.readString(p)).fold(e => fail(e), identity)
+    val lang = PackLoader.requireClosed("stlc")
     assertEquals(lang.digest, Stlc.language.digest)
+    assertEquals(lang.grammar, Stlc.language.grammar)
 
   test("M42: a brand-new toy language as pure text — parse, eval, no Scala"):
     val toySrc = """

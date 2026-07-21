@@ -1,12 +1,16 @@
 package cairn.examples.stlc
 
 import cairn.kernel.*
+import cairn.workbench.*
 
 /** STLC as composable fragment DATA (S16, §5). Everything here is values —
   * sorts, grammar alternatives, rewrite rules, typing rules — interpreted by
   * the generic engines. No STLC-specific code exists in L0–L3.
   *
-  * Surface syntax:
+  * Phase 2: semantic fragments are grammar-free; concrete syntax lives in
+  * [[surfaceFragments]] / `languages/stlc/surfaces/default.cairn`.
+  *
+  * Surface syntax (default):
   *   term  ::= fun x : type . term | if term then term else term
   *           | true | false | (term term) | (term) | x
   *   type  ::= type -> type | Bool | (type)
@@ -15,7 +19,7 @@ object Stlc:
   private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
   private def mv(x: String): Cst = Cst.Leaf(s"$$$x")
 
-  /** Base: the term category, variables, application, grouping. */
+  /** Base: the term category, variables, application (semantics). */
   val base: Fragment = Fragment(
     name = "base",
     provides = List("term"),
@@ -24,7 +28,12 @@ object Stlc:
     constructors = List(
       CtorDef("var", "Term", List("Name")),
       CtorDef("app", "Term", List("Term", "Term"))),
-    varCtor = Some("var"),
+    varCtor = Some("var"))
+
+  val baseSurface: Fragment = Fragment(
+    name = "base",
+    provides = Nil,
+    requires = Nil,
     grammar = GrammarPart(
       puncts = List("(", ")"),
       categories = List(CategorySpec("term", List(
@@ -33,7 +42,7 @@ object Stlc:
         ConstructorSpec("var", List(Elem.NameLeaf))))),
       top = Some("term")))
 
-  /** Simple types: Bool and the arrow (right-associative infix). */
+  /** Simple types: Bool and the arrow (semantics). */
   val types: Fragment = Fragment(
     name = "types",
     provides = List("type"),
@@ -41,7 +50,12 @@ object Stlc:
     sorts = List(SortDef("Type", SortMode.Tree)),
     constructors = List(
       CtorDef("tyBool", "Type", Nil),
-      CtorDef("arrow", "Type", List("Type", "Type"))),
+      CtorDef("arrow", "Type", List("Type", "Type"))))
+
+  val typesSurface: Fragment = Fragment(
+    name = "types",
+    provides = Nil,
+    requires = Nil,
     grammar = GrammarPart(
       keywords = List("Bool"),
       puncts = List("->", "(", ")"),
@@ -58,17 +72,22 @@ object Stlc:
     requires = List("term", "type"),
     constructors = List(
       CtorDef("lam", "Term", List("Name", "Type", "Term"), binders = List((0, List(2))))),
+    rewriteRules = List(
+      RewriteRule("beta",
+        pattern = n("app", n("lam", mv("x"), mv("T"), mv("b")), mv("v")),
+        template = n("$subst", mv("b"), mv("x"), mv("v")))))
+
+  val lambdaSurface: Fragment = Fragment(
+    name = "lambda",
+    provides = Nil,
+    requires = Nil,
     grammar = GrammarPart(
       keywords = List("fun"),
       puncts = List(":", "."),
       categories = List(CategorySpec("term", List(
         ConstructorSpec("lam", List(
           Elem.Tok("fun"), Elem.NameLeaf, Elem.Tok(":"), Elem.Cat("type"),
-          Elem.Tok("."), Elem.Cat("term"))))))),
-    rewriteRules = List(
-      RewriteRule("beta",
-        pattern = n("app", n("lam", mv("x"), mv("T"), mv("b")), mv("v")),
-        template = n("$subst", mv("b"), mv("x"), mv("v")))))
+          Elem.Tok("."), Elem.Cat("term"))))))))
 
   /** Booleans: literals + if/then/else + ι-reduction. */
   val booleans: Fragment = Fragment(
@@ -79,6 +98,14 @@ object Stlc:
       CtorDef("true", "Term", Nil),
       CtorDef("false", "Term", Nil),
       CtorDef("if", "Term", List("Term", "Term", "Term"))),
+    rewriteRules = List(
+      RewriteRule("if-true", n("if", n("true"), mv("a"), mv("b")), mv("a")),
+      RewriteRule("if-false", n("if", n("false"), mv("a"), mv("b")), mv("b"))))
+
+  val booleansSurface: Fragment = Fragment(
+    name = "booleans",
+    provides = Nil,
+    requires = Nil,
     grammar = GrammarPart(
       keywords = List("true", "false", "if", "then", "else"),
       categories = List(CategorySpec("term", List(
@@ -86,15 +113,9 @@ object Stlc:
         ConstructorSpec("false", List(Elem.Tok("false"))),
         ConstructorSpec("if", List(
           Elem.Tok("if"), Elem.Cat("term"), Elem.Tok("then"), Elem.Cat("term"),
-          Elem.Tok("else"), Elem.Cat("term"))))))),
-    rewriteRules = List(
-      RewriteRule("if-true", n("if", n("true"), mv("a"), mv("b")), mv("a")),
-      RewriteRule("if-false", n("if", n("false"), mv("a"), mv("b")), mv("b"))))
+          Elem.Tok("else"), Elem.Cat("term"))))))))
 
-  /** STLC typing rules as declarative judgment data (S22).
-    * Judgment forms (as Cst): hasType(ctx, term, type); lookup(ctx, x, type).
-    * Contexts: ctxNil | ctxCons(name, type, rest).
-    */
+  /** STLC typing rules as declarative judgment data (S22). */
   val typing: Fragment = Fragment(
     name = "typing",
     provides = List("typing"),
@@ -105,7 +126,6 @@ object Stlc:
           n("lookup", n("ctxCons", mv("x"), mv("T"), mv("r")), mv("x"), mv("T"))),
         InferRule("l-there", List(n("lookup", mv("r"), mv("x"), mv("T"))),
           n("lookup", n("ctxCons", mv("y"), mv("S"), mv("r")), mv("x"), mv("T")),
-          // M19: without this side condition a shadowed binding could be typed
           conditions = List(n("$neq", mv("x"), mv("y")))))),
       JudgmentDef("hasType", List(
         InferRule("t-var", List(n("$ctx-lookup", mv("ctx"), mv("x"), mv("T"))),
@@ -125,9 +145,17 @@ object Stlc:
           n("hasType", mv("ctx"), n("if", mv("c"), mv("a"), mv("b")), mv("T")))))))
 
   val fragments: List[Fragment] = List(base, types, lambda, booleans, typing)
+  val surfaceFragments: List[Fragment] =
+    List(baseSurface, typesSurface, lambdaSurface, booleansSurface)
+
+  val defaultSurface: SurfacePack =
+    SurfacePack(PackLoader.DefaultSurface, "stlc", surfaceFragments)
+
+  /** Semantic fragments with default surface grammar bound (for Compose / tests). */
+  def boundFragments: List[Fragment] = PackLoader.bindSurface(fragments, defaultSurface)
 
   def language: ComposedLanguage =
-    Compose.compose("stlc", fragments) match
+    Compose.compose("stlc", boundFragments) match
       case Right(l)   => l
       case Left(errs) => throw RuntimeException(errs.map(_.render).mkString("\n"))
 

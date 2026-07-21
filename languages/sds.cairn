@@ -9,31 +9,5 @@ language sds {
     ctor shadow : SdsObj(Ref, Ref, Text);
     ctor basis : SdsObj(Name, Str);
     varctor sdsRef;
-    keyword substance;
-    keyword phrase;
-    keyword lang;
-    keyword text;
-    keyword mixture;
-    keyword of;
-    keyword pct;
-    keyword product;
-    keyword uses;
-    keyword phrases;
-    keyword shadow;
-    keyword overrides;
-    keyword with;
-    keyword basis;
-    keyword section;
-    punct "(";
-    punct ")";
-    punct ",";
-    syntax sdsObj += substance : tok "substance" str str;
-    syntax sdsObj += phrase : tok "phrase" name tok "lang" name tok "text" str;
-    syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
-    syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
-    syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
-    syntax sdsObj += basis : tok "basis" name tok "section" str;
-    syntax component += component : name tok "pct" num;
-    top sdsObj;
   }
 }
