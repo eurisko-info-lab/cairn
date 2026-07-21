@@ -121,9 +121,9 @@ hierarchy (`Type : Type1`, `Type1` itself untyped), and one hardcoded `Nat`
 inductive with a dependent-motive recursor — checked by the *same* generic
 kernel `Checker`/`Search` as STLC/PKI/Search's judgments. NOT full CIC (§8
 anti-goal): no universe polymorphism, no user-declarable inductives, no
-tactics/elaboration. NOT Lean-surface-compatible: Lean stays a Rosetta
-*projection* target only (§4.10) — this is a genuinely different,
-Cairn-native calculus merely inspired by the same lineage.
+tactics/elaboration. NOT Lean-surface-compatible — a genuinely different,
+Cairn-native calculus merely inspired by the same lineage. LeanCore (below)
+climbs the next rung on top of this one (identity types, an environment).
 
 - The one judgment shape STLC never needed: type **conversion**. `t-app`
   and the recursor's result type are true substitutions/reductions, not
@@ -147,7 +147,43 @@ Cairn-native calculus merely inspired by the same lineage.
 
 Remaining: universe polymorphism; user-declarable inductives; a tactic
 layer (M22's `Tactics.replay` machinery already exists generically —
-MiniTT doesn't yet use it).
+MiniTT doesn't yet use it). Identity types are LeanCore's, not this pack's.
+
+## LeanCore — identity types and a checked-declaration environment (§2c amendment)
+
+`languages/leancore.cairn` + `examples/leancore` (`LeanCore` glue). The next
+rung: everything MiniTT has, plus `Eq`/`refl`/`subst` (identity types) and a
+minimal environment of checked declarations — §2c's "executable reference vs.
+optimized backend" amendment's Lean-kernel *fragment*, named as future work
+when that amendment landed and built in this pack. Same generic
+`Checker`/`Search`/`TreeEngine`, same `$defeq` extension shape as MiniTT —
+literally the same rule file with three more constructors and three more
+judgment rules added.
+
+- `subst` (transport), not full path-induction `J`: `J`'s motive depends on
+  the equality proof itself (`(x y : A) (p : Eq(A,x,y)) -> Type`), not just
+  the endpoint (`A -> Type`) — a substantially harder rule to search over.
+  `subst`'s one reduction rule (`subst($P, refl($a), $px) => $px`) and one
+  typing rule (`... where $defeq($U, app($P, $b))`) mirror `natRec`'s own
+  shape exactly, so this landed without needing a new engine workaround —
+  MiniTT's `t-lam`/`t-lam-conv` split already covers the cases that came up,
+  including a "symmetry via `subst`" derivation whose motive itself mentions
+  the equality type being transported.
+- Environment: an ordered, Scala-level list of `(name, type, value)`
+  declarations that fold into the same `ctxCons` chain `hasType` already
+  walks — no new grammar or engine machinery. `Environment.extend` checks
+  the value against the stated type in the current environment's context
+  before appending, i.e. "theorem checking." Declarations are opaque once
+  checked (no delta-unfolding) — closer to Lean's `axiom`/`theorem` than a
+  `def` later terms can unfold through, an explicit, honest limitation.
+- `ΔLean` is free: `Delta.deltaOf(LeanCore.language)` works the moment the
+  language is composed, same as every other pack — no bespoke change
+  language was written or needed.
+- Not in scope: user-declarable inductive types, universe polymorphism,
+  real Lean 4 surface syntax or import/export.
+
+Remaining: full path-induction `J`; delta-unfolding `def`s; universe
+polymorphism; user-declarable inductives; a real Lean import/export surface.
 
 ## Rosetta QuickSort — on par with ROSETTA entrypoints
 
