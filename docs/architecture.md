@@ -319,11 +319,34 @@ Each test now constructs its own local `AuthorityGate()` inline instead —
 genuinely isolated regardless of test execution order or grouping, not
 just reset-before by convention.
 
-**Explicitly not done**: full injection (every handler/`Node` receiving
-an `AuthorityGate` instance as an explicit parameter instead of reaching
-`AuthorityGate.default`) — a separate future slice. `PackAccess` — the
-second ambient global — remains untouched, deliberately deferred until
-`AuthorityGate`'s injection is further along.
+**`PackAccess`** (done, second slice — smaller cut than a full injection
+rewrite, per the user's choice): removed two things rather than
+redesigning the whole registry. The `Class.forName("cairn.runtime.
+PackLoader$")` reflection fallback in `get` existed to force
+`runtime.PackLoader`'s object initializer (which calls
+`PackAccess.install(this)`) to run without `system-interface` having a
+compile-time dependency on `runtime`. Research found `PackLoader` is
+referenced directly and constantly elsewhere (`examples/pki/Pki.scala`,
+`examples/riemann/Riemann.scala`, `examples/search/Search.scala`, dozens
+of test call sites) — something else always touches `PackLoader` first in
+every real run, so the reflection hack was dead-in-practice. Verified
+empirically (not just by static reading, since that can't fully prove a
+reflection fallback is unneeded): removed it, ran the full suite plus
+both transcripts plus an isolated run of the three test suites that
+exercise `PackAccess`-dependent `user/` objects (`LeanCoreSuite`,
+`MiniTTSuite`, `UnisonCoreSuite`) — all green, confirming nothing actually
+needed it. Also removed `PackAccess.withInstalled` (a "test helper... "
+escape hatch with zero callers anywhere in the repo — unlike
+`AuthorityGate`'s equivalent reset pattern, which was actually used, just
+badly, this one was never used at all).
+
+**Explicitly not done**: full injection — the 5 `user/` language objects
+(`Law`/`MiniTT`/`UnisonCore`/`LeanCore`/`Sds`) still call `PackAccess.get`
+rather than receiving an explicit `PackAccess` parameter, and
+`AuthorityGate`/`Node`/the 8 handlers still reach `AuthorityGate.default`
+rather than an injected instance — both are the same larger, separate
+future slice: converting singleton objects into constructor-injected
+values, rippling to every consumer.
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 
