@@ -25,9 +25,16 @@ class MetaPreserveFormatSuite extends munit.FunSuite:
   private val fragments = cairn.examples.search.Search.fragments
   private val canonical = Meta.printLanguage(name, fragments).fold(e => fail(e), identity)
 
+  // Stable, currently-emitted declaration text used as a comment-anchor site.
+  // (Older Search surface had `keyword origin;` / `top searchObj;` — those
+  // forms are gone after the Phase 2 surface split; tests must target real
+  // printed decls or the replace is a silent no-op.)
+  private val untouchedDecl = "    ctor origin : Fact(Text);"
+
   test("no-op: fragments unchanged from currentText — output is byte-identical, comment and all"):
     val withComment = canonical.replace(
-      "    top searchObj;", "    -- kept comment on an untouched declaration\n    top searchObj;")
+      untouchedDecl, "    -- kept comment on an untouched declaration\n" + untouchedDecl)
+    assert(withComment != canonical, "anchor must exist in canonical print")
     val result = Meta.printLanguagePreservingFormat(name, fragments, withComment).fold(e => fail(e), identity)
     assertEquals(result, withComment)
 
@@ -43,10 +50,11 @@ class MetaPreserveFormatSuite extends munit.FunSuite:
     })
     val oldText = Meta.printLanguage(name, List(oldFragment)).fold(e => fail(e), identity)
     val handEdited = oldText
-      .replace("    keyword origin;", "    -- unrelated, must survive regeneration\n    keyword origin;")
+      .replace(untouchedDecl, "    -- unrelated, must survive regeneration\n" + untouchedDecl)
       .replace("    judgment wellFormed {",
         "    -- stale comment about the OLD stub rule, must NOT survive\n    judgment wellFormed {")
-
+    assert(handEdited.contains("-- unrelated, must survive regeneration"),
+      "anchor must exist in oldText print")
     val result = Meta.printLanguagePreservingFormat(name, fragments, handEdited).fold(e => fail(e), identity)
     assert(result.contains("-- unrelated, must survive regeneration"), result)
     assert(!result.contains("-- stale comment about the OLD stub rule"), result)
@@ -80,7 +88,8 @@ class MetaPreserveFormatSuite extends munit.FunSuite:
 
   test("vsReference no-op: working text unchanged from reference — output is byte-identical, comment and all"):
     val withComment = canonical.replace(
-      "    top searchObj;", "    -- kept comment on an untouched declaration\n    top searchObj;")
+      untouchedDecl, "    -- kept comment on an untouched declaration\n" + untouchedDecl)
+    assert(withComment != canonical, "anchor must exist in canonical print")
     val result = Meta.printLanguagePreservingFormatVsReference(name, withComment, canonical)
       .fold(e => fail(e), identity)
     assertEquals(result, withComment)
@@ -98,8 +107,9 @@ class MetaPreserveFormatSuite extends munit.FunSuite:
     })
     val reference = Meta.printLanguage(name, List(oldFragment)).fold(e => fail(e), identity)
     val working = canonical.replace(
-      "    keyword origin;", "    -- freshly added while editing, must survive\n    keyword origin;")
-
+      untouchedDecl, "    -- freshly added while editing, must survive\n" + untouchedDecl)
+    assert(working.contains("-- freshly added while editing, must survive"),
+      "anchor must exist in canonical print")
     val result = Meta.printLanguagePreservingFormatVsReference(name, working, reference).fold(e => fail(e), identity)
     assert(result.contains("-- freshly added while editing, must survive"), result)
     assert(result.contains("wf-origin"), result) // the real rules, canonically reprinted

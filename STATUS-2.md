@@ -24,18 +24,20 @@ round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 ## Golden digests (`sbt "examples/runMain cairn.examples.Main digests"`)
 
 ```text
-language law    91111fabc095765019c0997bbd37f49b633735599f9045bc0e39814cfe58c8da
-language pki    6e5be96d864104f9b04a3a91e106cdcbec0d56d560fae2b46f5b2b81555de8ad
-language policy 542f97a889a5081d314248d8ef6c36fe757d5ddb7921c3b085fe1d30871f4e1b
-language query  33b0c2e1bc6ac50c372d572e4131f9c0d1bc5a24a922eaae3edcb34c97c3d601
-language sds    67b7472010dc18c8a35042ea30e98c8d4f81feabd4e66f8af926903ee6913134
-language stlc   c505555940893bf55221aeef05586479991104c4a5066c197f9b9fc0b2ff9954
+language law    6d39fe8e82738f0da994d62064e4bc74035d5476e570ce85923f4741d127072a
+language pki    bebf85a46279c76fb90c3dae71b138e85def650449912bc691aae5e5b72eb3e8
+language policy df25113d6bd70b5af73d8eb3a7f86660b742caad33c2e45e0141d630432a01b6
+language query  14a04e0fbdbc91a07da588c10ff909dfb8cba28544722e97052e38dfc031150b
+language sds    7d28d11d228d825a2377c540385a583d7f4d802a40abdd7e564d9c28e60e2f66
+language search a5e2f932d079c1b0d4ba6d19e8b6a3e2aefba105c7a29a733ff046d0722a85a9
+language stlc   ef1188f151541c1e7dcb738cce62dd3ec0f7172e32313ce4b9d4aa2676bc2f2e
 rosetta quicksort2   c2de9525e314f240a4dea977e9ad3992e31d1789b03bce8d5e70ce87dc9d04fb
 rosetta quicksortApp f86cc325dd7b736b642893561d555aed3a725624dc2ab912251e5a0a4aa29e9f
 ```
 
-Closed Law/SDS digests include demoted dependency fragments (`PackLoader`); PKI
-unchanged. See [docs/exemplars.md](docs/exemplars.md).
+Closed Law/SDS digests include demoted dependency fragments (`PackLoader`). Phase 2
+excluded grammar from all language digests (surface packs). See
+[docs/exemplars.md](docs/exemplars.md).
 
 ## Benchmarks (`sbt "examples/runMain cairn.examples.Bench"`, this machine)
 
