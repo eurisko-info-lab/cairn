@@ -1,7 +1,7 @@
 package cairn.rosetta
 
 import cairn.core.{RosettaModule2, ScaffoldPlan}
-import cairn.systemhandler.{AuthorityGate, Filesystem}
+import cairn.systemhandler.{EffectContext, Filesystem}
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
 
@@ -23,13 +23,13 @@ object Scaffold:
 
   export ScaffoldPlan.obligationsManifest
 
-  def emitAll(m: RosettaModule2, dir: Path, gate: AuthorityGate): Either[String, List[Project]] =
+  def emitAll(m: RosettaModule2, dir: Path, ctx: EffectContext): Either[String, List[Project]] =
     ScaffoldPlan.plan(m).flatMap { (ps, writes) =>
       val pathArgs = writes.map(_._1).toSet ++ ps.flatMap(p => List(p.root, p.mainFile))
       val written = writes.foldLeft[Either[String, Unit]](Right(())) { (acc, rw) =>
         val (rel, content) = rw
         acc.flatMap(_ =>
-          Filesystem.perform(Fs.Request.Write(Fs.Path(dir.resolve(rel).toString), content), gate)
+          Filesystem.perform(Fs.Request.Write(Fs.Path(dir.resolve(rel).toString), content), ctx)
             .map(_ => ()).left.map(_.toString))
       }
       written.map { _ =>

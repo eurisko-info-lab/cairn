@@ -5,9 +5,9 @@ import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 
 /** Host-toolchain discovery and invocation (Phase 3). `find`/`run` are
-  * private: `perform` is the only entry point, gated by [[AuthorityGate]]
-  * (Subject("local") is a placeholder — this family has no real
-  * multi-tenant identity yet).
+  * private: `perform` is the only entry point, gated via [[EffectContext]]
+  * (subject from composition root). Nested process runs use a separate
+  * process [[EffectContext]].
   */
 object ExternalBackend:
   private def findOnPath(name: String): Option[Path] =
@@ -21,17 +21,17 @@ object ExternalBackend:
     case EB.Host.Lake     => findOnPath("lake")
 
   private def run(host: EB.Host, args: List[String],
-          cwd: Option[Path], processGate: AuthorityGate): Either[EB.Error, EB.Response] =
+          cwd: Option[Path], processCtx: EffectContext): Either[EB.Error, EB.Response] =
     find(host) match
       case None => Right(EB.Response.Missing(host))
       case Some(bin) =>
         Process.perform(
           Proc.Request.Run(bin.toString :: args, cwd.map(p => Fs.Path(p.toString))),
-          processGate)
+          processCtx)
           .map(r => EB.Response.ProcessResult(r.exitCode, r.combined))
           .left.map(e => EB.Error.Io(e.toString))
 
-  def perform(req: EB.Request, gate: AuthorityGate, processGate: AuthorityGate)
+  def perform(req: EB.Request, ctx: EffectContext, processCtx: EffectContext)
       : Either[EB.Error, EB.Response] =
     // The Host being invoked is the natural resource identifier — there's
     // no path to scope by until `find` resolves one, and the tool itself
@@ -39,13 +39,13 @@ object ExternalBackend:
     val (action, resourcePath) = req match
       case EB.Request.Find(host)      => (Effects.Action.BackendFind, host.toString)
       case EB.Request.Run(host, _, _) => (Effects.Action.BackendRun, host.toString)
-    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("externalBackend", resourcePath))
-    gate.checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
+    val authReq = ctx.effectRequest(action, Authority.Resource("externalBackend", resourcePath))
+    ctx.gate.checked(authReq)(err => EB.Error.Io(s"denied: $err")) {
       req match
         case EB.Request.Find(host) =>
           find(host) match
             case Some(p) => Right(EB.Response.Found(Fs.Path(p.toString)))
             case None    => Right(EB.Response.Missing(host))
         case EB.Request.Run(host, args, cwd) =>
-          run(host, args, cwd.map(p => Path.of(p.value)), processGate)
+          run(host, args, cwd.map(p => Path.of(p.value)), processCtx)
     }

@@ -11,8 +11,8 @@ import java.io.{InputStream, OutputStream}
   * so a caller building fixture bytes over a `ByteArrayOutputStream` (as
   * `WaveH2Suite` does) has no real-world effect to gate — the same
   * reasoning as `Filesystem.Resolve`. `perform` is where the actual
-  * session I/O happens and is gated by [[AuthorityGate]] (Subject("local")
-  * is a placeholder — this family has no real multi-tenant identity yet).
+  * session I/O happens and is gated via [[EffectContext]] (subject from
+  * composition root).
   */
 object LspTransport:
   def readMessage(in: InputStream): Option[String] =
@@ -40,15 +40,15 @@ object LspTransport:
     out.write(bytes)
     out.flush()
 
-  def perform(req: LspIface.Request, in: InputStream, out: OutputStream, gate: AuthorityGate)
+  def perform(req: LspIface.Request, in: InputStream, out: OutputStream, ctx: EffectContext)
       : Either[LspIface.Error, LspIface.Response] =
     val action = req match
       case LspIface.Request.ReadMessage     => Effects.Action.LspRead
       case LspIface.Request.WriteMessage(_) => Effects.Action.LspWrite
     // "*" is honestly correct here, not a placeholder: an LSP session's
     // transport isn't scoped per-message — same reasoning as Terminal.
-    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("lsp", "*"))
-    gate.checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
+    val authReq = ctx.effectRequest(action, Authority.Resource("lsp", "*"))
+    ctx.gate.checked(authReq)(err => LspIface.Error.Framing(s"denied: $err")) {
       try req match
         case LspIface.Request.ReadMessage =>
           readMessage(in) match

@@ -7,10 +7,15 @@ import java.nio.file.{Files, Path}
 /** Single-node PoA ledger over a CAS directory (Phase 3 ledger-transport
   * family). Moved from `ledger.Node`. All validation delegates to the pure
   * [[LedgerKernel]].
+  *
+  * Constructed with an [[EffectContext]] for the gate; ledger append still
+  * authenticates as the signing authority (`Subject(authority.name)`), not
+  * the process-local subject — that identity is intrinsic to the seal.
   */
-final class Node(val root: Path, gate: AuthorityGate):
+final class Node(val root: Path, ctx: EffectContext):
   val cas: Cas = DiskCas(root)
   private val chainFile = root.resolve("chain")
+  private def gate: AuthorityGate = ctx.gate
 
   def chainDigests: List[Digest] =
     if !Files.exists(chainFile) then Nil

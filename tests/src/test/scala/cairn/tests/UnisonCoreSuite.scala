@@ -3,8 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.AuthorityGate
-
+import cairn.systemhandler.EffectContext
 /** UnisonCore (§5b, §2c): a real term language — closed List/Option ADTs,
   * pattern matching, a minimal non-resumptive `Abort` ability — checked by
   * the same generic kernel Checker/Search as STLC/PKI/MiniTT, and stored by
@@ -14,7 +13,7 @@ import cairn.systemhandler.AuthorityGate
   * what isn't (no user-declarable ADTs/abilities, no Unison-surface syntax).
   */
 class UnisonCoreSuite extends munit.FunSuite:
-  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val packs = PackLoader(EffectContext.bootstrapped())
   private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
   private val Unison = cairn.examples.unison.Unison(UnisonCore)
 

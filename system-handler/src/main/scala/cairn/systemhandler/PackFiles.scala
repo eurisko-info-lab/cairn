@@ -6,9 +6,8 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 /** Workspace / language-pack discovery handler (Phase 3). `perform` is the
-  * only entry point, gated by [[AuthorityGate]] (Subject("local") is a
-  * placeholder — this family has no real multi-tenant identity yet); every
-  * other method here is private.
+  * only entry point, gated via [[EffectContext]] (subject from composition
+  * root); every other method here is private.
   */
 object Workspace:
   private def languageDirs: List[Path] =
@@ -34,7 +33,7 @@ object Workspace:
       .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".cairn"))
       .toList
 
-  def perform(req: Ws.Request, gate: AuthorityGate): Either[Ws.Error, Ws.Response] =
+  def perform(req: Ws.Request, ctx: EffectContext): Either[Ws.Error, Ws.Response] =
     // Real request target, not a wildcard, so path-scoped policies have
     // real data to match against (same pattern as Filesystem). LanguageDirs
     // takes no input — it discovers the dirs rather than targeting one —
@@ -45,9 +44,9 @@ object Workspace:
       case Ws.Request.ListSubdirs(dir)              => dir.value
       case Ws.Request.ListSurfaceCairnFiles(langDir) => langDir.value
       case Ws.Request.ReadText(path)                => path.value
-    val authReq = Authority.EffectRequest(
-      Authority.Subject("local"), Effects.Action.WorkspaceRead, Authority.Resource("workspace", resourcePath))
-    gate.checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
+    val authReq = ctx.effectRequest(
+      Effects.Action.WorkspaceRead, Authority.Resource("workspace", resourcePath))
+    ctx.gate.checked(authReq)(err => Ws.Error.Io(s"denied: $err")) {
       try req match
         case Ws.Request.LanguageDirs =>
           Right(Ws.Response.Paths(languageDirs.map(p => Fs.Path(p.toString))))

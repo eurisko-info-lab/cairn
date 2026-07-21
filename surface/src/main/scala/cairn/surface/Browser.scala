@@ -477,11 +477,11 @@ object BrowserServer:
   def serve(
       root: Path,
       languages: Map[String, ComposedLanguage],
-      ledgerGate: cairn.systemhandler.AuthorityGate,
+      ledgerCtx: cairn.systemhandler.EffectContext,
       port: Int = 8765
   ): Int =
     Files.createDirectories(root)
-    val node = Node(root, ledgerGate)
+    val node = Node(root, ledgerCtx)
     val srv = BrowserServer(node, languages, port)
     val bound = srv.start()
     bound

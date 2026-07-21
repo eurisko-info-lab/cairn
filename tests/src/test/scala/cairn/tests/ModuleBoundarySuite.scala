@@ -69,3 +69,16 @@ class ModuleBoundarySuite extends munit.FunSuite:
         if !line.trim.startsWith("//") && !line.trim.startsWith("*")
       yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
     assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("handlers do not invent Subject(\"local\") — subject comes from EffectContext"):
+    val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
+    val allow = Set("EffectContext.scala") // composition-root factory may mint local
+    val hits =
+      for
+        file <- scalaFilesUnder(handlerRoot)
+        if !allow.contains(file.getFileName.toString)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        if line.contains("""Subject("local")""") || line.contains("""Subject('local')""")
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+      yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))

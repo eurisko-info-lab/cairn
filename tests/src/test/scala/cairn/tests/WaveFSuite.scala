@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.core.Ports2.*
 import cairn.rosetta.Scaffold
-import cairn.systemhandler.AuthorityGate
+import cairn.systemhandler.EffectContext
 import cairn.examples.quicksort.QuickSort2
 
 /** Wave F acceptance (M30–M34). */
@@ -12,7 +12,7 @@ class WaveFSuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
   val m = QuickSort2.module
   val allPorts: List[PortV2] = List(ScalaPort2, LeanPort2, HaskellPort2, RustPort2)
-  private val scaffoldGate = AuthorityGate.bootstrapped()
+  private val scaffoldCtx = EffectContext.bootstrapped()
 
   test("M30: generic Ord-constrained quicksort is one canonical artifact"):
     assertEquals(m.artifact.kind, ArtifactKind.RosettaDecl)
@@ -70,7 +70,7 @@ class WaveFSuite extends munit.FunSuite:
       .find(java.nio.file.Files.isExecutable)
     assume(cargo.isDefined, "cargo not on PATH")
     val dir = java.nio.file.Files.createTempDirectory("cairn-rs")
-    Scaffold.emitAll(m, dir, scaffoldGate).fold(e => fail(e), identity)
+    Scaffold.emitAll(m, dir, scaffoldCtx).fold(e => fail(e), identity)
     val pb = new ProcessBuilder(cargo.get.toString, "test", "--quiet")
     pb.directory(dir.resolve("rust").toFile)
     pb.redirectErrorStream(true)
@@ -86,7 +86,7 @@ class WaveFSuite extends munit.FunSuite:
 
   test("M33: scaffolds + obligations manifest"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-scaffold")
-    val projects = Scaffold.emitAll(m, dir, scaffoldGate).fold(e => fail(e), identity)
+    val projects = Scaffold.emitAll(m, dir, scaffoldCtx).fold(e => fail(e), identity)
     assertEquals(projects.map(_.host).toSet, Set("scala", "lean", "haskell", "rust"))
     assert(java.nio.file.Files.exists(dir.resolve("lean/lakefile.lean")))
     assert(java.nio.file.Files.exists(dir.resolve("rust/Cargo.toml")))

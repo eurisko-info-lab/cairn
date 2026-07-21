@@ -3,14 +3,14 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.{AuthorityGate, DiskCas}
+import cairn.systemhandler.{DiskCas, EffectContext}
 import cairn.ledger.Provenance
 import cairn.examples.search.SearchTutorial
 import java.nio.file.Files
 
 /** Fact–Intent–Hint search pack: object language + CAS provenance spine. */
 class SearchSuite extends munit.FunSuite:
-  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val packs = PackLoader(EffectContext.bootstrapped())
   private val Search = cairn.examples.search.Search(packs)
 
   test("search pack loads from languages/*.cairn at runtime"):

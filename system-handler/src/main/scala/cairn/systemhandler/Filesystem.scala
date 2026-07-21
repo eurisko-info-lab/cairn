@@ -6,12 +6,11 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 /** Local filesystem handler (Phase 3). `perform` is the only entry point,
-  * gated by [[AuthorityGate]] (Subject("local") is a placeholder — this
-  * family has no real multi-tenant identity yet); every other method here
-  * is private. The action derivation below mirrors
-  * `kernel.EffectMeta.filesystem`'s `requestActions` grouping exactly
-  * (read/write/mkdirs classes; `Resolve` needs no right, pure path
-  * arithmetic with zero I/O).
+  * gated via [[EffectContext]] (subject comes from the composition root,
+  * not invented here); every other method here is private. The action
+  * derivation below mirrors `kernel.EffectMeta.filesystem`'s
+  * `requestActions` grouping exactly (read/write/mkdirs classes;
+  * `Resolve` needs no right, pure path arithmetic with zero I/O).
   */
 object Filesystem:
   private def toNio(p: Fs.Path): Path = Path.of(p.value)
@@ -45,7 +44,7 @@ object Filesystem:
   private def createTempDirectory(prefix: String): Path =
     Files.createTempDirectory(prefix)
 
-  def perform(req: Fs.Request, gate: AuthorityGate): Either[Fs.Error, Fs.Response] =
+  def perform(req: Fs.Request, ctx: EffectContext): Either[Fs.Error, Fs.Response] =
     // Resource path is the real target of the request (or, for
     // CreateTempDirectory, its prefix — the closest thing to a target it
     // has, since the actual path is OS-generated after the fact) rather
@@ -67,8 +66,8 @@ object Filesystem:
     action match
       case None => performRaw(req)
       case Some(a) =>
-        val authReq = Authority.EffectRequest(Authority.Subject("local"), a, Authority.Resource("filesystem", resourcePath))
-        gate.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
+        val authReq = ctx.effectRequest(a, Authority.Resource("filesystem", resourcePath))
+        ctx.gate.checked(authReq)(err => Fs.Error.Io(s"denied: $err"))(performRaw(req))
 
   private def performRaw(req: Fs.Request): Either[Fs.Error, Fs.Response] =
     try req match

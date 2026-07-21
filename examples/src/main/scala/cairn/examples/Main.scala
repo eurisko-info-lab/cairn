@@ -2,18 +2,18 @@ package cairn.examples
 
 import cairn.runtime.PackLoader
 import cairn.surface.Cli
-import cairn.systemhandler.AuthorityGate
+import cairn.systemhandler.EffectContext
 
 /** The `cairn` command-line entry point: the generic surface CLI wired with
   * the shipped example language packs (packs are injected here so the surface
   * layer stays domain-free, §4.11).
   */
 @main def Main(args: String*): Unit =
-    val workspaceGate = AuthorityGate.bootstrapped()
-    val packLoader = PackLoader(workspaceGate)
-    val ledgerGate = AuthorityGate.bootstrapped()
-    val processGate = AuthorityGate.bootstrapped()
-    val lspGate = AuthorityGate.bootstrapped()
+    val workspaceCtx = EffectContext.bootstrapped()
+    val packLoader = PackLoader(workspaceCtx)
+    val ledgerCtx = EffectContext.bootstrapped()
+    val processCtx = EffectContext.bootstrapped()
+    val lspCtx = EffectContext.bootstrapped()
     val pki = cairn.examples.pki.Pki(packLoader)
     val law = cairn.examples.law.Law(packLoader)
     val sds = cairn.examples.sds.Sds(packLoader)
@@ -149,6 +149,6 @@ import cairn.systemhandler.AuthorityGate
         println(s"wrote languages/stlc.cairn (${stlcText.length} bytes) + surfaces/default.cairn (${stlcSurf.length} bytes)")
         println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; Meta describes surface tops)")
       case other =>
-        Cli.main(other, packs, portModules, packLoader, ledgerGate, processGate, lspGate) match
+        Cli.main(other, packs, portModules, packLoader, ledgerCtx, processCtx, lspCtx) match
           case Right(out) => println(out)
           case Left(err)  => System.err.println(s"error: $err"); sys.exit(1)

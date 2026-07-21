@@ -5,9 +5,8 @@ import cairn.kernel.{Authority, Effects}
 import java.io.{BufferedReader, InputStreamReader}
 
 /** Stdio terminal handler (Phase 3). `write`/`writeLine`/`readLine` are
-  * private: `perform` is the only entry point, gated by [[AuthorityGate]]
-  * (Subject("local") is a placeholder — this family has no real
-  * multi-tenant identity yet).
+  * private: `perform` is the only entry point, gated via [[EffectContext]]
+  * (subject from composition root).
   */
 object Terminal:
   private lazy val in = new BufferedReader(new InputStreamReader(System.in))
@@ -18,7 +17,7 @@ object Terminal:
   private def readLine(): Option[String] =
     Option(in.readLine())
 
-  def perform(req: Term.Request, gate: AuthorityGate): Either[Term.Error, Term.Response] =
+  def perform(req: Term.Request, ctx: EffectContext): Either[Term.Error, Term.Response] =
     val action = req match
       case Term.Request.ReadLine     => Effects.Action.TerminalRead
       case Term.Request.Write(_)     => Effects.Action.TerminalWrite
@@ -26,8 +25,8 @@ object Terminal:
     // "*" is honestly correct here, not a placeholder: stdio is a
     // session-level resource, not a per-request one — there's no "which
     // terminal" to scope by.
-    val authReq = Authority.EffectRequest(Authority.Subject("local"), action, Authority.Resource("terminal", "*"))
-    gate.checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
+    val authReq = ctx.effectRequest(action, Authority.Resource("terminal", "*"))
+    ctx.gate.checked(authReq)(err => Term.Error.Io(s"denied: $err")) {
       try req match
         case Term.Request.Write(t) => write(t); Right(Term.Response.Ok)
         case Term.Request.WriteLine(t) => writeLine(t); Right(Term.Response.Ok)

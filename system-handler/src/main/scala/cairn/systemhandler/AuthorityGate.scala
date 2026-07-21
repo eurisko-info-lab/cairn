@@ -11,10 +11,12 @@ import cairn.kernel.Effects
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
   * (`mode`/`policies`/`events`) is explicit and constructible rather than
-  * shared, hidden, JVM-wide mutable state. Callers pass a gate instance
-  * explicitly (constructor injection on `Node`, method parameter on effect
-  * handler `perform`s). There is no process-global registry or default
-  * instance: composition roots and tests construct gates and pass them down.
+  * shared, hidden, JVM-wide mutable state. Callers pass an [[EffectContext]]
+  * (subject + gate + optional capabilities/audit) explicitly — constructor
+  * injection on `Node`/`PackLoader`, method parameter on effect handler
+  * `perform`s. There is no process-global registry, default instance, or
+  * thread-local context: composition roots and tests construct contexts and
+  * pass them down.
   *
   * A directly-constructed `AuthorityGate()` starts in `Mode.Audit` with no
   * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with the
@@ -83,8 +85,8 @@ object AuthorityGate:
 
   /** Production/test wiring helper: `Mode.Enforce` with one allow policy per
     * known `Action`, allowing any subject (`"*"`) over any resource — not just
-    * the placeholder `Subject("local")` the 8 effect handlers use, since
-    * `Node.append` authenticates as the real signing authority
+    * the process-local subject composition roots put in [[EffectContext]],
+    * since `Node.append` authenticates as the real signing authority
     * (`Subject(authority.name)`, e.g. `"alice"`). Honestly **not** meaningful
     * access control yet: a blanket allow-everyone-everything policy can't deny
     * anything. Real enforcement needs real, distinct subjects and narrower

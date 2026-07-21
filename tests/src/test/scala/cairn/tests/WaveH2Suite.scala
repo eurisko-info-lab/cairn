@@ -1,6 +1,6 @@
 package cairn.tests
 
-import cairn.systemhandler.AuthorityGate
+import cairn.systemhandler.EffectContext
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systemhandler.DiskCas
@@ -14,16 +14,16 @@ import cairn.ledger.Keypair
 class WaveH2Suite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
 
-  private val packs = PackLoader(AuthorityGate.bootstrapped())
+  private val packs = PackLoader(EffectContext.bootstrapped())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
   private val SearchPack = cairn.examples.search.Search(packs)
   private val Riemann = cairn.examples.riemann.Riemann(packs)
   private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
   private val Unison = cairn.examples.unison.Unison(UnisonCore)
-  private val ledgerGate = AuthorityGate.bootstrapped()
-  private val processGate = AuthorityGate.bootstrapped()
-  private val lspGate = AuthorityGate.bootstrapped()
+  private val ledgerCtx = EffectContext.bootstrapped()
+  private val processCtx = EffectContext.bootstrapped()
+  private val lspCtx = EffectContext.bootstrapped()
 
   // ---- M43: capability manifests ----
 
@@ -232,7 +232,7 @@ class WaveH2Suite extends munit.FunSuite:
     cairn.systemhandler.LspTransport.writeMessage(inBytes, request)
     cairn.systemhandler.LspTransport.writeMessage(inBytes, exitNote)
     val out = new java.io.ByteArrayOutputStream()
-    Lsp.serve(lspCfg, new java.io.ByteArrayInputStream(inBytes.toByteArray), out, lspGate)
+    Lsp.serve(lspCfg, new java.io.ByteArrayInputStream(inBytes.toByteArray), out, lspCtx)
     val response = out.toString
     assert(response.contains("Content-Length:"), response)
     assert(response.contains("renameProvider"), response)
@@ -378,7 +378,7 @@ class WaveH2Suite extends munit.FunSuite:
     assert(doc1.contains("Causes serious eye irritation"), doc1) // non-shadowed intact
     // ledger publish
     val alice = Keypair.dev("alice")
-    val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerGate)
+    val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerCtx)
     node.cas.put(m2.artifact)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
@@ -422,8 +422,8 @@ class WaveH2Suite extends munit.FunSuite:
       work,
       portModules = Map("quicksort2" -> cairn.examples.quicksort.QuickSort2.module),
       packLoader = packs,
-      ledgerGate = ledgerGate,
-      processGate = processGate) match
+      ledgerCtx = ledgerCtx,
+      processCtx = processCtx) match
       case Right(report) =>
         assert(report.steps.exists(_.startsWith("loaded language stlc")), report.render)
         assert(report.steps.exists(_.startsWith("gossip converged")), report.render)

@@ -4,7 +4,7 @@ import cairn.kernel.Authority.*
 import cairn.kernel.Effects
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.AuthorityGate
+import cairn.systemhandler.{AuthorityGate, EffectContext, Filesystem}
 
 /** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
   * Each test constructs its own fresh `AuthorityGate` instance instead of
@@ -77,3 +77,18 @@ class AuthoritySuite extends munit.FunSuite:
     fs.setMode(AuthorityGate.Mode.Audit)
     assertEquals(fs.currentMode, AuthorityGate.Mode.Audit)
     assertEquals(random.currentMode, AuthorityGate.Mode.Enforce) // unaffected
+
+  test("EffectContext subject flows into handler EffectRequest"):
+    import cairn.systeminterface.Filesystem as Fs
+    val gate = AuthorityGate()
+    gate.setMode(AuthorityGate.Mode.Enforce)
+    gate.install(List(PolicyEval.allowAll("allow-alice", alice, Effects.Action.FsRead)))
+    val aliceCtx = EffectContext(alice, gate)
+    val localCtx = EffectContext.local(gate)
+    // Exists is FsRead-gated; alice is allowed, local is not.
+    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), aliceCtx).isRight)
+    assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), localCtx).isLeft)
+    assertEquals(aliceCtx.subject, alice)
+    assertEquals(localCtx.subject, Subject("local"))
+    assert(localCtx.capabilities.isEmpty)
+    assertEquals(localCtx.audit, EffectContext.Audit.Local)

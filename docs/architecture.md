@@ -246,14 +246,13 @@ behavior for anyone. Verified zero regression: the compiler catching zero
 external breakage on privatization confirmed the call-site audit was
 complete.
 
-**Placeholder, flagged explicitly**: all four use `Authority.Subject("local")`
-and `Authority.Resource(<family>, "*")` — there's no real multi-tenant
-identity concept for local, non-ledger effects today (the whole system
-runs as one local process; only the ledger's PoA layer has real per-
-authority identity). Replacing this placeholder with real injected
-capabilities is the user's priority #2 ("replace ambient globals... with
-explicit runtime contexts and injected capabilities") — noted here as a
-forward pointer, not solved.
+**Placeholder, flagged explicitly**: all four previously used
+`Authority.Subject("local")` invented inside the handler. That placeholder is
+now owned by composition roots via `EffectContext` (`EffectContext.local` /
+`.bootstrapped`); handlers take `ctx: EffectContext` and build
+`EffectRequest` from `ctx.subject`. Replacing the still-empty
+`capabilities` list with real injected grants remains the AuthorizedEffect
+split (priority #2) — noted here as a forward pointer.
 
 **`LspTransport`** (done): the first family with real callers to be
 migrated. `surface.Lsp.serve`'s session loop — the actual live effect path,
@@ -505,6 +504,7 @@ continuing to pass, not by reproducing the failure mode itself.
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in `examples/` because they need handler crypto/CAS/filesystem; pure language defs that can live without handlers are in `user/`
 - **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports, `rosetta.Scaffold`) retained as documented compatibility shims
 - **Full AuthorityGate/PackAccess injection** — **DONE**: explicit constructor/`perform` params; composition roots build `AuthorityGate.bootstrapped()` + `PackLoader(gate)` and pass them; no ambient `get`/`install`/`forFamily`/`default`
+- **EffectContext** — **DONE**: handlers take `EffectContext(subject, gate, capabilities, audit)` instead of a bare gate; composition roots (`Main`, tests, `PackLoader`, `Node`, `Cli`/`Transcript`/`Lsp`/`Browser`) supply subject (typically `EffectContext.local` / `.bootstrapped`); handlers no longer invent `Subject("local")`. `capabilities` is still an empty placeholder pending grant-bundle threading. **Not yet done**: AuthorizedEffect-only handler split (handlers accepting only Kernel-minted tokens) — EffectContext is shaped so that split stays additive.
 
 ## Final principle
 

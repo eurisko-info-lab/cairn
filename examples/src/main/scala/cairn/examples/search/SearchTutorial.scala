@@ -25,7 +25,7 @@ object SearchTutorial:
   def run(workDir: Path = Files.createTempDirectory("cairn-search")): Report =
     Files.createDirectories(workDir)
     val Search = cairn.examples.search.Search(
-      cairn.runtime.PackLoader(cairn.systemhandler.AuthorityGate.bootstrapped()))
+      cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.bootstrapped()))
     val cas = DiskCas(workDir.resolve("cas"))
     val lang = Search.language
     val provides = lang.fragments.flatMap(_.provides).toSet
