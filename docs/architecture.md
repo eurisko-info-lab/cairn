@@ -231,10 +231,34 @@ real-world effect, the same reasoning as `Filesystem.Resolve` needing no
 right at all. That test now calls `LspTransport.writeMessage` by its real
 name instead of through the removed re-export.
 
-**Remaining** (`Filesystem`, `Process`, `PackFiles`/`Workspace`): each has
-real external callers needing an actual call-site migration before
-gating — separate future slices, roughly ordered by call-site count
-(`Filesystem`/`Process` smallest, `PackFiles` largest at 6 sites).
+**`Filesystem`** (done): a full call-site check of all 12 convenience
+methods (not just the two the initial audit found) showed it was almost
+entirely dead too — only `writeFile` (1 real caller: `rosetta.Scaffold
+.emitAll`, where host-project files actually get written to disk) and
+`readText` (1 caller, `system-handler.MetaActivation.loadAndValidate`,
+itself uncalled anywhere) had any callers at all; the other 10
+(`mkdirs`/`writeBytes`/`readBytes`/`exists`/`isDirectory`/
+`isRegularFile`/`isExecutable`/`list`/`delete`/`createTempDirectory`,
+plus `toNio`/`fromNio`) had none. `perform` is now the only public entry
+point, restructured into a gated wrapper calling a private `performRaw` —
+the **first slice where `kernel.EffectMeta`'s rights groupings are
+actually consumed at runtime**: the `Action` derivation in `perform`
+mirrors `EffectMeta.filesystem.requestActions` exactly (read/write/mkdirs
+classes; `Resolve` stays ungated, matching its `None` entry). Both real
+callers migrated onto `perform`: `Scaffold.emitAll`'s write loop (which
+also turned an uncaught-exception-on-I/O-failure path into a clean
+`Left(String)`, a small correctness improvement the typed entry point
+enabled) and `MetaActivation.loadAndValidate` — migrated even though
+`MetaActivation` itself is still uncalled anywhere, because its effect is
+real (Phase 7 language-pack activation), unlike the two confirmed
+"no real effect" precedents (`Filesystem.Resolve`, the `Lsp` test
+fixture).
+
+**Remaining** (`Process`, `PackFiles`/`Workspace`): each has real external
+callers needing an actual call-site migration before gating — separate
+future slices (`Process` smaller: 1 external + 1 internal cross-object
+caller from `ExternalBackend`; `PackFiles` largest at 6 sites in one
+file).
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 
