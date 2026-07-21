@@ -15,9 +15,9 @@ import java.nio.file.{Files, Path}
   * (`docs/agreement.md`).
   *
   * Always runs Cairn-side reference checks. Native `lean` / `hvm` on PATH are
-  * optional: Lean is invoked live when present; otherwise goldens. HVM is
-  * stubbed (`no-hvm-surface-exporter`) until an exporter exists — certificates
-  * still bind Cairn to classical-IC goldens.
+  * optional: Lean is invoked live when present; otherwise goldens. HVM uses
+  * [[HvmSurface]] (HVM2 CON/DUP/ERA book export); live `hvm run` when on PATH,
+  * else classical-IC goldens — certificates still bind Cairn to the envelope.
   */
 class AgreementSuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
@@ -36,6 +36,31 @@ class AgreementSuite extends munit.FunSuite:
     val proc = pb.start()
     val out = new String(proc.getInputStream.readAllBytes())
     (proc.waitFor(), out)
+
+  /** Run exported HVM2 book when `hvm` is on PATH; else keep classical golden. */
+  private def hvmCertify(
+      book: String,
+      expectation: String,
+      golden: Digest
+  ): (Digest, NativeSource) =
+    val exportDig = HvmSurface.exportDigest("hvm2-book", book)
+    onPath("hvm") match
+      case None => (golden, NativeSource.Golden)
+      case Some(hvm) =>
+        val dir = Files.createTempDirectory("cairn-agree-hvm")
+        val f = dir.resolve("case.hvm")
+        Files.writeString(f, book)
+        val (code, out) = runCmd(List(hvm.toString, "run", f.toString))
+        val detail = s"exit=$code;export=${exportDig.short}"
+        if code != 0 then
+          fail(s"hvm run failed ($detail):\n$out")
+        HvmSurface.readResult(out) match
+          case Left(e) => fail(s"$e ($detail)\n$out")
+          case Right(res) =>
+            assert(
+              HvmSurface.accepts(expectation, res),
+              s"hvm result '$res' rejected for expectation '$expectation' ($detail)")
+            (golden, NativeSource.Live("hvm", s"$detail;result=$res"))
 
   private def leanCheck(caseName: String, body: String): (Int, NativeSource) =
     onPath("lean") match
@@ -136,10 +161,6 @@ class AgreementSuite extends munit.FunSuite:
 
   // ---- HVM / IC envelope ---------------------------------------------------
 
-  private def hvmSource: NativeSource =
-    if onPath("hvm").isDefined then NativeSource.Stub("no-hvm-surface-exporter")
-    else NativeSource.Golden
-
   test("hvm-ic envelope is stable"):
     val e = Agreement.hvmIc
     assertEquals(e.id, "hvm-ic")
@@ -148,7 +169,20 @@ class AgreementSuite extends munit.FunSuite:
     assert(!AffineNet.language.kinds.exists(_.name == "dup"))
     assert(IcNet.language.kinds.exists(_.name == "dup"))
 
-  test("hvm-ic: (λx. x) true → true (classical golden)"):
+  test("hvm-ic: HvmSurface exports stable IC + HVM2 forms"):
+    val term = Stlc.app1(Stlc.idBool, Stlc.tru)
+    val ic = HvmSurface.icLambda(term).fold(e => fail(e), identity)
+    assertEquals(ic, "((λx. x) true)")
+    val book = HvmSurface.bookFromLambda(term).fold(e => fail(e), identity)
+    assert(book.contains("@True"), book)
+    assert(book.contains("@main"), book)
+    assert(book.contains("&"), book)
+    // Export digest is stable for certificate evidence.
+    assertEquals(
+      HvmSurface.exportDigest("hvm2-book", book),
+      HvmSurface.exportDigest("hvm2-book", book))
+
+  test("hvm-ic: (λx. x) true → true"):
     val term = Stlc.app1(Stlc.idBool, Stlc.tru)
     val expected = Stlc.tru
     val Right((net, root)) = IcNet.lower(term): @unchecked
@@ -157,12 +191,14 @@ class AgreementSuite extends munit.FunSuite:
     assertEquals(got, expected)
     val cairn = Agreement.outcome("ok", Cst.toCanon(got))
     val golden = Agreement.outcome("ok", Cst.toCanon(expected))
+    val book = HvmSurface.bookFromLambda(term).fold(e => fail(e), identity)
+    val (native, src) = hvmCertify(book, "true", golden)
     val c = certify(Agreement.hvmIc, "id-true", Digest.of(Cst.toCanon(term)),
-      cairn, golden, hvmSource)
+      cairn, native, src)
     assert(c.agreed)
-    assert(c.source.startsWith("golden") || c.source.startsWith("stub:"))
+    assert(c.source.startsWith("golden") || c.source.startsWith("live:hvm:"))
 
-  test("hvm-ic: self-application with δ agrees with tree eval (classical)"):
+  test("hvm-ic: self-application with δ agrees with tree eval"):
     val selfApp = Stlc.lam1("d", Stlc.tBool, Stlc.app1(Stlc.v("d"), Stlc.v("d")))
     val term = Stlc.app1(selfApp, Stlc.idBool)
     val Right(treeValue) = TreeEngine.normalize(Stlc.language, term): @unchecked
@@ -174,11 +210,14 @@ class AgreementSuite extends munit.FunSuite:
       s"tree ${treeValue.render} vs net ${netValue.render}")
     val cairn = Agreement.outcome("ok", Cst.toCanon(Alpha.normalize(spec, "var")(netValue)))
     val golden = Agreement.outcome("ok", Cst.toCanon(Alpha.normalize(spec, "var")(treeValue)))
+    val book = HvmSurface.bookFromLambda(term).fold(e => fail(e), identity)
+    assert(book.contains("{"), "dup must appear in HVM2 export for shared binder")
+    val (native, src) = hvmCertify(book, "id", golden)
     val c = certify(Agreement.hvmIc, "dup-id", Digest.of(Cst.toCanon(term)),
-      cairn, golden, hvmSource)
+      cairn, native, src)
     assert(c.agreed)
 
-  test("hvm-ic: AffineNet era-fan erases constants (classical)"):
+  test("hvm-ic: AffineNet era-fan erases constants"):
     // Same fixture as Phase3: era meets fan whose aux hold konsts → empty NF.
     val b = AffineNet.Builder()
     val e = b.agent("era"); val f = b.agent("fan")
@@ -190,8 +229,10 @@ class AgreementSuite extends munit.FunSuite:
     assertEquals(n2.agents.size, 0)
     val cairn = Agreement.outcome("ok", Canon.CInt(0))
     val golden = Agreement.outcome("ok", Canon.CInt(0))
+    val book = HvmSurface.bookEraFan
+    val (native, src) = hvmCertify(book, "era", golden)
     val c = certify(Agreement.hvmIc, "era-fan",
-      Digest.of(Canon.CStr("era-fan-fixture")), cairn, golden, hvmSource)
+      Digest.of(Canon.CStr("era-fan-fixture")), cairn, native, src)
     assert(c.agreed)
 
   test("Agreement.check rejects forged agreement flag"):

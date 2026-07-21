@@ -46,11 +46,14 @@ object Agreement:
     claims = List(
       "AffineNet: γ/ε annihilation and erasure of the classical IC affine fragment",
       "IcNet: γγ/δδ annihilate, γδ commute, ε erases, δ copies labelled konst",
-      "Lowered λ-net normal forms agree with recorded classical-IC outcomes on the envelope corpus"),
+      "Lowered λ-net normal forms agree with recorded classical-IC outcomes on the envelope corpus",
+      "HvmSurface projects the corpus to HVM2 CON/DUP/ERA books; live hvm run agrees when present"),
     excludes = List(
-      "HVM / HVM5 runtime ABI, memory layout, or CLI wire compatibility",
-      "HVM strict/lazy modes; numbers/recursion primitives",
-      "Full Bend / Kind / QDIC surfaces"))
+      "HVM / HVM5 runtime ABI, memory layout, or full CLI wire compatibility",
+      "HVM2 NUM/OPR/SWI ops; Bend / HVM5 / Kind surface syntax",
+      "HVM strict/lazy modes; numbers/recursion primitives beyond the corpus",
+      "Full Bend / Kind / QDIC surfaces",
+      "Opaque labelled konst ↔ Church @True/@False isomorphism outside the corpus"))
 
   /** Where the native-side digest came from. */
   enum NativeSource:

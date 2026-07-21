@@ -63,7 +63,8 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     fixpoints (M31). Expression bodies inside port files are verbatim
     single-line regions. **Agreement envelopes** (LeanCore ↔ Lean `#check`,
     AffineNet/IcNet ↔ classical IC) are separate from Rosetta — see
-    [docs/agreement.md](agreement.md); native tools optional with goldens/stubs.
+    [docs/agreement.md](agreement.md); native tools optional with goldens /
+    `HvmSurface` export (live `hvm` when on PATH).
 11. ~~Meta-language staging~~ — discharged by M41/M42: the fused meta surface
     covers grammar productions, print rules, infix tables, rewrite rules, and
     judgments; `languages/meta.cairn` passes the self-description fixpoint

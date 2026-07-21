@@ -40,33 +40,44 @@ are optional.
 | | |
 |---|---|
 | **Cairn side** | `AffineNet` (γ/ε) and `IcNet` (γ/δ/ε + labelled `konst`) via `NetEngine` |
-| **Native side** | Classical IC table outcomes (goldens); optional live `hvm` when an exporter exists |
-| **Claims** | Affine γ/ε annihilation+erasure; full IcNet table (γγ/δδ annihilate, γδ commute, ε erases, δ copies konst); lowered λ-net NFs agree with recorded classical-IC corpus outcomes. |
-| **Does NOT claim** | HVM/HVM5 ABI, memory layout, or CLI wire format; strict/lazy modes; numbers/recursion; full Bend/Kind/QDIC. |
+| **Native side** | Classical IC table outcomes (goldens); `HvmSurface` HVM2 book export; optional live `hvm run` |
+| **Claims** | Affine γ/ε annihilation+erasure; full IcNet table (γγ/δδ annihilate, γδ commute, ε erases, δ copies konst); lowered λ-net NFs agree with recorded classical-IC corpus outcomes; `HvmSurface` projects the corpus to HVM2 CON/DUP/ERA books and live `hvm` agrees when present. |
+| **Does NOT claim** | Full HVM/HVM5 ABI or memory layout; HVM2 NUM/OPR/SWI; Bend/HVM5/Kind surface syntax; strict/lazy modes; numbers/recursion beyond the corpus; full Bend/Kind/QDIC; opaque labelled `konst` ↔ Church `@True`/`@False` outside the corpus. |
+
+### Surface exporter (`cairn.core.HvmSurface`)
+
+Projects STLC λ-terms (and the era-fan net fixture) into two honest forms:
+
+1. **Classical IC λ-text** — `(λx. body)`, `(f x)`, `true`/`false` (`icLambda`) for golden-stable lineage digests.
+2. **HVM2 book IR** — `(a b)` = CON/γ, `{a b}` = DUP/δ, `*` = ERA/ε, `@Name` refs, `& t ~ u` active pairs (`bookFromLambda` / `bookEraFan`). Booleans are Church-affine `@True`/`@False`, not Cairn `konst` labels.
+
+This is a **projection for the envelope corpus**, not a general Cairn↔HVM compiler.
 
 ### How tests run
 
-1. **Always:** lower → normalize → readback / kind fingerprint → `cairnResult`.
+1. **Always:** lower → normalize → readback / kind fingerprint → `cairnResult`; export IC + HVM2 surfaces.
 2. **Goldens:** hand-specified classical IC expected readbacks / fingerprints (not “Cairn agrees with itself”).
-3. **If `hvm` on PATH:** currently **stubbed** with reason `no-hvm-surface-exporter` — we do not fake an HVM CLI encoding we do not ship. Certificate source is `stub:…`; Cairn↔golden agreement still certifies.
-4. When an HVM surface exporter lands, swap the stub for `live:hvm:…` without widening the envelope’s excludes.
+3. **If `hvm` on PATH:** write the HVM2 book, run `hvm run`, accept coarse result tokens (`@True`, `*`, identity forms) → `live:hvm:…` (export digest in the live detail). Envelope excludes stay narrow.
+4. **Else:** classical golden path → `golden`.
 
 ## Certificate shape
 
 ```text
 AgreementCertificate {
-  envelopeId   : "lean-core" | "hvm-ic"
-  caseName     : corpus case id
-  subject      : Digest(Cairn reference term)
-  cairnResult  : Digest(Cairn outcome)
-  nativeResult : Digest(imported / golden / stub outcome)
-  source       : "golden" | "live:<tool>:<detail>" | "stub:<reason>"
-  agreed       : Bool
+  envelopeId     : "lean-core" | "hvm-ic"
+  envelopeDigest : Digest(claims + excludes)
+  caseName       : corpus case id
+  subject        : Digest(Cairn reference term)
+  cairnResult    : Digest(Cairn outcome)
+  nativeResult   : Digest(imported / golden outcome)
+  source         : "golden" | "live:<tool>:<detail>" | "stub:<reason>"
+  nativeEvidence : Digest(source detail)
+  agreed         : Bool
 }
 ```
 
 Artifact kind: `agreement-certificate`. `Agreement.check` rejects mismatched
-digests or inconsistent `agreed` flags.
+digests, inconsistent `agreed` flags, or envelope-digest drift.
 
 ## Relation to Rosetta
 

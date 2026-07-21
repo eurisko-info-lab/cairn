@@ -32,9 +32,13 @@ rewiring is port fusion (internal binder–body wires resolve correctly);
 pairs without rules (interface anchors) are part of the normal form.
 Well-formedness (declared kinds, arities, exactly-once wiring) is checkable.
 
+## HVM surface export
+
+`cairn.core.HvmSurface` projects STLC λ-terms (and the AffineNet era-fan
+fixture) to classical IC text plus HVM2 CON/DUP/ERA books for the agreement
+envelope — see [agreement.md](agreement.md). Not a general net→HVM compiler.
+
 ## Still deferred
 
 Call-by-need boxes/levels for exponentials; lowering for `if`; net-level
-benchmarking against the compiled tree engine beyond the Bench harness;
-HVM CLI surface exporter (agreement uses classical-IC goldens — see
-[agreement.md](agreement.md)).
+benchmarking against the compiled tree engine beyond the Bench harness.

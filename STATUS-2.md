@@ -9,7 +9,8 @@ the S1–S50 base, plus a **top-level parity pass** (constitution §4.16), an
 agreement envelope digests) and a **deferred-trust follow-on** (issuer-scoped
 `ReplayStore`, journaled transactional accept, CAS-pinned effect interfaces,
 causal-LCA merge) plus **reclaim / sync** (`reclaimOrphanBlobs`, CAS
-`replay-snapshot` merge). Full suite: **458 tests green** (+2 skipped;
+`replay-snapshot` merge) and an **HVM surface exporter** (`HvmSurface` HVM2
+books + live `hvm` when on PATH). Full suite: **460 tests green** (+1 skipped;
 `tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
 round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 
@@ -140,7 +141,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | parity (Scala shape) | parity | L0–L6 engines; Unison pack; CLI/transcript |
 | marblego | Grammar VM + artifact/branch/store crates | parity (absorbed) | parity | Same L0–L1 story in Scala |
 | MetaLego / Kiwi | Composable fragments + STLC | parity | parity | STLC fragments + pushout |
-| Eurisko / HVM | Lattice meta / IC lineage | N/A deferred | **envelope** | `docs/agreement.md` + `AgreementSuite` (classical IC goldens; live HVM stubbed) |
+| Eurisko / HVM | Lattice meta / IC lineage | N/A deferred | **envelope** | `docs/agreement.md` + `HvmSurface` + `AgreementSuite` (IC goldens; live `hvm` when on PATH) |
 
 ### What closed this pass
 
@@ -171,12 +172,12 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
   `#check` ([docs/agreement.md](docs/agreement.md)), not full kernel compatibility.
-- HVM live differential: classical IC goldens certify AffineNet/IcNet; no HVM
-  surface exporter yet (`stub:no-hvm-surface-exporter` when `hvm` is on PATH).
+- HVM live differential: `HvmSurface` exports HVM2 CON/DUP/ERA books for the
+  envelope corpus; live `hvm run` when on PATH. Still not full HVM ABI / Bend /
+  HVM5 / labelled-konst isomorphism outside the corpus.
 - BFT / gossip daemon / public ledger (explicitly deferred).
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.
 - Crash may leave unreferenced CAS blobs until `reclaimOrphanBlobs`;
   multi-node replay is digest-merge only (not consensus / BFT).
-- HVM surface exporter (agreement classical-IC goldens until then).
 - GRANITE SDS depth / Lean proof bodies / BFT — see above.

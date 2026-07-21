@@ -174,7 +174,8 @@ not Lean-kernel or HVM-ABI compatible. Boundaries:
 - Types: `cairn.core.Agreement` (`Envelope`, `AgreementCertificate` with
   `envelopeDigest` + `nativeEvidence`, `check` / `certify`)
 - Tests: `AgreementSuite` — always Cairn reference; optional `lean` on PATH;
-  classical-IC goldens for nets; `hvm` stubbed (`no-hvm-surface-exporter`)
+  classical-IC goldens for nets; `HvmSurface` HVM2 export; live `hvm run` when
+  on PATH
 
 Rosetta LeanPort remains projection + `sorry` obligations, orthogonal to the
 LeanCore `#check` envelope.
@@ -193,9 +194,9 @@ LeanCore `#check` envelope.
   handlers live in `user/`
 - **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports,
   `rosetta.Scaffold`) — documented compatibility shims
-- **HVM surface exporter** — agreement uses classical-IC goldens until an
-  exporter exists
--   **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
+- **HVM surface limits** — `HvmSurface` projects the envelope corpus to HVM2
+  CON/DUP/ERA books (not full ABI / Bend / HVM5); live `hvm` optional on PATH
+- **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
   `mergeBranches` (causal LCA by shared module-result digests; replay-checked
   histories; causal digests on `BranchManifest`). Ledger publish remains
   **opt-in**. Accepts are journaled across CAS + refs + optional ledger
