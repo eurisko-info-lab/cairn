@@ -2,6 +2,7 @@ surface default for sds {
   fragment sds-objects {
     keyword substance;
     keyword phrase;
+    keyword corpus;
     keyword lang;
     keyword text;
     keyword mixture;
@@ -20,6 +21,7 @@ surface default for sds {
     punct ",";
     syntax sdsObj += substance : tok "substance" str str;
     syntax sdsObj += phrase : tok "phrase" name tok "lang" name tok "text" str;
+    syntax sdsObj += corpusPhrase : tok "corpus" tok "phrase" name tok "lang" name tok "text" str;
     syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
     syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;

@@ -3,6 +3,7 @@ language sds {
     sort SdsObj tree;
     ctor substance : SdsObj(Cas, Label);
     ctor phrase : SdsObj(Name, Lang, Text);
+    ctor corpusPhrase : SdsObj(Name, Lang, Text);
     ctor component : Component(Ref, Pct);
     ctor mixture : SdsObj(Components);
     ctor product : SdsObj(Label, Ref, PhraseRefs);

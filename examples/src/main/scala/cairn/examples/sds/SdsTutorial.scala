@@ -27,13 +27,19 @@ object SdsTutorial:
   def acetoneBase: Module = Module(List(
     "acetone" -> Cst.node("substance", Cst.Leaf("67-64-1"), Cst.Leaf("Acetone")),
     "secretBlend" -> Cst.node("substance", Cst.Leaf("trade-secret"), Cst.Leaf("Proprietary Degreaser Base")),
-    "h225" -> Cst.node("phrase", Cst.Leaf("h225"), Cst.Leaf("en"),
+    // H-phrases are official corpus — never go stale under PhraseStaleness
+    "h225" -> Cst.node("corpusPhrase", Cst.Leaf("h225"), Cst.Leaf("en"),
       Cst.Leaf("Highly flammable liquid and vapour")),
-    "h225fr" -> Cst.node("phrase", Cst.Leaf("h225"), Cst.Leaf("fr"),
+    "h225fr" -> Cst.node("corpusPhrase", Cst.Leaf("h225"), Cst.Leaf("fr"),
       Cst.Leaf("Liquide et vapeurs extremement inflammables")),
-    "h319" -> Cst.node("phrase", Cst.Leaf("h319"), Cst.Leaf("en"),
+    "h319" -> Cst.node("corpusPhrase", Cst.Leaf("h319"), Cst.Leaf("en"),
       Cst.Leaf("Causes serious eye irritation")),
     // FR missing for h319 — render must fall back to EN
+    // Free-text product label translations — subject to EN-source restale
+    "prodNameEn" -> Cst.node("phrase", Cst.Leaf("prodName"), Cst.Leaf("en"),
+      Cst.Leaf("Acetone Cleaner")),
+    "prodNameFr" -> Cst.node("phrase", Cst.Leaf("prodName"), Cst.Leaf("fr"),
+      Cst.Leaf("Nettoyant acetone")),
     "cleaner" -> Cst.node("mixture", Cst.Node("list", List(
       Cst.node("component", Cst.Leaf("acetone"), Cst.Leaf("60")),
       Cst.node("component", Cst.Leaf("secretBlend"), Cst.Leaf("15"))))),
@@ -66,7 +72,7 @@ object SdsTutorial:
 
     // Conflict: base replaces a phrase the shadow overrides
     val basePhrase = Parser.parse(dl.grammar,
-      """{ replace h225 = phrase h225 lang en text "Base reworded flammable phrase" ; }""")
+      """{ replace h225 = corpus phrase h225 lang en text "Base reworded flammable phrase" ; }""")
       .fold(e => throw RuntimeException(e), identity)
     val conflict = Sds.rebaseShadow(base, basePhrase, addShadow)
     val conflictPaths = conflict.fold(c => c.overlap, _ => Set.empty)

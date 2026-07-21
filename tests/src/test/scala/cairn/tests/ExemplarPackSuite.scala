@@ -131,3 +131,43 @@ class ExemplarPackSuite extends munit.FunSuite:
     val bad = Parser.parse(dl.grammar,
       """{ add badBasis = basis phantom section "9" ; }""").fold(e => fail(e), identity)
     assert(Sds.applySds(base, bad).swap.exists(_.contains("unknown product 'phantom'")))
+
+  test("SDS phrase-staleness: free-text FR goes stale when EN source hash changes"):
+    import cairn.examples.sds.PhraseStaleness
+    val enHash1 = PhraseStaleness.textHash("Acetone Cleaner")
+    val translations = Map(
+      "en" -> PhraseStaleness.TranslatedText("Acetone Cleaner", enHash1.hex, PhraseStaleness.State.HumanReviewed),
+      "fr" -> PhraseStaleness.TranslatedText("Nettoyant acetone", enHash1.hex, PhraseStaleness.State.HumanReviewed))
+    val enHash2 = PhraseStaleness.textHash("Acetone Cleaner (industrial)")
+    val restaled = PhraseStaleness.restale(translations, enHash2)
+    assertEquals(restaled("fr").state, PhraseStaleness.State.StaleBecauseSourceChanged)
+    assertEquals(restaled("en").state, PhraseStaleness.State.HumanReviewed)
+
+  test("SDS phrase-staleness: corpusPhrase never stales; acetone H-phrases are corpus"):
+    import cairn.examples.sds.PhraseStaleness
+    val base = cairn.examples.sds.SdsTutorial.acetoneBase
+    assert(Sds.language.constructors.contains("corpusPhrase"))
+    assert(base.get("h225").exists {
+      case Cst.Node("corpusPhrase", _) => true
+      case _ => false
+    })
+    val projected = PhraseStaleness.project(base, "h225")
+    assertEquals(projected("en").state, PhraseStaleness.State.OfficialCorpus)
+    assertEquals(projected("fr").state, PhraseStaleness.State.OfficialCorpus)
+    val restaled = PhraseStaleness.restale(projected, PhraseStaleness.textHash("other"))
+    assertEquals(restaled("fr").state, PhraseStaleness.State.OfficialCorpus)
+    assertEquals(
+      PhraseStaleness.staleLangsAfterEnChange(base, "h225", "rewritten hazard"),
+      Set.empty)
+
+  test("SDS phrase-staleness: acetone free-text prodName FR stales on EN rewrite"):
+    import cairn.examples.sds.PhraseStaleness
+    val base = cairn.examples.sds.SdsTutorial.acetoneBase
+    val projected = PhraseStaleness.project(base, "prodName")
+    assertEquals(projected("fr").state, PhraseStaleness.State.HumanReviewed)
+    assertEquals(
+      PhraseStaleness.staleLangsAfterEnChange(base, "prodName", "Acetone Cleaner (new)"),
+      Set("fr"))
+    // matching hash keeps FR fresh
+    val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Acetone Cleaner"))
+    assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)

@@ -45,19 +45,25 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
 
-`languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` + `SdsTutorial`):
+`languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` +
+`PhraseStaleness` + `SdsTutorial`):
 
-- Typed objects (substance / mixture / phrase / product / shadow / `basis`);
-  rendered document is a compiled bidirectional view.
+- Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
+  `basis`); rendered document is a compiled bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
 - ΔSDS = generic free ΔL + domain gate; multilingual phrase fallback; domain-aware
   shadow rebase with semantic conflict on overridden phrases.
+- Phrase-staleness machine stub (`PhraseStaleness`): official `corpusPhrase`
+  never stales; free-text `phrase` translations restale to
+  `StaleBecauseSourceChanged` when the English source hash drifts (GRANITE
+  Multilingual.restale). State is projected, not Studio-persisted.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
-- Acetone tutorial publishes industrial shadow to the ledger.
+- Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
+  `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE: full chemicals corpus, regulatory section numbering,
-phrase-corpus staleness machine, SDS Studio UI (deferred).
+full phrase-corpus / Studio-persisted staleness UI, SDS Studio UI (deferred).
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)
 

@@ -6,12 +6,14 @@ import cairn.core.*
 
 /** SDS pack (M47, §5b): Safety Data Sheet authoring — flagship of
   * `PKI → Law → SDS`. An SDS is NOT a flat document: it is a compiled view
-  * over typed objects (substances, mixtures, phrases, products, shadows,
-  * regulatory `basis` citations into Law sections).
+  * over typed objects (substances, mixtures, phrases / corpus phrases,
+  * products, shadows, regulatory `basis` citations into Law sections).
   *
   * Object language: [[languages/sds.cairn]] (`provides sds requires law`).
   * Closed composition pulls Law + PKI; compose without them fails.
   * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
+  * Phrase staleness (official corpus vs free-text restale) lives in the
+  * examples host machine — see `cairn.examples.sds.PhraseStaleness`.
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -120,12 +122,13 @@ final class Sds(packs: PackAccess):
         PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.StrField(1)))),
     top = "doc")
 
-  /** Resolve a phrase with multilingual fallback: exact lang → `en` → any. */
+  /** Resolve a phrase (free-text or corpus) with multilingual fallback:
+    * exact lang → `en` → any.
+    */
   def phraseText(m: Module, phraseName: String, lang: String): Option[String] =
     def texts: List[(String, String)] = m.defs.collect {
-      case (_, Cst.Node("phrase", List(Cst.Leaf(n), Cst.Leaf(l), Cst.Leaf(t)))) if n == phraseName =>
-        (l, t)
-      case (n, Cst.Node("phrase", List(_, Cst.Leaf(l), Cst.Leaf(t)))) if n == phraseName =>
+      case (_, Cst.Node("corpusPhrase" | "phrase", List(Cst.Leaf(n), Cst.Leaf(l), Cst.Leaf(t))))
+          if n == phraseName =>
         (l, t)
     }.toList
     val all = texts
