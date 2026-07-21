@@ -129,10 +129,23 @@ once compiled), 2 needed an added import (`tests/MetaPreserveFormatSuite.scala`,
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
 only import updates at call sites. `user` and `runtime` do not exist yet;
-`workbench.Delta`/`Capabilities` and `rosetta`'s own port-generation engine
-(`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`, confirmed I/O-free but not
-yet relocated) still play Core's role, unsplit. Every exemplar language and
-domain pack still lives under `examples/`.
+`workbench.ChangeAlgebra`/`Merge`/`Migrate` and `rosetta`'s own
+port-generation engine (`Rosetta.scala`/`Rosetta2.scala`/`Ports2.scala`,
+confirmed I/O-free but not yet relocated) still play Core's role, unsplit.
+Every exemplar language and domain pack still lives under `examples/`.
+
+`core` (Phase 2, seventh slice): `workbench.Delta` (Module + ΔL derivation/
+apply/compose/flatten/format-preserving apply, 456 lines),
+`workbench.ModuleSurface` (40 lines; required by format-preserving ΔL), and
+`workbench.Capabilities`+`Query` (210 lines) moved wholesale to
+`core.Delta`/`core.ModuleSurface`/`core.Capabilities`. Pure code motion for
+Delta/ModuleSurface; Query's `run` had a filesystem CAS walk for
+`artifacts kind` — purified by taking a preloaded `List[Artifact]` instead of
+a `Path` (one WaveH2Suite call site updated to pass artifacts it already
+`cas.put`). No `build.sbt` change. `ChangeAlgebra`/`Merge`/`Migrate` stay in
+`workbench` for now (import `cairn.core.{Delta, Module}`); they are the
+natural next workbench follow-on, not part of this slice. `ModuleBoundarySuite`
+now also enforces the core no-filesystem/networking/process rule.
 
 ## Forbidden-import rules
 
@@ -144,16 +157,17 @@ Enforced today, mechanically, by `tests/ModuleBoundarySuite`:
   existing `java.io`/`java.nio.charset`/`java.security` imports (in-memory
   buffers, charset constants, message digests) are not filesystem/network/
   process I/O and are not flagged.
+- `core` must not import the same filesystem/networking/process APIs (same
+  list as kernel). Added in the seventh Phase 2 slice once Query's CAS walk
+  was removed.
 
 Named in `MIGRATION-PLAN.md` but **not yet checkable**, because the modules
 they constrain don't exist yet:
 
-- `core` must not import filesystem or networking APIs (no `core` module yet
-  — `workbench`/`proof`/`compute`/`rosetta` still play that role, unsplit).
 - `user` must not import `system-handler` packages (no `user` module yet).
 - `system-handler` must not contain language-specific domain logic, e.g. SDS
   or Unison Core internals (no enforcement needed yet — nothing has moved
-  into `system-handler` that isn't `Cas`-adjacent).
+  into `system-handler` that isn't generic I/O).
 
 ## Migration status
 
@@ -161,7 +175,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Third slice: `workbench.PackLoader` split into `system-handler.PackFiles` (I/O) + `core.PackCompose` (pure) + a thin `PackLoader` facade. Fourth slice: `rosetta.Scaffold`'s I/O extracted to `system-handler.Filesystem`; its pure planning half stays in `rosetta`, blocked from `core` by a `JsonSurface`/`workbench` dependency. Fifth slice: `workbench.Grammar` (Lexer/Parser/Concrete/Printer/RoundTrip) moved wholesale to `core.Grammar`, unblocking (but not yet resolving) the third/fourth slices' deferrals. Sixth slice: `workbench.Meta`+`Surfaces`(`JsonSurface`) moved wholesale to `core`, removing `Scaffold`'s specific `JsonSurface` blocker (though `Scaffold.plan` itself wasn't revisited). Still pending within Phase 2: `workbench.Delta`/`Capabilities`, `rosetta`'s port-generation engine |
+| 2. Introduce Core | In progress | First–sixth slices as previously recorded. Seventh slice: `workbench.Delta`/`ModuleSurface`/`Capabilities`+`Query` → `core` (Query.kind purified off the filesystem). Still pending within Phase 2: `workbench.ChangeAlgebra`/`Merge`/`Migrate`, `rosetta`'s port-generation engine, optional `Scaffold.plan` revisit |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |

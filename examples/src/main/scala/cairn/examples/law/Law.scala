@@ -2,6 +2,7 @@ package cairn.examples.law
 
 import cairn.kernel.*
 import cairn.workbench.*
+import cairn.core.*
 
 /** Law pack — middle link in `PKI → Law → SDS`.
   *

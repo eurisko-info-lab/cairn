@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.Module
+import cairn.core.Module
 import cairn.core.{Parser, RoundTrip}
 import cairn.ledger.*
 import cairn.examples.stlc.Stlc
@@ -104,7 +104,7 @@ class WaveGSuite extends munit.FunSuite:
     RoundTrip.check(PolicyLang.language.grammar, term).fold(e => fail(e), identity)
     val dp = PolicyLang.deltaPolicy.fold(e => fail(e), identity)
     assertEquals(dp.name, "Δpolicy")
-    assert(cairn.workbench.Delta.deltaOf(dp).isRight) // Δ(ΔPolicy)
+    assert(cairn.core.Delta.deltaOf(dp).isRight) // Δ(ΔPolicy)
 
   test("M37: head update violating policy rejected with policy cited"):
     val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"))
@@ -187,9 +187,9 @@ class WaveGSuite extends munit.FunSuite:
     cas.put(lang.artifact)
     Provenance.record(cas, lang.digest, Stlc.fragments.map(_.digest), "compose")
     // hop 2: language + change -> module (delta)
-    val dl = cairn.workbench.Delta.deltaOf(lang).toOption.get
+    val dl = cairn.core.Delta.deltaOf(lang).toOption.get
     val change = Parser.parse(dl.grammar, "{ add id = fun x : Bool . x ; }").toOption.get
-    val Right((module, vcs)) = cairn.workbench.Delta.apply(lang, Module(Nil), change): @unchecked
+    val Right((module, vcs)) = cairn.core.Delta.apply(lang, Module(Nil), change): @unchecked
     cas.put(module.artifact)
     cas.put(vcs.artifact)
     Provenance.record(cas, module.digest, List(lang.digest, vcs.artifact.digest), "delta")

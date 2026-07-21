@@ -13,7 +13,7 @@ import cairn.surface.Cli
     "sds" -> cairn.examples.sds.Sds.language,
     "law" -> cairn.examples.law.Law.language,
     "search" -> cairn.examples.search.Search.language,
-    "query" -> cairn.workbench.Query.language,
+    "query" -> cairn.core.Query.language,
     "policy" -> cairn.ledger.PolicyLang.language)
   val portModules = Map(
     "quicksort2" -> cairn.examples.quicksort.QuickSort2.module,

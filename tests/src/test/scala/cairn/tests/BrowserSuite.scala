@@ -3,7 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.ledger.{Keypair, Node}
 import cairn.surface.BrowserServer
-import cairn.workbench.Module
+import cairn.core.Module
 import java.net.URI
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.nio.file.Files

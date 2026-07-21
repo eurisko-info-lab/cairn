@@ -1,7 +1,6 @@
 package cairn.surface
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
 import cairn.core.TreeEngine
 
@@ -13,9 +12,8 @@ import cairn.core.TreeEngine
   * Documents use the generic module surface: `name = <term> ;` lines derived
   * mechanically for any language (no per-language server code).
   */
-// ModuleSurface moved to cairn.workbench.ModuleSurface (L1) — format-preserving
-// Delta application needs it without pulling in the surface layer; imported here
-// via the existing `import cairn.workbench.*` above.
+// ModuleSurface lives in cairn.core — format-preserving ΔL apply and the LSP
+// share the same generic module-file surface (via `import cairn.core.*` above).
 
 /** JSON value helpers over the JsonSurface Cst shapes. */
 object J:

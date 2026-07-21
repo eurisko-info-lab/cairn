@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systemhandler.DiskCas
 import cairn.surface.*
-import cairn.core.{Search, Parser, Printer, RoundTrip}
+import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.examples.pki.PkiMax
 import cairn.examples.sds.Sds
@@ -260,10 +260,12 @@ class WaveH2Suite extends munit.FunSuite:
     // 3. CAS: artifacts by kind
     val dir = java.nio.file.Files.createTempDirectory("cairn-query")
     val cas = DiskCas(dir)
-    cas.put(cairn.proof.Claim("c1", Cst.node("x"), Stlc.language.digest).artifact)
-    cas.put(Stlc.base.artifact)
+    val claimArt = cairn.proof.Claim("c1", Cst.node("x"), Stlc.language.digest).artifact
+    val baseArt = Stlc.base.artifact
+    cas.put(claimArt)
+    cas.put(baseArt)
     val q3 = Query.parse("artifacts kind claim").fold(e => fail(e), identity)
-    val r3 = Query.run(q3, Module(Nil), casRoot = Some(dir)).fold(e => fail(e), identity)
+    val r3 = Query.run(q3, Module(Nil), artifacts = Some(List(claimArt, baseArt))).fold(e => fail(e), identity)
     assertEquals(r3.hits.length, 1)
     // results are artifacts; the query language is a language (ΔQuery forced)
     assertEquals(r1.artifact.kind, ArtifactKind.QueryResult)

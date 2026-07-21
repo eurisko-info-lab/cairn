@@ -2,7 +2,7 @@ package cairn.examples.unison
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.core.{Search, TreeEngine}
+import cairn.core.*
 
 /** UnisonCore (§5b, §2c): a real term language for the Unison-inspired
   * content-addressed store (`Unison.Store`/`Unison.Codebase`), replacing the

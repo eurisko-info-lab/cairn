@@ -5,7 +5,7 @@ import cairn.workbench.*
 import cairn.systeminterface.Cas
 import cairn.ledger.Provenance
 import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
-import cairn.core.{Search as DerivSearch}
+import cairn.core.{Search as DerivSearch, Module, Delta}
 
 /** Search pack — Fact–Intent–Hint board as a `.cairn` object language.
   *

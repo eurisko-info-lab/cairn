@@ -2,7 +2,7 @@ package cairn.examples.claims
 
 import cairn.kernel.*
 import cairn.proof.*
-import cairn.workbench.Module
+import cairn.core.Module
 
 /** Claims pack (S24, §5): proof-free properties over STLC programs backed by
   * test certificates, alongside the certified proof path.

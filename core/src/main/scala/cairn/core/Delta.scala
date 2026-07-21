@@ -1,7 +1,6 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.*
 
 /** A module: named definitions in some language L. The unit ΔL edits act on. */
 final case class Module(defs: List[(String, Cst)]):

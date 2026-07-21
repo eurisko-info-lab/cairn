@@ -1,7 +1,6 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
 
 /** Format-preserving meta-surface regeneration: the follow-up to a real CI

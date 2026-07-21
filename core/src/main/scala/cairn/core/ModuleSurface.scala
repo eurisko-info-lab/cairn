@@ -1,12 +1,12 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
 
 /** The generic module-file text surface of any composed language: `name = <term> ;`
-  * lines derived mechanically, no per-language code (M44). Lives in `workbench` (L1)
-  * rather than `surface` (L6) because it only touches `ComposedLanguage`/`GrammarSpec`/
-  * `Cst`/`Module` — L0/L1 concepts — and `workbench`-layer consumers (e.g. format-
-  * preserving `Delta` application) need it without pulling in the surface layer.
+  * lines derived mechanically, no per-language code (M44). Lives in `core` because
+  * it only touches `ComposedLanguage`/`GrammarSpec`/`Cst`/`Module` — pure proposal
+  * machinery — and format-preserving `Delta` application needs it without pulling
+  * in the surface layer.
   */
 object ModuleSurface:
   /** The module-file grammar of a language: `def* ` with def := name = term ; */

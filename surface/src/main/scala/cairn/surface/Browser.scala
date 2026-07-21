@@ -1,7 +1,6 @@
 package cairn.surface
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
 import cairn.systemhandler.CasAdmin
 import cairn.ledger.Node

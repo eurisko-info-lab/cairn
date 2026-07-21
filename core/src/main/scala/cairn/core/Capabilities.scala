@@ -1,7 +1,6 @@
-package cairn.workbench
+package cairn.core
 
 import cairn.kernel.*
-import cairn.core.*
 
 /** M43: the §2b capability bundle as a first-class, lintable manifest.
   *
@@ -176,11 +175,13 @@ object Query:
       "name" -> Canon.CStr(n), "digest" -> Canon.CStr(d.hex))))
     def artifact: Artifact = Artifact(ArtifactKind.QueryResult, canon)
 
-  /** Execute a query against a module (+ optional CAS root for kind queries,
-    * + optional checker cfg + type-goal builder for `defs typed`).
+  /** Execute a query against a module (+ optional preloaded artifacts for kind
+    * queries, + optional type-inference callback for `defs typed`). Kind queries
+    * take already-decoded [[Artifact]]s — CAS/filesystem walking is a System
+    * Handler concern; callers that used to pass a CAS root load artifacts first.
     */
   def run(query: Cst, module: Module,
-          casRoot: Option[java.nio.file.Path] = None,
+          artifacts: Option[List[Artifact]] = None,
           typeOf: Option[Cst => Either[String, Cst]] = None): Either[String, Result] =
     query match
       case Cst.Node("qMatch", List(qp)) =>
@@ -195,16 +196,7 @@ object Query:
           infer(t).toOption.filter(ty => matches(pat, ty))
             .map(_ => (n, Artifact(ArtifactKind.Term, Cst.toCanon(t)).digest)) })
       case Cst.Node("qKind", List(Cst.Leaf(kind))) =>
-        casRoot.toRight("`artifacts kind` needs a CAS root").map { root =>
-          import scala.jdk.CollectionConverters.*
-          val objs = root.resolve("objects")
-          val hits =
-            if !java.nio.file.Files.exists(objs) then Nil
-            else java.nio.file.Files.walk(objs).iterator.asScala
-              .filter(p => java.nio.file.Files.isRegularFile(p) && !p.toString.endsWith(".corrupt"))
-              .flatMap(p => Artifact.decode(java.nio.file.Files.readAllBytes(p)).toOption)
-              .filter(_.kind.name == kind)
-              .map(a => (a.kind.name, a.digest))
-              .toList
+        artifacts.toRight("`artifacts kind` needs a preloaded artifact list").map { arts =>
+          val hits = arts.filter(_.kind.name == kind).map(a => (a.kind.name, a.digest))
           Result(hits.sortBy(_._2.hex)) }
       case other => Left(s"not a query: ${other.render}")

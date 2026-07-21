@@ -2,7 +2,7 @@ package cairn.examples.minitt
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.core.{Search, TreeEngine}
+import cairn.core.*
 
 /** MiniTT — a minimal, closed dependent type core (§5b, §2c; the "Formal-
   * methods IR ladder" rung, §8b), checked by the SAME generic kernel
