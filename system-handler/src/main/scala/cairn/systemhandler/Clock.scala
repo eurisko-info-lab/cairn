@@ -1,26 +1,28 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Clock as Clk
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /** Wall-clock handler (Phase 3). [[perform]] accepts only a pre-authorized
   * [[AuthorizedEffect]]; use [[run]] as the thin authorize-then-perform adapter.
+  * Action/resource keys come from [[EffectMeta.clock]].
   */
 object Clock:
+  private val iface = EffectMeta.clock
   private val slugFmt = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
   private def nowMillis(): Long = System.currentTimeMillis()
 
   private def timestampSlug(): String = LocalDateTime.now().format(slugFmt)
 
-  def intent(req: Clk.Request): (Effects.Action, Authority.Resource) =
-    val action = req match
-      case Clk.Request.Now           => Effects.Action.ClockNow
-      case Clk.Request.TimestampSlug => Effects.Action.ClockTimestampSlug
+  def intent(req: Clk.Request): (Effects.ActionKey, Authority.Resource) =
+    val ctor = req match
+      case Clk.Request.Now           => "now"
+      case Clk.Request.TimestampSlug => "timestampSlug"
     // "*" is honestly correct: wall-clock time isn't scoped to a target.
-    (action, Authority.Resource("clock", "*"))
+    (iface.keyFor(ctor).get, iface.resource.any)
 
   def run(req: Clk.Request, ctx: EffectContext): Either[Clk.Error, Clk.Response] =
     val (action, resource) = intent(req)

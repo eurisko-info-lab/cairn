@@ -12,14 +12,14 @@ import cairn.kernel.Effects
   */
 final class AuthorizedEffect private[systemhandler] (val authorized: AuthorizedRequest):
   def request: EffectRequest = authorized.request
-  def action: Effects.Action = authorized.action
+  def action: Effects.ActionKey = authorized.action
   def resource: Resource = authorized.resource
   def subject: Authority.Subject = authorized.subject
 
   /** Exact cover check: the token must match the action and resource the
     * handler is about to perform (same values passed to authorize).
     */
-  def covers(action: Effects.Action, resource: Resource): Boolean =
+  def covers(action: Effects.ActionKey, resource: Resource): Boolean =
     this.action == action && this.resource == resource
 
 object AuthorizedEffect:

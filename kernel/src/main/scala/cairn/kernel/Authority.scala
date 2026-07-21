@@ -6,15 +6,17 @@ package cairn.kernel
   * Distinct from branch-policy CSTs (`ArtifactKind.Policy` language packs) and
   * language capability manifests (`ArtifactKind.Capability` / `core.Capabilities`).
   *
-  * Action vocabulary lives in [[Effects]] (Kernel) so authorization stays inside
-  * the TCB without depending on system-interface.
+  * Action vocabulary is [[Effects.ActionKey]], derived from [[EffectMeta]]
+  * effect-interface artifacts (with [[Effects.Action]] as host bridge).
   */
 object Authority:
 
   /** Subject identity. */
   final case class Subject(id: String)
 
-  /** Resource scope for an effect. */
+  /** Resource scope for an effect. Prefer constructing via
+    * [[EffectMeta.ResourceSchema.at]] so `kind` comes from the interface.
+    */
   final case class Resource(kind: String, path: String):
     def matches(pattern: Resource): Boolean =
       (pattern.kind == "*" || pattern.kind == kind) &&
@@ -22,7 +24,7 @@ object Authority:
 
   final case class EffectRequest(
       subject: Subject,
-      action: Effects.Action,
+      action: Effects.ActionKey,
       resource: Resource,
       args: Map[String, String] = Map.empty)
 
@@ -33,7 +35,7 @@ object Authority:
   final case class EffectPolicy(
       id: String,
       subject: Subject | "*",
-      action: Effects.Action | "*",
+      action: Effects.ActionKey | "*",
       resource: Resource,
       decision: Decision,
       conditions: Map[String, String] = Map.empty):
@@ -42,20 +44,20 @@ object Authority:
         case "*"       => true
         case s: Subject => s.id == req.subject.id
       val actOk = action match
-        case "*"               => true
-        case a: Effects.Action => a == req.action
+        case "*"                    => true
+        case a: Effects.ActionKey   => a == req.action
       subOk && actOk && req.resource.matches(resource)
 
     def canon: Canon = Canon.cmap(
       "id" -> Canon.CStr(id),
       "subject" -> Canon.CStr(subject match { case "*" => "*"; case s: Subject => s.id }),
-      "action" -> Canon.CStr(action match { case "*" => "*"; case a: Effects.Action => s"${a.family}.${a.name}" }),
+      "action" -> Canon.CStr(action match { case "*" => "*"; case a: Effects.ActionKey => a.id }),
       "resource" -> Canon.cmap("kind" -> Canon.CStr(resource.kind), "path" -> Canon.CStr(resource.path)),
       "decision" -> Canon.CStr(decision.match { case Decision.Allow => "allow"; case Decision.Deny => "deny" }))
 
   final case class CapabilityGrant(
       subject: Subject,
-      action: Effects.Action,
+      action: Effects.ActionKey,
       resource: Resource,
       expiresAtEpochMillis: Option[Long] = None,
       nonce: Option[String] = None,
@@ -73,7 +75,7 @@ object Authority:
 
     def canon: Canon = Canon.cmap(
       "subject" -> Canon.CStr(subject.id),
-      "action" -> Canon.CStr(s"${action.family}.${action.name}"),
+      "action" -> Canon.CStr(action.id),
       "resource" -> Canon.cmap("kind" -> Canon.CStr(resource.kind), "path" -> Canon.CStr(resource.path)),
       "depth" -> Canon.CInt(delegationDepth),
       "policies" -> Canon.cstrs(sourcePolicyIds))
@@ -95,7 +97,7 @@ object Authority:
     private[kernel] def mint(req: EffectRequest): AuthorizedRequest = req
     extension (a: AuthorizedRequest)
       def request: EffectRequest = a
-      def action: Effects.Action = a.action
+      def action: Effects.ActionKey = a.action
       def resource: Resource = a.resource
       def subject: Subject = a.subject
 

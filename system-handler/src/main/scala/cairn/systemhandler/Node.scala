@@ -34,7 +34,7 @@ final class Node(val root: Path, ctx: EffectContext):
   def append(authority: Keypair, authorities: Map[String, Vector[Byte]], txs: List[SignedTx]): Either[String, Block] =
     val req = Authority.EffectRequest(
       Authority.Subject(authority.name),
-      Effects.Action.LedgerAppend,
+      Effects.Action.LedgerAppend.key,
       Authority.Resource("ledger", root.toString))
     ctx.authorize(req).flatMap { _ =>
       for

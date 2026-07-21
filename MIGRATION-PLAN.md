@@ -158,7 +158,11 @@ Language.Change(LanguageKey, SemanticFootprint)
 Branch.Advance(BranchKey)
 ```
 
-Effect declarations generate the valid action vocabulary. Policies cannot reference nonexistent operations or malformed resources.
+Effect declarations generate the valid action vocabulary
+(`Effects.ActionKey` derived from `EffectMeta` action decls +
+`ResourceSchema`). Policies cannot reference nonexistent operations or
+malformed resources. Closed `Effects.Action` is a host bridge during
+migration.
 
 ### 4.2 Policies
 
@@ -488,10 +492,17 @@ perform for composition roots. Handler-internal `Subject("local")` and
 placeholder pending grant-bundle threading.
 
 **Narrow PackLoader policy — DONE.** First restrictive deployment path:
-`PolicyEval.packLoaderWorkspace` allows only `WorkspaceRead` for a single
-subject under `languages*`. `examples.Main` wires PackLoader with
-`EffectContext.forPackLoader()` (not allow-all). Ledger/process/LSP remain
-on `bootstrapped()` until scoped similarly.
+`PolicyEval.packLoaderWorkspace` allows only workspace `read` (derived
+`ActionKey`) for a single subject under `languages*`. `examples.Main` wires
+PackLoader with `EffectContext.forPackLoader()` (not allow-all).
+Ledger/process/LSP remain on `bootstrapped()` until scoped similarly.
+
+**Derived ActionKey + resource schemas (priority #4) — DONE.** Effect-interface
+artifacts (`EffectMeta.EffectFamily`) declare capability-class names and a
+`ResourceSchema(kind, pathPattern)`. Policies and `EffectRequest`s use
+`Effects.ActionKey`; handlers derive intents via `keyFor` / `resource.at`.
+Closed `Effects.Action` remains a host bridge (`toHost` / `.key`) for
+Cas/Ledger and completeness checks — not the policy-boundary type.
 
 ## 7. Concrete old-to-new mapping
 

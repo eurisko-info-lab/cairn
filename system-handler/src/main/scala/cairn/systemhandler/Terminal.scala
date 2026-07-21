@@ -1,13 +1,15 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Terminal as Term
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.io.{BufferedReader, InputStreamReader}
 
 /** Stdio terminal handler (Phase 3). [[perform]] accepts only a pre-authorized
   * [[AuthorizedEffect]]; use [[run]] as the thin authorize-then-perform adapter.
+  * Keys from [[EffectMeta.terminal]].
   */
 object Terminal:
+  private val iface = EffectMeta.terminal
   private lazy val in = new BufferedReader(new InputStreamReader(System.in))
 
   private def write(text: String): Unit = Console.print(text)
@@ -16,12 +18,12 @@ object Terminal:
   private def readLine(): Option[String] =
     Option(in.readLine())
 
-  def intent(req: Term.Request): (Effects.Action, Authority.Resource) =
-    val action = req match
-      case Term.Request.ReadLine     => Effects.Action.TerminalRead
-      case Term.Request.Write(_)     => Effects.Action.TerminalWrite
-      case Term.Request.WriteLine(_) => Effects.Action.TerminalWrite
-    (action, Authority.Resource("terminal", "*"))
+  def intent(req: Term.Request): (Effects.ActionKey, Authority.Resource) =
+    val ctor = req match
+      case Term.Request.ReadLine     => "readLine"
+      case Term.Request.Write(_)     => "write"
+      case Term.Request.WriteLine(_) => "writeLine"
+    (iface.keyFor(ctor).get, iface.resource.any)
 
   def run(req: Term.Request, ctx: EffectContext): Either[Term.Error, Term.Response] =
     val (action, resource) = intent(req)

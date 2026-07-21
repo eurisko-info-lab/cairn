@@ -165,11 +165,20 @@ language rather than an opaque Scala shape.
   Request/Response enum family, and stays out of scope for this mechanism
   as designed — untouched.
 - **All 8 live families are now Meta-defined; the vestigial ones are
-  removed.** What's left of this priority: the two "not yet attempted"
-  items below.
-- **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
-  hand-written Scala enum — `EffectMeta.completeness` checks it, doesn't
-  replace it).
+  removed.**
+- **Derived `ActionKey` + resource schemas (post-migration priority #4,
+  done):** `EffectMeta.EffectFamily` now declares `actions: List[String]`
+  (capability classes) and `resource: ResourceSchema(kind, pathPattern)`
+  alongside the Fragment. `Effects.ActionKey(family, name)` is the typed
+  key used by `EffectRequest` / `EffectPolicy` / `CapabilityGrant` /
+  handler `intent`. Keys are derived via `actionKey` / `keyFor` /
+  `resource.at(path)` rather than hardcoding enum cases or kind strings at
+  the policy boundary. `Effects.Action` remains a closed host bridge
+  (`ActionKey.toHost` / `Action.key`); Cas and LedgerTransport are still
+  host-only (not Meta-defined). PackLoader narrow policy, Filesystem,
+  Workspace, and Process (plus the other live handlers) construct intents
+  from the interface artifact. Completeness checks derived keys against
+  the host enum.
 - **Typed per-family resources — first slice (`Filesystem`)**:
   `Authority.Resource(kind, path)`'s `matches` already supports path-prefix
   scoping, and `AuthoritySuite`'s own tests already construct example

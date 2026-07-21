@@ -1,14 +1,17 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.{ExternalBackend as EB, Filesystem as Fs, Process as Proc}
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.nio.file.{Files, Path}
 
 /** Host-toolchain discovery and invocation (Phase 3). [[perform]] accepts
   * only a pre-authorized [[AuthorizedEffect]]; nested process runs use
   * [[Process.run]] with a separate process [[EffectContext]].
+  * Keys from [[EffectMeta.externalBackend]].
   */
 object ExternalBackend:
+  private val iface = EffectMeta.externalBackend
+
   private def findOnPath(name: String): Option[Path] =
     sys.env.getOrElse("PATH", "").split(":")
       .map(Path.of(_, name)).find(Files.isExecutable)
@@ -30,11 +33,11 @@ object ExternalBackend:
           .map(r => EB.Response.ProcessResult(r.exitCode, r.combined))
           .left.map(e => EB.Error.Io(e.toString))
 
-  def intent(req: EB.Request): (Effects.Action, Authority.Resource) =
-    val (action, resourcePath) = req match
-      case EB.Request.Find(host)      => (Effects.Action.BackendFind, host.toString)
-      case EB.Request.Run(host, _, _) => (Effects.Action.BackendRun, host.toString)
-    (action, Authority.Resource("externalBackend", resourcePath))
+  def intent(req: EB.Request): (Effects.ActionKey, Authority.Resource) =
+    val (ctor, resourcePath) = req match
+      case EB.Request.Find(host)      => ("find", host.toString)
+      case EB.Request.Run(host, _, _) => ("run", host.toString)
+    (iface.keyFor(ctor).get, iface.resource.at(resourcePath))
 
   def run(req: EB.Request, ctx: EffectContext, processCtx: EffectContext)
       : Either[EB.Error, EB.Response] =

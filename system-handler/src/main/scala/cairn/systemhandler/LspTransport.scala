@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Lsp as LspIface
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.io.{InputStream, OutputStream}
 
 /** LSP Content-Length framing transport (Phase 3 lsp family). Message
@@ -12,8 +12,11 @@ import java.io.{InputStream, OutputStream}
   * `WaveH2Suite` does) has no real-world effect to gate — the same
   * reasoning as `Filesystem.Resolve`. [[perform]] is where the actual
   * session I/O happens and requires a pre-authorized [[AuthorizedEffect]].
+  * Keys from [[EffectMeta.lsp]].
   */
 object LspTransport:
+  private val iface = EffectMeta.lsp
+
   def readMessage(in: InputStream): Option[String] =
     var length = -1
     var line = new StringBuilder
@@ -39,11 +42,11 @@ object LspTransport:
     out.write(bytes)
     out.flush()
 
-  def intent(req: LspIface.Request): (Effects.Action, Authority.Resource) =
-    val action = req match
-      case LspIface.Request.ReadMessage     => Effects.Action.LspRead
-      case LspIface.Request.WriteMessage(_) => Effects.Action.LspWrite
-    (action, Authority.Resource("lsp", "*"))
+  def intent(req: LspIface.Request): (Effects.ActionKey, Authority.Resource) =
+    val ctor = req match
+      case LspIface.Request.ReadMessage     => "readMessage"
+      case LspIface.Request.WriteMessage(_) => "writeMessage"
+    (iface.keyFor(ctor).get, iface.resource.any)
 
   def run(req: LspIface.Request, in: InputStream, out: OutputStream, ctx: EffectContext)
       : Either[LspIface.Error, LspIface.Response] =

@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.Authority.*
-import cairn.kernel.Effects
+import cairn.kernel.{EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.{AuthorityGate, EffectContext, Filesystem}
@@ -15,12 +15,16 @@ import cairn.systemhandler.{AuthorityGate, EffectContext, Filesystem}
 class AuthoritySuite extends munit.FunSuite:
 
   private val alice = Subject("alice")
-  private val readReq = EffectRequest(alice, Effects.Action.FsRead, Resource("file", "/tmp/a"))
-  private val appendReq = EffectRequest(alice, Effects.Action.LedgerAppend, Resource("ledger", "/tmp/node"))
+  private val fsRead = EffectMeta.filesystem.actionKey("read")
+  private val fsWrite = EffectMeta.filesystem.actionKey("write")
+  private val wsRead = EffectMeta.workspace.actionKey("read")
+  private val ledgerAppend = Effects.Action.LedgerAppend.key
+  private val readReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
+  private val appendReq = EffectRequest(alice, ledgerAppend, Resource("ledger", "/tmp/node"))
 
   test("Phase 4 audit mode never blocks and records would-permit"):
     val gate = AuthorityGate()
-    gate.install(List(PolicyEval.allowAll("allow-read", alice, Effects.Action.FsRead)))
+    gate.install(List(PolicyEval.allowAll("allow-read", alice, fsRead)))
     val auth = gate.check(readReq)
     assert(auth.isRight)
     val ev = gate.drainEvents()
@@ -52,19 +56,19 @@ class AuthoritySuite extends munit.FunSuite:
   test("Phase 5 enforce mode allows with matching policy"):
     val gate = AuthorityGate()
     gate.setMode(AuthorityGate.Mode.Enforce)
-    gate.install(List(PolicyEval.allowAll("allow-append", alice, Effects.Action.LedgerAppend)))
+    gate.install(List(PolicyEval.allowAll("allow-append", alice, ledgerAppend)))
     val allowed = gate.check(appendReq)
     assert(allowed.isRight, allowed.toString)
 
   test("Kernel validate rejects mismatched Core derivation"):
-    val policies = List(PolicyEval.denyAll("deny", alice, Effects.Action.FsRead))
+    val policies = List(PolicyEval.denyAll("deny", alice, fsRead))
     val bad = AuthorizationDerivation(readReq, policies, Decision.Allow, None, "lie")
     assert(Authority.validate(readReq, policies, bad).isLeft)
 
   test("deny overrides allow"):
     val policies = List(
-      PolicyEval.allowAll("allow", alice, Effects.Action.FsRead),
-      PolicyEval.denyAll("deny", alice, Effects.Action.FsRead))
+      PolicyEval.allowAll("allow", alice, fsRead),
+      PolicyEval.denyAll("deny", alice, fsRead))
     val d = PolicyEval.propose(readReq, policies)
     assertEquals(d.decision, Decision.Deny)
 
@@ -82,15 +86,15 @@ class AuthoritySuite extends munit.FunSuite:
     import cairn.systeminterface.Filesystem as Fs
     val gate = AuthorityGate()
     gate.setMode(AuthorityGate.Mode.Enforce)
-    gate.install(List(PolicyEval.allowAll("allow-alice", alice, Effects.Action.FsRead)))
+    gate.install(List(PolicyEval.allowAll("allow-alice", alice, fsRead)))
     val aliceCtx = EffectContext(alice, gate)
     val localCtx = EffectContext.local(gate)
-    val resource = Resource("filesystem", "/tmp")
+    val resource = EffectMeta.filesystem.resource.at("/tmp")
     // Exists is FsRead-gated; alice is allowed, local is not.
-    val aliceAuth = aliceCtx.authorize(Effects.Action.FsRead, resource)
+    val aliceAuth = aliceCtx.authorize(fsRead, resource)
     assert(aliceAuth.isRight, aliceAuth.toString)
     assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), aliceAuth.toOption.get).isRight)
-    assert(localCtx.authorize(Effects.Action.FsRead, resource).isLeft)
+    assert(localCtx.authorize(fsRead, resource).isLeft)
     assert(Filesystem.run(Fs.Request.Exists(Fs.Path("/tmp")), aliceCtx).isRight)
     assert(Filesystem.run(Fs.Request.Exists(Fs.Path("/tmp")), localCtx).isLeft)
     assertEquals(aliceCtx.subject, alice)
@@ -102,9 +106,9 @@ class AuthoritySuite extends munit.FunSuite:
     import cairn.systeminterface.Filesystem as Fs
     val gate = AuthorityGate()
     gate.setMode(AuthorityGate.Mode.Enforce)
-    gate.install(List(PolicyEval.allowAll("allow-alice", alice, Effects.Action.FsRead)))
+    gate.install(List(PolicyEval.allowAll("allow-alice", alice, fsRead)))
     val aliceCtx = EffectContext(alice, gate)
-    val auth = aliceCtx.authorize(Effects.Action.FsRead, Resource("filesystem", "/other")).toOption.get
+    val auth = aliceCtx.authorize(fsRead, EffectMeta.filesystem.resource.at("/other")).toOption.get
     assert(Filesystem.perform(Fs.Request.Exists(Fs.Path("/tmp")), auth).isLeft)
 
   test("pack-loader narrow policy allows WorkspaceRead under languages*"):
@@ -129,17 +133,48 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("pack-loader narrow policy denies wrong action"):
     val ctx = EffectContext.forPackLoader()
-    assert(ctx.authorize(Effects.Action.FsWrite, Resource("workspace", "languages/stlc.cairn")).isLeft)
-    assert(ctx.authorize(Effects.Action.LedgerAppend, Resource("workspace", "languages")).isLeft)
+    assert(ctx.authorize(fsWrite, EffectMeta.workspace.resource.at("languages/stlc.cairn")).isLeft)
+    assert(ctx.authorize(ledgerAppend, EffectMeta.workspace.resource.at("languages")).isLeft)
 
   test("pack-loader narrow policy denies wrong subject"):
     val ctx = EffectContext.forPackLoader()
     val aliceCtx = ctx.withSubject(alice)
-    assert(aliceCtx.authorize(Effects.Action.WorkspaceRead, Resource("workspace", "languages")).isLeft)
-    assert(ctx.authorize(Effects.Action.WorkspaceRead, Resource("workspace", "languages")).isRight)
+    assert(aliceCtx.authorize(wsRead, EffectMeta.workspace.resource.at("languages")).isLeft)
+    assert(ctx.authorize(wsRead, EffectMeta.workspace.resource.at("languages")).isRight)
 
   test("PackLoader loads packs under forPackLoader gate"):
     import cairn.runtime.PackLoader
     val packs = PackLoader(EffectContext.forPackLoader())
     val stlc = packs.requireOwn("stlc")
     assert(stlc.nonEmpty)
+
+  test("derived ActionKey round-trips through host bridge and policy match"):
+    val key = EffectMeta.filesystem.actionKey("read")
+    assertEquals(key, Effects.Action.FsRead.key)
+    assertEquals(key.toHost, Some(Effects.Action.FsRead))
+    assertEquals(EffectMeta.filesystem.resource.kind, "filesystem")
+    val policies = List(PolicyEval.allowAll("allow", alice, key))
+    val req = EffectRequest(alice, key, EffectMeta.filesystem.resource.at("/tmp/x"))
+    assertEquals(PolicyEval.propose(req, policies).decision, Decision.Allow)
+
+  test("derived resource kind mismatch denies even when action matches"):
+    val key = EffectMeta.process.actionKey("run")
+    val policies = List(EffectPolicy(
+      "proc-only",
+      alice,
+      key,
+      EffectMeta.process.resource.at("scala-cli"),
+      Decision.Allow))
+    val ok = EffectRequest(alice, key, EffectMeta.process.resource.at("scala-cli"))
+    val wrongKind = EffectRequest(alice, key, EffectMeta.filesystem.resource.at("scala-cli"))
+    assertEquals(PolicyEval.propose(ok, policies).decision, Decision.Allow)
+    assertEquals(PolicyEval.propose(wrongKind, policies).decision, Decision.Deny)
+
+  test("Filesystem.intent derives keys from EffectMeta, not hardcoded enum"):
+    import cairn.systeminterface.Filesystem as Fs
+    Filesystem.intent(Fs.Request.Read(Fs.Path("/a"))) match
+      case Some((action, resource)) =>
+        assertEquals(action, EffectMeta.filesystem.actionKey("read"))
+        assertEquals(resource, EffectMeta.filesystem.resource.at("/a"))
+      case None => fail("expected gated intent for Read")
+    assertEquals(Filesystem.intent(Fs.Request.Resolve(Fs.Path("/a"), Fs.Path("b"))), None)

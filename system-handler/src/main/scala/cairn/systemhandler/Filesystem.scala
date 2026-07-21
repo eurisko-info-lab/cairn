@@ -1,18 +1,19 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Filesystem as Fs
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 /** Local filesystem handler (Phase 3). [[perform]] accepts only a
   * pre-authorized [[AuthorizedEffect]]; composition roots authorize via
   * [[EffectContext.authorize]] then perform, or use [[run]] as a thin adapter.
-  * Every other method here is private. The action derivation mirrors
-  * `kernel.EffectMeta.filesystem`'s `requestActions` grouping
-  * (read/write/mkdirs; `Resolve` needs no right).
+  * Every other method here is private. Action/resource keys come from
+  * `kernel.EffectMeta.filesystem` (read/write/mkdirs; `Resolve` ungated).
   */
 object Filesystem:
+  private val iface = EffectMeta.filesystem
+
   private def toNio(p: Fs.Path): Path = Path.of(p.value)
   private def fromNio(p: Path): Fs.Path = Fs.Path(p.toString)
 
@@ -41,22 +42,37 @@ object Filesystem:
   private def createTempDirectory(prefix: String): Path =
     Files.createTempDirectory(prefix)
 
-  /** Action + resource for authorization, or `None` when ungated (`Resolve`). */
-  def intent(req: Fs.Request): Option[(Effects.Action, Authority.Resource)] =
-    val (action, resourcePath): (Option[Effects.Action], String) = req match
-      case Fs.Request.Read(p)                  => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.Exists(p)                => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsDirectory(p)           => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsRegularFile(p)         => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.IsExecutable(p)          => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.List(p)                  => (Some(Effects.Action.FsRead), p.value)
-      case Fs.Request.Write(p, _)              => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.WriteBytes(p, _)         => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.Delete(p)                => (Some(Effects.Action.FsWrite), p.value)
-      case Fs.Request.Mkdirs(p)                => (Some(Effects.Action.FsMkdirs), p.value)
-      case Fs.Request.CreateTempDirectory(prefix) => (Some(Effects.Action.FsMkdirs), prefix)
-      case Fs.Request.Resolve(_, _)            => (None, "*")
-    action.map(a => (a, Authority.Resource("filesystem", resourcePath)))
+  private def ctorName(req: Fs.Request): String = req match
+    case Fs.Request.Read(_)                => "read"
+    case Fs.Request.Exists(_)              => "exists"
+    case Fs.Request.IsDirectory(_)         => "isDirectory"
+    case Fs.Request.IsRegularFile(_)       => "isRegularFile"
+    case Fs.Request.IsExecutable(_)        => "isExecutable"
+    case Fs.Request.List(_)                => "list"
+    case Fs.Request.Write(_, _)            => "write"
+    case Fs.Request.WriteBytes(_, _)       => "writeBytes"
+    case Fs.Request.Delete(_)              => "delete"
+    case Fs.Request.Mkdirs(_)              => "mkdirs"
+    case Fs.Request.CreateTempDirectory(_) => "createTempDirectory"
+    case Fs.Request.Resolve(_, _)          => "resolve"
+
+  private def resourcePath(req: Fs.Request): String = req match
+    case Fs.Request.Read(p)                    => p.value
+    case Fs.Request.Exists(p)                  => p.value
+    case Fs.Request.IsDirectory(p)             => p.value
+    case Fs.Request.IsRegularFile(p)           => p.value
+    case Fs.Request.IsExecutable(p)            => p.value
+    case Fs.Request.List(p)                    => p.value
+    case Fs.Request.Write(p, _)                => p.value
+    case Fs.Request.WriteBytes(p, _)           => p.value
+    case Fs.Request.Delete(p)                  => p.value
+    case Fs.Request.Mkdirs(p)                  => p.value
+    case Fs.Request.CreateTempDirectory(prefix) => prefix
+    case Fs.Request.Resolve(_, _)              => "*"
+
+  /** Derived action + resource, or `None` when ungated (`Resolve`). */
+  def intent(req: Fs.Request): Option[(Effects.ActionKey, Authority.Resource)] =
+    iface.keyFor(ctorName(req)).map(k => (k, iface.resource.at(resourcePath(req))))
 
   /** Thin adapter: authorize then [[perform]]. */
   def run(req: Fs.Request, ctx: EffectContext): Either[Fs.Error, Fs.Response] =

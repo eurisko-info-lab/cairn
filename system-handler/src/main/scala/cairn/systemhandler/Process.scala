@@ -1,13 +1,16 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.{Filesystem as Fs, Process as Proc}
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.nio.file.Path
 
 /** Local process runner (Phase 3). [[perform]] accepts only a pre-authorized
   * [[AuthorizedEffect]]; use [[run]] as the thin authorize-then-perform adapter.
+  * Action/resource keys come from [[EffectMeta.process]].
   */
 object Process:
+  private val iface = EffectMeta.process
+
   private def runCmd(command: List[String], cwd: Option[Path] = None,
           mergeStderr: Boolean = true): Either[Proc.Error, Proc.Result] =
     if command.isEmpty then Left(Proc.Error.Io("empty command"))
@@ -29,10 +32,10 @@ object Process:
         case e: Exception =>
           Left(Proc.Error.Io(e.getMessage))
 
-  def intent(req: Proc.Request): (Effects.Action, Authority.Resource) =
+  def intent(req: Proc.Request): (Effects.ActionKey, Authority.Resource) =
     req match
       case Proc.Request.Run(command, _, _) =>
-        (Effects.Action.ProcessRun, Authority.Resource("process", command.headOption.getOrElse("*")))
+        (iface.actionKey("run"), iface.resource.at(command.headOption.getOrElse("*")))
 
   def run(req: Proc.Request, ctx: EffectContext): Either[Proc.Error, Proc.Result] =
     val (action, resource) = intent(req)

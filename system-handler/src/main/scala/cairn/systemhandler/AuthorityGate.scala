@@ -3,7 +3,7 @@ package cairn.systemhandler
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.kernel.Authority.*
-import cairn.kernel.Effects
+import cairn.kernel.EffectMeta
 
 /** Authority gate (Phases 4–5, priority #2). Composition roots authorize via
   * [[EffectContext.authorize]] (which calls [[check]]); handlers accept only
@@ -78,13 +78,14 @@ object AuthorityGate:
     case Audit, Enforce
 
   private def bootstrapPolicies: List[EffectPolicy] =
-    Effects.Action.values.toList.map(a =>
-      EffectPolicy(s"bootstrap-allow-${a.name}", "*", a, Resource("*", "*"), Decision.Allow))
+    EffectMeta.allActionKeys.toList.map(k =>
+      EffectPolicy(s"bootstrap-allow-${k.id}", "*", k, Resource("*", "*"), Decision.Allow))
 
   /** Test / non-pack-loader wiring helper: `Mode.Enforce` with one allow
-    * policy per known `Action`, any subject (`"*"`), any resource. Still used
-    * for ledger/process/LSP and suites that do not exercise path-scoped
-    * denial. PackLoader production uses [[EffectContext.forPackLoader]].
+    * policy per known [[cairn.kernel.Effects.ActionKey]] (derived + host-only), any
+    * subject (`"*"`), any resource. Still used for ledger/process/LSP and
+    * suites that do not exercise path-scoped denial. PackLoader production
+    * uses [[EffectContext.forPackLoader]].
     *
     * Each call returns a **fresh** gate — never a shared singleton.
     */

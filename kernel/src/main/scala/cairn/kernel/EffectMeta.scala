@@ -1,41 +1,51 @@
 package cairn.kernel
 
-/** Meta-defined effect interfaces (post-migration priority #1): each effect
-  * family's Request/Response/Error vocabulary as a Kernel-owned [[Fragment]]
-  * (sorts + constructors, no grammar — effect requests are host-constructed,
-  * not user-typed source text), so the family's rights vocabulary is checked
-  * against a composable, Kernel-valid description instead of maintained by
-  * hand with nothing to keep it honest. Kept in `kernel` (not
-  * `system-interface`), matching [[Authority]]'s stated constraint that the
-  * action vocabulary stays inside the TCB.
+/** Meta-defined effect interfaces: each effect family's Request/Response/Error
+  * vocabulary as a Kernel-owned [[Fragment]], plus declared [[ActionKey]]s and
+  * a [[ResourceSchema]] — the artifact from which typed rights and resource
+  * kinds are derived rather than hand-maintained beside the Fragment.
   *
   * Rights are many-to-one: several `Request`-sorted constructors can share
-  * one [[Effects.Action]] (e.g. `Filesystem`'s dozen request shapes reduce
-  * to three capability classes — read/write/mkdirs — by design, not by
-  * accident). `requestActions` makes that grouping an explicit, checked
-  * declaration instead of an inferred name match, which only happened to
-  * work for the first four families because each had ≤2 distinct request
-  * shapes.
+  * one action key (e.g. Filesystem's dozen request shapes → read/write/mkdirs).
+  * `requestActions` maps constructor name → declared action name (or `None`
+  * for ungated requests such as `Filesystem.resolve`).
   *
-  * All 8 live families (`random`/`clock`/`process`/`externalBackend`/
-  * `terminal`/`workspace`/`filesystem`/`lsp`) are converted. The vestigial
-  * families (`Http`/`Network`/`Crypto`/`LedgerTransport`, no handler
-  * implementation at all) and `Cas` (a trait, not this shape) remain a
-  * separate decision — see `docs/architecture.md`.
+  * [[Effects.Action]] remains a closed host bridge; [[completeness]] checks
+  * derived keys against it. Policies and EffectRequest construction use
+  * [[ActionKey]] / [[ResourceSchema.at]].
   */
 object EffectMeta:
-  /** A Fragment paired with the explicit constructor-name → Action grouping
-    * that governs it. `Action` stays a closed Scala enum in this slice
-    * (widening it to fully mint cases from the Fragment is a separate,
-    * larger move) — this makes the grouping authoritative and checked
-    * ([[completeness]]) rather than replacing `Action` outright.
-    *
-    * A `None` entry is an explicit, checked declaration that a request
-    * needs no authorization at all (e.g. `Filesystem.Resolve`, pure
-    * path-string arithmetic with zero I/O) — distinct from an omitted
-    * entry, which `completeness` still flags as an ungated request.
+
+  /** Per-family resource language: kind + informal path grammar.
+    * `pathPattern` documents how path values are shaped (`Path`, `Command`,
+    * `Host`, `*` for unscoped families); matching still uses
+    * [[Authority.Resource.matches]] (exact / prefix / wildcard).
     */
-  final case class EffectFamily(fragment: Fragment, requestActions: Map[String, Option[Effects.Action]])
+  final case class ResourceSchema(kind: String, pathPattern: String):
+    def at(path: String): Authority.Resource = Authority.Resource(kind, path)
+    def any: Authority.Resource = Authority.Resource(kind, "*")
+
+  /** Fragment + declared actions + resource schema + request→action grouping.
+    * Action keys and resources are derived from these declarations.
+    */
+  final case class EffectFamily(
+      fragment: Fragment,
+      family: Effects.Family,
+      /** Declared capability-class names (distinct [[Effects.ActionKey]] names). */
+      actions: List[String],
+      resource: ResourceSchema,
+      /** Request ctor name → declared action name, or `None` if ungated. */
+      requestActions: Map[String, Option[String]],
+  ):
+    def actionKeys: Set[Effects.ActionKey] =
+      actions.map(Effects.ActionKey.of(family, _)).toSet
+
+    def actionKey(name: String): Effects.ActionKey =
+      Effects.ActionKey.of(family, name)
+
+    /** Resolve a Request constructor to its derived action key, if gated. */
+    def keyFor(ctor: String): Option[Effects.ActionKey] =
+      requestActions.get(ctor).flatten.map(actionKey)
 
   private val randomFragment: Fragment = Fragment(
     name = "effect.random",
@@ -50,8 +60,12 @@ object EffectMeta:
       CtorDef("bytesValue", "Response", List("Bytes")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val random: EffectFamily = EffectFamily(randomFragment, Map(
-    "bytes" -> Some(Effects.Action.RandomBytes)))
+  val random: EffectFamily = EffectFamily(
+    randomFragment,
+    Effects.Family.Random,
+    actions = List("bytes"),
+    resource = ResourceSchema("random", "*"),
+    requestActions = Map("bytes" -> Some("bytes")))
 
   private val clockFragment: Fragment = Fragment(
     name = "effect.clock",
@@ -68,9 +82,14 @@ object EffectMeta:
       CtorDef("slug", "Response", List("Str")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val clock: EffectFamily = EffectFamily(clockFragment, Map(
-    "now" -> Some(Effects.Action.ClockNow),
-    "timestampSlug" -> Some(Effects.Action.ClockTimestampSlug)))
+  val clock: EffectFamily = EffectFamily(
+    clockFragment,
+    Effects.Family.Clock,
+    actions = List("now", "timestampSlug"),
+    resource = ResourceSchema("clock", "*"),
+    requestActions = Map(
+      "now" -> Some("now"),
+      "timestampSlug" -> Some("timestampSlug")))
 
   private val processFragment: Fragment = Fragment(
     name = "effect.process",
@@ -86,8 +105,12 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val process: EffectFamily = EffectFamily(processFragment, Map(
-    "run" -> Some(Effects.Action.ProcessRun)))
+  val process: EffectFamily = EffectFamily(
+    processFragment,
+    Effects.Family.Process,
+    actions = List("run"),
+    resource = ResourceSchema("process", "Command"),
+    requestActions = Map("run" -> Some("run")))
 
   private val externalBackendFragment: Fragment = Fragment(
     name = "effect.externalBackend",
@@ -105,9 +128,14 @@ object EffectMeta:
       CtorDef("processResult", "Response", List("Int", "Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val externalBackend: EffectFamily = EffectFamily(externalBackendFragment, Map(
-    "find" -> Some(Effects.Action.BackendFind),
-    "run" -> Some(Effects.Action.BackendRun)))
+  val externalBackend: EffectFamily = EffectFamily(
+    externalBackendFragment,
+    Effects.Family.ExternalBackend,
+    actions = List("find", "run"),
+    resource = ResourceSchema("externalBackend", "Host"),
+    requestActions = Map(
+      "find" -> Some("find"),
+      "run" -> Some("run")))
 
   private val terminalFragment: Fragment = Fragment(
     name = "effect.terminal",
@@ -127,15 +155,15 @@ object EffectMeta:
       CtorDef("closed", "Error", Nil),
       CtorDef("io", "Error", List("Str"))))
 
-  /** `write` and `writeLine` are both terminal-output operations, gated by
-    * the same right — the first non-retrofitted use of the many-to-one
-    * grouping (contrast with random/clock/process/externalBackend above,
-    * each of which happened to be 1:1).
-    */
-  val terminal: EffectFamily = EffectFamily(terminalFragment, Map(
-    "readLine" -> Some(Effects.Action.TerminalRead),
-    "write" -> Some(Effects.Action.TerminalWrite),
-    "writeLine" -> Some(Effects.Action.TerminalWrite)))
+  val terminal: EffectFamily = EffectFamily(
+    terminalFragment,
+    Effects.Family.Terminal,
+    actions = List("read", "write"),
+    resource = ResourceSchema("terminal", "*"),
+    requestActions = Map(
+      "readLine" -> Some("read"),
+      "write" -> Some("write"),
+      "writeLine" -> Some("write")))
 
   private val workspaceFragment: Fragment = Fragment(
     name = "effect.workspace",
@@ -155,17 +183,17 @@ object EffectMeta:
       CtorDef("text", "Response", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  /** All 5 requests are read-only discovery/reading (confirmed via
-    * `system-handler.Workspace.perform` — nothing mutates), so all 5 map to
-    * the single existing `WorkspaceRead` right — a genuine 5-to-1 grouping,
-    * unlike `Terminal`'s 2-to-1, with no drift to fix.
-    */
-  val workspace: EffectFamily = EffectFamily(workspaceFragment, Map(
-    "languageDirs" -> Some(Effects.Action.WorkspaceRead),
-    "listCairnFiles" -> Some(Effects.Action.WorkspaceRead),
-    "listSubdirs" -> Some(Effects.Action.WorkspaceRead),
-    "listSurfaceCairnFiles" -> Some(Effects.Action.WorkspaceRead),
-    "readText" -> Some(Effects.Action.WorkspaceRead)))
+  val workspace: EffectFamily = EffectFamily(
+    workspaceFragment,
+    Effects.Family.Workspace,
+    actions = List("read"),
+    resource = ResourceSchema("workspace", "Path"),
+    requestActions = Map(
+      "languageDirs" -> Some("read"),
+      "listCairnFiles" -> Some("read"),
+      "listSubdirs" -> Some("read"),
+      "listSurfaceCairnFiles" -> Some("read"),
+      "readText" -> Some("read")))
 
   private val filesystemFragment: Fragment = Fragment(
     name = "effect.filesystem",
@@ -197,30 +225,24 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Path")),
       CtorDef("io", "Error", List("Str"))))
 
-  /** Three judgment calls, made explicitly rather than guessed at (asked of
-    * the user directly): `delete` groups under the existing `FsWrite`
-    * (mutating, like write/writeBytes — no family has finer-grained rights
-    * than broad classes yet); `createTempDirectory` groups under `FsMkdirs`
-    * (it creates a directory, regardless of the path being system-chosen);
-    * `resolve` needs no right at all — confirmed via
-    * `system-handler.Filesystem.perform`, it's pure path-string arithmetic
-    * with zero `Files.*` calls, so it can't leak, corrupt, or touch
-    * anything. No new `Action` needed: the existing 3 (`FsRead`/`FsWrite`/
-    * `FsMkdirs`) already cover all 11 authorized requests.
-    */
-  val filesystem: EffectFamily = EffectFamily(filesystemFragment, Map(
-    "read" -> Some(Effects.Action.FsRead),
-    "exists" -> Some(Effects.Action.FsRead),
-    "isDirectory" -> Some(Effects.Action.FsRead),
-    "isRegularFile" -> Some(Effects.Action.FsRead),
-    "isExecutable" -> Some(Effects.Action.FsRead),
-    "list" -> Some(Effects.Action.FsRead),
-    "write" -> Some(Effects.Action.FsWrite),
-    "writeBytes" -> Some(Effects.Action.FsWrite),
-    "delete" -> Some(Effects.Action.FsWrite),
-    "mkdirs" -> Some(Effects.Action.FsMkdirs),
-    "createTempDirectory" -> Some(Effects.Action.FsMkdirs),
-    "resolve" -> None))
+  val filesystem: EffectFamily = EffectFamily(
+    filesystemFragment,
+    Effects.Family.Filesystem,
+    actions = List("read", "write", "mkdirs"),
+    resource = ResourceSchema("filesystem", "Path"),
+    requestActions = Map(
+      "read" -> Some("read"),
+      "exists" -> Some("read"),
+      "isDirectory" -> Some("read"),
+      "isRegularFile" -> Some("read"),
+      "isExecutable" -> Some("read"),
+      "list" -> Some("read"),
+      "write" -> Some("write"),
+      "writeBytes" -> Some("write"),
+      "delete" -> Some("write"),
+      "mkdirs" -> Some("mkdirs"),
+      "createTempDirectory" -> Some("mkdirs"),
+      "resolve" -> None))
 
   private val lspFragment: Fragment = Fragment(
     name = "effect.lsp",
@@ -239,15 +261,14 @@ object EffectMeta:
       CtorDef("framing", "Error", List("Str")),
       CtorDef("closed", "Error", Nil)))
 
-  /** `ReadMessage`/`WriteMessage` are symmetric Content-Length-framed stdio
-    * operations, structurally identical to `Terminal.ReadLine`/`Write` — not
-    * a session-establishment concept. The prior `Action` (`LspServe`) was a
-    * confirmed orphan (referenced nowhere outside its own declaration, not
-    * matching either Request case), replaced with `LspRead`/`LspWrite`.
-    */
-  val lsp: EffectFamily = EffectFamily(lspFragment, Map(
-    "readMessage" -> Some(Effects.Action.LspRead),
-    "writeMessage" -> Some(Effects.Action.LspWrite)))
+  val lsp: EffectFamily = EffectFamily(
+    lspFragment,
+    Effects.Family.Lsp,
+    actions = List("read", "write"),
+    resource = ResourceSchema("lsp", "*"),
+    requestActions = Map(
+      "readMessage" -> Some("read"),
+      "writeMessage" -> Some("write")))
 
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
@@ -259,28 +280,57 @@ object EffectMeta:
     Effects.Family.Filesystem -> filesystem,
     Effects.Family.Lsp -> lsp)
 
-  /** The rights vocabulary for a family: every distinct [[Effects.Action]]
-    * its `requestActions` grouping declares (`None` entries contribute
-    * nothing — they declare "no right needed," not a right).
-    */
-  def actions(family: EffectFamily): Set[Effects.Action] = family.requestActions.values.flatten.toSet
+  /** All action keys declared by Meta-defined families. */
+  def derivedActionKeys: Set[Effects.ActionKey] =
+    families.values.flatMap(_.actionKeys).toSet
 
-  /** Checked correspondence between a family's Fragment and its grouping:
-    * every `Request`-sorted constructor must have a `requestActions` entry
-    * (no ungated request — though the entry may explicitly be `None`),
-    * every entry must name a real constructor (no dangling grouping), and
-    * every `Some`-mapped `Action` must actually belong to `expected` (no
-    * cross-family mistagging). Empty result = consistent.
+  /** Host-only keys (Cas / LedgerTransport) not yet Meta-defined. */
+  def hostOnlyActionKeys: Set[Effects.ActionKey] =
+    Effects.Action.values.map(Effects.ActionKey.of).toSet -- derivedActionKeys
+
+  /** Every known action key: derived + host-only bridge. */
+  def allActionKeys: Set[Effects.ActionKey] =
+    derivedActionKeys ++ hostOnlyActionKeys
+
+  /** Rights vocabulary projected from declared actions. */
+  def actions(family: EffectFamily): Set[Effects.ActionKey] = family.actionKeys
+
+  /** Host enum cases corresponding to a family's derived keys. */
+  def hostActions(family: EffectFamily): Set[Effects.Action] =
+    family.actionKeys.flatMap(_.toHost)
+
+  def completeness(family: EffectFamily): List[String] =
+    completeness(family, family.family)
+
+  /** Checked correspondence: Request ctors ↔ requestActions, declared
+    * action names ↔ requestActions targets, and derived keys ↔ host enum
+    * for the expected family. Empty result = consistent.
     */
   def completeness(family: EffectFamily, expected: Effects.Family): List[String] =
+    val famErr =
+      if family.family != expected then
+        List(s"EffectFamily.family is ${family.family}, expected $expected")
+      else Nil
     val reqCtorNames = family.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     val mappedNames = family.requestActions.keySet
     val missing = reqCtorNames.diff(mappedNames).toList.map(n =>
       s"constructor '$n' has no requestActions entry")
     val dangling = mappedNames.diff(reqCtorNames).toList.map(n =>
       s"requestActions entry '$n' has no matching Request constructor")
-    val misfamily = family.requestActions.toList.collect {
-      case (n, Some(a)) if a.family != expected =>
-        s"requestActions('$n') = $a is tagged ${a.family}, not $expected"
+    val declared = family.actions.toSet
+    val usedNames = family.requestActions.values.flatten.toSet
+    val undeclared = usedNames.diff(declared).toList.map(n =>
+      s"requestActions targets undeclared action '$n'")
+    val unusedDecl = declared.diff(usedNames).toList.map(n =>
+      s"declared action '$n' is never targeted by requestActions")
+    val hostMismatch = family.actionKeys.toList.flatMap { k =>
+      k.toHost match
+        case None =>
+          List(s"derived ActionKey ${k.id} has no host Effects.Action bridge")
+        case Some(a) if a.family != expected =>
+          List(s"ActionKey ${k.id} bridges to $a tagged ${a.family}, not $expected")
+        case Some(_) => Nil
     }
-    missing ++ dangling ++ misfamily
+    val hostExtra = Effects.Action.values.filter(_.family == expected).toSet.diff(hostActions(family)).toList.map(a =>
+      s"host Action $a has no matching derived ActionKey in the EffectFamily")
+    famErr ++ missing ++ dangling ++ undeclared ++ unusedDecl ++ hostMismatch ++ hostExtra

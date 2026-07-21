@@ -23,7 +23,7 @@ final case class EffectContext(
 
   /** Build an [[EffectRequest]] using this context's subject. */
   def effectRequest(
-      action: Effects.Action,
+      action: Effects.ActionKey,
       resource: Resource,
       args: Map[String, String] = Map.empty,
   ): EffectRequest =
@@ -38,7 +38,7 @@ final case class EffectContext(
 
   /** Authorize using this context's subject. */
   def authorize(
-      action: Effects.Action,
+      action: Effects.ActionKey,
       resource: Resource,
       args: Map[String, String] = Map.empty,
   ): Either[String, AuthorizedEffect] =
@@ -66,7 +66,7 @@ object EffectContext:
     local(AuthorityGate.bootstrapped(), audit)
 
   /** PackLoader composition root: local subject + Enforce gate restricted to
-    * [[PolicyEval.packLoaderWorkspace]] (WorkspaceRead under `languages*` only).
+    * [[PolicyEval.packLoaderWorkspace]] (workspace `read` under `languages*` only).
     */
   def forPackLoader(audit: Audit = Audit.Local): EffectContext =
     val subject = Subject("local")

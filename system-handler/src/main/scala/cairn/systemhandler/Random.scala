@@ -1,14 +1,15 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Random as Rnd
-import cairn.kernel.{Authority, Effects}
+import cairn.kernel.{Authority, EffectMeta, Effects}
 import java.security.SecureRandom
 
 /** Secure-randomness handler (Phase 3). [[perform]] accepts only a
   * pre-authorized [[AuthorizedEffect]]; use [[run]] as the thin
-  * authorize-then-perform adapter.
+  * authorize-then-perform adapter. Keys from [[EffectMeta.random]].
   */
 object Random:
+  private val iface = EffectMeta.random
   private val secure = new SecureRandom()
 
   private def bytes(n: Int): Array[Byte] =
@@ -16,10 +17,10 @@ object Random:
     secure.nextBytes(out)
     out
 
-  def intent(req: Rnd.Request): (Effects.Action, Authority.Resource) =
+  def intent(req: Rnd.Request): (Effects.ActionKey, Authority.Resource) =
     req match
       case Rnd.Request.Bytes(_) =>
-        (Effects.Action.RandomBytes, Authority.Resource("random", "*"))
+        (iface.actionKey("bytes"), iface.resource.any)
 
   def run(req: Rnd.Request, ctx: EffectContext): Either[Rnd.Error, Rnd.Response] =
     val (action, resource) = intent(req)
