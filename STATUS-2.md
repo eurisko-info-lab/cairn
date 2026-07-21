@@ -58,11 +58,11 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
 - **M10**: incremental reparse retains prefix memo entries; suffix entries are
   discarded (index shift), so "O(affected)" is prefix-anchored.
 - **M17**: semantic merge operates on module change histories; `Branches` refs
-  are merge-aware via `Branches.merge` → `SemanticRepository.integrate`
+  are merge-aware via `Branches.merge` / `mergeBranches` → `SemanticRepository.integrate`
   (conflict artifacts persist to CAS without advancing the head; clean merges
-  advance and record provenance). Residual: change histories are supplied at
-  merge time rather than reconstructed solely from manifest history; ledger
-  `SetBranchHead` remains a separate publication path.
+  advance and record provenance). `commitTip` persists ValidatedChangeSet
+  sidecars so everyday merge need not pass CSTs explicitly; ledger
+  `SetBranchHead` remains optional via `Branches.publishHead`.
 - **M31**: signatures/declarations are fully grammatical; expression BODIES are
   verbatim single-line regions inside the file grammars (rendered by one shared
   fold, not per-host string soup). Whole-file byte fixpoint still enforced.

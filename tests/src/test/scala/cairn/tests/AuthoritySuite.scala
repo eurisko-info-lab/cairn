@@ -1,10 +1,11 @@
 package cairn.tests
 
 import cairn.kernel.Authority.*
-import cairn.kernel.{Canon, EffectMeta, Effects}
+import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, EffectContext, Filesystem}
+import cairn.systemhandler.{AuthorityGate, CasEffects, EffectContext, Filesystem, MemCas}
+import cairn.systeminterface.Cas
 
 /** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
   * Each test constructs its own fresh `AuthorityGate` instance instead of
@@ -502,3 +503,25 @@ class AuthoritySuite extends munit.FunSuite:
     assert(lsp.authorize(
       EffectMeta.lsp.actionKey("read"), EffectMeta.lsp.resource.any).isRight)
     assert(lsp.authorize(fsWrite, EffectMeta.filesystem.resource.at("/x")).isLeft)
+    val casCtx = EffectContext.forCas()
+    assert(casCtx.authorize(
+      EffectMeta.cas.actionKey("put"),
+      EffectMeta.cas.resource.at("abc")).isRight)
+    assert(casCtx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
+
+  test("CasEffects: authorize → perform put/get over MemCas"):
+    val store = MemCas()
+    val ctx = EffectContext.forCas()
+    val art = Artifact(ArtifactKind.Term, Canon.CStr("hello-cas"))
+    val put = CasEffects.run(store, Cas.Request.Put(art), ctx)
+    assert(put.isRight, put.toString)
+    val key = put.toOption.get match
+      case Cas.Response.Key(k) => k
+      case other => fail(s"expected Key, got $other")
+    val got = CasEffects.run(store, Cas.Request.Get(key.valueHash), ctx)
+    assertEquals(got.map {
+      case Cas.Response.Stored(a) => a.digest
+      case _ => Digest.ofBytes(Array.empty)
+    }, Right(art.digest))
+    val denied = CasEffects.run(store, Cas.Request.Get(key.valueHash), EffectContext.forPackLoader())
+    assert(denied.isLeft, denied.toString)

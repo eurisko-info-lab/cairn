@@ -422,9 +422,9 @@ object Cli:
                   _ = branches.commitModule("demo-base", m0)
                   tipA <- SemanticRepository.tipAfter(lang, m0, cA)
                   tipB <- SemanticRepository.tipAfter(lang, m0, cB)
-                  _ = branches.commitModule("demo-a", tipA.tip)
-                  _ = branches.commitModule("demo-b", tipB.tip)
-                  outcome <- branches.merge(lang, "demo-main", m0, cA, cB)
+                  _ = branches.commitTip("demo-a", lang.digest, tipA)
+                  _ = branches.commitTip("demo-b", lang.digest, tipB)
+                  outcome <- branches.mergeBranches(lang, "demo-main", "demo-a", "demo-b")
                 yield outcome match
                   case Left(conflict) =>
                     s"conflict: ${conflict.render}"

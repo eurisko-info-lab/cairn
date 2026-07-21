@@ -123,8 +123,9 @@ branch state
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
-Residuals: ledger `SetBranchHead` is still a separate publication path;
-change histories on branch refs are passed explicitly at merge time.
+Residuals: everyday path uses `commitTip` + `mergeBranches` (change histories
+persisted with tips); ledger `SetBranchHead` remains optional via
+`Branches.publishHead` after accept.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -156,8 +157,10 @@ LeanCore `#check` envelope.
   `rosetta.Scaffold`) — documented compatibility shims
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
-- **Semantic merge residuals** — change histories supplied at merge time;
-  ledger `SetBranchHead` remains a separate publication path
+- **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
+  (changes persisted with tips); `merge(..., changeOurs, changeTheirs)` remains
+  for callers that already hold CSTs. Ledger `SetBranchHead` is optional via
+  `Branches.publishHead` after accept
 
 ## Final principle
 

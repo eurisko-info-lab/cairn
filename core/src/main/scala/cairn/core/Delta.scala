@@ -107,6 +107,15 @@ object Delta:
       "result" -> Canon.CStr(result.hex))
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, canon)
 
+  object ValidatedChangeSet:
+    def fromCanon(c: Canon): ValidatedChangeSet =
+      ValidatedChangeSet(
+        Digest(c.field("language").asStr),
+        Digest(c.field("base").asStr),
+        Cst.fromCanon(c.field("change")),
+        Digest(c.field("result").asStr))
+
+
   /** Child-index path helpers for structural edits (M15). */
   def pathOf(pathCst: Cst): List[Int] = pathCst match
     case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n.toInt }

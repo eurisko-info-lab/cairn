@@ -3,7 +3,8 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
-import cairn.systemhandler.{Branches, DiskCas, Provenance}
+import cairn.ledger.Keypair
+import cairn.systemhandler.{Branches, DiskCas, EffectContext, Provenance}
 import java.nio.file.Files
 
 /** End-to-end semantic repository spine: Branches + ΔL + ChangeAlgebra +
@@ -56,9 +57,9 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.commitModule("base", m0)
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
-    branches.commitModule("feat-a", tipA.tip)
-    branches.commitModule("feat-b", tipB.tip)
-    branches.merge(lang, "main", m0, cA, cB) match
+    branches.commitTip("feat-a", lang.digest, tipA)
+    branches.commitTip("feat-b", lang.digest, tipB)
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
       case Right(Right(manifest)) =>
         assertEquals(manifest.branch, "main")
         assert(manifest.head.isDefined)
@@ -69,6 +70,27 @@ class SemanticRepositorySuite extends munit.FunSuite:
         assertEquals(branches.list().sorted, List("base", "feat-a", "feat-b", "main"))
         val hops = Provenance.why(dir.resolve("cas"), head.digest)
         assert(hops.exists(_.record.tool == "semantic-merge"), hops.toString)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  test("Branches.publishHead: optional ledger SetBranchHead after accept"):
+    val dir = Files.createTempDirectory("cairn-semrepo-pub")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"))
+    val cA = parseChange("{ replace a = false ; }")
+    val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    branches.commitTip("feat", lang.digest, tipA)
+    branches.merge(lang, "main", m0, cA, parseChange("{ replace b = true ; }")) match
+      case Right(Right(_)) =>
+        val alice = Keypair.dev("alice")
+        val auth = Map("alice" -> alice.publicBytes)
+        val node = cairn.systemhandler.Node(dir.resolve("ledger"), EffectContext.forLedger())
+        node.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
+          .fold(e => fail(e), identity)
+        branches.publishHead("main", node, alice, auth).fold(e => fail(e), identity)
+        val st = node.state(auth).fold(e => fail(e), identity)
+        assert(st.heads.contains("main"), s"heads=${st.heads}")
+        assertEquals(st.heads("main"), branches.load("main").head.get)
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)
 

@@ -112,7 +112,7 @@ class Phase8Suite extends munit.FunSuite:
     val anchorDigest = Pki.anchorCertificateDigest(registry, "root").toOption.get
     val authority = Keypair.dev("authority")
     val auth = Map("authority" -> authority.publicBytes)
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"), EffectContext.bootstrapped())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"), EffectContext.forLedger())
     val txs = List(
       authority.signTx(Tx.RegisterIdentity("authority", authority.publicBytes)),
       authority.signTx(Tx.RecordCertificate(anchorDigest)))

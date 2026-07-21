@@ -29,7 +29,9 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    composition/inverses/commutation exist (M16); three-way semantic merge
    exists (M17) and `Branches.merge` is merge-aware through
    `SemanticRepository` (conflict → CAS artifact, accept → new head +
-   provenance). Ledger publication of heads remains a separate path.
+   provenance). Everyday branch path persists change-sets with `commitTip` and
+   merges via `mergeBranches`; ledger `SetBranchHead` remains an optional
+   publication step (`Branches.publishHead`).
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

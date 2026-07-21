@@ -23,7 +23,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("browser API serves overview, chain, blocks, typed artifact view"):
     val root = Files.createTempDirectory("cairn-ui")
-    val node = Node(root, EffectContext.bootstrapped())
+    val node = Node(root, EffectContext.forLedger())
     val alice = Keypair.dev("alice")
     val auth = Map(alice.name -> alice.publicBytes)
     val term = Artifact(ArtifactKind.Term, Cst.toCanon(Cst.Leaf("true")))
@@ -73,7 +73,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("POST /api/parse validates editor buffer against a language"):
     val root = Files.createTempDirectory("cairn-ui-parse")
-    val node = Node(root, EffectContext.bootstrapped())
+    val node = Node(root, EffectContext.forLedger())
     val langs = Map("stlc" -> cairn.examples.stlc.Stlc.language)
     val srv = BrowserServer(node, langs, 0)
     val port = srv.start()
@@ -91,7 +91,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("GET /api/board returns Fact–Intent graph from IR module"):
     val root = Files.createTempDirectory("cairn-ui-board")
-    val node = Node(root, EffectContext.bootstrapped())
+    val node = Node(root, EffectContext.forLedger())
     val board = Module(List(
       "origin" -> Cst.node("origin", Cst.Leaf("start")),
       "goal" -> Cst.node("goal", Cst.Leaf("done")),

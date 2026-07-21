@@ -8,6 +8,10 @@ import cairn.kernel.*
   * the System Interface half of the old `workbench.Cas.scala` — the
   * concrete, effectful implementations (`MemCas`/`DiskCas`) live in
   * `system-handler` instead.
+  *
+  * [[Request]] / [[Response]] / [[Error]] mirror [[cairn.kernel.EffectMeta.cas]]
+  * so handlers can authorize → [[cairn.systemhandler.AuthorizedEffect]] →
+  * perform, same spine as Filesystem / Workspace.
   */
 trait Cas:
   def putBytes(bs: Array[Byte]): Digest
@@ -24,3 +28,18 @@ trait Cas:
     yield a
   def getByDigest(d: Digest): Either[String, Artifact] =
     getBytes(d).flatMap(Artifact.decode)
+
+object Cas:
+  enum Request:
+    case Put(artifact: Artifact)
+    case Get(digest: Digest)
+
+  /** Response ctors mirror Meta (`typedKey` / `artifact`) by role; Scala
+    * names avoid shadowing [[cairn.kernel.TypedKey]] / [[Artifact]]. */
+  enum Response:
+    case Key(key: TypedKey)
+    case Stored(artifact: Artifact)
+
+  enum Error:
+    case Missing(digest: Digest)
+    case Io(message: String)

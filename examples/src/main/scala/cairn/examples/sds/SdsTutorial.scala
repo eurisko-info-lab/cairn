@@ -84,7 +84,7 @@ object SdsTutorial:
 
     // Ledger publish of industrial module
     val alice = Keypair.dev("alice")
-    val node = Node(work, EffectContext.bootstrapped())
+    val node = Node(work, EffectContext.forLedger())
     node.cas.put(industrial.artifact)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),

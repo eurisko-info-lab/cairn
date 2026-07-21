@@ -104,5 +104,9 @@ object EffectContext:
   def forBackend(audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.externalBackend(Subject("local")), audit)
 
+  /** CAS composition root: put/get under any digest path. */
+  def forCas(audit: Audit = Audit.Local): EffectContext =
+    localCtx(PolicyEval.casStore(Subject("local")), audit)
+
   private def localCtx(policies: List[Authority.EffectPolicy], audit: Audit): EffectContext =
     EffectContext(Subject("local"), AuthorityGate.enforcing(policies), Nil, audit)

@@ -14,7 +14,7 @@ class Phase7Suite extends munit.FunSuite:
   test("agreement: ledger state root — kernel replay vs app recomputation (S43)"):
     val alice = Keypair.dev("alice")
     val auth = Map("alice" -> alice.publicBytes)
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-agree"), EffectContext.bootstrapped())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-agree"), EffectContext.forLedger())
     node.cas.put(Stlc.base.artifact)
     val txs = List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),

@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
-import cairn.core.{LangMigration, Merge, Module}
+import cairn.core.{Delta, LangMigration, Merge, Module, SemanticRepository}
 import cairn.systeminterface.Cas
 import java.nio.file.{Files, Path}
 
@@ -62,16 +62,58 @@ final class DiskCas(root: Path) extends Cas:
           if HashAlgo.hash(algo, bs) == hex then Right(bs)
           else Left(s"CAS corruption on $key") }
 
+/** Authorized CAS put/get over a store — same authorize →
+  * [[AuthorizedEffect]] → perform spine as Filesystem / Workspace.
+  */
+object CasEffects:
+  private val iface = EffectMeta.cas
+
+  private def ctorName(req: Cas.Request): String = req match
+    case Cas.Request.Put(_) => "put"
+    case Cas.Request.Get(_) => "get"
+
+  private def resourcePath(req: Cas.Request): String = req match
+    case Cas.Request.Put(a)  => a.digest.hex
+    case Cas.Request.Get(d)  => d.hex
+
+  def intent(req: Cas.Request): (Effects.ActionKey, Authority.Resource) =
+    (iface.keyFor(ctorName(req)).get, iface.resource.at(resourcePath(req)))
+
+  def run(store: Cas, req: Cas.Request, ctx: EffectContext): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = intent(req)
+    ctx.authorize(action, resource) match
+      case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
+      case Right(auth) => perform(store, req, auth)
+
+  def perform(store: Cas, req: Cas.Request, auth: AuthorizedEffect): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = intent(req)
+    if !auth.covers(action, resource) then Left(Cas.Error.Io("authorized effect does not cover request"))
+    else
+      try req match
+        case Cas.Request.Put(artifact) =>
+          Right(Cas.Response.Key(store.put(artifact)))
+        case Cas.Request.Get(digest) =>
+          store.getByDigest(digest) match
+            case Right(a) => Right(Cas.Response.Stored(a))
+            case Left(_)  => Left(Cas.Error.Missing(digest))
+      catch case e: Exception => Left(Cas.Error.Io(e.getMessage))
+
 /** Named branch refs over a CAS; ref file stores the manifest digest.
   *
-  * Merge-aware (M17): [[merge]] runs [[cairn.core.SemanticRepository.integrate]]
-  * then either advances the target head with the accepted module or persists
-  * the conflict artifact without advancing.
+  * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
+  * [[cairn.core.SemanticRepository.integrate]] then either advance the target
+  * head or persist the conflict artifact. [[commitTip]] persists the
+  * ValidatedChangeSet alongside the tip so everyday merge need not pass
+  * change histories explicitly.
   */
 final class Branches(cas: Cas, refsDir: Path):
   private def refPath(branch: String): Path =
     require(branch.nonEmpty && branch.forall(c => c.isLetterOrDigit || c == '-' || c == '_'), s"bad branch name '$branch'")
     refsDir.resolve(branch)
+
+  /** Sidecar ref: digest of the ValidatedChangeSet that produced the tip. */
+  private def changeRefPath(branch: String): Path =
+    refsDir.resolve(s"$branch.change")
 
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
@@ -91,7 +133,9 @@ final class Branches(cas: Cas, refsDir: Path):
 
   def list(): List[String] =
     if !Files.exists(refsDir) then Nil
-    else Files.list(refsDir).map(_.getFileName.toString).toArray.toList.map(_.toString).sorted
+    else
+      Files.list(refsDir).map(_.getFileName.toString).toArray.toList.map(_.toString)
+        .filterNot(_.endsWith(".change")).sorted
 
   /** Load the module at a branch head (heads are [[ArtifactKind.Ir]] modules). */
   def headModule(branch: String): Either[String, Module] =
@@ -105,6 +149,30 @@ final class Branches(cas: Cas, refsDir: Path):
   /** Seed or advance a branch to a module tip; returns the new manifest. */
   def commitModule(branch: String, module: Module): BranchManifest =
     advance(branch, cas.put(module.artifact))
+
+  /** Persist a semantic tip: store base + ValidatedChangeSet + tip module,
+    * record provenance, write the change sidecar, and advance the branch.
+    */
+  def commitTip(branch: String, language: Digest, tip: SemanticRepository.Tip): BranchManifest =
+    cas.put(tip.base.artifact)
+    val vcs = Delta.ValidatedChangeSet(language, tip.baseDigest, tip.change, tip.tipDigest)
+    val vcsKey = cas.put(vcs.artifact)
+    val modKey = cas.put(tip.tip.artifact)
+    Provenance.record(cas, tip.tipDigest, List(tip.baseDigest, vcsKey.valueHash), "semantic-commit")
+    Files.createDirectories(refsDir)
+    Files.writeString(changeRefPath(branch), vcsKey.valueHash.hex)
+    advance(branch, modKey)
+
+  /** Load the ValidatedChangeSet recorded by [[commitTip]] for `branch`. */
+  def loadChange(branch: String): Either[String, Delta.ValidatedChangeSet] =
+    val p = changeRefPath(branch)
+    if !Files.exists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
+    else
+      val d = Digest(Files.readString(p).trim)
+      cas.getByDigest(d).flatMap { a =>
+        if a.kind != ArtifactKind.ChangeSet then Left(s"change ref for '$branch' is ${a.kind.name}, not a change-set")
+        else Right(Delta.ValidatedChangeSet.fromCanon(a.body))
+      }
 
   /** Semantic merge into `into`: integrate two change histories relative to
     * `base`, persist the ValidatedChangeSet + provenance, and advance `into`
@@ -121,7 +189,6 @@ final class Branches(cas: Cas, refsDir: Path):
       changeTheirs: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    import cairn.core.SemanticRepository
     SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).map {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
         cas.put(conflict.artifact)
@@ -131,5 +198,44 @@ final class Branches(cas: Cas, refsDir: Path):
         val modKey = cas.put(module.artifact)
         Provenance.record(cas, module.digest,
           List(base.digest, vcsKey.valueHash), "semantic-merge")
+        Files.createDirectories(refsDir)
+        Files.writeString(changeRefPath(into), vcsKey.valueHash.hex)
         Right(advance(into, modKey))
+    }
+
+  /** Everyday merge: load change histories persisted by [[commitTip]] on
+    * `ours` / `theirs` (shared base from the VCS records). No explicit Cst.
+    */
+  def mergeBranches(
+      language: ComposedLanguage,
+      into: String,
+      ours: String,
+      theirs: String,
+      migration: Option[(LangMigration, ComposedLanguage)] = None,
+  ): Either[String, Either[Merge.Conflict, BranchManifest]] =
+    for
+      vcsA <- loadChange(ours)
+      vcsB <- loadChange(theirs)
+      _ <- Either.cond(vcsA.base == vcsB.base, (),
+        s"branch tips do not share a base: ${vcsA.base.short} vs ${vcsB.base.short}")
+      baseArt <- cas.getByDigest(vcsA.base)
+      base <-
+        if baseArt.kind != ArtifactKind.Ir then Left(s"base ${vcsA.base.short} is not a module")
+        else Right(Module.fromCanon(baseArt.body))
+      out <- merge(language, into, base, vcsA.change, vcsB.change, migration)
+    yield out
+
+  /** Optionally publish the accepted branch head via ledger: `PublishArtifact`
+    * then `SetBranchHead` (heads must be published before they can be set).
+    */
+  def publishHead(
+      branch: String,
+      node: Node,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+  ): Either[String, Block] =
+    load(branch).head.toRight(s"branch '$branch' has no head").flatMap { key =>
+      node.append(authority, authorities, List(
+        authority.signTx(Tx.PublishArtifact(key)),
+        authority.signTx(Tx.SetBranchHead(branch, key))))
     }

@@ -99,7 +99,7 @@ object PkiTutorial:
     val afterTamper = PkiMax.validate(tampered, "leaf", now, Set("root")).isLeft
 
     // Publish trust-anchor certificate digest on ledger
-    val node = Node(work, EffectContext.bootstrapped())
+    val node = Node(work, EffectContext.forLedger())
     val alice = h.root.signing
     val auth = Map(alice.name -> alice.publicBytes)
     val anchorArt = Artifact(ArtifactKind.Certificate, Cst.toCanon(h.root.cert))

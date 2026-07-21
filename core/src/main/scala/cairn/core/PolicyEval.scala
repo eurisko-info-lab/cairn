@@ -204,3 +204,14 @@ object PolicyEval:
           s"backend-run-$host", subject, EffectMeta.externalBackend.actionKey("run"),
           EffectMeta.externalBackend.resource.at(host), Decision.Allow))
     }
+
+  /** CAS put/get under a digest-path pattern (default `*` = whole store). */
+  def casStore(subject: Subject | "*", pathPattern: String = "*"): List[EffectPolicy] =
+    List(
+      EffectPolicy(
+        "cas-put", subject, EffectMeta.cas.actionKey("put"),
+        EffectMeta.cas.resource.at(pathPattern), Decision.Allow),
+      EffectPolicy(
+        "cas-get", subject, EffectMeta.cas.actionKey("get"),
+        EffectMeta.cas.resource.at(pathPattern), Decision.Allow))
+
