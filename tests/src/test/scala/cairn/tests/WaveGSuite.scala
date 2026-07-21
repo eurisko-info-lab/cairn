@@ -214,7 +214,7 @@ class WaveGSuite extends munit.FunSuite:
     val portDigest = putBs(portText.getBytes)
     record(portDigest, List(rosettaArt.digest), "port-scala")
     // why?
-    val hops = Provenance.why(dir, portDigest)
+    val hops = Provenance.why(dir, portDigest, ctx).fold(e => fail(e), identity)
     assertEquals(hops.map(_.record.tool).sorted, List("compose", "delta", "port-scala", "rosetta-model"))
     assertEquals(hops.map(_.depth).max, 3)
     val terminal = hops.find(_.record.tool == "compose").get

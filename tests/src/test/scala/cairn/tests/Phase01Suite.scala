@@ -172,7 +172,7 @@ class DeltaSuite extends munit.FunSuite:
     RoundTrip.check(dl.grammar, t).fold(e => fail(e), identity)
 
 class BranchSuite extends munit.FunSuite:
-  private val casCtx = EffectContext.forCas()
+  private val casCtx = EffectContext.forBranches()
 
   test("branch manifests: append-only history surviving restart (S18)"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-branches")

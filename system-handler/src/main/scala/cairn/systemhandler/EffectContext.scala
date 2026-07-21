@@ -108,6 +108,13 @@ object EffectContext:
   def forCas(audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.casStore(Subject("local")) ++ PolicyEval.casAdmin(Subject("local")), audit)
 
+  /** Branches composition root: CAS store + refs-directory filesystem. */
+  def forBranches(refsPathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =
+    localCtx(
+      PolicyEval.branchesStore(Subject("local"), refsPathPattern) ++
+        PolicyEval.casAdmin(Subject("local")),
+      audit)
+
   /** Filesystem composition root: read/write/mkdirs under a path pattern. */
   def forFilesystem(pathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.filesystemStore(Subject("local"), pathPattern), audit)

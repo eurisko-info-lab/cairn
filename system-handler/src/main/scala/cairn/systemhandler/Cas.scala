@@ -3,6 +3,7 @@ package cairn.systemhandler
 import cairn.kernel.*
 import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, SemanticRepository}
 import cairn.systeminterface.Cas
+import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.{Files, Path}
 
 /** MIGRATION-PLAN.md Phase 1: the System Handler half of the old
@@ -161,8 +162,9 @@ object CasEffects:
 
 /** Named branch refs over a CAS; ref file stores the manifest digest.
   *
-  * CAS put/get go through [[CasEffects]] with [[ctx]]; the refs directory
-  * (branch pointers, tip sidecars, `.changes` logs) stays ungated local FS.
+  * CAS put/get go through [[CasEffects]] with [[ctx]]; refs-directory
+  * read/write/mkdirs/list go through [[Filesystem]] with the same [[ctx]]
+  * (use [[EffectContext.forBranches]] at the composition root).
   *
   * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
   * [[cairn.core.SemanticRepository.integrate]] then either advance the target
@@ -182,6 +184,36 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private def casErr(e: Cas.Error): String = e match
     case Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
     case Cas.Error.Io(m)      => m
+
+  private def fsAbs(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
+
+  private def fsErr(e: Fs.Error): String = e match
+    case Fs.Error.NotFound(p) => s"not found: ${p.value}"
+    case Fs.Error.Io(m)       => m
+
+  private def fsRun(req: Fs.Request): Either[String, Fs.Response] =
+    Filesystem.run(req, ctx).left.map(fsErr)
+
+  private def refsMkdirs(): Unit =
+    fsRun(Fs.Request.Mkdirs(fsAbs(refsDir))).fold(e => throw RuntimeException(e), _ => ())
+
+  private def refsExists(p: Path): Boolean =
+    fsRun(Fs.Request.Exists(fsAbs(p))) match
+      case Right(Fs.Response.Bool(b)) => b
+      case Left(e)                    => throw RuntimeException(e)
+      case other                      => throw RuntimeException(s"unexpected fs response: $other")
+
+  private def refsRead(p: Path): String =
+    fsRun(Fs.Request.Read(fsAbs(p))) match
+      case Right(Fs.Response.Text(s)) => s
+      case Left(e)                    => throw RuntimeException(e)
+      case other                      => throw RuntimeException(s"unexpected fs response: $other")
+
+  private def refsWrite(p: Path, content: String): Unit =
+    fsRun(Fs.Request.Write(fsAbs(p), content)) match
+      case Right(Fs.Response.Ok) => ()
+      case Left(e)               => throw RuntimeException(e)
+      case other                 => throw RuntimeException(s"unexpected fs response: $other")
 
   private def putArt(a: Artifact): TypedKey =
     CasEffects.put(cas, a, ctx).fold(e => throw RuntimeException(casErr(e)), identity)
@@ -210,12 +242,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     name.endsWith(".change") || name.endsWith(".changes")
 
   private def persistChange(branch: String, vcsKey: TypedKey): Unit =
-    Files.createDirectories(refsDir)
-    Files.writeString(changeRefPath(branch), vcsKey.valueHash.hex)
+    refsMkdirs()
+    refsWrite(changeRefPath(branch), vcsKey.valueHash.hex)
     val hist = changeHistoryPath(branch)
-    val prev = if Files.exists(hist) then Files.readString(hist) else ""
+    val prev = if refsExists(hist) then refsRead(hist) else ""
     val line = vcsKey.valueHash.hex + "\n"
-    Files.writeString(hist, prev + line)
+    refsWrite(hist, prev + line)
 
   private def loadVcs(digest: Digest): Either[String, Delta.ValidatedChangeSet] =
     getByDigest(digest).flatMap { a =>
@@ -244,9 +276,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
-    if !Files.exists(p) then BranchManifest(branch, None, Nil)
+    if !refsExists(p) then BranchManifest(branch, None, Nil)
     else
-      val d = Digest(Files.readString(p).trim)
+      val d = Digest(refsRead(p).trim)
       getByDigest(d).map(a => BranchManifest.fromCanon(a.body)).fold(e => throw RuntimeException(e), identity)
 
   /** Append: new head goes to history head; manifest itself stored in CAS. */
@@ -254,15 +286,17 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     val cur = load(branch)
     val next = BranchManifest(branch, Some(newHead), cur.head.toList ++ cur.history)
     val key = putArt(next.artifact)
-    Files.createDirectories(refsDir)
-    Files.writeString(refPath(branch), key.valueHash.hex)
+    refsMkdirs()
+    refsWrite(refPath(branch), key.valueHash.hex)
     next
 
   def list(): List[String] =
-    if !Files.exists(refsDir) then Nil
+    if !refsExists(refsDir) then Nil
     else
-      Files.list(refsDir).map(_.getFileName.toString).toArray.toList.map(_.toString)
-        .filterNot(isSidecar).sorted
+      fsRun(Fs.Request.List(fsAbs(refsDir))) match
+        case Right(Fs.Response.Entries(names)) => names.filterNot(isSidecar).sorted
+        case Left(e)                           => throw RuntimeException(e)
+        case other                             => throw RuntimeException(s"unexpected fs response: $other")
 
   /** Load the module at a branch head (heads are [[ArtifactKind.Ir]] modules). */
   def headModule(branch: String): Either[String, Module] =
@@ -293,16 +327,16 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   /** Load the tip ValidatedChangeSet recorded by [[commitTip]] / merge accept. */
   def loadChange(branch: String): Either[String, Delta.ValidatedChangeSet] =
     val p = changeRefPath(branch)
-    if !Files.exists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
-    else loadVcs(Digest(Files.readString(p).trim))
+    if !refsExists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
+    else loadVcs(Digest(refsRead(p).trim))
 
   /** Full change history for `branch` (oldest → newest), from the `.changes` log.
     * Falls back to the tip sidecar alone when the log is absent (pre-history tips).
     */
   def loadChangeHistory(branch: String): Either[String, List[Delta.ValidatedChangeSet]] =
     val hist = changeHistoryPath(branch)
-    if Files.exists(hist) then
-      val digests = Files.readString(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
+    if refsExists(hist) then
+      val digests = refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
       digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
         acc.flatMap(xs => loadVcs(d).map(xs :+ _))
       }

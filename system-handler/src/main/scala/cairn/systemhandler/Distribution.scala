@@ -149,26 +149,32 @@ object Provenance:
           m.field("tool").asStr))
         case _ => None
 
-  def index(root: java.nio.file.Path): Map[String, Record] =
-    val objs = root.resolve("objects")
-    if !Files.exists(objs) then Map.empty
-    else
-      import scala.jdk.CollectionConverters.*
-      Files.walk(objs).iterator.asScala
-        .filter(p => Files.isRegularFile(p) && !p.toString.endsWith(".corrupt"))
-        .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption)
-        .flatMap(fromArtifact)
-        .map(r => r.output.hex -> r)
-        .toMap
+  /** Inventory provenance records under a CAS root. Authorizes CAS `stats`
+    * on the root (same inventory right as [[CasAdminEffects.stats]]), then
+    * walks object files — no ungated public FS entry.
+    */
+  def index(root: java.nio.file.Path, ctx: EffectContext): Either[String, Map[String, Record]] =
+    val abs = root.toAbsolutePath.normalize.toString
+    ctx.authorize(EffectMeta.cas.actionKey("stats"), EffectMeta.cas.resource.at(abs)) match
+      case Left(err) => Left(s"denied: $err")
+      case Right(_) =>
+        Right(
+          CasAdmin.objectFiles(root)
+            .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption)
+            .flatMap(fromArtifact)
+            .map(r => r.output.hex -> r)
+            .toMap)
 
   final case class Hop(record: Record, depth: Int)
 
-  def why(root: java.nio.file.Path, target: Digest): List[Hop] =
-    val idx = index(root)
-    def walk(d: Digest, depth: Int, seen: Set[String]): List[Hop] =
-      if seen.contains(d.hex) then Nil
-      else idx.get(d.hex) match
-        case None => Nil
-        case Some(r) =>
-          Hop(r, depth) :: r.inputs.flatMap(i => walk(i, depth + 1, seen + d.hex))
-    walk(target, 0, Set.empty)
+  /** Walk provenance edges to `target`. Authorizes via [[index]]. */
+  def why(root: java.nio.file.Path, target: Digest, ctx: EffectContext): Either[String, List[Hop]] =
+    index(root, ctx).map { idx =>
+      def walk(d: Digest, depth: Int, seen: Set[String]): List[Hop] =
+        if seen.contains(d.hex) then Nil
+        else idx.get(d.hex) match
+          case None => Nil
+          case Some(r) =>
+            Hop(r, depth) :: r.inputs.flatMap(i => walk(i, depth + 1, seen + d.hex))
+      walk(target, 0, Set.empty)
+    }

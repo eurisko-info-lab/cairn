@@ -404,10 +404,12 @@ object Cli:
           r.render
         }
       case List("why", hex) =>
-        Digest.parse(hex).map { d =>
-          val hops = cairn.ledger.Provenance.why(casDir, d)
-          if hops.isEmpty then s"no provenance recorded for ${d.short}"
-          else hops.map(h => s"${"  " * h.depth}${h.record.output.short} <- ${h.record.tool}(${h.record.inputs.map(_.short).mkString(", ")})").mkString("\n") }
+        Digest.parse(hex).flatMap { d =>
+          cairn.ledger.Provenance.why(casDir, d, ledgerCtx).map { hops =>
+            if hops.isEmpty then s"no provenance recorded for ${d.short}"
+            else hops.map(h => s"${"  " * h.depth}${h.record.output.short} <- ${h.record.tool}(${h.record.inputs.map(_.short).mkString(", ")})").mkString("\n")
+          }
+        }
       case List("capabilities", langName) =>
         packs.get(langName).toRight(s"unknown language '$langName'")
           .flatMap { l =>
@@ -419,7 +421,7 @@ object Cli:
       case "repo" :: rest =>
         // Semantic repository surface: Branches + SemanticRepository spine.
         val refs = home.resolve("refs")
-        val branches = cairn.systemhandler.Branches(cas, refs, ledgerCtx)
+        val branches = cairn.systemhandler.Branches(cas, refs, EffectContext.forBranches())
         rest match
           case List("branches") | Nil =>
             val names = branches.list()

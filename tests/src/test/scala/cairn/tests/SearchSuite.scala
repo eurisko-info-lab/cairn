@@ -80,7 +80,8 @@ class SearchSuite extends munit.FunSuite:
     assert(r.goalMet)
     assert(r.whyHops >= 1, r.toString)
     assert(r.whyTools.contains("explore"), r.whyTools.toString)
-    val hops = Provenance.why(dir.resolve("cas"), Digest(r.factDigest))
+    val hops = Provenance.why(dir.resolve("cas"), Digest(r.factDigest), EffectContext.forCas())
+      .fold(e => fail(e), identity)
     assert(hops.exists(_.record.inputs.exists(_.hex == r.intentDigest)), hops.toString)
     assert(r.languageProvides.contains("search"))
 
@@ -108,7 +109,8 @@ class SearchSuite extends munit.FunSuite:
     val edge = Search.certifyEdge(cas, board, "link", factDig).fold(e => fail(e), identity)
     assertEquals(edge.certificate.method, "test-suite")
     assertEquals(edge.certificate.claim, edge.claim.artifact.digest)
-    val hops = Provenance.why(dir.resolve("cas"), edge.certDigest)
+    val hops = Provenance.why(dir.resolve("cas"), edge.certDigest, EffectContext.forCas())
+      .fold(e => fail(e), identity)
     assert(hops.exists(_.record.inputs.exists(_ == factDig)), hops.toString)
     assert(hops.exists(_.record.inputs.exists(_ == intentDig)) ||
       hops.exists(h => h.record.output == factDig && h.record.inputs.exists(_ == intentDig)),

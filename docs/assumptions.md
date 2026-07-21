@@ -33,10 +33,12 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    (tip sidecar + `.changes` history) and merges via `mergeBranches` (composes
   stacked histories from a shared oldest base) / `loadTip`. Ledger
   `SetBranchHead` is opt-in (`Branches.publishHead` or `publish = Some(...)`
-  on merge) — accept stays local by default. `Branches` CAS is gated;
-  refs store is not. CAS `contains`, admin (fsck/gc/stats), chunking, and
-  Unison store use `CasEffects` / `CasAdminEffects`; Phase0 MemCas/DiskCas
-  and WaveA M4 algo tests remain intentional trait-contract exceptions.
+  on merge) — accept stays local by default. `Branches` CAS and refs FS are
+  gated (`EffectContext.forBranches` = `CasEffects` + `Filesystem`). CAS
+  `contains`, admin (fsck/gc/stats), chunking, Unison store, and provenance
+  `index`/`why` (CAS `stats`) use `CasEffects` / `CasAdminEffects`; Phase0
+  MemCas/DiskCas and WaveA M4 algo tests remain intentional trait-contract
+  exceptions.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

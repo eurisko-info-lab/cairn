@@ -14,7 +14,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
   val lang = Stlc.language
   val dl = Delta.deltaOf(lang).toOption.get
   val m0 = Module(List("a" -> Stlc.tru, "b" -> Stlc.fls))
-  private val casCtx = EffectContext.forCas()
+  private val casCtx = EffectContext.forBranches()
 
   def parseChange(src: String): Cst =
     Parser.parse(dl.grammar, src).fold(e => fail(e), identity)
@@ -72,7 +72,8 @@ class SemanticRepositorySuite extends munit.FunSuite:
         assertEquals(head.get("b"), Some(Stlc.tru))
         assert(head.get("fromA").isDefined && head.get("fromB").isDefined)
         assertEquals(branches.list().sorted, List("base", "feat-a", "feat-b", "main"))
-        val hops = Provenance.why(dir.resolve("cas"), head.digest)
+        val hops = Provenance.why(dir.resolve("cas"), head.digest, casCtx)
+          .fold(e => fail(e), identity)
         assert(hops.exists(_.record.tool == "semantic-merge"), hops.toString)
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)

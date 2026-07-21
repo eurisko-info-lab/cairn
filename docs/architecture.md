@@ -89,8 +89,9 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
   PackLoader (`packLoaderWorkspace`), ledger+CAS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
-  filesystem (`forFilesystem`). `bootstrapped()` remains available for rare
-  allow-all fixtures; composition roots and suites use narrow gates.
+  branches (`forBranches` = CAS + refs FS), filesystem (`forFilesystem`).
+  `bootstrapped()` remains available for rare allow-all fixtures; composition
+  roots and suites use narrow gates.
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
   accidental prefix of a non-wildcard path.
 - **Meta conditions:** known `meta:*` keys validate value shape fail-closed
@@ -131,8 +132,9 @@ Residuals: everyday path uses `commitTip` + `mergeBranches` (tip sidecar +
 `mergeBranches` composes full stacked histories from a shared oldest base).
 Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
 `merge(..., publish = Some(...))` — accept does not auto-publish. `Branches`
-CAS put/get/contains go through `CasEffects` + `EffectContext`; admin via
-`CasAdminEffects`; refs FS stays ungated.
+CAS put/get/contains go through `CasEffects` + `EffectContext`; refs FS through
+`Filesystem` (`EffectContext.forBranches`); admin via `CasAdminEffects`.
+Provenance `index`/`why` authorize CAS `stats` on the store root then walk.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -171,8 +173,9 @@ LeanCore `#check` envelope.
   `publish = Some(...)` on merge) — not the default on accept.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
-  Unison host glue, sync `contains`, and Browser stats go through
-  `CasEffects` / `CasAdminEffects`.
+  Unison host glue, sync `contains`, Browser stats, provenance `why`, and
+  Branches refs FS go through `CasEffects` / `CasAdminEffects` /
+  `Filesystem` (`forBranches`).
 
 ## Final principle
 

@@ -246,6 +246,14 @@ object PolicyEval:
         "fs-mkdirs", subject, EffectMeta.filesystem.actionKey("mkdirs"),
         EffectMeta.filesystem.resource.at(pathPattern), Decision.Allow))
 
+  /** Branches composition: CAS put/get/stats plus refs-directory FS. */
+  def branchesStore(
+      subject: Subject | "*" = Subject("local"),
+      refsPathPattern: String = "*",
+      casPathPattern: String = "*",
+  ): List[EffectPolicy] =
+    casStore(subject, casPathPattern) ++ filesystemStore(subject, refsPathPattern)
+
   /** Ledger node + its local CAS (append as any subject; CAS as `local`). */
   def ledgerWithCas(
       subject: Subject | "*" = "*",

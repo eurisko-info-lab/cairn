@@ -4,7 +4,7 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, CasAdminEffects, CasEffects, EffectContext, Filesystem, Keypair, MemCas}
+import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance}
 import cairn.systeminterface.Cas
 import cairn.kernel.Tx
 
@@ -517,6 +517,14 @@ class AuthoritySuite extends munit.FunSuite:
     assert(fsCtx.authorize(
       EffectMeta.ledgerTransport.actionKey("append"),
       EffectMeta.ledgerTransport.resource.at("/tmp")).isLeft)
+    val brCtx = EffectContext.forBranches()
+    assert(brCtx.authorize(
+      EffectMeta.cas.actionKey("put"),
+      EffectMeta.cas.resource.at("abc")).isRight)
+    assert(brCtx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/refs")).isRight)
+    assert(brCtx.authorize(
+      EffectMeta.ledgerTransport.actionKey("append"),
+      EffectMeta.ledgerTransport.resource.at("/tmp")).isLeft)
 
   test("CasEffects: authorize → perform put/get/contains over MemCas"):
     val store = MemCas()
@@ -543,6 +551,29 @@ class AuthoritySuite extends munit.FunSuite:
     assert(ok.isRight, ok.toString)
     val denied = CasAdminEffects.stats(dir, EffectContext.forPackLoader())
     assert(denied.isLeft, denied.toString)
+
+  test("Provenance.why: stats-gated index under forCas; denied under forPackLoader"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-prov-auth")
+    val disk = DiskCas(dir)
+    val ctx = EffectContext.forCas()
+    val out = Digest.ofBytes("out".getBytes)
+    Provenance.record(disk, out, Nil, "test", ctx).fold(e => fail(e.toString), identity)
+    val hops = Provenance.why(dir, out, ctx)
+    assert(hops.isRight, hops.toString)
+    assert(hops.exists(_.nonEmpty), hops.toString)
+    assert(Provenance.why(dir, out, EffectContext.forPackLoader()).isLeft)
+
+  test("Branches refs FS: gated under forBranches; denied under forCas-only"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-refs-auth")
+    val cas = MemCas()
+    val art = Artifact(ArtifactKind.Term, Canon.CStr("branch-seed"))
+    val key = CasEffects.put(cas, art, EffectContext.forCas()).fold(e => fail(e.toString), identity)
+    val denied = Branches(cas, dir.resolve("refs"), EffectContext.forCas())
+    intercept[RuntimeException](denied.advance("main", key))
+    val ok = Branches(cas, dir.resolve("refs"), EffectContext.forBranches())
+    ok.advance("main", key)
+    assertEquals(ok.load("main").head, Some(key))
+    assertEquals(ok.list(), List("main"))
 
   test("LedgerTransport: authorize → perform append over Node"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-lt")

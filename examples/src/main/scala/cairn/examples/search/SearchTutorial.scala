@@ -66,7 +66,8 @@ object SearchTutorial:
     Provenance.record(cas, boardArt.valueHash, List(lang.digest, factDig, intentDig, edgeCert.certDigest), "search-board", casCtx)
       .fold(e => throw RuntimeException(e.toString), identity)
 
-    val hops = Provenance.why(workDir.resolve("cas"), edgeCert.certDigest)
+    val hops = Provenance.why(workDir.resolve("cas"), edgeCert.certDigest, casCtx)
+      .fold(e => throw RuntimeException(e), identity)
     Report(
       languageProvides = provides,
       languageRequiresMet = met,
