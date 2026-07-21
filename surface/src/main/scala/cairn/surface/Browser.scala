@@ -481,15 +481,18 @@ final class BrowserServer(
             case None => Left("no search-shaped board module in CAS — run transcripts/search-board.cairn")
 
 object BrowserServer:
-  /** Serve UI for a local node/CAS root until interrupted. */
+  /** Serve UI for a local node/CAS root until interrupted.
+    * Root directory creation is authorized via [[fsCtx]] ([[EffectContext.forFilesystem]]).
+    */
   def serve(
       root: Path,
       languages: Map[String, ComposedLanguage],
       ledgerCtx: cairn.systemhandler.EffectContext,
+      fsCtx: cairn.systemhandler.EffectContext,
       port: Int = 8765
-  ): Int =
-    Files.createDirectories(root)
-    val node = Node(root, ledgerCtx)
-    val srv = BrowserServer(node, languages, port)
-    val bound = srv.start()
-    bound
+  ): Either[String, Int] =
+    Transcript.fsMkdirs(root, fsCtx).map { _ =>
+      val node = Node(root, ledgerCtx)
+      val srv = BrowserServer(node, languages, port)
+      srv.start()
+    }

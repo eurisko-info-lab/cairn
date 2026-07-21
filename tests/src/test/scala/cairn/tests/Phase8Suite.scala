@@ -16,13 +16,14 @@ class Phase8Suite extends munit.FunSuite:
   private val Pki = cairn.examples.pki.Pki(packs)
   private val ledgerCtx = EffectContext.forLedger()
   private val processCtx = EffectContext.forProcess()
+  private val fsCtx = EffectContext.forFilesystem()
 
   test("mvp transcript runs from checkout (S46 acceptance, §9.9)"):
     val candidates = List("transcripts/mvp.cairn", "../transcripts/mvp.cairn").map(java.nio.file.Path.of(_))
     val path = candidates.find(java.nio.file.Files.exists(_)).getOrElse(fail("transcripts/mvp.cairn not found"))
     val src = java.nio.file.Files.readString(path)
     val work = java.nio.file.Files.createTempDirectory("cairn-mvp")
-    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx) match
+    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
       case Right(report) =>
         assert(report.steps.exists(_.startsWith("published main")), report.render)
         assert(report.steps.exists(_.startsWith("fetched main")), report.render)
@@ -37,7 +38,7 @@ class Phase8Suite extends munit.FunSuite:
   test("transcript failure is a structured error, not silence (S46)"):
     val src = """transcript t { lang stlc ; eval "true" expect "false" ; }"""
     val work = java.nio.file.Files.createTempDirectory("cairn-bad")
-    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx) match
+    Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
       case Left(e)  => assert(e.contains("eval mismatch"), e)
       case Right(r) => fail(s"expected failure, got ${r.render}")
 

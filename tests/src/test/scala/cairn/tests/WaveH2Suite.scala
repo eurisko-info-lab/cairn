@@ -23,6 +23,7 @@ class WaveH2Suite extends munit.FunSuite:
   private val ledgerCtx = EffectContext.forLedger()
   private val processCtx = EffectContext.forProcess()
   private val lspCtx = EffectContext.forLsp()
+  private val fsCtx = EffectContext.forFilesystem()
 
   // ---- M43: capability manifests ----
 
@@ -423,7 +424,8 @@ class WaveH2Suite extends munit.FunSuite:
       portModules = Map("quicksort2" -> cairn.examples.quicksort.QuickSort2.module),
       packLoader = packs,
       ledgerCtx = ledgerCtx,
-      processCtx = processCtx) match
+      processCtx = processCtx,
+      fsCtx = fsCtx) match
       case Right(report) =>
         assert(report.steps.exists(_.startsWith("loaded language stlc")), report.render)
         assert(report.steps.exists(_.startsWith("gossip converged")), report.render)

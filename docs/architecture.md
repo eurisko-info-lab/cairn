@@ -89,7 +89,8 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
   PackLoader (`packLoaderWorkspace`), ledger+CAS+chain FS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
-  branches (`forBranches` = CAS + refs FS), filesystem (`forFilesystem`).
+  branches (`forBranches` = CAS + refs FS), filesystem (`forFilesystem` —
+  CLI Transcript/Cli home/run/ui paths).
   `bootstrapped()` remains available for rare allow-all fixtures; composition
   roots and suites use narrow gates.
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
@@ -136,6 +137,8 @@ CAS put/get/contains go through `CasEffects` + `EffectContext`; refs FS through
 `Filesystem` (`EffectContext.forBranches`); admin via `CasAdminEffects`.
 Provenance `index`/`why` authorize CAS `stats` on the store root then walk.
 Node/Sync/HttpSync chain-file I/O goes through `Filesystem` (`EffectContext.forLedger`).
+CLI Transcript/Cli home, run directories, and `ui` root paths go through
+`Filesystem` (`EffectContext.forFilesystem`).
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -176,7 +179,8 @@ LeanCore `#check` envelope.
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync `contains`, Browser stats, provenance `why`,
   Branches refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
-  `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger`).
+  `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger`). CLI
+  Transcript/Cli home/run/ui paths use `Filesystem` (`forFilesystem`).
 
 ## Final principle
 

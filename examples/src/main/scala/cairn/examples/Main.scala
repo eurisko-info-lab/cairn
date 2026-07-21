@@ -15,6 +15,7 @@ import cairn.systemhandler.EffectContext
     val ledgerCtx = EffectContext.forLedger()
     val processCtx = EffectContext.forProcess()
     val lspCtx = EffectContext.forLsp()
+    val fsCtx = EffectContext.forFilesystem()
     val pki = cairn.examples.pki.Pki(packLoader)
     val law = cairn.examples.law.Law(packLoader)
     val sds = cairn.examples.sds.Sds(packLoader)
@@ -150,6 +151,6 @@ import cairn.systemhandler.EffectContext
         println(s"wrote languages/stlc.cairn (${stlcText.length} bytes) + surfaces/default.cairn (${stlcSurf.length} bytes)")
         println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; Meta describes surface tops)")
       case other =>
-        Cli.main(other, packs, portModules, packLoader, ledgerCtx, processCtx, lspCtx) match
+        Cli.main(other, packs, portModules, packLoader, ledgerCtx, processCtx, lspCtx, fsCtx) match
           case Right(out) => println(out)
           case Left(err)  => System.err.println(s"error: $err"); sys.exit(1)

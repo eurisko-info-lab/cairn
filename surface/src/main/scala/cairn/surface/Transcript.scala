@@ -3,7 +3,8 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
+import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.ledger.*
 import cairn.runtime.PackLoader
@@ -93,20 +94,26 @@ object Transcript:
         PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
 
-  final case class Report(name: String, steps: List[String], workDir: Path, nodes: List[(String, Path)] = Nil):
+  /** Node name, absolute root, and whether a chain file exists (FS-gated probe). */
+  final case class Report(
+      name: String,
+      steps: List[String],
+      workDir: Path,
+      nodes: List[(String, Path, Boolean)] = Nil,
+  ):
     def render: String =
       val body = (s"transcript '$name':" :: steps.map("  ✓ " + _)).mkString("\n")
       val nodeLines =
         if nodes.isEmpty then Nil
         else
-          "" :: "blockchain nodes:" :: nodes.sortBy(_._1).map { (n, p) =>
+          "" :: "blockchain nodes:" :: nodes.sortBy(_._1).map { (n, p, hasChain) =>
             val abs = p.toAbsolutePath.normalize
-            val tip = if Files.exists(abs.resolve("chain")) then " (has chain)" else ""
+            val tip = if hasChain then " (has chain)" else ""
             s"  $n = $abs$tip"
           }
       val browse =
         nodes.find(_._1 == "nodeA").orElse(nodes.headOption) match
-          case Some((_, p)) =>
+          case Some((_, p, _)) =>
             val abs = p.toAbsolutePath.normalize
             List(
               "",
@@ -116,10 +123,50 @@ object Transcript:
             List("", s"workDir: ${workDir.toAbsolutePath.normalize}")
       (body :: nodeLines ++ browse).mkString("\n")
 
+  private[surface] def fsAbs(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
+
+  private[surface] def fsErr(e: Fs.Error): String = e match
+    case Fs.Error.NotFound(p) => s"not found: ${p.value}"
+    case Fs.Error.Io(m)       => m
+
+  private[surface] def fsRun(req: Fs.Request, ctx: EffectContext): Either[String, Fs.Response] =
+    Filesystem.run(req, ctx).left.map(fsErr)
+
+  private[surface] def fsExists(p: Path, ctx: EffectContext): Either[String, Boolean] =
+    fsRun(Fs.Request.Exists(fsAbs(p)), ctx).flatMap {
+      case Fs.Response.Bool(b) => Right(b)
+      case other               => Left(s"unexpected fs response: $other")
+    }
+
+  private[surface] def fsMkdirs(p: Path, ctx: EffectContext): Either[String, Unit] =
+    fsRun(Fs.Request.Mkdirs(fsAbs(p)), ctx).flatMap {
+      case Fs.Response.Ok => Right(())
+      case other          => Left(s"unexpected fs response: $other")
+    }
+
+  private[surface] def fsRead(p: Path, ctx: EffectContext): Either[String, String] =
+    fsRun(Fs.Request.Read(fsAbs(p)), ctx).flatMap {
+      case Fs.Response.Text(s) => Right(s)
+      case other               => Left(s"unexpected fs response: $other")
+    }
+
+  private[surface] def fsWrite(p: Path, content: String, ctx: EffectContext): Either[String, Unit] =
+    fsRun(Fs.Request.Write(fsAbs(p), content), ctx).flatMap {
+      case Fs.Response.Ok => Right(())
+      case other          => Left(s"unexpected fs response: $other")
+    }
+
+  private[surface] def fsIsRegularFile(p: Path, ctx: EffectContext): Either[String, Boolean] =
+    fsRun(Fs.Request.IsRegularFile(fsAbs(p)), ctx).flatMap {
+      case Fs.Response.Bool(b) => Right(b)
+      case other               => Left(s"unexpected fs response: $other")
+    }
+
   /** Interpret a transcript against a working directory. `packs` is the
     * language registry (domain packs stay out of the surface layer — they are
     * injected by callers, §4.11). EffectContexts and packLoader are explicit — no
-    * ambient AuthorityGate / PackAccess.
+    * ambient AuthorityGate / PackAccess. Run/node directories use [[fsCtx]]
+    * ([[EffectContext.forFilesystem]] at the CLI composition root).
     */
   def run(
       src: String,
@@ -129,10 +176,11 @@ object Transcript:
       packLoader: PackLoader,
       ledgerCtx: EffectContext,
       processCtx: EffectContext,
+      fsCtx: EffectContext,
   ): Either[String, Report] =
     Parser.parse(grammar, src).flatMap {
       case Cst.Node("transcript", List(Cst.Leaf(name), Cst.Node("list", steps))) =>
-        runSteps(name, steps, packs, workDir, portModules, packLoader, ledgerCtx, processCtx)
+        runSteps(name, steps, packs, workDir, portModules, packLoader, ledgerCtx, processCtx, fsCtx)
       case other => Left(s"not a transcript: ${other.render}")
     }
 
@@ -145,6 +193,7 @@ object Transcript:
       packLoader: PackLoader,
       ledgerCtx: EffectContext,
       processCtx: EffectContext,
+      fsCtx: EffectContext,
   ): Either[String, Report] =
     var packs = packsIn
     var lang: Option[ComposedLanguage] = None
@@ -153,13 +202,17 @@ object Transcript:
     def authorities = Map(authority.name -> authority.publicBytes)
     val log = List.newBuilder[String]
     val nodes = scala.collection.mutable.LinkedHashMap[String, Node]()
-    def nodeOf(n: String): Node =
-      nodes.getOrElseUpdate(n, {
-        val path = workDir.resolve(n).toAbsolutePath.normalize
-        Files.createDirectories(path)
-        log += s"node $n at $path"
-        Node(path, ledgerCtx)
-      })
+    def ensureNode(n: String): Either[String, Node] =
+      nodes.get(n) match
+        case Some(node) => Right(node)
+        case None =>
+          val path = workDir.resolve(n).toAbsolutePath.normalize
+          fsMkdirs(path, fsCtx).map { _ =>
+            log += s"node $n at $path"
+            val node = Node(path, ledgerCtx)
+            nodes(n) = node
+            node
+          }
 
     def need: Either[String, ComposedLanguage] = lang.toRight("no language selected (use `lang NAME ;` first)")
     def parseIn(l: ComposedLanguage, s: String): Either[String, Cst] = Parser.parse(l.grammar, s)
@@ -192,10 +245,12 @@ object Transcript:
 
     def fetchBetween(branch: String, fromN: String, toN: String): Either[String, Unit] =
       for
-        _ <- Sync.pull(nodeOf(fromN), nodeOf(toN), authorities)
-        st <- nodeOf(toN).state(authorities)
+        from <- ensureNode(fromN)
+        to <- ensureNode(toN)
+        _ <- Sync.pull(from, to, authorities)
+        st <- to.state(authorities)
         head <- st.heads.get(branch).toRight(s"branch '$branch' not on ledger")
-        art <- CasEffects.get(nodeOf(toN).cas, head.valueHash, nodeOf(toN).ctx).left.map {
+        art <- CasEffects.get(to.cas, head.valueHash, to.ctx).left.map {
           case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
           case cairn.systeminterface.Cas.Error.Io(m)      => m
         }
@@ -221,7 +276,7 @@ object Transcript:
             packs = packs + (l.name -> l)
             log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
         case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
-          nodeOf(n); Right(())
+          ensureNode(n).map(_ => ())
         case Cst.Node("roundtrip", List(Cst.Leaf(s))) =>
           for
             l <- need
@@ -256,17 +311,21 @@ object Transcript:
             cert <- cairn.proof.Certify.byTests(claim, suite, t => TreeEngine.normalize(l, t))
           yield log += s"claim $cn certified (${cert.artifact.digest.short})"
         case Cst.Node("publishOn", List(Cst.Leaf(branch), Cst.Leaf(nodeName))) =>
-          publishTo(nodeOf(nodeName), branch)
+          ensureNode(nodeName).flatMap(publishTo(_, branch))
         case Cst.Node("publish", List(Cst.Leaf(branch))) =>
-          publishTo(nodeOf("nodeA"), branch)
+          ensureNode("nodeA").flatMap(publishTo(_, branch))
         case Cst.Node("fetchBetween", List(Cst.Leaf(branch), Cst.Leaf(f), Cst.Leaf(t))) =>
           fetchBetween(branch, f, t)
         case Cst.Node("fetch", List(Cst.Leaf(branch))) =>
           fetchBetween(branch, "nodeA", "nodeB")
         case Cst.Node("gossip", List(Cst.Node("list", names))) =>
-          val peers = names.collect { case Cst.Leaf(n) => Gossip.Peer(n, nodeOf(n)) }
-          Gossip.converge(peers, authorities).map { reorgs =>
-            log += s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)" }
+          val peerNames = names.collect { case Cst.Leaf(n) => n }
+          peerNames.foldLeft[Either[String, List[Gossip.Peer]]](Right(Nil)) { (acc, n) =>
+            acc.flatMap(ps => ensureNode(n).map(node => ps :+ Gossip.Peer(n, node)))
+          }.flatMap { peers =>
+            Gossip.converge(peers, authorities).map { reorgs =>
+              log += s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)" }
+          }
         case Cst.Node("port", List(Cst.Leaf(host))) =>
           portModules.values.headOption.toRight("no rosetta module registered for port steps").flatMap { m =>
             val port: Option[cairn.core.PortV2] = host match
@@ -283,17 +342,19 @@ object Transcript:
                   scalaCli match
                     case None => Right(log += s"port $host verified (host toolchain absent, fixpoint only)")
                     case Some(cli) =>
-                      val f = Files.createTempDirectory(workDir, "port").resolve(out.fileName)
-                      Files.writeString(f, out.text)
-                      cairn.systemhandler.Process.run(
-                        cairn.systeminterface.Process.Request.Run(
-                          List(cli.toString, "run", "--server=false", f.toString)),
-                        processCtx
-                      ) match
-                        case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
-                          Right(log += s"port $host tests pass in host")
-                        case Right(r) => Left(s"port $host host run failed:\n${r.combined}")
-                        case Left(e)  => Left(s"port $host host run failed: $e")
+                      val portDir = workDir.resolve(s"port-${java.util.UUID.randomUUID()}")
+                      val f = portDir.resolve(out.fileName)
+                      fsMkdirs(portDir, fsCtx).flatMap(_ => fsWrite(f, out.text, fsCtx)).flatMap { _ =>
+                        cairn.systemhandler.Process.run(
+                          cairn.systeminterface.Process.Request.Run(
+                            List(cli.toString, "run", "--server=false", f.toString)),
+                          processCtx
+                        ) match
+                          case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
+                            Right(log += s"port $host tests pass in host")
+                          case Right(r) => Left(s"port $host host run failed:\n${r.combined}")
+                          case Left(e)  => Left(s"port $host host run failed: $e")
+                      }
                 else Right(log += s"port $host verified (byte fixpoint)")
               }
             }
@@ -315,11 +376,15 @@ object Transcript:
 
     val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
       acc.flatMap(_ => runStep(step)) }
-    result.map(_ => Report(
-      name,
-      log.result(),
-      workDir.toAbsolutePath.normalize,
-      nodes.toList.map((n, node) => (n, node.root.toAbsolutePath.normalize))))
+    result.flatMap { _ =>
+      nodes.toList.foldLeft[Either[String, List[(String, Path, Boolean)]]](Right(Nil)) {
+        case (acc, (n, node)) =>
+          acc.flatMap { xs =>
+            val abs = node.root.toAbsolutePath.normalize
+            fsExists(abs.resolve("chain"), fsCtx).map(has => xs :+ (n, abs, has))
+          }
+      }.map(ns => Report(name, log.result(), workDir.toAbsolutePath.normalize, ns))
+    }
 
 /** Generic CLI (S6, M40, M42, M43, M44): hash / put / get / canon over a disk
   * CAS, transcripts, provenance walking, capability manifests, REPL, LSP,
@@ -339,40 +404,58 @@ object Cli:
       ledgerCtx: EffectContext,
       processCtx: EffectContext,
       lspCtx: EffectContext,
+      fsCtx: EffectContext,
   ): Either[String, String] =
     /** Durable store root. Override with env `CAIRN_HOME`.
       * Default: `./.cas`. Each transcript writes a fresh run under
       * `$CAIRN_HOME/runs/<timestamp>/{nodeA,nodeB,…}` and prints those paths.
       * `ui` opens the latest run's `nodeA` (via `$CAIRN_HOME/LATEST`).
+      * Home/run/ui path I/O goes through [[Filesystem]] on [[fsCtx]].
       */
     val home = Path.of(sys.env.getOrElse("CAIRN_HOME", ".cas")).toAbsolutePath.normalize
     val casDir = home
     def cas = DiskCas(casDir)
-    def defaultUiRoot: Path =
+    def defaultUiRoot: Either[String, Path] =
       val latestFile = home.resolve("LATEST")
-      val fromLatest =
-        if Files.isRegularFile(latestFile) then
-          val nodeA = Path.of(Files.readString(latestFile).trim).resolve("nodeA")
-          if Files.exists(nodeA.resolve("chain")) then Some(nodeA) else None
-        else None
-      fromLatest.getOrElse {
-        val nodeA = home.resolve("nodeA")
-        if Files.exists(nodeA.resolve("chain")) then nodeA
-        else if Files.exists(home.resolve("chain")) then home
-        else nodeA
-      }
+      for
+        isLatest <- Transcript.fsIsRegularFile(latestFile, fsCtx)
+        fromLatest <-
+          if isLatest then
+            Transcript.fsRead(latestFile, fsCtx).flatMap { text =>
+              val nodeA = Path.of(text.trim).resolve("nodeA")
+              Transcript.fsExists(nodeA.resolve("chain"), fsCtx).map(ok => Option.when(ok)(nodeA))
+            }
+          else Right(None)
+        fallback <- fromLatest match
+          case Some(p) => Right(p)
+          case None =>
+            val nodeA = home.resolve("nodeA")
+            for
+              hasNodeA <- Transcript.fsExists(nodeA.resolve("chain"), fsCtx)
+              hasHome <- if hasNodeA then Right(false)
+                         else Transcript.fsExists(home.resolve("chain"), fsCtx)
+            yield
+              if hasNodeA then nodeA
+              else if hasHome then home
+              else nodeA
+      yield fallback
     val packs = packsIn ++ packLoader.loadClosed() ++ loadLanguages(Path.of("languages"), packLoader)
     args match
       case List("home") =>
-        val latest = Option.when(Files.isRegularFile(home.resolve("LATEST")))(
-          Files.readString(home.resolve("LATEST")).trim)
-        Right(
+        for
+          isLatest <- Transcript.fsIsRegularFile(home.resolve("LATEST"), fsCtx)
+          latest <-
+            if isLatest then Transcript.fsRead(home.resolve("LATEST"), fsCtx).map(s => Some(s.trim))
+            else Right(None)
+          uiRoot <- defaultUiRoot
+          hasChain <- Transcript.fsExists(uiRoot.resolve("chain"), fsCtx)
+        yield
           s"""CAIRN_HOME=$home
              |env=${sys.env.getOrElse("CAIRN_HOME", "<unset> (default ./.cas)")}
              |latest-run=${latest.getOrElse("<none>")}
-             |ui-default=$defaultUiRoot
-             |ui-has-chain=${Files.exists(defaultUiRoot.resolve("chain"))}
-             |""".stripMargin.trim)
+             |ui-default=$uiRoot
+             |ui-has-chain=$hasChain
+             |""".stripMargin.trim
       case List("hash", file) =>
         Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)
       case List("put", file) =>
@@ -396,13 +479,11 @@ object Cli:
         val runId = java.time.LocalDateTime.now()
           .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
         val runDir = home.resolve("runs").resolve(runId).toAbsolutePath.normalize
-        Files.createDirectories(runDir)
-        Transcript.run(src, packs, runDir, portModules, packLoader, ledgerCtx, processCtx).map { r =>
-          // Remember latest publisher for bare `ui`
-          val latest = home.resolve("LATEST")
-          Files.writeString(latest, runDir.toString + "\n")
-          r.render
-        }
+        for
+          _ <- Transcript.fsMkdirs(runDir, fsCtx)
+          r <- Transcript.run(src, packs, runDir, portModules, packLoader, ledgerCtx, processCtx, fsCtx)
+          _ <- Transcript.fsWrite(home.resolve("LATEST"), runDir.toString + "\n", fsCtx)
+        yield r.render
       case List("why", hex) =>
         Digest.parse(hex).flatMap { d =>
           cairn.ledger.Provenance.why(casDir, d, ledgerCtx).map { hops =>
@@ -478,19 +559,22 @@ object Cli:
           case ps if portOpt.isDefined && ps.length >= 2 => Some(Path.of(ps.dropRight(1).mkString("/")))
           case ps if portOpt.isDefined => None
           case ps => Some(Path.of(ps.mkString("/")))
-        val root = rootArg.map(_.toAbsolutePath.normalize).getOrElse(defaultUiRoot)
         val port = portOpt.getOrElse(8765)
-        Files.createDirectories(root)
-        val bound = BrowserServer.serve(root, packs, ledgerCtx, port)
-        System.out.println(s"Cairn Explorer at http://127.0.0.1:$bound")
-        System.out.println(s"CAIRN_HOME=$home")
-        System.out.println(s"serving root=$root")
-        if !Files.exists(root.resolve("chain")) then
-          System.out.println("NOTE: empty node (no chain file). Seed then reopen ui:")
-          System.out.println("""  sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"""")
-          System.out.println(s"  (writes $home/nodeA)")
-        System.out.println("Press Enter to stop.")
-        scala.io.StdIn.readLine()
-        Right("ui stopped")
+        for
+          resolved <- rootArg.map(p => Right(p.toAbsolutePath.normalize)).getOrElse(defaultUiRoot)
+          _ <- Transcript.fsMkdirs(resolved, fsCtx)
+          hasChain <- Transcript.fsExists(resolved.resolve("chain"), fsCtx)
+          bound <- BrowserServer.serve(resolved, packs, ledgerCtx, fsCtx, port)
+        yield
+          System.out.println(s"Cairn Explorer at http://127.0.0.1:$bound")
+          System.out.println(s"CAIRN_HOME=$home")
+          System.out.println(s"serving root=$resolved")
+          if !hasChain then
+            System.out.println("NOTE: empty node (no chain file). Seed then reopen ui:")
+            System.out.println("""  sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"""")
+            System.out.println(s"  (writes $home/nodeA)")
+          System.out.println("Press Enter to stop.")
+          scala.io.StdIn.readLine()
+          "ui stopped"
       case _ =>
         Left("usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|repl|lsp|ui] <arg>")

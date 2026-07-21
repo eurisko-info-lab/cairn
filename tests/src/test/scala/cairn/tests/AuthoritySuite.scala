@@ -5,6 +5,7 @@ import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, Sync}
+import cairn.surface.Transcript
 import cairn.systeminterface.Cas
 import cairn.kernel.Tx
 
@@ -594,6 +595,20 @@ class AuthoritySuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     val pullDenied = Sync.pull(src, denied, auth)
     assert(pullDenied.isLeft, pullDenied.toString)
+
+  test("Transcript run-dir FS: gated under forFilesystem; denied under forCas-only"):
+    val work = java.nio.file.Files.createTempDirectory("cairn-tx-fs")
+    val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
+    val src = """transcript t { node a ; }"""
+    val denied = Transcript.run(
+      src, Map.empty, work, Map.empty, packs,
+      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forCas())
+    assert(denied.isLeft, denied.toString)
+    assert(denied.swap.exists(_.contains("denied")), denied.toString)
+    val ok = Transcript.run(
+      src, Map.empty, work.resolve("ok"), Map.empty, packs,
+      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forFilesystem())
+    assert(ok.isRight, ok.toString)
 
   test("LedgerTransport: authorize → perform append over Node"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-lt")

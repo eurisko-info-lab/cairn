@@ -67,7 +67,9 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
   `Branches.publishHead` (or `publish = Some(...)` on merge) — not automatic
   on accept. `Branches` CAS put/get authorize via `EffectContext`; refs FS
   is gated through `Filesystem` (`EffectContext.forBranches`). Node/Sync/HttpSync
-  chain-file I/O is gated through `Filesystem` (`EffectContext.forLedger`). CAS
+  chain-file I/O is gated through `Filesystem` (`EffectContext.forLedger`). CLI
+  Transcript/Cli home/run/ui paths are gated through `Filesystem`
+  (`EffectContext.forFilesystem`). CAS
   `contains` / admin / chunking / Unison store are gated (`CasEffects` /
   `CasAdminEffects`); provenance `index`/`why` authorize CAS `stats` then walk.
   Phase0 trait-contract and WaveA M4 algo-agility tests stay direct by design.
