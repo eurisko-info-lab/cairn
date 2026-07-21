@@ -167,7 +167,7 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.filesystem", List(EffectMeta.filesystem.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.filesystem's requestActions is complete and matches the hand-tagged actions (no new action, 12-to-3)"):
+  test("EffectMeta.filesystem's requestActions is complete and matches the hand-tagged actions (no new action, 13-to-3)"):
     assertEquals(EffectMeta.completeness(EffectMeta.filesystem), Nil)
     val derived = EffectMeta.actions(EffectMeta.filesystem)
     val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Filesystem).map(_.key).toSet
@@ -185,6 +185,7 @@ class EffectMetaSuite extends munit.FunSuite:
   test("system-interface.Filesystem.Request cases correspond 1:1 to the Fragment's Request constructors"):
     def ctorNameOf(r: FsEffect.Request): String = r match
       case FsEffect.Request.Read(_)                => "read"
+      case FsEffect.Request.ReadBytes(_)           => "readBytes"
       case FsEffect.Request.Write(_, _)             => "write"
       case FsEffect.Request.WriteBytes(_, _)        => "writeBytes"
       case FsEffect.Request.Mkdirs(_)                => "mkdirs"
@@ -199,6 +200,7 @@ class EffectMetaSuite extends munit.FunSuite:
     val p = FsEffect.Path("")
     val scalaReqCases = Set(
       ctorNameOf(FsEffect.Request.Read(p)),
+      ctorNameOf(FsEffect.Request.ReadBytes(p)),
       ctorNameOf(FsEffect.Request.Write(p, "")),
       ctorNameOf(FsEffect.Request.WriteBytes(p, Array.empty)),
       ctorNameOf(FsEffect.Request.Mkdirs(p)),

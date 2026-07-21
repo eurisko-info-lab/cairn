@@ -8,7 +8,7 @@ import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.ledger.*
 import cairn.runtime.PackLoader
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** Transcript DSL (S46, §2 Transcript, §7 "Transcripts are CI").
   *
@@ -150,6 +150,12 @@ object Transcript:
       case other               => Left(s"unexpected fs response: $other")
     }
 
+  private[surface] def fsReadBytes(p: Path, ctx: EffectContext): Either[String, Array[Byte]] =
+    fsRun(Fs.Request.ReadBytes(fsAbs(p)), ctx).flatMap {
+      case Fs.Response.Bytes(bs) => Right(bs)
+      case other                 => Left(s"unexpected fs response: $other")
+    }
+
   private[surface] def fsWrite(p: Path, content: String, ctx: EffectContext): Either[String, Unit] =
     fsRun(Fs.Request.Write(fsAbs(p), content), ctx).flatMap {
       case Fs.Response.Ok => Right(())
@@ -263,16 +269,17 @@ object Transcript:
             .map { l => lang = Some(l); module = Module(Nil); log += s"lang $n (${l.digest.short})" }
         case Cst.Node("loadLang", List(Cst.Leaf(file))) =>
           val p = Path.of(file)
-          val src = if Files.exists(p) then Right(Files.readString(p))
-                    else Left(s"no such language file: $file")
-          src.flatMap { text =>
-            Meta.parseLanguageAst(text).flatMap { (name, fs) =>
+          (for
+            exists <- fsExists(p, fsCtx)
+            _ <- Either.cond(exists, (), s"no such language file: $file")
+            text <- fsRead(p, fsCtx)
+            l <- Meta.parseLanguageAst(text).flatMap { (name, fs) =>
               val dir = Option(p.toAbsolutePath.normalize.getParent).getOrElse(Path.of("."))
               val packsHere = packLoader.loadRaw(dir) + (name -> fs)
               val surfaces = packLoader.loadSurfaces(dir)
               packLoader.close(name, packsHere, surfaces).left.map(_.map(_.render).mkString("\n"))
             }
-          }.map { l =>
+          yield l).map { l =>
             packs = packs + (l.name -> l)
             log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
         case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
@@ -337,8 +344,14 @@ object Transcript:
             port.toRight(s"unknown port host '$host'").flatMap { p =>
               cairn.core.PortV2.verified(p, m).flatMap { out =>
                 if host == "scala" then
-                  val scalaCli = sys.env.getOrElse("PATH", "").split(":")
-                    .map(java.nio.file.Paths.get(_, "scala-cli")).find(Files.isExecutable(_))
+                  val scalaCli = sys.env.getOrElse("PATH", "").split(":").iterator
+                    .map(dir => Path.of(dir, "scala-cli"))
+                    .find { cand =>
+                      fsRun(Fs.Request.IsExecutable(fsAbs(cand)), fsCtx).exists {
+                        case Fs.Response.Bool(true) => true
+                        case _                      => false
+                      }
+                    }
                   scalaCli match
                     case None => Right(log += s"port $host verified (host toolchain absent, fixpoint only)")
                     case Some(cli) =>
@@ -457,13 +470,15 @@ object Cli:
              |ui-has-chain=$hasChain
              |""".stripMargin.trim
       case List("hash", file) =>
-        Right(Digest.ofBytes(Files.readAllBytes(Path.of(file))).hex)
+        Transcript.fsReadBytes(Path.of(file), fsCtx).map(bs => Digest.ofBytes(bs).hex)
       case List("put", file) =>
-        val bs = Files.readAllBytes(Path.of(file))
-        CasEffects.putBytes(cas, bs, ledgerCtx).left.map {
-          case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
-          case cairn.systeminterface.Cas.Error.Io(m)      => m
-        }.map(_.hex)
+        for
+          bs <- Transcript.fsReadBytes(Path.of(file), fsCtx)
+          d <- CasEffects.putBytes(cas, bs, ledgerCtx).left.map {
+            case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+            case cairn.systeminterface.Cas.Error.Io(m)      => m
+          }
+        yield d.hex
       case List("get", hex) =>
         Digest.parse(hex).flatMap { d =>
           CasEffects.getBytes(cas, d, ledgerCtx).left.map {
@@ -472,14 +487,16 @@ object Cli:
           }
         }.map(bs => new String(bs, "UTF-8"))
       case List("canon", file) =>
-        val bs = Files.readAllBytes(Path.of(file))
-        Canon.decode(bs).map(c => Digest.of(c).hex)
+        for
+          bs <- Transcript.fsReadBytes(Path.of(file), fsCtx)
+          c <- Canon.decode(bs)
+        yield Digest.of(c).hex
       case List("transcript", file) =>
-        val src = Files.readString(Path.of(file))
         val runId = java.time.LocalDateTime.now()
           .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
         val runDir = home.resolve("runs").resolve(runId).toAbsolutePath.normalize
         for
+          src <- Transcript.fsRead(Path.of(file), fsCtx)
           _ <- Transcript.fsMkdirs(runDir, fsCtx)
           r <- Transcript.run(src, packs, runDir, portModules, packLoader, ledgerCtx, processCtx, fsCtx)
           _ <- Transcript.fsWrite(home.resolve("LATEST"), runDir.toString + "\n", fsCtx)

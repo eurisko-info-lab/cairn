@@ -2,12 +2,12 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasAdminEffects, CasEffects}
+import cairn.systemhandler.{CasAdminEffects, CasEffects, EffectContext}
 import cairn.ledger.Node
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** L6 browser API + static UI for navigating a local Node/CAS and opening
   * typed artifact viewers/editors. UI proposes only; kernel/CAS remain the
@@ -26,7 +26,8 @@ import java.nio.file.{Files, Path}
 final class BrowserServer(
     node: Node,
     languages: Map[String, ComposedLanguage],
-    port: Int = 0
+    port: Int = 0,
+    fsCtx: EffectContext = EffectContext.forFilesystem(),
 ):
   private var server: HttpServer | Null = null
   private val uiRoot = "cairn/ui"
@@ -60,7 +61,13 @@ final class BrowserServer(
         Path.of("surface/src/main/resources", resource),
         Path.of("src/main/resources", resource),
         Path.of("../surface/src/main/resources", resource))
-      candidates.find(Files.isRegularFile(_)).map(Files.readAllBytes)
+      candidates.view
+        .flatMap { p =>
+          Transcript.fsIsRegularFile(p, fsCtx).toOption.filter(identity).flatMap { _ =>
+            Transcript.fsReadBytes(p, fsCtx).toOption
+          }
+        }
+        .headOption
     }
 
   private def reply(ex: HttpExchange, code: Int, body: Array[Byte], ctype: String): Unit =
@@ -466,19 +473,20 @@ final class BrowserServer(
           m = Module.fromCanon(a.body)
         yield graphFromModule(m, a.digest)
       case None =>
-        val objs = node.root.resolve("objects")
-        if !Files.exists(objs) then Left("CAS empty — publish a search board first")
-        else
-          import scala.jdk.CollectionConverters.*
-          val found = Files.walk(objs).iterator.asScala
-            .filter(p => Files.isRegularFile(p) && !p.toString.endsWith(".corrupt"))
-            .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption)
-            .filter(_.kind == ArtifactKind.Ir)
-            .map(a => a -> Module.fromCanon(a.body))
-            .find((_, m) => isSearchShaped(m))
-          found match
-            case Some((a, m)) => Right(graphFromModule(m, a.digest))
-            case None => Left("no search-shaped board module in CAS — run transcripts/search-board.cairn")
+        def casErr(e: cairn.systeminterface.Cas.Error): String = e match
+          case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+          case cairn.systeminterface.Cas.Error.Io(m)      => m
+        CasAdminEffects.artifacts(node.root, node.ctx).left.map(casErr).flatMap { arts =>
+          if arts.isEmpty then Left("CAS empty — publish a search board first")
+          else
+            val found = arts.iterator
+              .filter(_.kind == ArtifactKind.Ir)
+              .map(a => a -> Module.fromCanon(a.body))
+              .find((_, m) => isSearchShaped(m))
+            found match
+              case Some((a, m)) => Right(graphFromModule(m, a.digest))
+              case None => Left("no search-shaped board module in CAS — run transcripts/search-board.cairn")
+        }
 
 object BrowserServer:
   /** Serve UI for a local node/CAS root until interrupted.
@@ -493,6 +501,6 @@ object BrowserServer:
   ): Either[String, Int] =
     Transcript.fsMkdirs(root, fsCtx).map { _ =>
       val node = Node(root, ledgerCtx)
-      val srv = BrowserServer(node, languages, port)
+      val srv = BrowserServer(node, languages, port, fsCtx)
       srv.start()
     }

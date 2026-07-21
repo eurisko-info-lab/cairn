@@ -44,6 +44,7 @@ object Filesystem:
 
   private def ctorName(req: Fs.Request): String = req match
     case Fs.Request.Read(_)                => "read"
+    case Fs.Request.ReadBytes(_)           => "readBytes"
     case Fs.Request.Exists(_)              => "exists"
     case Fs.Request.IsDirectory(_)         => "isDirectory"
     case Fs.Request.IsRegularFile(_)       => "isRegularFile"
@@ -58,6 +59,7 @@ object Filesystem:
 
   private def resourcePath(req: Fs.Request): String = req match
     case Fs.Request.Read(p)                    => p.value
+    case Fs.Request.ReadBytes(p)               => p.value
     case Fs.Request.Exists(p)                  => p.value
     case Fs.Request.IsDirectory(p)             => p.value
     case Fs.Request.IsRegularFile(p)           => p.value
@@ -96,6 +98,10 @@ object Filesystem:
         val n = toNio(p)
         if !Files.exists(n) then Left(Fs.Error.NotFound(p))
         else Right(Fs.Response.Text(Files.readString(n)))
+      case Fs.Request.ReadBytes(p) =>
+        val n = toNio(p)
+        if !Files.exists(n) then Left(Fs.Error.NotFound(p))
+        else Right(Fs.Response.Bytes(Files.readAllBytes(n)))
       case Fs.Request.Write(p, content) =>
         writeFile(toNio(p), content); Right(Fs.Response.Ok)
       case Fs.Request.WriteBytes(p, bytes) =>

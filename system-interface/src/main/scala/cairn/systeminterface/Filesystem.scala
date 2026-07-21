@@ -14,6 +14,7 @@ object Filesystem:
 
   enum Request:
     case Read(path: Path)
+    case ReadBytes(path: Path)
     case Write(path: Path, content: String)
     case WriteBytes(path: Path, bytes: Array[Byte])
     case Mkdirs(path: Path)

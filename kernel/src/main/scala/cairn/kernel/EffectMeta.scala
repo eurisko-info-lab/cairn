@@ -220,6 +220,7 @@ object EffectMeta:
       SortDef("Error", SortMode.Tree)),
     constructors = List(
       CtorDef("read", "Request", List("Path")),
+      CtorDef("readBytes", "Request", List("Path")),
       CtorDef("write", "Request", List("Path", "Str")),
       CtorDef("writeBytes", "Request", List("Path", "Bytes")),
       CtorDef("mkdirs", "Request", List("Path")),
@@ -248,6 +249,7 @@ object EffectMeta:
     resourcePathPattern = "Path",
     requestActions = Map(
       "read" -> Some("read"),
+      "readBytes" -> Some("read"),
       "exists" -> Some("read"),
       "isDirectory" -> Some("read"),
       "isRegularFile" -> Some("read"),

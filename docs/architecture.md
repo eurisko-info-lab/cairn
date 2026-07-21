@@ -90,7 +90,8 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
   PackLoader (`packLoaderWorkspace`), ledger+CAS+chain FS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
   branches (`forBranches` = CAS + refs FS), filesystem (`forFilesystem` —
-  CLI Transcript/Cli home/run/ui paths).
+  CLI Transcript/Cli home/run/ui paths, hash/put/canon/transcript source,
+  load-language, Browser UI filesystem fallback).
   `bootstrapped()` remains available for rare allow-all fixtures; composition
   roots and suites use narrow gates.
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
@@ -137,8 +138,11 @@ CAS put/get/contains go through `CasEffects` + `EffectContext`; refs FS through
 `Filesystem` (`EffectContext.forBranches`); admin via `CasAdminEffects`.
 Provenance `index`/`why` authorize CAS `stats` on the store root then walk.
 Node/Sync/HttpSync chain-file I/O goes through `Filesystem` (`EffectContext.forLedger`).
-CLI Transcript/Cli home, run directories, and `ui` root paths go through
-`Filesystem` (`EffectContext.forFilesystem`).
+CLI Transcript/Cli home, run directories, `ui` root paths, hash/put/canon/
+transcript source reads, and load-language go through
+`Filesystem` (`EffectContext.forFilesystem`). Browser board discovery
+authorizes CAS `stats` then walks via `CasAdminEffects.artifacts`; UI
+classpath miss falls back through `Filesystem`.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -180,7 +184,9 @@ LeanCore `#check` envelope.
   Unison host glue, sync `contains`, Browser stats, provenance `why`,
   Branches refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
   `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger`). CLI
-  Transcript/Cli home/run/ui paths use `Filesystem` (`forFilesystem`).
+  Transcript/Cli home/run/ui, hash/put/canon/transcript reads, and
+  load-language use `Filesystem` (`forFilesystem`). Browser board inventory
+  uses `CasAdminEffects.artifacts` (CAS `stats` gate).
 
 ## Final principle
 

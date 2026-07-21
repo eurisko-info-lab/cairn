@@ -5,9 +5,9 @@ import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, Sync}
-import cairn.surface.Transcript
+import cairn.surface.{Cli, Transcript}
 import cairn.systeminterface.Cas
-import cairn.kernel.Tx
+import cairn.kernel.{Cst, Tx}
 
 /** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
   * Each test constructs its own fresh `AuthorityGate` instance instead of
@@ -609,6 +609,29 @@ class AuthoritySuite extends munit.FunSuite:
       src, Map.empty, work.resolve("ok"), Map.empty, packs,
       EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forFilesystem())
     assert(ok.isRight, ok.toString)
+
+  test("Cli hash ReadBytes: gated under forFilesystem; denied under forCas-only"):
+    val f = java.nio.file.Files.createTempFile("cairn-hash", ".txt")
+    java.nio.file.Files.writeString(f, "hello")
+    val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
+    val denied = Cli.main(
+      List("hash", f.toString), Map.empty, Map.empty, packs,
+      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forLsp(), EffectContext.forCas())
+    assert(denied.isLeft, denied.toString)
+    assert(denied.swap.exists(_.contains("denied")), denied.toString)
+    val ok = Cli.main(
+      List("hash", f.toString), Map.empty, Map.empty, packs,
+      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forLsp(), EffectContext.forFilesystem())
+    assert(ok.isRight, ok.toString)
+
+  test("CasAdminEffects.artifacts: gated under forLedger/forCas; denied under forFilesystem-only"):
+    val root = java.nio.file.Files.createTempDirectory("cairn-arts")
+    val art = Artifact(ArtifactKind.Term, Cst.toCanon(Cst.Leaf("x")))
+    CasEffects.put(DiskCas(root), art, EffectContext.forCas()).fold(e => fail(e.toString), identity)
+    val denied = CasAdminEffects.artifacts(root, EffectContext.forFilesystem())
+    assert(denied.isLeft, denied.toString)
+    val ok = CasAdminEffects.artifacts(root, EffectContext.forLedger())
+    assert(ok.exists(_.exists(_.digest == art.digest)), ok.toString)
 
   test("LedgerTransport: authorize → perform append over Node"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-lt")

@@ -137,6 +137,18 @@ object CasAdminEffects:
       case other => Left(Cas.Error.Io(s"unexpected response: $other"))
     }
 
+  /** Inventory decoded artifacts under a CAS root. Authorizes `stats` then
+    * walks object files (same gate as [[cairn.systemhandler.Provenance.index]]).
+    */
+  def artifacts(root: Path, ctx: EffectContext): Either[Cas.Error, List[Artifact]] =
+    val abs = rootPath(root)
+    ctx.authorize(iface.actionKey("stats"), iface.resource.at(abs)) match
+      case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
+      case Right(_) =>
+        Right(
+          CasAdmin.objectFiles(root)
+            .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption))
+
 /** Digest agility (M4): self-describing algorithm-prefixed digests alongside
   * the default sha-256, plus kernel-validated migration artifacts mapping
   * old-algorithm keys to new-algorithm keys for the same bytes.
