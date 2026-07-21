@@ -286,3 +286,20 @@ class EffectMetaSuite extends munit.FunSuite:
       }
       assertEquals(f.resource.interfaceDigest, Some(f.fragment.digest))
     }
+
+  test("CAS-pinned effect interface: round-trip + ActionKey.fromPinned; forgery rejected"):
+    val art = EffectMeta.interfaceArtifact(EffectMeta.filesystem)
+    val pinned = EffectMeta.PinnedInterface.fromArtifact(art).fold(e => fail(e), identity)
+    assertEquals(pinned.pinDigest, art.digest)
+    val key = Effects.ActionKey.fromPinned(pinned, "read").fold(e => fail(e), identity)
+    assertEquals(key, EffectMeta.filesystem.actionKey("read"))
+    assert(Effects.ActionKey.fromPinned(pinned, "nope").isLeft)
+    // Tampered envelope body with wrong claimed digest
+    val tampered = Artifact(ArtifactKind.Fragment, Canon.CTag("effect-interface",
+      Canon.cmap("family" -> Canon.CStr("Filesystem"))))
+    assert(EffectMeta.PinnedInterface.fromArtifact(tampered).isLeft)
+    // Host pin path
+    val hostPin = EffectMeta.pinHost(EffectMeta.clock)
+    assertEquals(
+      Effects.ActionKey.fromPinned(hostPin, "now").toOption.get,
+      EffectMeta.clock.actionKey("now"))

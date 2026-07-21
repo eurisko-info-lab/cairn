@@ -307,9 +307,10 @@ object Authority:
     * after [[checkProof]] / [[checkCapability]] — so
     * `withCapabilities` cannot accept arbitrary forged grants.
     *
-    * Residual: nonce / requestId replay sets remain gate-local
-    * ([[cairn.systemhandler.AuthorityGate]]); a VerifiedCapability alone does
-    * not carry a shared durable replay store.
+    * Replay tokens are consumed on an issuer-scoped
+    * [[cairn.systemhandler.ReplayStore]] held by the gate (shared / durable
+    * stores are composition-root concerns). A VerifiedCapability alone does
+    * not embed replay state.
     */
   opaque type VerifiedCapability = CapabilityGrant
   object VerifiedCapability:

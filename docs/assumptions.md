@@ -32,16 +32,20 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    provenance). Everyday branch path persists `ValidatedTip` via `commitTip`
    (opaque tip + replay-checked change-sets; tip sidecar + `.changes` history;
    causal digests on `BranchManifest`) and merges via `mergeBranches`
-   (common-ancestor suffix merge) / `loadTip`. Ledger `SetBranchHead` is
-   opt-in (`Branches.publishHead` or `publish = Some(...)` on merge) — accept
-   stays local by default. `Branches` CAS and refs FS are gated
+   (causal LCA by shared module-result digests) / `loadTip`. Accepts are
+   journaled (CAS → journal → refs → optional ledger). Ledger `SetBranchHead`
+   is opt-in (`Branches.publishHead` or `publish = Some(...)` on merge) —
+   accept stays local by default. `Branches` CAS and refs FS are gated
    (`EffectContext.forBranches`). Node / Sync / HttpSync chain files are gated
    (`EffectContext.forLedger`); Sync aborts on authorized CAS failure before
    advancing the chain. CLI / tutorial FS uses `forFilesystem`. CAS
    `contains`, admin, chunking, Unison store, provenance `index`/`why`, and
    Browser board inventory use `CasEffects` / `CasAdminEffects`; Phase0
    MemCas/DiskCas and WaveA M4 algo tests remain intentional trait-contract
-   exceptions.
+   exceptions. Capability nonce/requestId replay uses issuer-scoped
+   `ReplayStore` (memory or durable filesystem), shareable across gates.
+   Effect interfaces pin as CAS `effect-interface` artifacts
+   (`PinnedInterface` / `ActionKey.fromPinned`).
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

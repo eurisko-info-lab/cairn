@@ -173,17 +173,17 @@ object CasEffects:
   * Causal digests are also written into [[BranchManifest]] (CAS-backed);
   * refs sidecars remain for compatibility.
   *
-  * [[mergeBranches]] finds a common-ancestor prefix of stacked histories when
-  * both sides share a causal chain, then merges the divergent suffixes.
+  * [[mergeBranches]] finds a causal LCA by shared module-result digests
+  * (not only identical linear change prefixes), then merges divergent suffixes.
   *
-  * Accept is local-only by default: advancing the branch ref does **not**
-  * publish to the ledger. Call [[publishHead]] explicitly (or pass
-  * `publish = Some(...)` to [[merge]] / [[mergeBranches]]) when a ledger
-  * `SetBranchHead` is wanted.
+  * Accepts use a journaled transactional path: CAS blobs → accept journal →
+  * refs (history + tip + branch) → optional ledger publish → journal clear.
+  * [[recoverPendingAccepts]] rolls forward interrupted accepts. Crash may still
+  * leave unreferenced CAS blobs until GC; refs + optional ledger are
+  * all-or-nothing relative to the journal.
   *
-  * Branch updates put CAS blobs before writing the ref pointer (CAS-first);
-  * a crash mid-update may leave unreferenced blobs — not a full multi-store
-  * transaction across optional ledger publish.
+  * Ledger `SetBranchHead` remains opt-in via [[publishHead]] or
+  * `publish = Some(...)` on merge.
   */
 final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private def casErr(e: Cas.Error): String = e match
@@ -220,6 +220,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       case Left(e)               => throw RuntimeException(e)
       case other                 => throw RuntimeException(s"unexpected fs response: $other")
 
+  private def refsDelete(p: Path): Unit =
+    if refsExists(p) then
+      fsRun(Fs.Request.Delete(fsAbs(p))) match
+        case Right(Fs.Response.Ok) => ()
+        case Left(e)               => throw RuntimeException(e)
+        case other                 => throw RuntimeException(s"unexpected fs response: $other")
+
   private def putArt(a: Artifact): TypedKey =
     CasEffects.put(cas, a, ctx).fold(e => throw RuntimeException(casErr(e)), identity)
 
@@ -243,8 +250,154 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private def changeHistoryPath(branch: String): Path =
     refsDir.resolve(s"$branch.changes")
 
+  private def acceptJournalPath(branch: String): Path =
+    refsDir.resolve(s"$branch.accepting")
+
   private def isSidecar(name: String): Boolean =
-    name.endsWith(".change") || name.endsWith(".changes")
+    name.endsWith(".change") || name.endsWith(".changes") || name.endsWith(".accepting")
+
+  /** Journaled accept intent (CAS digests + intended ref / ledger steps). */
+  private final case class AcceptJournal(
+      branch: String,
+      moduleDigest: Digest,
+      vcsDigest: Digest,
+      parents: List[Digest],
+      causalHistoryRoot: Option[Digest],
+      historyAppend: Boolean,
+      phase: String, // "cas" | "refs" | "publish" | "done"
+  ):
+    def encode: String =
+      val lines = List(
+        s"branch=$branch",
+        s"module=${moduleDigest.hex}",
+        s"vcs=${vcsDigest.hex}",
+        s"parents=${parents.map(_.hex).mkString(",")}",
+        s"causal=${causalHistoryRoot.map(_.hex).getOrElse("")}",
+        s"historyAppend=$historyAppend",
+        s"phase=$phase")
+      lines.mkString("\n")
+
+  private object AcceptJournal:
+    def parse(text: String): Either[String, AcceptJournal] =
+      val m = text.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>
+        line.split("=", 2) match
+          case Array(k, v) => Some(k -> v)
+          case _           => None
+      }.toMap
+      for
+        branch <- m.get("branch").toRight("accept journal: missing branch")
+        mod <- m.get("module").toRight("accept journal: missing module")
+        vcs <- m.get("vcs").toRight("accept journal: missing vcs")
+        parents = m.getOrElse("parents", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
+        causal = m.get("causal").filter(_.nonEmpty).map(Digest(_))
+        histAppend = m.get("historyAppend").forall(_ != "false")
+        phase <- m.get("phase").toRight("accept journal: missing phase")
+      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase)
+
+  private def writeJournal(j: AcceptJournal): Unit =
+    refsMkdirs()
+    refsWrite(acceptJournalPath(j.branch), j.encode)
+
+  private def clearJournal(branch: String): Unit =
+    refsDelete(acceptJournalPath(branch))
+
+  /** Optional ledger publish after a local accept. */
+  final case class Publish(
+      node: Node,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+  )
+
+  private def applyRefs(j: AcceptJournal): BranchManifest =
+    val modArt = getByDigest(j.moduleDigest).fold(e => throw RuntimeException(e), identity)
+    val vcsArt = getByDigest(j.vcsDigest).fold(e => throw RuntimeException(e), identity)
+    if j.historyAppend then persistChange(j.branch, vcsArt.key)
+    else
+      refsMkdirs()
+      refsWrite(changeRefPath(j.branch), vcsArt.key.valueHash.hex)
+    advance(
+      j.branch,
+      modArt.key,
+      acceptedChange = Some(vcsArt.key.valueHash),
+      parents = j.parents,
+      causalHistoryRoot = j.causalHistoryRoot)
+
+  /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
+    * On ledger failure after refs, journal stays at phase=publish for recovery.
+    */
+  private def transactionalAccept(
+      branch: String,
+      module: Module,
+      vcs: Delta.ValidatedChangeSet,
+      parents: List[Digest],
+      causalHistoryRoot: Option[Digest],
+      publish: Option[Publish],
+      provenanceParents: List[Digest],
+      provenanceTool: String,
+      historyAppend: Boolean = true,
+      extraPuts: List[Artifact] = Nil,
+  ): Either[String, BranchManifest] =
+    extraPuts.foreach(putArt)
+    val vcsKey = putArt(vcs.artifact)
+    val modKey = putArt(module.artifact)
+    Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
+      .fold(e => throw RuntimeException(casErr(e)), identity)
+    var journal = AcceptJournal(
+      branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas")
+    writeJournal(journal)
+    val manifest = applyRefs(journal)
+    journal = journal.copy(phase = "refs")
+    writeJournal(journal)
+    publish match
+      case None =>
+        clearJournal(branch)
+        Right(manifest)
+      case Some(p) =>
+        journal = journal.copy(phase = "publish")
+        writeJournal(journal)
+        publishHead(branch, p.node, p.authority, p.authorities) match
+          case Left(err) => Left(err)
+          case Right(_) =>
+            clearJournal(branch)
+            Right(manifest)
+
+  /** Roll forward interrupted accepts (refs and/or ledger publish). */
+  def recoverPendingAccepts(
+      publish: Option[Publish] = None
+  ): Either[String, List[String]] =
+    if !refsExists(refsDir) then Right(Nil)
+    else
+      fsRun(Fs.Request.List(fsAbs(refsDir))) match
+        case Left(e) => Left(e)
+        case Right(Fs.Response.Entries(names)) =>
+          val pending = names.filter(_.endsWith(".accepting")).sorted
+          pending.foldLeft[Either[String, List[String]]](Right(Nil)) { (acc, name) =>
+            acc.flatMap { done =>
+              val branch = name.stripSuffix(".accepting")
+              val text = refsRead(acceptJournalPath(branch))
+              AcceptJournal.parse(text).flatMap { j =>
+                j.phase match
+                  case "cas" =>
+                    applyRefs(j)
+                    clearJournal(branch)
+                    Right(done :+ branch)
+                  case "refs" =>
+                    clearJournal(branch)
+                    Right(done :+ branch)
+                  case "publish" =>
+                    publish match
+                      case Some(p) =>
+                        publishHead(branch, p.node, p.authority, p.authorities).map { _ =>
+                          clearJournal(branch)
+                          done :+ branch
+                        }
+                      case None =>
+                        Left(s"pending publish for '$branch' needs Publish credentials")
+                  case other => Left(s"unknown accept journal phase '$other' for $branch")
+              }
+            }
+          }
+        case other => Left(s"unexpected fs response: $other")
 
   private def persistChange(branch: String, vcsKey: TypedKey): Unit =
     refsMkdirs()
@@ -252,7 +405,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     val hist = changeHistoryPath(branch)
     val prev = if refsExists(hist) then refsRead(hist) else ""
     val line = vcsKey.valueHash.hex + "\n"
-    refsWrite(hist, prev + line)
+    val last = prev.linesIterator.map(_.trim).filter(_.nonEmpty).toList.lastOption
+    if last != Some(vcsKey.valueHash.hex) then refsWrite(hist, prev + line)
 
   /** Load + replay-check a change-set artifact against `language`. */
   private def loadVcs(
@@ -289,12 +443,27 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           val composed = hist.map(_.change).reduceLeft(ChangeAlgebra.compose(language, _, _))
           Right((hist.head.base, composed))
 
-  /** Longest shared causal prefix (by successive `result` digests). */
+  /** Longest identical linear prefix (change-equal). Retained for diagnostics. */
   private def commonAncestorPrefix(
       a: List[Delta.ValidatedChangeSet],
       b: List[Delta.ValidatedChangeSet],
   ): Int =
     a.zip(b).takeWhile((x, y) => x.result == y.result && x.base == y.base && x.change == y.change).length
+
+  /** Causal LCA by shared module-result digests: tip-proximal shared state,
+    * even when the change objects that produced it differ (diamond / alternate
+    * paths). Returns indices into `a`/`b` of the last shared result, or
+    * `(-1,-1)` when only a shared starting base applies.
+    */
+  private def causalLca(
+      a: List[Delta.ValidatedChangeSet],
+      b: List[Delta.ValidatedChangeSet],
+  ): (Int, Int) =
+    val bByResult: Map[Digest, Int] =
+      b.zipWithIndex.map((v, i) => v.result -> i).toMap
+    a.zipWithIndex.reverse.collectFirst {
+      case (v, i) if bByResult.contains(v.result) => (i, bByResult(v.result))
+    }.getOrElse((-1, -1))
 
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
@@ -349,25 +518,23 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   def commitModule(branch: String, module: Module): BranchManifest =
     advance(branch, putArt(module.artifact))
 
-  /** Persist a [[SemanticRepository.ValidatedTip]]: CAS blobs first, then
-    * sidecars + manifest with causal digests, then the ref pointer.
+  /** Persist a [[SemanticRepository.ValidatedTip]] via journaled transactional
+    * accept (CAS → journal → refs → clear).
     */
   def commitTip(branch: String, tip: SemanticRepository.ValidatedTip): BranchManifest =
-    putArt(tip.base.artifact)
-    val vcs = tip.vcs
-    val vcsKey = putArt(vcs.artifact)
-    val modKey = putArt(tip.tip.artifact)
-    Provenance.record(cas, tip.tipDigest, List(tip.baseDigest, vcsKey.valueHash), "semantic-commit", ctx)
-      .fold(e => throw RuntimeException(casErr(e)), identity)
-    persistChange(branch, vcsKey)
     val cur = load(branch)
-    val histRoot = cur.causalHistoryRoot.orElse(Some(vcs.base))
-    advance(
+    val histRoot = cur.causalHistoryRoot.orElse(Some(tip.vcs.base))
+    transactionalAccept(
       branch,
-      modKey,
-      acceptedChange = Some(vcsKey.valueHash),
+      tip.tip,
+      tip.vcs,
       parents = cur.head.toList.map(_.valueHash),
-      causalHistoryRoot = histRoot)
+      causalHistoryRoot = histRoot,
+      publish = None,
+      provenanceParents = List(tip.baseDigest),
+      provenanceTool = "semantic-commit",
+      extraPuts = List(tip.base.artifact),
+    ).fold(e => throw RuntimeException(e), identity)
 
   /** Load + replay-check the tip ValidatedChangeSet. */
   def loadChange(
@@ -406,27 +573,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         language, SemanticRepository.Tip(base, tipMod, vcs.change))
     yield checked
 
-  /** Optional ledger publish after a local accept. */
-  final case class Publish(
-      node: Node,
-      authority: Keypair,
-      authorities: Map[String, Vector[Byte]],
-  )
-
-  private def maybePublish(
-      into: String,
-      outcome: Either[Merge.Conflict, BranchManifest],
-      publish: Option[Publish],
-  ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    (outcome, publish) match
-      case (Right(_), Some(p)) =>
-        publishHead(into, p.node, p.authority, p.authorities).map(_ => outcome)
-      case _ => Right(outcome)
-
   /** Semantic merge into `into`: integrate two change histories relative to
-    * `base`, persist the ValidatedChangeSet + provenance, and advance `into`
-    * on success. On conflict, the conflict artifact is stored in CAS and the
-    * branch head is left unchanged. Ledger publish is opt-in via `publish`.
+    * `base`, then journaled transactional accept. On conflict, the conflict
+    * artifact is stored in CAS and the branch head is left unchanged.
+    * Ledger publish is opt-in via `publish`.
     *
     * @return `Right(manifest)` on accept, `Left(conflict)` on overlap.
     */
@@ -450,27 +600,19 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         putArt(marked.artifact) // record conflict digest in CAS; head unchanged
         Right(Left(conflict))
       case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
-        val vcsKey = putArt(vcs.artifact)
-        val modKey = putArt(module.artifact)
-        Provenance.record(cas, module.digest,
-          List(base.digest, vcsKey.valueHash), "semantic-merge", ctx)
-          .fold(e => throw RuntimeException(casErr(e)), identity)
-        persistChange(into, vcsKey)
         val parentDigests =
           if parentBranches.nonEmpty then
             parentBranches.flatMap(b => load(b).head.map(_.valueHash))
           else load(into).head.toList.map(_.valueHash)
-        maybePublish(
-          into,
-          Right(advance(
-            into, modKey,
-            acceptedChange = Some(vcsKey.valueHash),
-            parents = parentDigests,
-            causalHistoryRoot = Some(base.digest))),
-          publish)
+        transactionalAccept(
+          into, module, vcs, parentDigests, Some(base.digest), publish,
+          provenanceParents = List(base.digest),
+          provenanceTool = "semantic-merge",
+          extraPuts = List(base.artifact),
+        ).map(Right(_))
     }
 
-  /** Everyday merge: common-ancestor prefix of stacked histories, then merge
+  /** Everyday merge: causal LCA by shared module-result digests, then merge
     * divergent suffixes. Loaded change-sets are replay-checked.
     * Ledger publish remains opt-in via `publish` (default: local accept only).
     */
@@ -485,16 +627,20 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     for
       histA <- loadChangeHistory(ours, language)
       histB <- loadChangeHistory(theirs, language)
-      shared = commonAncestorPrefix(histA, histB)
-      suffixA = histA.drop(shared)
-      suffixB = histB.drop(shared)
-      // Merge base = end of shared prefix, else oldest shared empty-base.
+      (idxA, idxB) = causalLca(histA, histB)
+      // Prefer identical linear prefix when it reaches the same LCA tip.
+      linear = commonAncestorPrefix(histA, histB)
+      (iA, iB) =
+        if linear > 0 && linear - 1 == idxA && linear - 1 == idxB then (linear - 1, linear - 1)
+        else (idxA, idxB)
+      suffixA = if iA < 0 then histA else histA.drop(iA + 1)
+      suffixB = if iB < 0 then histB else histB.drop(iB + 1)
       baseDig <-
-        if shared > 0 then Right(histA(shared - 1).result)
+        if iA >= 0 then Right(histA(iA).result)
         else if histA.nonEmpty && histB.nonEmpty && histA.head.base == histB.head.base then
           Right(histA.head.base)
         else if histA.isEmpty || histB.isEmpty then Left("empty branch history")
-        else Left(s"branch histories do not share a base: ${histA.head.base.short} vs ${histB.head.base.short}")
+        else Left(s"branch histories do not share a causal ancestor: ${histA.head.base.short} vs ${histB.head.base.short}")
       stackedA <-
         if suffixA.isEmpty then Right(None)
         else composeHistory(language, suffixA).map(Some(_))
@@ -505,40 +651,35 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       base <-
         if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDig.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
+      parentDigests = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash))
       out <- (stackedA, stackedB) match
         case (None, None) =>
-          // Identical histories — fast-forward into from ours tip.
-          headModule(ours).map(m => Right(advance(
-            into, putArt(m.artifact),
-            acceptedChange = load(ours).acceptedChange,
-            parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
-            causalHistoryRoot = Some(baseDig))))
+          headModule(ours).flatMap { m =>
+            // Fast-forward: put tip module, advance without a new change-set.
+            val modKey = putArt(m.artifact)
+            Right(Right(advance(
+              into, modKey,
+              acceptedChange = load(ours).acceptedChange,
+              parents = parentDigests,
+              causalHistoryRoot = Some(baseDig))))
+          }
         case (Some((_, chA)), Some((_, chB))) =>
           merge(language, into, base, chA, chB, migration, publish, List(ours, theirs))
         case (Some((_, chA)), None) =>
-          // Only ours diverged — apply ours suffix onto base.
           SemanticRepository.commit(language, base, chA).flatMap { (mod, vcs) =>
-            val vcsKey = putArt(vcs.artifact)
-            val modKey = putArt(mod.artifact)
-            persistChange(into, vcsKey)
-            maybePublish(
-              into,
-              Right(advance(into, modKey, Some(vcsKey.valueHash),
-                parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
-                causalHistoryRoot = Some(baseDig))),
-              publish)
+            transactionalAccept(
+              into, mod, vcs, parentDigests, Some(baseDig), publish,
+              provenanceParents = List(base.digest),
+              provenanceTool = "semantic-merge",
+            ).map(Right(_))
           }
         case (None, Some((_, chB))) =>
           SemanticRepository.commit(language, base, chB).flatMap { (mod, vcs) =>
-            val vcsKey = putArt(vcs.artifact)
-            val modKey = putArt(mod.artifact)
-            persistChange(into, vcsKey)
-            maybePublish(
-              into,
-              Right(advance(into, modKey, Some(vcsKey.valueHash),
-                parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
-                causalHistoryRoot = Some(baseDig))),
-              publish)
+            transactionalAccept(
+              into, mod, vcs, parentDigests, Some(baseDig), publish,
+              provenanceParents = List(base.digest),
+              provenanceTool = "semantic-merge",
+            ).map(Right(_))
           }
     yield out
 

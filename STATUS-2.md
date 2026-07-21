@@ -6,7 +6,9 @@ the S1–S50 base, plus a **top-level parity pass** (constitution §4.16), an
 `PKI → Law → SDS` `requires`/`provides` DAG), and a **trust-hardening pass**
 (Sync abort, delegation root justification, opaque `ValidatedTip` /
 `ValidatedChangeSet`, `VerifiedCapability`, BranchManifest causal digests,
-agreement envelope digests). Full suite: **451 tests green** (+2 skipped;
+agreement envelope digests) and a **deferred-trust follow-on** (issuer-scoped
+`ReplayStore`, journaled transactional accept, CAS-pinned effect interfaces,
+causal-LCA merge). Full suite: **455 tests green** (+2 skipped;
 `tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
 round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 
@@ -156,10 +158,10 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Sync | `Sync.pull` / `HttpSync.pull` abort on authorized CAS failure; chain not advanced |
 | Delegation | Root grant expiry/nonce/resource justified before hop validation |
 | Tips / ΔL | Opaque `ValidatedTip` + `ValidatedChangeSet`; Branches accepts only checked tips; loads replay |
-| Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); replay sets still gate-local |
-| BranchManifest | Causal digests (`causalHistoryRoot`, `parents`, `acceptedChange`, `conflictState`); sidecars kept; common-ancestor suffix merge; CAS-first not full multi-store txn |
+| Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS, shareable) |
+| BranchManifest | Causal digests; sidecars kept; causal-LCA merge by shared module results; journaled accept (CAS+refs+optional ledger) |
 | Agreement | Certificate carries `envelopeDigest` + `nativeEvidence` |
-| Effect interfaces | `ActionKey` digest-bound via host-embedded Meta fragments — CAS-pinned family load deferred |
+| Effect interfaces | `ActionKey` digest-bound; CAS-pinned `effect-interface` via `PinnedInterface` / `ActionKey.fromPinned`; host Meta remains bootstrap |
 
 ### Remaining honest gaps
 
@@ -173,5 +175,5 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - BFT / gossip daemon / public ledger (explicitly deferred).
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.
-- Durable shared capability replay store; full transactional branch accept
-  across CAS + refs + ledger; load effect interfaces as pinned CAS artifacts.
+- Crash may leave unreferenced CAS blobs until GC; multi-node shared replay
+  replication beyond a single durable filesystem store.

@@ -4,10 +4,11 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, Sync}
+import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, ReplayStore, Sync}
 import cairn.surface.{Cli, Transcript}
 import cairn.systeminterface.Cas
 import cairn.kernel.{Cst, Tx}
+import java.nio.file.Files
 
 /** Phase 4–5 authority: audit mode records decisions; enforce mode blocks.
   * Each test constructs its own fresh `AuthorityGate` instance instead of
@@ -266,6 +267,26 @@ class AuthoritySuite extends munit.FunSuite:
     assert(gate.check(r1).isRight)
     assert(gate.check(r2).isLeft)
     assert(gate.check(readReq.copy(requestId = Some("req-43"))).isRight)
+
+  test("ReplayStore: durable filesystem store shared across gates; issuer-scoped"):
+    val dir = Files.createTempDirectory("cairn-replay")
+    val store = ReplayStore.filesystem(dir)
+    val policy = EffectPolicy(
+      "once", alice, fsRead, Resource("*", "*"), Decision.Allow,
+      conditions = Map("meta:nonce" -> "shared-n"))
+    val g1 = AuthorityGate.enforcing(List(policy), store)
+    val g2 = AuthorityGate.enforcing(List(policy), store)
+    assert(g1.check(readReq, nowMillis = 0).isRight, "first gate consumes")
+    assert(g2.check(readReq, nowMillis = 0).isLeft, "second gate sees durable replay")
+    // Distinct issuer (subject) may reuse the same nonce string
+    val bob = Subject("bob")
+    val bobPolicy = policy.copy(id = "bob-once", subject = bob)
+    val bobGate = AuthorityGate.enforcing(List(bobPolicy), store)
+    val bobReq = EffectRequest(bob, fsRead, EffectMeta.filesystem.resource.at("/tmp/x"))
+    assert(bobGate.check(bobReq, nowMillis = 0).isRight, "issuer-scoped")
+    val snap = store.snapshot
+    assert(snap.nonces.get(alice.id).exists(_.contains("shared-n")))
+    assert(snap.nonces.get(bob.id).exists(_.contains("shared-n")))
 
   test("attenuation: Kernel witness allows narrower path; rejects widening"):
     val parent = CapabilityGrant(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))

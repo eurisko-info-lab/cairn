@@ -417,3 +417,85 @@ object EffectMeta:
     val hostExtra = Effects.Action.values.filter(_.family == expected).toSet.diff(hostActions(family)).toList.map(a =>
       s"host Action $a has no matching derived ActionKey in the EffectFamily")
     famErr ++ missing ++ dangling ++ undeclared ++ unusedDecl ++ hostMismatch ++ hostExtra
+
+  opaque type PinnedInterface = EffectFamily
+  object PinnedInterface:
+    /** Host-embedded family as an already-accepted pin (bootstrap / tests). */
+    def fromHost(family: EffectFamily): PinnedInterface = family
+
+    /** Decode + verify a pinned interface artifact (kind [[ArtifactKind.Fragment]]
+      * envelope under tag `effect-interface`). Rejects digest mismatch and
+      * incomplete declarations.
+      */
+    def fromArtifact(a: Artifact): Either[String, PinnedInterface] =
+      if a.kind != ArtifactKind.Fragment then
+        Left(s"pinned effect interface must be fragment-kind, got ${a.kind.name}")
+      else a.body match
+        case Canon.CTag("effect-interface", body) =>
+          decodeFamily(body).flatMap { ef =>
+            val errs = completeness(ef)
+            if errs.nonEmpty then Left(errs.mkString("; "))
+            else
+              val expected = interfaceArtifact(ef)
+              if expected.digest != a.digest then
+                Left(s"pinned interface digest mismatch: got ${a.digest.short}, expected ${expected.digest.short}")
+              else Right(ef)
+          }
+        case _ => Left("pinned effect interface: missing effect-interface tag")
+
+    extension (p: PinnedInterface)
+      def family: Effects.Family = p.family
+      def fragment: Fragment = p.fragment
+      def actions: List[String] = p.actions
+      def actionKeys: Set[Effects.ActionKey] = p.actionKeys
+      def actionKey(name: String): Effects.ActionKey = p.actionKey(name)
+      def resource: ResourceSchema = p.resource
+      def asFamily: EffectFamily = p
+      def artifact: Artifact = interfaceArtifact(p)
+      def pinDigest: Digest = artifact.digest
+
+  /** CAS-storable encoding of an [[EffectFamily]] (Fragment + declarations). */
+  def interfaceArtifact(family: EffectFamily): Artifact =
+    Artifact(ArtifactKind.Fragment, Canon.CTag("effect-interface", encodeFamily(family)))
+
+  /** Accept a host-embedded family as pinned (digest = [[interfaceArtifact]]). */
+  def pinHost(family: EffectFamily): PinnedInterface =
+    PinnedInterface.fromHost(family)
+
+  private def encodeFamily(ef: EffectFamily): Canon =
+    val reqActs = ef.requestActions.toList.sortBy(_._1).map { (ctor, act) =>
+      Canon.cmap(
+        "ctor" -> Canon.CStr(ctor),
+        "action" -> act.fold(Canon.CTag("none", Canon.CStr("")))(a => Canon.CTag("some", Canon.CStr(a))))
+    }
+    Canon.cmap(
+      "family" -> Canon.CStr(ef.family.toString),
+      "fragment" -> FragmentCodec.toCanon(ef.fragment),
+      "actions" -> Canon.cstrs(ef.actions),
+      "resourceKind" -> Canon.CStr(ef.resourceKind),
+      "resourcePathPattern" -> Canon.CStr(ef.resourcePathPattern),
+      "requestActions" -> Canon.CList(reqActs))
+
+  private def decodeFamily(body: Canon): Either[String, EffectFamily] =
+    try
+      val famName = body.field("family").asStr
+      Effects.Family.values.find(_.toString == famName) match
+        case None => Left(s"unknown effect family '$famName'")
+        case Some(f) =>
+          val reqActs = body.field("requestActions").asList.map { c =>
+            val ctor = c.field("ctor").asStr
+            val act = c.field("action") match
+              case Canon.CTag("none", _) => None
+              case Canon.CTag("some", s) => Some(s.asStr)
+              case other => throw IllegalArgumentException(s"bad action tag: $other")
+            ctor -> act
+          }.toMap
+          Right(EffectFamily(
+            FragmentCodec.fromCanon(body.field("fragment")),
+            f,
+            body.field("actions").asList.map(_.asStr),
+            body.field("resourceKind").asStr,
+            body.field("resourcePathPattern").asStr,
+            reqActs))
+    catch
+      case e: Exception => Left(e.getMessage)

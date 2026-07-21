@@ -14,8 +14,8 @@ import cairn.kernel.EffectMeta
   *
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
-  * (`mode`/`policies`/`events`/replay sets) is explicit and constructible rather
-  * than shared, hidden, JVM-wide mutable state. There is no process-global
+  * (`mode`/`policies`/`events`) is explicit and constructible rather than
+  * shared, hidden, JVM-wide mutable state. There is no process-global
   * registry, default instance, or thread-local context: composition roots
   * and tests construct [[EffectContext]]s and authorize through them.
   *
@@ -25,14 +25,14 @@ import cairn.kernel.EffectMeta
   * wiring uses [[EffectContext.forPackLoader]] instead.
   *
   * Replay: successful Enforce authorizations consume grant [[CapabilityGrant.nonce]]
-  * and [[EffectRequest.requestId]] via [[Authority.Replay]] (deny on reuse).
+  * and [[EffectRequest.requestId]] via a shared issuer-scoped [[ReplayStore]]
+  * (default in-memory; composition roots may inject a durable filesystem store).
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
-    @volatile private var policies: List[EffectPolicy] = Nil):
+    @volatile private var policies: List[EffectPolicy] = Nil,
+    private val replay: ReplayStore = ReplayStore.memory()):
   private val events = scala.collection.mutable.ListBuffer[AuthorityEvent]()
-  private var usedNonces: Set[String] = Set.empty
-  private var usedRequestIds: Set[String] = Set.empty
 
   def setMode(m: AuthorityGate.Mode): Unit = mode = m
   def currentMode: AuthorityGate.Mode = mode
@@ -41,8 +41,13 @@ final class AuthorityGate(
   def drainEvents(): List[AuthorityEvent] =
     synchronized { val out = events.toList; events.clear(); out }
 
-  /** Snapshot of consumed nonces / request ids (tests). */
-  def replayState: (Set[String], Set[String]) = synchronized { (usedNonces, usedRequestIds) }
+  /** Underlying replay store (may be shared across gates). */
+  def replayStore: ReplayStore = replay
+
+  /** Flattened snapshot of consumed nonces / request ids (tests). */
+  def replayState: (Set[String], Set[String]) =
+    val s = replay.snapshot
+    (s.flatNonces, s.flatRequestIds)
 
   /** Check authorization. In Audit mode always returns the request wrapped as
     * authorized (after recording whether it *would* be permitted). In Enforce
@@ -118,25 +123,15 @@ final class AuthorityGate(
             }
 
   private def consumeReplay(derivation: AuthorizationDerivation, req: EffectRequest): Either[String, Unit] =
+    val nonceIssuer = derivation.grant.map(_.subject.id).getOrElse(req.subject.id)
     val afterNonce =
       derivation.grant.flatMap(_.nonce) match
-        case None => Right(usedNonces)
-        case Some(n) =>
-          Authority.Replay.consumeNonce(n, usedNonces) match
-            case Left(err) => Left(err)
-            case Right(next) => Right(next)
-    afterNonce.flatMap { nonces =>
+        case None    => Right(())
+        case Some(n) => replay.consumeNonce(nonceIssuer, n)
+    afterNonce.flatMap { _ =>
       req.requestId match
-        case None =>
-          usedNonces = nonces
-          Right(())
-        case Some(id) =>
-          Authority.Replay.consumeRequestId(id, usedRequestIds) match
-            case Left(err) => Left(err)
-            case Right(nextIds) =>
-              usedNonces = nonces
-              usedRequestIds = nextIds
-              Right(())
+        case None     => Right(())
+        case Some(id) => replay.consumeRequestId(req.subject.id, id)
     }
 
   /** Phase 5 family enforcement helper — temporarily enforce for one check. */
@@ -175,9 +170,15 @@ object AuthorityGate:
   def bootstrapped(): AuthorityGate =
     enforcing(bootstrapPolicies)
 
-  /** Fresh Enforce gate with the given policies. */
+  /** Fresh Enforce gate with the given policies (private in-memory replay). */
   def enforcing(policies: List[EffectPolicy]): AuthorityGate =
-    val gate = new AuthorityGate()
-    gate.install(policies)
-    gate.setMode(Mode.Enforce)
+    enforcing(policies, ReplayStore.memory())
+
+  /** Fresh Enforce gate sharing an issuer-scoped [[ReplayStore]]. */
+  def enforcing(policies: List[EffectPolicy], replay: ReplayStore): AuthorityGate =
+    val gate = new AuthorityGate(Mode.Enforce, policies, replay)
     gate
+
+  /** Fresh Enforce allow-all gate over a shared replay store. */
+  def bootstrapped(replay: ReplayStore): AuthorityGate =
+    enforcing(bootstrapPolicies, replay)

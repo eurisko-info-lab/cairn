@@ -74,8 +74,8 @@ only (`VerifiedCapability.fromProof`). A covering verified grant is Kernel-check
 without broad policy re-evaluation; empty capabilities fall back to Core
 `prove` → Kernel `checkProof`. Raw `CapabilityGrant` construction remains for
 proof / delegation building — it cannot enter `withCapabilities`.
-**Residual:** nonce / `requestId` replay sets stay gate-local on
-`AuthorityGate` (not a durable shared replay store).
+Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
+(default in-memory; durable `ReplayStore.filesystem` may be shared across gates).
 
 ## Authority
 
@@ -149,9 +149,11 @@ branch state
 
 `BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
 `conflictState` (CAS digests). Refs `.change` / `.changes` sidecars remain for
-compat. `mergeBranches` takes a common-ancestor prefix then merges divergent
-suffixes. Branch updates are CAS-first then ref pointer — not a full
-multi-store transaction across optional ledger publish.
+compat. `mergeBranches` finds a causal LCA by shared module-result digests
+(not only identical linear change prefixes), then merges divergent suffixes.
+Branch accepts are journaled: CAS blobs → accept journal → refs → optional
+ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
+Unreferenced CAS blobs after a crash remain until GC.
 
 Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
 `merge(..., publish = Some(...))`. `Branches` CAS / refs FS go through
@@ -190,13 +192,15 @@ LeanCore `#check` envelope.
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
 -   **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
-  `mergeBranches` (common-ancestor suffix merge; replay-checked histories;
-  causal digests on `BranchManifest`). Ledger publish remains **opt-in**.
-  Full transactional accept across CAS + history + refs + ledger publish is
-  still CAS-first / best-effort (crash may leave unreferenced blobs).
+  `mergeBranches` (causal LCA by shared module-result digests; replay-checked
+  histories; causal digests on `BranchManifest`). Ledger publish remains
+  **opt-in**. Accepts are journaled across CAS + refs + optional ledger
+  (`recoverPendingAccepts`); crash may still leave unreferenced CAS blobs.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
-  `EffectMeta` Fragment digests; loading families as externally pinned CAS
-  artifacts (vs host-embedded Meta fragments) remains open.
+  `EffectMeta` Fragment digests; families load as CAS-pinned
+  `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
+  `ActionKey.fromPinned`). Host-embedded Meta fragments remain the bootstrap
+  vocabulary.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches

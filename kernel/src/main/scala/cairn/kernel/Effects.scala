@@ -15,8 +15,9 @@ object Effects:
   /** Typed action key — family id + capability-class name, optionally bound
     * to the effect-interface Fragment digest.
     *
-    * Derived from [[EffectMeta.EffectFamily]] for Meta-defined families;
-    * constructible from [[Action]] for host bridge / migration checks.
+    * Derived from [[EffectMeta.EffectFamily]] / [[EffectMeta.PinnedInterface]]
+    * for Meta-defined families; constructible from [[Action]] for host bridge.
+    * Prefer [[ActionKey.fromPinned]] so the interface digest is the CAS pin.
     * Equality includes digest when present so unbound host keys and
     * digest-bound Meta keys stay distinct until both sides bind.
     */
@@ -37,6 +38,12 @@ object Effects:
     def of(family: Family, name: String): ActionKey = ActionKey(family.toString, name)
     def bound(family: Family, name: String, digest: Digest): ActionKey =
       ActionKey(family.toString, name, Some(digest))
+
+    /** Mint a digest-bound key only from an accepted [[EffectMeta.PinnedInterface]]. */
+    def fromPinned(pinned: EffectMeta.PinnedInterface, name: String): Either[String, ActionKey] =
+      if !pinned.actions.contains(name) then
+        Left(s"action '$name' not declared on pinned ${pinned.family}")
+      else Right(pinned.actionKey(name))
 
   /** Host-bridge action tags. Prefer [[ActionKey]] / [[EffectMeta]] at the
     * policy and EffectRequest boundary; keep these cases in sync via

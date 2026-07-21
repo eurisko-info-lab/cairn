@@ -181,6 +181,51 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assertEquals(m.causalHistoryRoot, Some(m0.digest))
     assertEquals(m.acceptedChange, Some(tip.vcs.artifact.digest))
 
+  test("Branches: transactional accept clears journal; recoverPendingAccepts is idle"):
+    val dir = Files.createTempDirectory("cairn-txn-accept")
+    val branches = branchesAt(dir)
+    val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
+      .fold(e => fail(e), identity)
+    branches.commitTip("feat", tip)
+    assertEquals(branches.recoverPendingAccepts(), Right(Nil))
+    assert(branches.headModule("feat").isRight)
+
+  test("Branches.mergeBranches: causal LCA by shared result (not only identical changes)"):
+    // Two histories that reach the same intermediate module via different
+    // change objects (commuting edits applied in opposite order), then diverge.
+    val dir = Files.createTempDirectory("cairn-semrepo-lca")
+    val branches = branchesAt(dir)
+    val cA = parseChange("{ replace a = false ; }")
+    val cB = parseChange("{ replace b = true ; }")
+    // Path 1: a then b
+    val tip1a = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val tip1ab = SemanticRepository.tipAfter(lang, tip1a.tip, cB).fold(e => fail(e), identity)
+    // Path 2: b then a — same tip module digest as tip1ab if they commute
+    assert(SemanticRepository.commutes(lang, cA, cB))
+    val tip2b = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
+    val tip2ba = SemanticRepository.tipAfter(lang, tip2b.tip, cA).fold(e => fail(e), identity)
+    assertEquals(tip1ab.tipDigest, tip2ba.tipDigest)
+    // Divergent suffixes from the shared module state
+    val cFromA = parseChange("{ add fromA = true ; }")
+    val cFromB = parseChange("{ add fromB = false ; }")
+    val tipA = SemanticRepository.tipAfter(lang, tip1ab.tip, cFromA).fold(e => fail(e), identity)
+    val tipB = SemanticRepository.tipAfter(lang, tip2ba.tip, cFromB).fold(e => fail(e), identity)
+    branches.commitTip("feat-a", tip1a)
+    branches.commitTip("feat-a", tip1ab)
+    branches.commitTip("feat-a", tipA)
+    branches.commitTip("feat-b", tip2b)
+    branches.commitTip("feat-b", tip2ba)
+    branches.commitTip("feat-b", tipB)
+    // Linear identical-prefix would be 0 (change objects differ); LCA by result finds the shared module.
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
+      case Right(Right(_)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.get("a"), Some(Stlc.fls))
+        assertEquals(head.get("b"), Some(Stlc.tru))
+        assert(head.get("fromA").isDefined && head.get("fromB").isDefined)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
   test("spine: optional migration step before accepted state"):
     val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get
     val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)

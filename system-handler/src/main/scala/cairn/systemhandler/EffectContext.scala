@@ -16,8 +16,8 @@ import cairn.kernel.Effects
   *
   * Capabilities must be Kernel-minted via [[VerifiedCapability.fromProof]];
   * raw [[CapabilityGrant]] values are not accepted by [[withCapabilities]].
-  * Replay-store residual: nonce/requestId consumption remains on the local
-  * [[AuthorityGate]].
+  * Replay tokens are consumed on the gate's issuer-scoped [[ReplayStore]]
+  * (in-memory by default; durable filesystem stores may be shared).
   */
 final case class EffectContext(
     subject: Subject,
