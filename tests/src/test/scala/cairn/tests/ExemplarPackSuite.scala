@@ -214,3 +214,27 @@ class ExemplarPackSuite extends munit.FunSuite:
       SectionNumbering.order(List(16, 1, 2)).map(_.map(_.number)),
       Right(List(1, 2, 16)))
     assert(SectionNumbering.order(List(1, 99)).isLeft)
+
+  test("SDS chemicals corpus: acetone fuller outline is all 16 EU-CLP sections"):
+    import cairn.examples.sds.{Chemicals, SectionNumbering}
+    val acetone = Chemicals.Acetone.pure
+    assertEquals(acetone.populatedNumbers, (1 to 16).toList)
+    assertEquals(acetone.cas, "67-64-1")
+    val validated = acetone.validateOutline
+    assertEquals(validated.map(_.map(_.number)), Right((1 to 16).toList))
+    assertEquals(
+      validated.map(_.map(_.title)),
+      Right(SectionNumbering.euClp.map(_.title)))
+    // every section carries at least one honest field
+    assert(acetone.sections.values.forall(_.fields.nonEmpty))
+    assert(acetone.sections(16).fields("otherInformation").contains("Demo/example"))
+    // tutorial spine remains the sparse 2+3 subset
+    assertEquals(
+      Chemicals.acetoneTutorialSparse.map(_.number),
+      List(2, 3))
+
+  test("SDS chemicals corpus: ethanol sparse outline still validates"):
+    import cairn.examples.sds.Chemicals
+    val ethanol = Chemicals.Ethanol.pure
+    assertEquals(ethanol.populatedNumbers, List(1, 2))
+    assertEquals(ethanol.validateOutline.map(_.map(_.number)), Right(List(1, 2)))

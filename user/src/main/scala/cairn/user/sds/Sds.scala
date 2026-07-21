@@ -15,7 +15,8 @@ import cairn.core.*
   * Phrase staleness (official corpus vs free-text restale) lives in the
   * examples host machine — see `cairn.examples.sds.PhraseStaleness`.
   * Regulatory section numbering (EU-CLP 1..16 + ordering) lives in
-  * `cairn.examples.sds.SectionNumbering`.
+  * `cairn.examples.sds.SectionNumbering`. Host chemicals fixtures (acetone
+  1..16 outline) live in `cairn.examples.sds.Chemicals`.
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")

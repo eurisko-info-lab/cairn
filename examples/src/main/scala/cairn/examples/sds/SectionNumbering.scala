@@ -6,10 +6,10 @@ package cairn.examples.sds
   * independent of any chemical. Numbers must be in 1..16; titles must match
   * the canonical heading for that number; when listing a (possibly sparse)
   * outline, sections appear in ascending number order with no duplicates.
-  * Gaps are allowed — most demo chemicals populate only a few sections.
+  * Gaps are allowed — sparse secondary chemicals populate only a few sections;
+  * acetone's fuller host fixture lives in [[Chemicals]].
   *
-  * Not a full chemicals corpus and not Studio section UI; see STATUS-2 /
-  * docs/exemplars remaining gaps.
+  * Not Studio section UI; see STATUS-2 / docs/exemplars remaining gaps.
   */
 object SectionNumbering:
   final case class SectionDef(number: Int, title: String)
@@ -88,8 +88,9 @@ object SectionNumbering:
     if bad.nonEmpty then Left(s"invalid section number(s): ${bad.mkString(", ")}")
     else Right(uniq.sorted.map(n => SectionDef(n, byNumber(n))))
 
-  /** Acetone tutorial spine: sparse outline of sections the host objects
-    * actually speak to (hazards + composition). Not a full 16-section SDS.
+  /** Acetone tutorial spine: sparse outline of sections the host *language*
+    * objects actually speak to (hazards + composition). The fuller 16-section
+    * host fixture is [[Chemicals.Acetone]].
     */
   def acetoneSparseOutline: List[OutlineEntry] = List(
     OutlineEntry(2, "Hazards identification"),
