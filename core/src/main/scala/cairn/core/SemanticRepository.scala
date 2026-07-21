@@ -23,10 +23,44 @@ import cairn.kernel.*
   */
 object SemanticRepository:
 
-  /** A branch tip expressed relative to a shared base module. */
+  /** Proposed tip — Core may construct this; Branches accepts only
+    * [[ValidatedTip]] after `apply(language, base, change) = tip`.
+    */
   final case class Tip(base: Module, tip: Module, change: Cst):
     def tipDigest: Digest = tip.digest
     def baseDigest: Digest = base.digest
+
+  /** Opaque tip whose `apply(language, base, change) = tip` has been checked.
+    * Carries the minting [[Delta.ValidatedChangeSet]].
+    */
+  opaque type ValidatedTip = ValidatedTip.Repr
+  object ValidatedTip:
+    private[SemanticRepository] final case class Repr(
+        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet)
+
+    private[core] def mint(
+        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet
+    ): ValidatedTip =
+      Repr(base, tip, change, vcs)
+
+    /** Check a proposed [[Tip]]: replay apply and require digest equality. */
+    def check(language: ComposedLanguage, proposed: Tip): Either[String, ValidatedTip] =
+      Delta.apply(language, proposed.base, proposed.change).flatMap { (result, vcs) =>
+        if result.digest != proposed.tip.digest then
+          Left(s"tip forgery: apply yielded ${result.digest.short}, claimed ${proposed.tip.digest.short}")
+        else if vcs.base != proposed.base.digest then
+          Left(s"tip base mismatch: ${vcs.base.short} ≠ ${proposed.base.digest.short}")
+        else Right(mint(proposed.base, result, proposed.change, vcs))
+      }
+
+    extension (t: ValidatedTip)
+      def base: Module = t.base
+      def tip: Module = t.tip
+      def change: Cst = t.change
+      def vcs: Delta.ValidatedChangeSet = t.vcs
+      def tipDigest: Digest = t.tip.digest
+      def baseDigest: Digest = t.base.digest
+      def asTip: Tip = Tip(t.base, t.tip, t.change)
 
   /** Outcome of integrating two tips. */
   enum Outcome:
@@ -48,13 +82,13 @@ object SemanticRepository:
   ): Either[String, (Module, Delta.ValidatedChangeSet)] =
     Delta.apply(language, tip, change)
 
-  /** Build a [[Tip]] by applying `change` to `base` (validates dependencies). */
+  /** Mint a [[ValidatedTip]] by applying `change` to `base`. */
   def tipAfter(
       language: ComposedLanguage,
       base: Module,
       change: Cst,
-  ): Either[String, Tip] =
-    commit(language, base, change).map((tip, _) => Tip(base, tip, change))
+  ): Either[String, ValidatedTip] =
+    commit(language, base, change).map((tip, vcs) => ValidatedTip.mint(base, tip, change, vcs))
 
   /** Footprint commutation (M16): disjoint writes ⇒ reorderable. */
   def commutes(language: ComposedLanguage, a: Cst, b: Cst): Boolean =
@@ -114,11 +148,11 @@ object SemanticRepository:
               }
             }
 
-  /** Integrate two [[Tip]]s that claim the same base digest. */
+  /** Integrate two [[ValidatedTip]]s that claim the same base digest. */
   def integrateTips(
       language: ComposedLanguage,
-      ours: Tip,
-      theirs: Tip,
+      ours: ValidatedTip,
+      theirs: ValidatedTip,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
   ): Either[String, Outcome] =
     if ours.baseDigest != theirs.baseDigest then

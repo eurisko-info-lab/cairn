@@ -61,8 +61,8 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.commitModule("base", m0)
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", lang.digest, tipA)
-    branches.commitTip("feat-b", lang.digest, tipB)
+    branches.commitTip("feat-a", tipA)
+    branches.commitTip("feat-b", tipB)
     branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
       case Right(Right(manifest)) =>
         assertEquals(manifest.branch, "main")
@@ -84,7 +84,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
-    branches.commitTip("feat", lang.digest, tipA)
+    branches.commitTip("feat", tipA)
     branches.merge(lang, "main", m0, cA, parseChange("{ replace b = true ; }")) match
       case Right(Right(_)) =>
         val alice = Keypair.dev("alice")
@@ -107,15 +107,15 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val c1 = parseChange("{ replace a = false ; }")
     val tip1 = SemanticRepository.tipAfter(lang, m0, c1).fold(e => fail(e), identity)
-    branches.commitTip("feat", lang.digest, tip1)
+    branches.commitTip("feat", tip1)
     val c2 = parseChange("{ replace b = true ; }")
     val tip2 = SemanticRepository.tipAfter(lang, tip1.tip, c2).fold(e => fail(e), identity)
     // Second tip on same branch: history log grows; tip sidecar is latest
-    branches.commitTip("feat", lang.digest, tip2)
-    val loaded = branches.loadTip("feat").fold(e => fail(e), identity)
+    branches.commitTip("feat", tip2)
+    val loaded = branches.loadTip("feat", lang).fold(e => fail(e), identity)
     assertEquals(loaded.tipDigest, tip2.tipDigest)
     assertEquals(loaded.baseDigest, tip2.baseDigest)
-    val hist = branches.loadChangeHistory("feat").fold(e => fail(e), identity)
+    val hist = branches.loadChangeHistory("feat", lang).fold(e => fail(e), identity)
     assertEquals(hist.length, 2)
     assertEquals(hist.last.result, tip2.tipDigest)
 
@@ -130,10 +130,10 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val tipA2 = SemanticRepository.tipAfter(lang, tipA1.tip, cA2).fold(e => fail(e), identity)
     val tipB1 = SemanticRepository.tipAfter(lang, m0, cB1).fold(e => fail(e), identity)
     val tipB2 = SemanticRepository.tipAfter(lang, tipB1.tip, cB2).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", lang.digest, tipA1)
-    branches.commitTip("feat-a", lang.digest, tipA2)
-    branches.commitTip("feat-b", lang.digest, tipB1)
-    branches.commitTip("feat-b", lang.digest, tipB2)
+    branches.commitTip("feat-a", tipA1)
+    branches.commitTip("feat-a", tipA2)
+    branches.commitTip("feat-b", tipB1)
+    branches.commitTip("feat-b", tipB2)
     // Tip-only would fail: tipA2.base = tipA1.tip ≠ tipB2.base = tipB1.tip
     assertNotEquals(tipA2.baseDigest, tipB2.baseDigest)
     branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
@@ -158,6 +158,28 @@ class SemanticRepositorySuite extends munit.FunSuite:
         assertEquals(branches.load("main").head, None)
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)
+
+  test("ValidatedTip forgery: claimed tip digest must match apply"):
+    val cA = parseChange("{ replace a = false ; }")
+    val real = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val forged = SemanticRepository.Tip(m0, m0, cA) // tip == base, not apply result
+    assert(SemanticRepository.ValidatedTip.check(lang, forged).isLeft)
+    assert(SemanticRepository.ValidatedTip.check(lang, real.asTip).isRight)
+    // ValidatedChangeSet.decodeClaim alone is not validated
+    val claim = Delta.ValidatedChangeSet.Claim(lang.digest, m0.digest, cA, m0.digest)
+    assert(Delta.ValidatedChangeSet.check(lang, m0, claim).isLeft)
+    val okClaim = real.vcs.claim
+    assert(Delta.ValidatedChangeSet.check(lang, m0, okClaim).isRight)
+
+  test("Branches.commitTip records causal digests on BranchManifest"):
+    val dir = Files.createTempDirectory("cairn-manifest-causal")
+    val branches = branchesAt(dir)
+    val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
+      .fold(e => fail(e), identity)
+    val m = branches.commitTip("feat", tip)
+    assert(m.acceptedChange.isDefined, m.toString)
+    assertEquals(m.causalHistoryRoot, Some(m0.digest))
+    assertEquals(m.acceptedChange, Some(tip.vcs.artifact.digest))
 
   test("spine: optional migration step before accepted state"):
     val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get

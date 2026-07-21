@@ -69,9 +69,13 @@ There is no ambient `PackAccess.get`/`install`, no `AuthorityGate.default` or
 (`Law(packs)`, …). `Node`, `PackLoader`, `Lsp`, `Browser`, and `Cli` receive
 gates / contexts from composition roots (`examples.Main`, tests).
 
-`EffectContext.capabilities` is consulted first when non-empty: a covering
-grant is Kernel-checked without broad policy re-evaluation; empty
-capabilities fall back to Core `prove` → Kernel `checkProof`.
+`EffectContext.capabilities` holds Kernel-minted `VerifiedCapability` values
+only (`VerifiedCapability.fromProof`). A covering verified grant is Kernel-checked
+without broad policy re-evaluation; empty capabilities fall back to Core
+`prove` → Kernel `checkProof`. Raw `CapabilityGrant` construction remains for
+proof / delegation building — it cannot enter `withCapabilities`.
+**Residual:** nonce / `requestId` replay sets stay gate-local on
+`AuthorityGate` (not a durable shared replay store).
 
 ## Authority
 
@@ -86,6 +90,10 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
   put/get/contains go through `CasEffects`; admin fsck/gc/stats through
   `CasAdminEffects`; LedgerTransport `append` through `LedgerTransport.run`
   (`Node.append` is a thin adapter).
+- **Sync:** `Sync.pull` / `HttpSync.pull` compose CAS `contains` / get / put
+  as `Either` — authorized failures abort and do **not** advance the consumer
+  chain with a partial blob set (`Either.forall` is never used to treat denial
+  as “missing”).
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
   PackLoader (`packLoaderWorkspace`), ledger+CAS+chain FS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
@@ -100,22 +108,26 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
 - **Meta conditions:** known `meta:*` keys validate value shape fail-closed
   (e.g. `meta:expiresAtEpochMillis = "banana"` does not match).
 - **Calculus:** fail-closed conditions; grant expiry/nonce; replay denial;
-  delegation chains (root policy ↔ root grantor; final grant covers grantee
-  request); Kernel `AttenuationWitness` checks `parentCanon` and forbids
-  subject changes except via Delegation.
+  delegation chains fully justify the **root grant** (expiry, nonce, resource,
+  conditions) against cited policies **before** hop validation — widened TTL
+  or omitted policy nonce on a constructed root is rejected; final grant covers
+  the grantee request; Kernel `AttenuationWitness` checks `parentCanon` and
+  forbids subject changes except via Delegation.
 - **Proofs:** Core `PolicyEval.prove` / `proveDelegated` builds
   `AuthorizationProof`; Kernel `checkProof` validates the witness. Proof
   `canon` includes request, full cited policies, attenuation, and delegation
   links so distinct proofs do not collide.
+- **VerifiedCapability:** minted only after `checkProof` / covering
+  `checkCapability`; see EffectContext above.
 
 ## Semantic repository spine
 
 ```text
 branch state
 → causal semantic change   (Delta.apply / SemanticRepository.commit)
-→ dependency validation    (ValidatedChangeSet)
+→ dependency validation    (opaque ValidatedChangeSet / ValidatedTip)
 → commutation              (ChangeAlgebra.commutes)
-→ merge                    (Merge.threeWay)
+→ merge                    (Merge.threeWay / common-ancestor suffixes)
 → conflict artifact        (Merge.Conflict → CAS)
 → migration                (Migrate, optional)
 → accepted new branch state (Branches.merge → BranchManifest head)
@@ -123,28 +135,29 @@ branch state
 
 | Piece | Module | Role |
 | ----- | ------ | ---- |
-| `SemanticRepository` | `core` | Pure orchestration of the story above |
-| `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Existing engines composed, not rewritten |
-| `BranchManifest` | `kernel` | Accepted branch state record |
-| `Branches` | `system-handler` | Effectful refs + merge-aware advance / conflict persist |
+| `SemanticRepository` | `core` | Pure orchestration; proposes `Tip`, mints `ValidatedTip` |
+| `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Engines; opaque `ValidatedChangeSet` via apply/check |
+| `BranchManifest` | `kernel` | Accepted branch state + causal digests |
+| `Branches` | `system-handler` | Effectful refs; accepts only `ValidatedTip` |
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
-Residuals: everyday path uses `commitTip` + `mergeBranches` (tip sidecar +
-`.changes` history log; `loadTip` / `loadChangeHistory` reconstruct;
-`mergeBranches` composes full stacked histories from a shared oldest base).
+`ValidatedChangeSet` is opaque: minted by `Delta.apply` / `ValidatedChangeSet.check`
+(replay). `decodeClaim` does not mint. `ValidatedTip` requires
+`apply(language, base, change) = tip`; `Branches.commitTip` accepts only
+`ValidatedTip`. Loaded histories are replay-checked before merge.
+
+`BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
+`conflictState` (CAS digests). Refs `.change` / `.changes` sidecars remain for
+compat. `mergeBranches` takes a common-ancestor prefix then merges divergent
+suffixes. Branch updates are CAS-first then ref pointer — not a full
+multi-store transaction across optional ledger publish.
+
 Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
-`merge(..., publish = Some(...))` — accept does not auto-publish. `Branches`
-CAS put/get/contains go through `CasEffects` + `EffectContext`; refs FS through
-`Filesystem` (`EffectContext.forBranches`); admin via `CasAdminEffects`.
-Provenance `index`/`why` authorize CAS `stats` on the store root then walk.
-Node/Sync/HttpSync chain-file I/O goes through `Filesystem` (`EffectContext.forLedger`).
-CLI Transcript/Cli home, run directories, `ui` root paths, hash/put/canon/
-transcript source reads, load-language, and `emit-languages` go through
-`Filesystem` (`EffectContext.forFilesystem`). Riemann/Search tutorial
-artifact I/O uses the same gate. Browser board discovery
-authorizes CAS `stats` then walks via `CasAdminEffects.artifacts`; UI
-classpath miss falls back through `Filesystem`.
+`merge(..., publish = Some(...))`. `Branches` CAS / refs FS go through
+`EffectContext.forBranches`. Node/Sync/HttpSync chain FS uses `forLedger`.
+CLI / tutorial FS uses `forFilesystem`. Browser board discovery authorizes CAS
+`stats` then walks via `CasAdminEffects.artifacts`.
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -152,8 +165,8 @@ LeanCore and AffineNet/IcNet are **Cairn-native** calculi in those lineages —
 not Lean-kernel or HVM-ABI compatible. Boundaries:
 
 - Doc: [agreement.md](agreement.md)
-- Types: `cairn.core.Agreement` (`Envelope`, `AgreementCertificate`, `check` /
-  `certify`)
+- Types: `cairn.core.Agreement` (`Envelope`, `AgreementCertificate` with
+  `envelopeDigest` + `nativeEvidence`, `check` / `certify`)
 - Tests: `AgreementSuite` — always Cairn reference; optional `lean` on PATH;
   classical-IC goldens for nets; `hvm` stubbed (`no-hvm-surface-exporter`)
 
@@ -176,20 +189,20 @@ LeanCore `#check` envelope.
   `rosetta.Scaffold`) — documented compatibility shims
 - **HVM surface exporter** — agreement uses classical-IC goldens until an
   exporter exists
--   **Semantic merge** — everyday path is `commitTip` → `mergeBranches`
-  (compose stacked `.changes` histories from a shared base; tip sidecar for
-  `loadTip`); `merge(..., changeOurs, changeTheirs)` for callers that already
-  hold CSTs. Ledger publish is **opt-in** (`publishHead` or
-  `publish = Some(...)` on merge) — not the default on accept.
+-   **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
+  `mergeBranches` (common-ancestor suffix merge; replay-checked histories;
+  causal digests on `BranchManifest`). Ledger publish remains **opt-in**.
+  Full transactional accept across CAS + history + refs + ledger publish is
+  still CAS-first / best-effort (crash may leave unreferenced blobs).
+- **Effect-interface pinning** — `ActionKey` is digest-bound via
+  `EffectMeta` Fragment digests; loading families as externally pinned CAS
+  artifacts (vs host-embedded Meta fragments) remains open.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
-  Unison host glue, sync `contains`, Browser stats, provenance `why`,
-  Branches refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
-  `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger`). CLI
-  Transcript/Cli home/run/ui, hash/put/canon/transcript reads,
-  load-language, and emit-languages use `Filesystem` (`forFilesystem`).
-  Riemann/Search tutorial artifact I/O uses `forFilesystem`. Browser board
-  inventory uses `CasAdminEffects.artifacts` (CAS `stats` gate).
+  Unison host glue, sync paths, Browser stats, provenance `why`, Branches
+  refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
+  `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger` /
+  `forFilesystem`).
 
 ## Final principle
 

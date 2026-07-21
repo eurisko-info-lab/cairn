@@ -97,23 +97,59 @@ object Delta:
     val demoted = l.fragments.map(f => f.copy(grammar = f.grammar.copy(top = None)))
     Compose.compose(s"Δ${l.name}", demoted :+ deltaFrag)
 
-  /** Record of a kernel-gated, applied change-set (§2 Kernel gate). */
-  final case class ValidatedChangeSet(
-      language: Digest, base: Digest, change: Cst, result: Digest):
-    def canon: Canon = Canon.cmap(
-      "language" -> Canon.CStr(language.hex),
-      "base" -> Canon.CStr(base.hex),
-      "change" -> Cst.toCanon(change),
-      "result" -> Canon.CStr(result.hex))
-    def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, canon)
-
+  /** Kernel-gated record of an applied change-set. Opaque: mint only via
+    * [[apply]] / [[applyTyped]], or [[ValidatedChangeSet.check]] after replay.
+    * Public [[ValidatedChangeSet.decodeClaim]] does not mint — forged canon
+    * cannot become a [[ValidatedChangeSet]] without `apply(language, base, change) = result`.
+    */
+  opaque type ValidatedChangeSet = ValidatedChangeSet.Repr
   object ValidatedChangeSet:
-    def fromCanon(c: Canon): ValidatedChangeSet =
-      ValidatedChangeSet(
+    private[Delta] final case class Repr(
+        language: Digest, base: Digest, change: Cst, result: Digest)
+
+    private[core] def mint(
+        language: Digest, base: Digest, change: Cst, result: Digest
+    ): ValidatedChangeSet =
+      Repr(language, base, change, result)
+
+    /** Unchecked fields decoded from canon — not a validated change-set. */
+    final case class Claim(language: Digest, base: Digest, change: Cst, result: Digest):
+      def canon: Canon = Canon.cmap(
+        "language" -> Canon.CStr(language.hex),
+        "base" -> Canon.CStr(base.hex),
+        "change" -> Cst.toCanon(change),
+        "result" -> Canon.CStr(result.hex))
+
+    def decodeClaim(c: Canon): Claim =
+      Claim(
         Digest(c.field("language").asStr),
         Digest(c.field("base").asStr),
         Cst.fromCanon(c.field("change")),
         Digest(c.field("result").asStr))
+
+    /** Replay [[apply]]; accept only when the result digest matches the claim. */
+    def check(
+        l: ComposedLanguage, baseMod: Module, claim: Claim
+    ): Either[String, ValidatedChangeSet] =
+      if l.digest != claim.language then
+        Left(s"ValidatedChangeSet language mismatch: claim ${claim.language.short} ≠ ${l.digest.short}")
+      else if baseMod.digest != claim.base then
+        Left(s"ValidatedChangeSet base mismatch: claim ${claim.base.short} ≠ ${baseMod.digest.short}")
+      else
+        apply(l, baseMod, claim.change).flatMap { (result, vcs) =>
+          if result.digest != claim.result then
+            Left(s"forged ValidatedChangeSet: claimed result ${claim.result.short}, apply yielded ${result.digest.short}")
+          else Right(vcs)
+        }
+
+    extension (v: ValidatedChangeSet)
+      def language: Digest = v.language
+      def base: Digest = v.base
+      def change: Cst = v.change
+      def result: Digest = v.result
+      def canon: Canon = Claim(v.language, v.base, v.change, v.result).canon
+      def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, v.canon)
+      def claim: Claim = Claim(v.language, v.base, v.change, v.result)
 
 
   /** Child-index path helpers for structural edits (M15). */
@@ -224,7 +260,7 @@ object Delta:
     changes.flatMap { chs =>
       chs.foldLeft[Either[Rejection, Module]](Right(module)) { (acc, ch) => acc.flatMap(applyOne(_, ch)) }
         .map { result =>
-          val vcs = ValidatedChangeSet(l.digest, module.digest, change, result.digest)
+          val vcs = ValidatedChangeSet.mint(l.digest, module.digest, change, result.digest)
           (result.sorted, vcs) }
     }
 

@@ -1,10 +1,13 @@
 # STATUS-2 — end of the maximalization plan (PLAN-2)
 
-Date: 2026-07-20. All 50 stories M1–M50 of [PLAN-2.md](PLAN-2.md) landed on top of
-the S1–S50 base, plus a **top-level parity pass** (constitution §4.16) and an
+Date: 2026-07-21. All 50 stories M1–M50 of [PLAN-2.md](PLAN-2.md) landed on top of
+the S1–S50 base, plus a **top-level parity pass** (constitution §4.16), an
 **exemplar elevation** (PKI/Law/SDS as `.cairn` languages with a real
-`PKI → Law → SDS` `requires`/`provides` DAG). Full suite: **206 tests green**
-(`tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
+`PKI → Law → SDS` `requires`/`provides` DAG), and a **trust-hardening pass**
+(Sync abort, delegation root justification, opaque `ValidatedTip` /
+`ValidatedChangeSet`, `VerifiedCapability`, BranchManifest causal digests,
+agreement envelope digests). Full suite: **451 tests green** (+2 skipped;
+`tests` module; `sbt test`), including a 100 000-term fuzz corpus with zero
 round-trip failures, `ParitySuite`, and `ExemplarPackSuite`.
 
 ## Story scorecard
@@ -146,6 +149,18 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - Exemplars elevated to `.cairn` languages; `PackLoader` closes `PKI → Law → SDS`
   via fragment `requires`/`provides` (compose without deps fails).
 
+### Trust / authority / repository (2026-07-21)
+
+| Area | Reality |
+|---|---|
+| Sync | `Sync.pull` / `HttpSync.pull` abort on authorized CAS failure; chain not advanced |
+| Delegation | Root grant expiry/nonce/resource justified before hop validation |
+| Tips / ΔL | Opaque `ValidatedTip` + `ValidatedChangeSet`; Branches accepts only checked tips; loads replay |
+| Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); replay sets still gate-local |
+| BranchManifest | Causal digests (`causalHistoryRoot`, `parents`, `acceptedChange`, `conflictState`); sidecars kept; common-ancestor suffix merge; CAS-first not full multi-store txn |
+| Agreement | Certificate carries `envelopeDigest` + `nativeEvidence` |
+| Effect interfaces | `ActionKey` digest-bound via host-embedded Meta fragments — CAS-pinned family load deferred |
+
 ### Remaining honest gaps
 
 - GRANITE SDS depth beyond the spine: full chemicals corpus, section numbering,
@@ -158,3 +173,5 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - BFT / gossip daemon / public ledger (explicitly deferred).
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.
+- Durable shared capability replay store; full transactional branch accept
+  across CAS + refs + ledger; load effect interfaces as pinned CAS artifacts.

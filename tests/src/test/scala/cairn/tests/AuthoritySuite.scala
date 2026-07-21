@@ -422,10 +422,14 @@ class AuthoritySuite extends munit.FunSuite:
     val gate = AuthorityGate.enforcing(List(banana))
     assert(gate.check(req, nowMillis = 0).isLeft)
 
-  test("EffectContext capabilities: covering grant authorizes without policy"):
-    val grant = CapabilityGrant(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
+  test("EffectContext capabilities: covering VerifiedCapability authorizes without policy"):
+    val policies = List(EffectPolicy(
+      "tmp", alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"), Decision.Allow))
+    val broadReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
+    val proof = PolicyEval.prove(broadReq, policies, nowMillis = 0).toOption.get
+    val cap = Authority.VerifiedCapability.fromProof(proof, policies).toOption.get
     val emptyGate = AuthorityGate.enforcing(Nil) // no policies
-    val ctx = EffectContext(alice, emptyGate, capabilities = List(grant), clock = () => 0L)
+    val ctx = EffectContext(alice, emptyGate, capabilities = List(cap), clock = () => 0L)
     val ok = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
     assert(ok.isRight, ok.toString)
     val miss = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/var/a"))
@@ -433,6 +437,73 @@ class AuthoritySuite extends munit.FunSuite:
     // empty capabilities fall back to policy path
     val policyCtx = EffectContext(alice, AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead))))
     assert(policyCtx.authorize(readReq).isRight)
+
+  test("capability forgery: raw CapabilityGrant cannot enter withCapabilities"):
+    // Compile-time: withCapabilities takes List[VerifiedCapability] only.
+    // Runtime: sole mint path is fromProof — a forged wide grant in a
+    // tampered proof is rejected; covers-alone is not a mint API.
+    val policies = List(PolicyEval.allowAll("a", alice, fsRead))
+    val proof = PolicyEval.prove(readReq, policies, 0).toOption.get
+    val ok = Authority.VerifiedCapability.fromProof(proof, policies)
+    assert(ok.isRight, ok.toString)
+    val widened = proof.copy(grant = proof.grant.copy(resource = Resource("*", "*")))
+    assert(Authority.VerifiedCapability.fromProof(widened, policies).isLeft)
+    // Empty store / missing citation cannot mint
+    assert(Authority.VerifiedCapability.fromProof(proof, Nil).isLeft)
+
+  test("delegation root: widened TTL / omitted policy nonce rejected before hops"):
+    val bob = Subject("bob")
+    val carol = Subject("carol")
+    val rootPolicies = List(EffectPolicy(
+      "alice-data",
+      alice,
+      fsRead,
+      EffectMeta.filesystem.resource.at("/data*"),
+      Decision.Allow,
+      conditions = Map(
+        "meta:expiresAtEpochMillis" -> "1000",
+        "meta:nonce" -> "root-n1")))
+    val honestRoot = CapabilityGrant(
+      alice, fsRead, EffectMeta.filesystem.resource.at("/data*"),
+      expiresAtEpochMillis = Some(1000L),
+      nonce = Some("root-n1"),
+      sourcePolicyIds = List("alice-data"))
+    val ab = PolicyEval.delegate(honestRoot, bob, EffectMeta.filesystem.resource.at("/data/b*")).toOption.get
+    val bc = PolicyEval.delegate(ab.child, carol, EffectMeta.filesystem.resource.at("/data/b/c")).toOption.get
+    val carolReq = EffectRequest(carol, fsRead, EffectMeta.filesystem.resource.at("/data/b/c"))
+    val ok = PolicyEval.proveDelegated(carolReq, rootPolicies, List(ab, bc), nowMillis = 0)
+    assert(ok.isRight, ok.toString)
+    assert(Authority.checkProof(ok.toOption.get, rootPolicies).isRight)
+    // Widened TTL (omit expiry) on a manually constructed root
+    val wideTtl = honestRoot.copy(expiresAtEpochMillis = None)
+    val abWide = PolicyEval.delegate(wideTtl, bob, EffectMeta.filesystem.resource.at("/data/b*")).toOption.get
+    val bcWide = PolicyEval.delegate(abWide.child, carol, EffectMeta.filesystem.resource.at("/data/b/c")).toOption.get
+    val badTtl = PolicyEval.proveDelegated(carolReq, rootPolicies, List(abWide, bcWide), nowMillis = 0)
+    assert(badTtl.isLeft, badTtl.toString)
+    assert(badTtl.swap.exists(_.contains("expiry")), badTtl.toString)
+    // Omitted policy nonce
+    val noNonce = honestRoot.copy(nonce = None)
+    val abN = PolicyEval.delegate(noNonce, bob, EffectMeta.filesystem.resource.at("/data/b*")).toOption.get
+    val bcN = PolicyEval.delegate(abN.child, carol, EffectMeta.filesystem.resource.at("/data/b/c")).toOption.get
+    val badNonce = PolicyEval.proveDelegated(carolReq, rootPolicies, List(abN, bcN), nowMillis = 0)
+    assert(badNonce.isLeft, badNonce.toString)
+    assert(badNonce.swap.exists(_.contains("nonce")), badNonce.toString)
+
+  test("Sync.pull aborts before chain advance on authorized CAS failure"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-sync-abort")
+    val aliceKp = Keypair.dev("alice")
+    val auth = Map("alice" -> aliceKp.publicBytes)
+    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContext.forLedger())
+    src.append(aliceKp, auth, List(aliceKp.signTx(Tx.RegisterIdentity("alice", aliceKp.publicBytes))))
+      .fold(e => fail(e), identity)
+    // Consumer CAS denied — contains/get/put must not be treated as "missing"
+    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContext.forPackLoader())
+    val chainFile = dir.resolve("denied").resolve("chain")
+    assert(!java.nio.file.Files.exists(chainFile))
+    val pull = Sync.pull(src, denied, auth)
+    assert(pull.isLeft, pull.toString)
+    assert(pull.swap.exists(e => e.contains("denied") || e.contains("blob")), pull.toString)
+    assert(!java.nio.file.Files.exists(chainFile), "chain must not advance after CAS failure")
 
   test("delegation Alice→Bob→Carol authorizes Carol via checkProof"):
     val bob = Subject("bob")

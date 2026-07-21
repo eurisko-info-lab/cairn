@@ -196,7 +196,15 @@ class AgreementSuite extends munit.FunSuite:
 
   test("Agreement.check rejects forged agreement flag"):
     val bog = Agreement.AgreementCertificate(
-      "lean-core", "forged", Digest.of(Canon.CStr("s")),
+      "lean-core", Agreement.leanCore.digest, "forged", Digest.of(Canon.CStr("s")),
       Agreement.outcome("ok"), Agreement.outcome("fail"),
-      "golden", agreed = true)
+      "golden", Agreement.evidenceFor(NativeSource.Golden), agreed = true)
     assert(Agreement.check(bog).isLeft)
+
+  test("Agreement.check rejects envelope digest drift"):
+    val ok = Agreement.outcome("ok")
+    val cert = Agreement.AgreementCertificate(
+      Agreement.leanCore.id, Digest.of(Canon.CStr("tampered-envelope")),
+      "drift", Digest.of(Canon.CStr("s")), ok, ok,
+      "golden", Agreement.evidenceFor(NativeSource.Golden), agreed = true)
+    assert(Agreement.check(cert, Some(Agreement.leanCore)).isLeft)

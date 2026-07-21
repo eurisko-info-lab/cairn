@@ -51,19 +51,29 @@ object HttpSync:
     case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
     case cairn.systeminterface.Cas.Error.Io(m)      => m
 
+  /** Fetch `d` when absent. Authorized `contains` / `putBytes` failures abort
+    * — never treat denial as "missing" via `Either.forall`.
+    */
+  private def fetchIfMissing(
+      baseUrl: String, to: Node, d: Digest, fetched: Int
+  ): Either[String, Int] =
+    CasEffects.contains(to.cas, d, to.ctx).left.map(casErr).flatMap {
+      case true => Right(fetched)
+      case false =>
+        get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
+          CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
+            if actual == d then Right(fetched + 1)
+            else Left(s"remote served wrong bytes for ${d.short}")
+          }
+        }
+    }
+
   def pull(baseUrl: String, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, PullReport] =
     for
       chainTxt <- get(baseUrl, "/chain")
       remoteChain = new String(chainTxt).linesIterator.filter(_.nonEmpty).map(Digest(_)).toList
-      wantBlocks = remoteChain.filter(d => CasEffects.contains(to.cas, d, to.ctx).forall(!_))
-      fetched <- wantBlocks.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
-        acc.flatMap { n =>
-          get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
-            CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
-              if actual == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}")
-            }
-          }
-        }
+      fetched <- remoteChain.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
+        acc.flatMap(n => fetchIfMissing(baseUrl, to, d, n))
       }
       blocks <- remoteChain.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
         acc.flatMap(bs =>
@@ -72,15 +82,8 @@ object HttpSync:
       publishedDigests = st.published.toList.flatMap(_.split(":") match
         case Array(_, value, _) => Digest.parse(value).toOption
         case _                  => None)
-      wantBlobs = publishedDigests.filter(d => CasEffects.contains(to.cas, d, to.ctx).forall(!_))
-      fetchedBlobs <- wantBlobs.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
-        acc.flatMap { n =>
-          get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
-            CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
-              if actual == d then Right(n + 1) else Left(s"remote served wrong bytes for ${d.short}")
-            }
-          }
-        }
+      fetchedBlobs <- publishedDigests.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
+        acc.flatMap(n => fetchIfMissing(baseUrl, to, d, n))
       }
       _ <- to.writeChain(remoteChain)
     yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)

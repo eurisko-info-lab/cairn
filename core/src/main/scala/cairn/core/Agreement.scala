@@ -62,23 +62,32 @@ object Agreement:
       case Live(tool, detail)  => s"live:$tool:$detail"
       case Stub(reason)        => s"stub:$reason"
 
-  /** Kernel-shaped record that Cairn and native results agree (or honestly don't). */
+  /** Kernel-shaped record that Cairn and native results agree (or honestly don't).
+    *
+    * [[envelopeDigest]] pins the envelope claims/excludes; [[nativeEvidence]]
+    * records native-run detail (tool output digest / golden id) beyond the
+    * source label so live vs golden vs stub are distinguishable in canon.
+    */
   final case class AgreementCertificate(
       envelopeId: String,
+      envelopeDigest: Digest,
       caseName: String,
       subject: Digest,
       cairnResult: Digest,
       nativeResult: Digest,
       source: String,
+      nativeEvidence: Digest,
       agreed: Boolean
   ):
     def canon: Canon = Canon.cmap(
       "envelope" -> Canon.CStr(envelopeId),
+      "envelopeDigest" -> Canon.CStr(envelopeDigest.hex),
       "case" -> Canon.CStr(caseName),
       "subject" -> Canon.CStr(subject.hex),
       "cairn" -> Canon.CStr(cairnResult.hex),
       "native" -> Canon.CStr(nativeResult.hex),
       "source" -> Canon.CStr(source),
+      "nativeEvidence" -> Canon.CStr(nativeEvidence.hex),
       "agreed" -> Canon.CStr(if agreed then "true" else "false"))
     def artifact: Artifact = Artifact(ArtifactKind.AgreementCertificate, canon)
 
@@ -86,15 +95,31 @@ object Agreement:
   def outcome(status: String, detail: Canon = Canon.CStr("")): Digest =
     Digest.of(Canon.cmap("status" -> Canon.CStr(status), "detail" -> detail))
 
+  def evidenceFor(source: NativeSource): Digest = source match
+    case NativeSource.Golden =>
+      outcome("golden")
+    case NativeSource.Live(tool, detail) =>
+      outcome("live", Canon.cmap("tool" -> Canon.CStr(tool), "detail" -> Canon.CStr(detail)))
+    case NativeSource.Stub(reason) =>
+      outcome("stub", Canon.CStr(reason))
+
   /** Validate certificate internal consistency, then accept only if agreed. */
-  def check(cert: AgreementCertificate): Either[String, AgreementCertificate] =
+  def check(
+      cert: AgreementCertificate,
+      envelope: Option[Envelope] = None
+  ): Either[String, AgreementCertificate] =
     val matchOk = cert.cairnResult == cert.nativeResult
     if matchOk != cert.agreed then
       Left(s"${cert.caseName}: agreed=${cert.agreed} but digests ${
           if matchOk then "match" else "differ"}")
     else if !cert.agreed then
       Left(s"${cert.caseName}: Cairn ${cert.cairnResult.short} ≠ native ${cert.nativeResult.short} (source=${cert.source})")
-    else Right(cert)
+    else envelope match
+      case Some(env) if env.id != cert.envelopeId =>
+        Left(s"${cert.caseName}: envelope id mismatch")
+      case Some(env) if env.digest != cert.envelopeDigest =>
+        Left(s"${cert.caseName}: envelope digest mismatch (claims/excludes drift)")
+      case _ => Right(cert)
 
   /** Issue + check in one step. */
   def certify(
@@ -107,4 +132,5 @@ object Agreement:
   ): Either[String, AgreementCertificate] =
     val agreed = cairnResult == nativeResult
     check(AgreementCertificate(
-      envelope.id, caseName, subject, cairnResult, nativeResult, source.label, agreed))
+      envelope.id, envelope.digest, caseName, subject, cairnResult, nativeResult,
+      source.label, evidenceFor(source), agreed), Some(envelope))

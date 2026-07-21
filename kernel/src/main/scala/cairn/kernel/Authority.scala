@@ -300,6 +300,37 @@ object Authority:
       def resource: Resource = a.resource
       def subject: Subject = a.subject
 
+  /** Kernel-minted capability for [[EffectContext]]-style grant bundles.
+    *
+    * Hosts may still construct [[CapabilityGrant]] values when building Core
+    * proofs / delegation chains, but [[VerifiedCapability]] is only minted
+    * after [[checkProof]] / [[checkCapability]] — so
+    * `withCapabilities` cannot accept arbitrary forged grants.
+    *
+    * Residual: nonce / requestId replay sets remain gate-local
+    * ([[cairn.systemhandler.AuthorityGate]]); a VerifiedCapability alone does
+    * not carry a shared durable replay store.
+    */
+  opaque type VerifiedCapability = CapabilityGrant
+  object VerifiedCapability:
+    private[kernel] def mint(g: CapabilityGrant): VerifiedCapability = g
+
+    /** Mint after a successful [[checkProof]] — sole public mint path.
+      * A host-forged [[CapabilityGrant]] that merely [[CapabilityGrant.covers]]
+      * a request is not enough (that would re-open forgery via `Resource("*","*")`).
+      */
+    def fromProof(
+        proof: AuthorizationProof, store: List[EffectPolicy]
+    ): Either[String, VerifiedCapability] =
+      checkProof(proof, store).map(_ => mint(proof.grant))
+
+    extension (c: VerifiedCapability)
+      def grant: CapabilityGrant = c
+      def covers(req: EffectRequest, nowMillis: Long): Boolean = c.covers(req, nowMillis)
+      def subject: Subject = c.subject
+      def action: Effects.ActionKey = c.action
+      def resource: Resource = c.resource
+
   /** Audit-mode pass-through — records intent without enforcement. Prefer
     * [[validate]] under Enforce mode. */
   def auditPass(req: EffectRequest): AuthorizedRequest = AuthorizedRequest.mint(req)
@@ -355,10 +386,14 @@ object Authority:
     *  2. Each cited allow matches the *policy subject* of the proof:
     *     root grantor (when [[delegationChain]] non-empty) else the request
     *  3. Fail-closed: no store Deny matches the **final** request
-    *  4. Condition evidence matches cited policy non-meta conditions and request args
-    *  5. Grant subject/action/sourcePolicyIds/expiry/nonce justified by cited allows
-    *  6. Grant [[CapabilityGrant.covers]] request at proof.nowMillis
-    *  7. Optional attenuation / delegation witnesses via shared pure checkers
+    *  4. Condition evidence matches cited policy non-meta conditions and
+    *     policy-match request args (root grantor when delegated)
+    *  5. When delegation/attenuation is present: **root grant** fully justified
+    *     against cited policies (expiry, nonce, resource) before hop checks
+    *  6. Final grant subject/action/sourcePolicyIds justified; direct grants
+    *     also match expiry/nonce/resource exactly
+    *  7. Grant [[CapabilityGrant.covers]] request at proof.nowMillis
+    *  8. Optional attenuation / delegation witnesses via shared pure checkers
     */
   def checkProof(
       proof: AuthorizationProof,
@@ -372,6 +407,7 @@ object Authority:
         _ <- checkCitedAllows(proof.allowPolicies, store, policyMatchRequest(proof))
         _ <- checkNoStoreDeny(store, req)
         _ <- checkConditionEvidence(proof)
+        _ <- checkRootGrantJustification(proof)
         _ <- checkGrantJustification(proof)
         _ <- checkAttenuation(proof)
         _ <- checkDelegation(proof)
@@ -435,6 +471,7 @@ object Authority:
     else Right(())
 
   private def checkConditionEvidence(proof: AuthorizationProof): Either[String, Unit] =
+    val matchReq = policyMatchRequest(proof)
     val required =
       proof.allowPolicies.iterator
         .flatMap(_.conditions.iterator)
@@ -445,10 +482,50 @@ object Authority:
       case (Right(()), (k, expected)) =>
         if !proof.conditionEvidence.get(k).contains(expected) then
           Left(s"condition evidence missing or wrong for $k")
-        else if !proof.request.args.get(k).contains(expected) then
+        else if !matchReq.args.get(k).contains(expected) then
           Left(s"request args do not satisfy condition $k")
         else Right(())
     }
+
+  /** When hops are present, justify the root/parent against cited policies
+    * (expiry, nonce, non-widening resource) **before** hop validation.
+    * Delegation roots must match the root request resource exactly;
+    * attenuation parents may be broader than the final request but must
+    * still be policy-bound (no widened TTL / omitted policy nonce).
+    */
+  private def checkRootGrantJustification(proof: AuthorizationProof): Either[String, Unit] =
+    val allows = proof.allowPolicies
+    if proof.delegationChain.nonEmpty then
+      val root = proof.delegationChain.head.parent
+      val matchReq = policyMatchRequest(proof)
+      rootPolicyBound(root, allows, matchReq, proof.nowMillis, requireResourceEq = true)
+    else proof.attenuatedFrom match
+      case None => Right(())
+      case Some((parent, _)) =>
+        val matchReq = proof.request.copy(
+          subject = parent.subject, action = parent.action, resource = parent.resource)
+        rootPolicyBound(parent, allows, matchReq, proof.nowMillis, requireResourceEq = false)
+
+  private def rootPolicyBound(
+      root: CapabilityGrant,
+      allows: List[EffectPolicy],
+      matchReq: EffectRequest,
+      nowMillis: Long,
+      requireResourceEq: Boolean
+  ): Either[String, Unit] =
+    val expectedExpiry = allows.flatMap(_.metaExpiresAt).minOption
+    val expectedNonce =
+      matchReq.args.get("nonce").orElse(allows.flatMap(_.metaNonce).headOption)
+    if root.subject != matchReq.subject then Left("root grant subject mismatch")
+    else if root.action != matchReq.action then Left("root grant action mismatch")
+    else if allows.exists(p => !root.resource.matches(p.resource)) then
+      Left("root grant widens beyond cited policy resource")
+    else if requireResourceEq && root.resource != matchReq.resource then
+      Left("root grant resource mismatch")
+    else if root.expiresAtEpochMillis != expectedExpiry then Left("root grant expiry mismatch")
+    else if root.nonce != expectedNonce then Left("root grant nonce mismatch")
+    else if expectedExpiry.exists(_ < nowMillis) then Left("root grant expired")
+    else Right(())
 
   private def checkGrantJustification(proof: AuthorizationProof): Either[String, Unit] =
     val g = proof.grant

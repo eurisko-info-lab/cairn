@@ -80,27 +80,37 @@ object Sync:
     * consumer is missing, by digest. Returns fetched digests.
     * Blob copies authorize through each node's [[CasEffects]] context;
     * the consumer chain file is written through [[Filesystem]] on [[to]].
+    *
+    * Any authorized CAS failure (`contains` / `getBytes` / `putBytes`) aborts
+    * the pull — the consumer chain is not advanced with a partial blob set.
     */
   def pull(from: Node, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, List[Digest]] =
+    def casErr(e: Cas.Error): String = e match
+      case Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+      case Cas.Error.Io(m)      => m
+
+    def fetchMissing(d: Digest, acc: List[Digest]): Either[String, List[Digest]] =
+      CasEffects.contains(to.cas, d, to.ctx).left.map(casErr).flatMap {
+        case true => Right(acc)
+        case false =>
+          for
+            bs <- CasEffects.getBytes(from.cas, d, from.ctx).left.map(casErr)
+            actual <- CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr)
+            _ <- Either.cond(actual == d, (), s"put digest mismatch for ${d.short}")
+          yield d :: acc
+      }
+
     for
       theirBlocks <- from.blocks
       _ <- LedgerKernel.replay(authorities, theirBlocks, Ed25519.verify)
       st <- from.state(authorities)
-      fetched <- Right {
-        val out = List.newBuilder[Digest]
-        def fetch(d: Digest): Unit =
-          val missing = CasEffects.contains(to.cas, d, to.ctx).forall(!_)
-          if missing then
-            CasEffects.getBytes(from.cas, d, from.ctx).foreach { bs =>
-              CasEffects.putBytes(to.cas, bs, to.ctx).foreach { _ => out += d }
-            }
-        theirBlocks.foreach(b => fetch(b.digest))
-        st.published.foreach { render =>
-          render.split(":") match
-            case Array(_, value, _) => Digest.parse(value).foreach(fetch)
-            case _                  => () }
-        out.result()
-      }
+      publishedDigests = st.published.toList.flatMap(_.split(":") match
+        case Array(_, value, _) => Digest.parse(value).toOption
+        case _                  => None)
+      want = theirBlocks.map(_.digest) ++ publishedDigests
+      fetched <- want.foldLeft[Either[String, List[Digest]]](Right(Nil)) { (acc, d) =>
+        acc.flatMap(fetchMissing(d, _))
+      }.map(_.reverse)
       _ <- to.writeChain(theirBlocks.map(_.digest))
     yield fetched
 

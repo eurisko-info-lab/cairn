@@ -2,7 +2,7 @@ package cairn.systemhandler
 
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.kernel.Authority.{CapabilityGrant, EffectRequest, Resource, Subject}
+import cairn.kernel.Authority.{EffectRequest, Resource, Subject, VerifiedCapability}
 import cairn.kernel.Effects
 
 /** Explicit effect-execution context. Composition roots construct this and
@@ -10,20 +10,26 @@ import cairn.kernel.Effects
   * and must not hold a gate — they accept only [[AuthorizedEffect]].
   *
   * Carries [[subject]] + [[gate]] for the authorize step; [[capabilities]] is
-  * consulted first when non-empty (covering grant → Kernel check, no broad
-  * policy re-eval); [[clock]] supplies injectable time for grant expiry.
+  * consulted first when non-empty (covering [[VerifiedCapability]] → Kernel
+  * check, no broad policy re-eval); [[clock]] supplies injectable time for
+  * grant expiry.
+  *
+  * Capabilities must be Kernel-minted via [[VerifiedCapability.fromProof]];
+  * raw [[CapabilityGrant]] values are not accepted by [[withCapabilities]].
+  * Replay-store residual: nonce/requestId consumption remains on the local
+  * [[AuthorityGate]].
   */
 final case class EffectContext(
     subject: Subject,
     gate: AuthorityGate,
-    capabilities: List[CapabilityGrant] = Nil,
+    capabilities: List[VerifiedCapability] = Nil,
     audit: EffectContext.Audit = EffectContext.Audit.Local,
     clock: () => Long = System.currentTimeMillis,
 ):
   def withSubject(s: Subject): EffectContext = copy(subject = s)
   def withGate(g: AuthorityGate): EffectContext = copy(gate = g)
   def withClock(c: () => Long): EffectContext = copy(clock = c)
-  def withCapabilities(caps: List[CapabilityGrant]): EffectContext = copy(capabilities = caps)
+  def withCapabilities(caps: List[VerifiedCapability]): EffectContext = copy(capabilities = caps)
 
   /** Build an [[EffectRequest]] using this context's subject. */
   def effectRequest(
@@ -36,16 +42,16 @@ final case class EffectContext(
 
   /** Single authorize entry point.
     *
-    * When [[capabilities]] is non-empty: find a covering grant → Kernel
-    * [[Authority.checkCapability]] (no policy prove). When empty: fall back
-    * to Core prove → Kernel checkProof via the gate.
+    * When [[capabilities]] is non-empty: find a covering verified grant →
+    * Kernel [[Authority.checkCapability]] (no policy prove). When empty: fall
+    * back to Core prove → Kernel checkProof via the gate.
     */
   def authorize(req: EffectRequest): Either[String, AuthorizedEffect] =
     val now = clock()
     if capabilities.nonEmpty then
       capabilities.find(_.covers(req, now)) match
-        case Some(grant) => gate.checkCapability(req, grant, now).map(AuthorizedEffect.mint)
-        case None        => Left("no covering capability in context")
+        case Some(cap) => gate.checkCapability(req, cap.grant, now).map(AuthorizedEffect.mint)
+        case None      => Left("no covering capability in context")
     else
       gate.check(req, now).map(AuthorizedEffect.mint)
 

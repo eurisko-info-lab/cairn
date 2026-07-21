@@ -66,8 +66,10 @@ object PolicyEval:
 
   /** Prove a final grantee's request via an Alice→…→Carol delegation chain.
     *
-    * Root policies must match the root grantor; the chain is Kernel-validated;
-    * the final child must cover `req`. Cited allows justify the root, not Carol.
+    * Root grant is fully justified against cited policies (resource, expiry,
+    * nonce, conditions) **before** hop validation — a manually widened TTL or
+    * omitted policy nonce on the root is rejected. The chain is then
+    * Kernel-validated; the final child must cover `req`.
     */
   def proveDelegated(
       req: EffectRequest,
@@ -77,30 +79,53 @@ object PolicyEval:
   ): Either[String, AuthorizationProof] =
     if chain.isEmpty then Left("empty delegation chain")
     else
-      Delegation.validateChain(chain).flatMap { finalGrant =>
-        if !finalGrant.covers(req, nowMillis) then Left("final grant does not cover request")
-        else if finalGrant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
+      val root = chain.head.parent
+      val rootReq = req.copy(subject = root.subject, action = root.action, resource = root.resource)
+      val matched = policies.filter(_.matches(rootReq))
+      val denies = matched.filter(_.decision == Decision.Deny)
+      if denies.nonEmpty then Left(s"deny by ${denies.map(_.id).mkString(",")}")
+      else
+        val allows = matched.filter(_.decision == Decision.Allow)
+        if allows.isEmpty then Left("no matching allow policy for root grantor")
         else
-          val root = chain.head.parent
-          val rootReq = req.copy(subject = root.subject, action = root.action, resource = root.resource)
-          val matched = policies.filter(_.matches(rootReq))
-          val denies = matched.filter(_.decision == Decision.Deny)
-          if denies.nonEmpty then Left(s"deny by ${denies.map(_.id).mkString(",")}")
-          else
-            val allows = matched.filter(_.decision == Decision.Allow)
-            if allows.isEmpty then Left("no matching allow policy for root grantor")
-            else if allows.exists(p => !root.resource.matches(p.resource)) then
-              Left("root grant widens beyond cited policy resource")
-            else
-              val grant = finalGrant.copy(sourcePolicyIds = allows.map(_.id))
-              Right(AuthorizationProof(
-                request = req,
-                nowMillis = nowMillis,
-                allowPolicies = allows,
-                grant = grant,
-                conditionEvidence = conditionEvidence(req, allows),
-                delegationChain = chain))
-      }
+          justifyRootGrant(root, rootReq, allows, nowMillis).flatMap { _ =>
+            Delegation.validateChain(chain).flatMap { finalGrant =>
+              if !finalGrant.covers(req, nowMillis) then Left("final grant does not cover request")
+              else if finalGrant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
+              else
+                val grant = finalGrant.copy(sourcePolicyIds = allows.map(_.id))
+                Right(AuthorizationProof(
+                  request = req,
+                  nowMillis = nowMillis,
+                  allowPolicies = allows,
+                  grant = grant,
+                  conditionEvidence = conditionEvidence(rootReq, allows),
+                  delegationChain = chain))
+            }
+          }
+
+  /** Root grant must match cited allows exactly on resource / expiry / nonce
+    * (no omitted policy nonce, no widened TTL) and cover `rootReq` at `now`.
+    */
+  private def justifyRootGrant(
+      root: CapabilityGrant,
+      rootReq: EffectRequest,
+      allows: List[EffectPolicy],
+      nowMillis: Long
+  ): Either[String, Unit] =
+    val expectedExpiry = allows.flatMap(_.metaExpiresAt).minOption
+    val expectedNonce = rootReq.args.get("nonce").orElse(allows.flatMap(_.metaNonce).headOption)
+    if root.subject != rootReq.subject then Left("root grant subject mismatch")
+    else if root.action != rootReq.action then Left("root grant action mismatch")
+    else if allows.exists(p => !root.resource.matches(p.resource)) then
+      Left("root grant widens beyond cited policy resource")
+    else if root.resource != rootReq.resource then Left("root grant resource mismatch")
+    else if root.expiresAtEpochMillis != expectedExpiry then Left("root grant expiry mismatch")
+    else if root.nonce != expectedNonce then Left("root grant nonce mismatch")
+    else if expectedExpiry.exists(_ < nowMillis) then Left("root grant expired")
+    else if !root.covers(rootReq, nowMillis) then Left("root grant does not cover root request")
+    else if !allows.forall(_.conditionsHold(rootReq)) then Left("root grant conditions not satisfied")
+    else Right(())
 
   private def conditionEvidence(req: EffectRequest, allows: List[EffectPolicy]): Map[String, String] =
     allows.iterator

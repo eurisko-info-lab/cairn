@@ -168,17 +168,22 @@ object CasEffects:
   *
   * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
   * [[cairn.core.SemanticRepository.integrate]] then either advance the target
-  * head or persist the conflict artifact. [[commitTip]] persists the
-  * ValidatedChangeSet alongside the tip (tip sidecar + append-only history
-  * log) so everyday merge need not pass change histories explicitly.
+  * head or persist the conflict artifact. [[commitTip]] accepts only
+  * [[SemanticRepository.ValidatedTip]]; change-sets are replay-checked on load.
+  * Causal digests are also written into [[BranchManifest]] (CAS-backed);
+  * refs sidecars remain for compatibility.
   *
-  * [[mergeBranches]] composes each side's full stacked history (not tip-only)
-  * when multiple commits share a causal chain from a common base.
+  * [[mergeBranches]] finds a common-ancestor prefix of stacked histories when
+  * both sides share a causal chain, then merges the divergent suffixes.
   *
   * Accept is local-only by default: advancing the branch ref does **not**
   * publish to the ledger. Call [[publishHead]] explicitly (or pass
   * `publish = Some(...)` to [[merge]] / [[mergeBranches]]) when a ledger
   * `SetBranchHead` is wanted.
+  *
+  * Branch updates put CAS blobs before writing the ref pointer (CAS-first);
+  * a crash mid-update may leave unreferenced blobs — not a full multi-store
+  * transaction across optional ledger publish.
   */
 final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private def casErr(e: Cas.Error): String = e match
@@ -249,10 +254,20 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     val line = vcsKey.valueHash.hex + "\n"
     refsWrite(hist, prev + line)
 
-  private def loadVcs(digest: Digest): Either[String, Delta.ValidatedChangeSet] =
+  /** Load + replay-check a change-set artifact against `language`. */
+  private def loadVcs(
+      language: ComposedLanguage, digest: Digest
+  ): Either[String, Delta.ValidatedChangeSet] =
     getByDigest(digest).flatMap { a =>
-      if a.kind != ArtifactKind.ChangeSet then Left(s"digest ${digest.short} is ${a.kind.name}, not a change-set")
-      else Right(Delta.ValidatedChangeSet.fromCanon(a.body))
+      if a.kind != ArtifactKind.ChangeSet then
+        Left(s"digest ${digest.short} is ${a.kind.name}, not a change-set")
+      else
+        val claim = Delta.ValidatedChangeSet.decodeClaim(a.body)
+        getByDigest(claim.base).flatMap { baseArt =>
+          if baseArt.kind != ArtifactKind.Ir then
+            Left(s"base ${claim.base.short} is not a module")
+          else Delta.ValidatedChangeSet.check(language, Module.fromCanon(baseArt.body), claim)
+        }
     }
 
   /** Compose stacked ValidatedChangeSets into one change relative to the
@@ -274,6 +289,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           val composed = hist.map(_.change).reduceLeft(ChangeAlgebra.compose(language, _, _))
           Right((hist.head.base, composed))
 
+  /** Longest shared causal prefix (by successive `result` digests). */
+  private def commonAncestorPrefix(
+      a: List[Delta.ValidatedChangeSet],
+      b: List[Delta.ValidatedChangeSet],
+  ): Int =
+    a.zip(b).takeWhile((x, y) => x.result == y.result && x.base == y.base && x.change == y.change).length
+
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
     if !refsExists(p) then BranchManifest(branch, None, Nil)
@@ -281,10 +303,26 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       val d = Digest(refsRead(p).trim)
       getByDigest(d).map(a => BranchManifest.fromCanon(a.body)).fold(e => throw RuntimeException(e), identity)
 
-  /** Append: new head goes to history head; manifest itself stored in CAS. */
-  def advance(branch: String, newHead: TypedKey): BranchManifest =
+  /** Append: new head goes to history head; manifest itself stored in CAS.
+    * Optional causal digests are recorded on the manifest.
+    */
+  def advance(
+      branch: String,
+      newHead: TypedKey,
+      acceptedChange: Option[Digest] = None,
+      parents: List[Digest] = Nil,
+      causalHistoryRoot: Option[Digest] = None,
+      conflictState: Option[Digest] = None,
+  ): BranchManifest =
     val cur = load(branch)
-    val next = BranchManifest(branch, Some(newHead), cur.head.toList ++ cur.history)
+    val next = BranchManifest(
+      branch,
+      Some(newHead),
+      cur.head.toList ++ cur.history,
+      causalHistoryRoot = causalHistoryRoot.orElse(cur.causalHistoryRoot),
+      parents = if parents.nonEmpty then parents else cur.head.toList.map(_.valueHash),
+      acceptedChange = acceptedChange.orElse(cur.acceptedChange),
+      conflictState = conflictState)
     val key = putArt(next.artifact)
     refsMkdirs()
     refsWrite(refPath(branch), key.valueHash.hex)
@@ -311,41 +349,52 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   def commitModule(branch: String, module: Module): BranchManifest =
     advance(branch, putArt(module.artifact))
 
-  /** Persist a semantic tip: store base + ValidatedChangeSet + tip module,
-    * record provenance, write the change sidecar + history log, and advance.
+  /** Persist a [[SemanticRepository.ValidatedTip]]: CAS blobs first, then
+    * sidecars + manifest with causal digests, then the ref pointer.
     */
-  def commitTip(branch: String, language: Digest, tip: SemanticRepository.Tip): BranchManifest =
+  def commitTip(branch: String, tip: SemanticRepository.ValidatedTip): BranchManifest =
     putArt(tip.base.artifact)
-    val vcs = Delta.ValidatedChangeSet(language, tip.baseDigest, tip.change, tip.tipDigest)
+    val vcs = tip.vcs
     val vcsKey = putArt(vcs.artifact)
     val modKey = putArt(tip.tip.artifact)
     Provenance.record(cas, tip.tipDigest, List(tip.baseDigest, vcsKey.valueHash), "semantic-commit", ctx)
       .fold(e => throw RuntimeException(casErr(e)), identity)
     persistChange(branch, vcsKey)
-    advance(branch, modKey)
+    val cur = load(branch)
+    val histRoot = cur.causalHistoryRoot.orElse(Some(vcs.base))
+    advance(
+      branch,
+      modKey,
+      acceptedChange = Some(vcsKey.valueHash),
+      parents = cur.head.toList.map(_.valueHash),
+      causalHistoryRoot = histRoot)
 
-  /** Load the tip ValidatedChangeSet recorded by [[commitTip]] / merge accept. */
-  def loadChange(branch: String): Either[String, Delta.ValidatedChangeSet] =
+  /** Load + replay-check the tip ValidatedChangeSet. */
+  def loadChange(
+      branch: String, language: ComposedLanguage
+  ): Either[String, Delta.ValidatedChangeSet] =
     val p = changeRefPath(branch)
     if !refsExists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
-    else loadVcs(Digest(refsRead(p).trim))
+    else loadVcs(language, Digest(refsRead(p).trim))
 
-  /** Full change history for `branch` (oldest → newest), from the `.changes` log.
-    * Falls back to the tip sidecar alone when the log is absent (pre-history tips).
-    */
-  def loadChangeHistory(branch: String): Either[String, List[Delta.ValidatedChangeSet]] =
+  /** Full change history (oldest → newest), each entry replay-checked. */
+  def loadChangeHistory(
+      branch: String, language: ComposedLanguage
+  ): Either[String, List[Delta.ValidatedChangeSet]] =
     val hist = changeHistoryPath(branch)
     if refsExists(hist) then
       val digests = refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
       digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
-        acc.flatMap(xs => loadVcs(d).map(xs :+ _))
+        acc.flatMap(xs => loadVcs(language, d).map(xs :+ _))
       }
-    else loadChange(branch).map(List(_))
+    else loadChange(branch, language).map(List(_))
 
-  /** Reconstruct a [[SemanticRepository.Tip]] from the tip sidecar + head module. */
-  def loadTip(branch: String): Either[String, SemanticRepository.Tip] =
+  /** Reconstruct a [[SemanticRepository.ValidatedTip]] (replay-checked). */
+  def loadTip(
+      branch: String, language: ComposedLanguage
+  ): Either[String, SemanticRepository.ValidatedTip] =
     for
-      vcs <- loadChange(branch)
+      vcs <- loadChange(branch, language)
       tipMod <- headModule(branch)
       baseArt <- getByDigest(vcs.base)
       base <-
@@ -353,7 +402,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         else Right(Module.fromCanon(baseArt.body))
       _ <- Either.cond(tipMod.digest == vcs.result, (),
         s"branch '$branch' head ${tipMod.digest.short} does not match change result ${vcs.result.short}")
-    yield SemanticRepository.Tip(base, tipMod, vcs.change)
+      checked <- SemanticRepository.ValidatedTip.check(
+        language, SemanticRepository.Tip(base, tipMod, vcs.change))
+    yield checked
 
   /** Optional ledger publish after a local accept. */
   final case class Publish(
@@ -387,10 +438,16 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeTheirs: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
       publish: Option[Publish] = None,
+      parentBranches: List[String] = Nil,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
-        putArt(conflict.artifact)
+        val conflictKey = putArt(conflict.artifact)
+        val cur = load(into)
+        val marked = BranchManifest(
+          into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
+          cur.acceptedChange, conflictState = Some(conflictKey.valueHash))
+        putArt(marked.artifact) // record conflict digest in CAS; head unchanged
         Right(Left(conflict))
       case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
         val vcsKey = putArt(vcs.artifact)
@@ -399,11 +456,22 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           List(base.digest, vcsKey.valueHash), "semantic-merge", ctx)
           .fold(e => throw RuntimeException(casErr(e)), identity)
         persistChange(into, vcsKey)
-        maybePublish(into, Right(advance(into, modKey)), publish)
+        val parentDigests =
+          if parentBranches.nonEmpty then
+            parentBranches.flatMap(b => load(b).head.map(_.valueHash))
+          else load(into).head.toList.map(_.valueHash)
+        maybePublish(
+          into,
+          Right(advance(
+            into, modKey,
+            acceptedChange = Some(vcsKey.valueHash),
+            parents = parentDigests,
+            causalHistoryRoot = Some(base.digest))),
+          publish)
     }
 
-  /** Everyday merge: compose full stacked histories from [[commitTip]] on
-    * `ours` / `theirs` (shared oldest base). No explicit Cst.
+  /** Everyday merge: common-ancestor prefix of stacked histories, then merge
+    * divergent suffixes. Loaded change-sets are replay-checked.
     * Ledger publish remains opt-in via `publish` (default: local accept only).
     */
   def mergeBranches(
@@ -415,19 +483,63 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish: Option[Publish] = None,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
-      histA <- loadChangeHistory(ours)
-      histB <- loadChangeHistory(theirs)
-      stackedA <- composeHistory(language, histA)
-      stackedB <- composeHistory(language, histB)
-      (baseDigA, chA) = stackedA
-      (baseDigB, chB) = stackedB
-      _ <- Either.cond(baseDigA == baseDigB, (),
-        s"branch histories do not share a base: ${baseDigA.short} vs ${baseDigB.short}")
-      baseArt <- getByDigest(baseDigA)
+      histA <- loadChangeHistory(ours, language)
+      histB <- loadChangeHistory(theirs, language)
+      shared = commonAncestorPrefix(histA, histB)
+      suffixA = histA.drop(shared)
+      suffixB = histB.drop(shared)
+      // Merge base = end of shared prefix, else oldest shared empty-base.
+      baseDig <-
+        if shared > 0 then Right(histA(shared - 1).result)
+        else if histA.nonEmpty && histB.nonEmpty && histA.head.base == histB.head.base then
+          Right(histA.head.base)
+        else if histA.isEmpty || histB.isEmpty then Left("empty branch history")
+        else Left(s"branch histories do not share a base: ${histA.head.base.short} vs ${histB.head.base.short}")
+      stackedA <-
+        if suffixA.isEmpty then Right(None)
+        else composeHistory(language, suffixA).map(Some(_))
+      stackedB <-
+        if suffixB.isEmpty then Right(None)
+        else composeHistory(language, suffixB).map(Some(_))
+      baseArt <- getByDigest(baseDig)
       base <-
-        if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDigA.short} is not a module")
+        if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDig.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
-      out <- merge(language, into, base, chA, chB, migration, publish)
+      out <- (stackedA, stackedB) match
+        case (None, None) =>
+          // Identical histories — fast-forward into from ours tip.
+          headModule(ours).map(m => Right(advance(
+            into, putArt(m.artifact),
+            acceptedChange = load(ours).acceptedChange,
+            parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
+            causalHistoryRoot = Some(baseDig))))
+        case (Some((_, chA)), Some((_, chB))) =>
+          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs))
+        case (Some((_, chA)), None) =>
+          // Only ours diverged — apply ours suffix onto base.
+          SemanticRepository.commit(language, base, chA).flatMap { (mod, vcs) =>
+            val vcsKey = putArt(vcs.artifact)
+            val modKey = putArt(mod.artifact)
+            persistChange(into, vcsKey)
+            maybePublish(
+              into,
+              Right(advance(into, modKey, Some(vcsKey.valueHash),
+                parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
+                causalHistoryRoot = Some(baseDig))),
+              publish)
+          }
+        case (None, Some((_, chB))) =>
+          SemanticRepository.commit(language, base, chB).flatMap { (mod, vcs) =>
+            val vcsKey = putArt(vcs.artifact)
+            val modKey = putArt(mod.artifact)
+            persistChange(into, vcsKey)
+            maybePublish(
+              into,
+              Right(advance(into, modKey, Some(vcsKey.valueHash),
+                parents = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash)),
+                causalHistoryRoot = Some(baseDig))),
+              publish)
+          }
     yield out
 
   /** Opt-in ledger publication of an accepted branch head: `PublishArtifact`
