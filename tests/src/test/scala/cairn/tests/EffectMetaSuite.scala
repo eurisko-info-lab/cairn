@@ -4,10 +4,12 @@ import cairn.kernel.*
 import cairn.systeminterface.Random as RandomEffect
 import cairn.systeminterface.Clock as ClockEffect
 import cairn.systeminterface.Process as ProcessEffect
+import cairn.systeminterface.ExternalBackend as BackendEffect
 
 /** Meta-defined effect interfaces (post-migration priority #1): `Random`,
-  * `Clock`, and `Process` are Fragment-defined template families. These are
-  * mechanical drift guards, same spirit as `ModuleBoundarySuite`.
+  * `Clock`, `Process`, and `ExternalBackend` are Fragment-defined template
+  * families. These are mechanical drift guards, same spirit as
+  * `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -64,4 +66,26 @@ class EffectMetaSuite extends munit.FunSuite:
       case ProcessEffect.Request.Run(_, _, _) => "run"
     val scalaReqCases = Set(ctorNameOf(ProcessEffect.Request.Run(Nil)))
     val fragmentReqCtors = EffectMeta.process.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.externalBackend composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.externalBackend", List(EffectMeta.externalBackend)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("actionsOf(ExternalBackend, ...) matches the hand-tagged actions exactly (incl. the fixed drift)"):
+    val derived = EffectMeta.actionsOf(Effects.Family.ExternalBackend, EffectMeta.externalBackend).toSet
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.ExternalBackend).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 2) // Find + Run — was 1 (Run only) before this slice
+
+  test("system-interface.ExternalBackend.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    // Find(host) and Run(host, args, cwd) both take parameters, so
+    // exhaustive match, same as Random/Process.
+    def ctorNameOf(r: BackendEffect.Request): String = r match
+      case BackendEffect.Request.Find(_)       => "find"
+      case BackendEffect.Request.Run(_, _, _)  => "run"
+    val scalaReqCases = Set(
+      ctorNameOf(BackendEffect.Request.Find(BackendEffect.Host.ScalaCli)),
+      ctorNameOf(BackendEffect.Request.Run(BackendEffect.Host.ScalaCli, Nil)))
+    val fragmentReqCtors = EffectMeta.externalBackend.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)

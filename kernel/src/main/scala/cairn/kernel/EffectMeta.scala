@@ -55,10 +55,27 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
+  val externalBackend: Fragment = Fragment(
+    name = "effect.externalBackend",
+    provides = List("effect.externalBackend"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("find", "Request", List("Host")),
+      CtorDef("run", "Request", List("Host", "Args", "Path")),
+      CtorDef("found", "Response", List("Path")),
+      CtorDef("missing", "Response", List("Host")),
+      CtorDef("processResult", "Response", List("Int", "Str")),
+      CtorDef("io", "Error", List("Str"))))
+
   val fragments: Map[Effects.Family, Fragment] = Map(
     Effects.Family.Random -> random,
     Effects.Family.Clock -> clock,
-    Effects.Family.Process -> process)
+    Effects.Family.Process -> process,
+    Effects.Family.ExternalBackend -> externalBackend)
 
   /** The rights vocabulary for a family, projected from its Fragment: every
     * declared [[Effects.Action]] whose name matches a `Request`-sorted

@@ -34,4 +34,5 @@ object Effects:
     case TerminalWrite    extends Action(Family.Terminal, "write")
     case LspServe         extends Action(Family.Lsp, "serve")
     case BackendRun       extends Action(Family.ExternalBackend, "run")
+    case BackendFind      extends Action(Family.ExternalBackend, "find")
     case WorkspaceRead    extends Action(Family.Workspace, "read")

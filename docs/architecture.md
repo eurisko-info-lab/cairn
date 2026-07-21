@@ -57,8 +57,9 @@ and resource vocabularies instead of hand-maintaining them independently of
 each other, the way `core.Meta` already treats the Fragment IR as a Cairn
 language rather than an opaque Scala shape.
 
-- **`Random`, `Clock`, `Process`** (done): `kernel.EffectMeta.{random,clock,process}`
-  are Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
+- **`Random`, `Clock`, `Process`, `ExternalBackend`** (done):
+  `kernel.EffectMeta.{random,clock,process,externalBackend}` are
+  Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
   requests are host-constructed, not user-typed source text) describing each
   family's `Request`/`Response`/`Error` shapes. `EffectMeta.actionsOf`
   projects a family's rights vocabulary from its Fragment and is checked
@@ -72,12 +73,40 @@ language rather than an opaque Scala shape.
   Fragment, and now caught by `EffectMetaSuite` going forward. `Process`
   confirmed the mechanism doesn't cry wolf (no drift found) and that a
   plain `case class` response (`Process.Result`, not a `Response` enum)
-  maps to a single-constructor sort without friction.
-- **Remaining 10 families** (`Filesystem`, `Cas`, `Workspace`, `Crypto`,
-  `Network`, `Http`, `LedgerTransport`, `Terminal`, `Lsp`,
-  `ExternalBackend`) — not yet converted; `Random`/`Clock`/`Process` are the
-  template, each is a separate future slice. Same incremental-adoption
-  shape as `AuthorityGate`'s per-family `Enforce` rollout below.
+  maps to a single-constructor sort without friction. `ExternalBackend` had
+  the same shape of gap as `Clock`: `Request.Find` had no matching `Action`
+  (only `Run` did) despite `system-handler.ExternalBackend.perform`
+  executing `Find` directly — fixed by adding `BackendFind`. Its `Host` enum
+  (the tool being invoked: `ScalaCli`/`Cargo`/`Runghc`/`Lake`) became an
+  informal `"Host"` argSort tag rather than its own sort, same convention as
+  `Process`'s `"Command"`/`"Path"` tags — `CtorDef.argSorts` are free-form,
+  unvalidated by `Compose.compose` (confirmed by reading it in full; already
+  relied on by `user.policy.PolicyLang`'s `"Name"` tags), so this needed no
+  new Fragment-IR machinery.
+- **Vestigial families** (found while scoping the `ExternalBackend` slice,
+  by checking for a `def perform(req: X.Request)` entry point in
+  `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
+  **no handler implementation at all** — real functionality (if any) is
+  implemented elsewhere bypassing the `system-interface` contract entirely
+  (HTTP: `system-handler.HttpNode`/`HttpSync`/`Distribution` and
+  `surface.Browser` use raw JDK `com.sun.net.httpserver.HttpServer`
+  directly; crypto: `cairn.ledger.Ed25519`/`Encryption`, not
+  `system-interface.Crypto`). Converting these to Meta-defined form would be
+  Meta-defining dead code — lower priority than the still-live families, and
+  possibly a case for removing them instead of converting them (an explicit
+  decision for later, not made here). `Cas` is a trait-based contract, not a
+  Request/Response enum family, and is out of scope for this mechanism as
+  designed.
+- **Remaining live families** (`Filesystem`, `Workspace`, `Terminal`,
+  `Lsp`) — not yet converted; the four done above are the template, each is
+  a separate future slice. `Lsp` needs a design decision first: its single
+  `Action` (`LspServe`) doesn't name-match either `Request` case
+  (`ReadMessage`/`WriteMessage`) at all, suggesting a session-level gate
+  rather than a per-request right — `actionsOf`'s current one-`Action`-per-
+  `Request`-constructor assumption doesn't fit `Lsp` as-is, so converting it
+  means either changing that assumption or deciding `Lsp` needs new,
+  per-message actions. Same incremental-adoption shape as `AuthorityGate`'s
+  per-family `Enforce` rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
   hand-written Scala enum — `EffectMeta.actionsOf` checks it, doesn't
   replace it) and typed per-family resources (`Authority.Resource` is still
