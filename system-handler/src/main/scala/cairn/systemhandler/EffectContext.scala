@@ -87,7 +87,8 @@ object EffectContext:
     EffectContext(subject, AuthorityGate.enforcing(PolicyEval.packLoaderWorkspace(subject)), Nil, audit)
 
   /** Ledger composition root: append under any ledger root (subject `*` so
-    * signing authorities authorize) plus local CAS put/get for the node store.
+    * signing authorities authorize), local CAS put/get, and chain-file FS
+    * (read/write/mkdirs) for the node store.
     */
   def forLedger(audit: Audit = Audit.Local): EffectContext =
     localCtx(PolicyEval.ledgerWithCas(), audit)

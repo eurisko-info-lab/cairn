@@ -4,10 +4,10 @@ import cairn.kernel.*
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.{InetSocketAddress, URI}
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
-import java.nio.file.Files
 
 /** HTTP node surface + want/have pull sync (Phase 3 http/network families).
-  * Moved from `ledger.Distribution`.
+  * Moved from `ledger.Distribution`. Chain-file writes go through
+  * [[Filesystem]] on the consumer node (same as [[Sync.pull]]).
   */
 final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
   private var server: HttpServer | Null = null
@@ -82,9 +82,8 @@ object HttpSync:
           }
         }
       }
-    yield
-      Files.writeString(to.root.resolve("chain"), remoteChain.map(_.hex).mkString("", "\n", "\n"))
-      PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
+      _ <- to.writeChain(remoteChain)
+    yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
 
 object Gossip:
   final case class Reorg(node: String, fromHead: Option[Digest], toHead: Digest, forkPoint: Int)
@@ -160,7 +159,7 @@ object Provenance:
       case Right(_) =>
         Right(
           CasAdmin.objectFiles(root)
-            .flatMap(p => Artifact.decode(Files.readAllBytes(p)).toOption)
+            .flatMap(p => Artifact.decode(java.nio.file.Files.readAllBytes(p)).toOption)
             .flatMap(fromArtifact)
             .map(r => r.output.hex -> r)
             .toMap)

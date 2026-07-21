@@ -254,11 +254,16 @@ object PolicyEval:
   ): List[EffectPolicy] =
     casStore(subject, casPathPattern) ++ filesystemStore(subject, refsPathPattern)
 
-  /** Ledger node + its local CAS (append as any subject; CAS as `local`). */
+  /** Ledger node + its local CAS + chain-file FS (append as any subject;
+    * CAS / chain FS as `local`).
+    */
   def ledgerWithCas(
       subject: Subject | "*" = "*",
       rootPattern: String = "*",
       casSubject: Subject = Subject("local"),
+      chainPathPattern: String = "*",
   ): List[EffectPolicy] =
-    ledgerNode(subject, rootPattern) ++ casStore(casSubject)
+    ledgerNode(subject, rootPattern) ++
+      casStore(casSubject) ++
+      filesystemStore(casSubject, chainPathPattern)
 

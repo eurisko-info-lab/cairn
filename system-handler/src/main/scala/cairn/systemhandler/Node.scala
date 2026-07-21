@@ -2,8 +2,9 @@ package cairn.systemhandler
 
 import cairn.kernel.*
 import cairn.systeminterface.Cas
+import cairn.systeminterface.Filesystem as Fs
 import cairn.systeminterface.LedgerTransport as LT
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** Single-node PoA ledger over a CAS directory (Phase 3 ledger-transport
   * family). Moved from `ledger.Node`. All validation delegates to the pure
@@ -12,24 +13,55 @@ import java.nio.file.{Files, Path}
   * Constructed with an [[EffectContext]] for the gate; ledger append still
   * authenticates as the signing authority (`Subject(authority.name)`), not
   * the process-local subject — that identity is intrinsic to the seal.
-  * CAS puts/gets on the node store go through [[CasEffects]].
+  * CAS puts/gets on the node store go through [[CasEffects]]; the chain file
+  * is read/written through [[Filesystem]] (use [[EffectContext.forLedger]]).
   */
 final class Node(val root: Path, val ctx: EffectContext):
   val cas: Cas = DiskCas(root)
   private val chainFile = root.resolve("chain")
 
+  private def fsAbs(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
+
+  private def fsErr(e: Fs.Error): String = e match
+    case Fs.Error.NotFound(p) => s"not found: ${p.value}"
+    case Fs.Error.Io(m)       => m
+
+  private def fsRun(req: Fs.Request): Either[String, Fs.Response] =
+    Filesystem.run(req, ctx).left.map(fsErr)
+
+  /** Read the on-disk chain digest list (authorized FS read/exists). */
+  private[systemhandler] def readChainDigests: Either[String, List[Digest]] =
+    fsRun(Fs.Request.Exists(fsAbs(chainFile))) match
+      case Right(Fs.Response.Bool(false)) => Right(Nil)
+      case Right(Fs.Response.Bool(true)) =>
+        fsRun(Fs.Request.Read(fsAbs(chainFile))) match
+          case Right(Fs.Response.Text(s)) =>
+            Right(s.linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList)
+          case Left(e)  => Left(e)
+          case other    => Left(s"unexpected fs response: $other")
+      case Left(e) => Left(e)
+      case other   => Left(s"unexpected fs response: $other")
+
+  /** Write the chain file (authorized FS mkdirs + write). */
+  private[systemhandler] def writeChain(digests: List[Digest]): Either[String, Unit] =
+    for
+      _ <- fsRun(Fs.Request.Mkdirs(fsAbs(root)))
+      _ <- fsRun(Fs.Request.Write(fsAbs(chainFile), digests.map(_.hex).mkString("", "\n", "\n")))
+    yield ()
+
   def chainDigests: List[Digest] =
-    if !Files.exists(chainFile) then Nil
-    else Files.readAllLines(chainFile).toArray.toList.map(l => Digest(l.toString.trim)).filter(_ => true)
+    readChainDigests.fold(e => throw RuntimeException(e), identity)
 
   def blocks: Either[String, List[Block]] =
-    chainDigests.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
-      acc.flatMap { bs =>
-        CasEffects.get(cas, d, ctx) match
-          case Right(a) => Right(bs :+ Block.fromCanon(a.body))
-          case Left(cairn.systeminterface.Cas.Error.Missing(_)) =>
-            Left(s"blob ${d.short} not in CAS")
-          case Left(cairn.systeminterface.Cas.Error.Io(m)) => Left(m)
+    readChainDigests.flatMap { digests =>
+      digests.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
+        acc.flatMap { bs =>
+          CasEffects.get(cas, d, ctx) match
+            case Right(a) => Right(bs :+ Block.fromCanon(a.body))
+            case Left(cairn.systeminterface.Cas.Error.Missing(_)) =>
+              Left(s"blob ${d.short} not in CAS")
+            case Left(cairn.systeminterface.Cas.Error.Io(m)) => Left(m)
+        }
       }
     }
 
@@ -46,28 +78,31 @@ final class Node(val root: Path, val ctx: EffectContext):
 object Sync:
   /** Pull-based blob sync: copy blocks + published artifact bodies the
     * consumer is missing, by digest. Returns fetched digests.
-    * Blob copies authorize through each node's [[CasEffects]] context.
+    * Blob copies authorize through each node's [[CasEffects]] context;
+    * the consumer chain file is written through [[Filesystem]] on [[to]].
     */
   def pull(from: Node, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, List[Digest]] =
     for
       theirBlocks <- from.blocks
       _ <- LedgerKernel.replay(authorities, theirBlocks, Ed25519.verify)
       st <- from.state(authorities)
-    yield
-      val fetched = List.newBuilder[Digest]
-      def fetch(d: Digest): Unit =
-        val missing = CasEffects.contains(to.cas, d, to.ctx).forall(!_)
-        if missing then
-          CasEffects.getBytes(from.cas, d, from.ctx).foreach { bs =>
-            CasEffects.putBytes(to.cas, bs, to.ctx).foreach { _ => fetched += d }
-          }
-      theirBlocks.foreach(b => fetch(b.digest))
-      st.published.foreach { render =>
-        render.split(":") match
-          case Array(_, value, _) => Digest.parse(value).foreach(fetch)
-          case _                  => () }
-      Files.writeString(to.root.resolve("chain"), theirBlocks.map(_.digest.hex).mkString("", "\n", "\n"))
-      fetched.result()
+      fetched <- Right {
+        val out = List.newBuilder[Digest]
+        def fetch(d: Digest): Unit =
+          val missing = CasEffects.contains(to.cas, d, to.ctx).forall(!_)
+          if missing then
+            CasEffects.getBytes(from.cas, d, from.ctx).foreach { bs =>
+              CasEffects.putBytes(to.cas, bs, to.ctx).foreach { _ => out += d }
+            }
+        theirBlocks.foreach(b => fetch(b.digest))
+        st.published.foreach { render =>
+          render.split(":") match
+            case Array(_, value, _) => Digest.parse(value).foreach(fetch)
+            case _                  => () }
+        out.result()
+      }
+      _ <- to.writeChain(theirBlocks.map(_.digest))
+    yield fetched
 
   enum Comparison:
     case Same

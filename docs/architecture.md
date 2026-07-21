@@ -87,7 +87,7 @@ capabilities fall back to Core `prove` → Kernel `checkProof`.
   `CasAdminEffects`; LedgerTransport `append` through `LedgerTransport.run`
   (`Node.append` is a thin adapter).
 - **Mode:** Enforce is live at composition roots. Narrow deployment policies:
-  PackLoader (`packLoaderWorkspace`), ledger+CAS (`forLedger`), process
+  PackLoader (`packLoaderWorkspace`), ledger+CAS+chain FS (`forLedger`), process
   (`forProcess`), LSP (`forLsp`), backends (`forBackend`), CAS (`forCas`),
   branches (`forBranches` = CAS + refs FS), filesystem (`forFilesystem`).
   `bootstrapped()` remains available for rare allow-all fixtures; composition
@@ -135,6 +135,7 @@ Ledger `SetBranchHead` is **opt-in** via `Branches.publishHead` or
 CAS put/get/contains go through `CasEffects` + `EffectContext`; refs FS through
 `Filesystem` (`EffectContext.forBranches`); admin via `CasAdminEffects`.
 Provenance `index`/`why` authorize CAS `stats` on the store root then walk.
+Node/Sync/HttpSync chain-file I/O goes through `Filesystem` (`EffectContext.forLedger`).
 
 ## Agreement envelopes (Lean · HVM)
 
@@ -173,9 +174,9 @@ LeanCore `#check` envelope.
   `publish = Some(...)` on merge) — not the default on accept.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
-  Unison host glue, sync `contains`, Browser stats, provenance `why`, and
-  Branches refs FS go through `CasEffects` / `CasAdminEffects` /
-  `Filesystem` (`forBranches`).
+  Unison host glue, sync `contains`, Browser stats, provenance `why`,
+  Branches refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
+  `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger`).
 
 ## Final principle
 

@@ -7,11 +7,13 @@ What exists after PLAN-2 (M38–M39) and what remains deferred.
 - **Pull-based blob sync** (`ledger.Sync.pull`): consumer replays the producer's
   blocks through the pure `LedgerKernel` (seals, parents, state roots) BEFORE
   adopting anything, then materializes missing published bodies by digest.
+  Chain-file adoption writes through `Filesystem` on the consumer's
+  `EffectContext.forLedger` (same gate as Node append).
 - **HTTP node surface** (`ledger.HttpNode` / `HttpSync`, M38): `/chain`,
   `/blob/{hex}`, `/heads`; pulls negotiate want/have digest sets, verify every
-  byte on arrival (content-addressed re-hash + kernel replay), and RESUME
-  safely — interruption loses nothing because every step is an idempotent
-  CAS write (second pull fetches zero).
+  byte on arrival (content-addressed re-hash + kernel replay), write the chain
+  via `Filesystem`, and RESUME safely — interruption loses nothing because
+  every step is an idempotent CAS write (second pull fetches zero).
 - **Gossip + fork choice** (`ledger.Gossip`, M39): round-based digest gossip
   over real node stores; rule = longest valid chain, ties break on smallest
   head digest; switching chains emits an EXPLICIT `Reorg(node, from, to,

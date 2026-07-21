@@ -2,10 +2,10 @@ package cairn.systemhandler
 
 import cairn.kernel.*
 import cairn.systeminterface.LedgerTransport as LT
-import java.nio.file.Files
 
 /** Authorized ledger append — same authorize → [[AuthorizedEffect]] → perform
   * spine as Cas / Filesystem. [[Node.append]] is a thin adapter over [[run]].
+  * Chain-file write goes through [[Filesystem]] on the node context.
   */
 object LedgerTransport:
   private val iface = EffectMeta.ledgerTransport
@@ -44,7 +44,9 @@ object LedgerTransport:
           case Left(err)    => Left(LT.Error.Io(err))
           case Right(block) => Right(LT.Response.Sealed(block))
 
-  /** Kernel validation + CAS put of the sealed block (CAS via [[CasEffects]]). */
+  /** Kernel validation + CAS put of the sealed block (CAS via [[CasEffects]]);
+    * chain-file append via [[Filesystem]].
+    */
   private[systemhandler] def appendRaw(
       node: Node,
       authority: Keypair,
@@ -66,8 +68,5 @@ object LedgerTransport:
         case cairn.systeminterface.Cas.Error.Io(m)      => m
         case cairn.systeminterface.Cas.Error.Missing(d) => s"missing ${d.short}"
       }
-    yield
-      Files.createDirectories(node.root)
-      Files.writeString(node.root.resolve("chain"),
-        (node.chainDigests :+ block.digest).map(_.hex).mkString("", "\n", "\n"))
-      block
+      _ <- node.writeChain(bs.map(_.digest) :+ block.digest)
+    yield block

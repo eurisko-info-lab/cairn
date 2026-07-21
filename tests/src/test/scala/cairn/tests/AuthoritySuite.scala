@@ -4,7 +4,7 @@ import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
-import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance}
+import cairn.systemhandler.{AuthorityGate, Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, Sync}
 import cairn.systeminterface.Cas
 import cairn.kernel.Tx
 
@@ -512,6 +512,9 @@ class AuthoritySuite extends munit.FunSuite:
     assert(led.authorize(
       EffectMeta.cas.actionKey("put"),
       EffectMeta.cas.resource.at("abc")).isRight, "forLedger includes local CAS")
+    assert(led.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isRight,
+      "forLedger includes chain FS")
+    assert(led.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp")).isRight)
     val fsCtx = EffectContext.forFilesystem("/tmp*")
     assert(fsCtx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/x")).isRight)
     assert(fsCtx.authorize(
@@ -574,6 +577,23 @@ class AuthoritySuite extends munit.FunSuite:
     ok.advance("main", key)
     assertEquals(ok.load("main").head, Some(key))
     assertEquals(ok.list(), List("main"))
+
+  test("Node chain FS: gated under forLedger; denied under forCas-only"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-chain-auth")
+    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContext.forCas())
+    intercept[RuntimeException](denied.chainDigests)
+    val alice = Keypair.dev("alice")
+    val auth = Map("alice" -> alice.publicBytes)
+    val ok = cairn.systemhandler.Node(dir.resolve("ok"), EffectContext.forLedger())
+    assertEquals(ok.chainDigests, Nil)
+    val block = ok.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
+    assert(block.isRight, block.toString)
+    assertEquals(ok.chainDigests, List(block.toOption.get.digest))
+    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContext.forLedger())
+    src.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
+      .fold(e => fail(e), identity)
+    val pullDenied = Sync.pull(src, denied, auth)
+    assert(pullDenied.isLeft, pullDenied.toString)
 
   test("LedgerTransport: authorize → perform append over Node"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-lt")
