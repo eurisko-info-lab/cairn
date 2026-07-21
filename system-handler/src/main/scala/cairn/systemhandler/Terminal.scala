@@ -1,0 +1,26 @@
+package cairn.systemhandler
+
+import cairn.systeminterface.Terminal as Term
+import java.io.{BufferedReader, InputStreamReader}
+
+/** Stdio terminal handler (Phase 3). */
+object Terminal:
+  private lazy val in = new BufferedReader(new InputStreamReader(System.in))
+
+  def write(text: String): Unit = Console.print(text)
+  def writeLine(text: String): Unit = Console.println(text)
+
+  def readLine(): Option[String] =
+    Option(in.readLine())
+
+  def perform(req: Term.Request): Either[Term.Error, Term.Response] =
+    try req match
+      case Term.Request.Write(t) => write(t); Right(Term.Response.Ok)
+      case Term.Request.WriteLine(t) => writeLine(t); Right(Term.Response.Ok)
+      case Term.Request.ReadLine =>
+        readLine() match
+          case Some(l) => Right(Term.Response.Line(l))
+          case None    => Right(Term.Response.Eof)
+    catch
+      case _: java.io.IOException => Left(Term.Error.Closed)
+      case e: Exception           => Left(Term.Error.Io(e.getMessage))

@@ -259,13 +259,13 @@ object Transcript:
                     case Some(cli) =>
                       val f = Files.createTempDirectory(workDir, "port").resolve(out.fileName)
                       Files.writeString(f, out.text)
-                      val pb = new ProcessBuilder(cli.toString, "run", "--server=false", f.toString)
-                      pb.redirectErrorStream(true)
-                      val proc = pb.start()
-                      val output = new String(proc.getInputStream.readAllBytes())
-                      if proc.waitFor() == 0 && output.contains("ALL TESTS PASS") then
-                        Right(log += s"port $host tests pass in host")
-                      else Left(s"port $host host run failed:\n$output")
+                      cairn.systemhandler.Process.run(
+                        List(cli.toString, "run", "--server=false", f.toString)
+                      ) match
+                        case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
+                          Right(log += s"port $host tests pass in host")
+                        case Right(r) => Left(s"port $host host run failed:\n${r.combined}")
+                        case Left(e)  => Left(s"port $host host run failed: $e")
                 else Right(log += s"port $host verified (byte fixpoint)")
               }
             }

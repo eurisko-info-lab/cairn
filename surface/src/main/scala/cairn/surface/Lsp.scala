@@ -254,45 +254,25 @@ final class LspServer(cfg: LspConfig):
       case _          => Nil // notifications we ignore
 
 object Lsp:
-  /** Content-Length framed serve loop (stdio or any stream pair). */
+  /** Content-Length framed serve loop (stdio or any stream pair).
+    * Framing I/O lives in `system-handler.LspTransport` (Phase 3).
+    */
   def serve(cfg: LspConfig, in: java.io.InputStream, out: java.io.OutputStream): Unit =
     val server = LspServer(cfg)
     var running = true
     while running do
-      readMessage(in) match
+      cairn.systemhandler.LspTransport.readMessage(in) match
         case None => running = false
         case Some(text) =>
           JsonSurface.decodeRaw(text) match
             case Right(msg) =>
               val method = J.fields(msg).get("method").flatMap(J.asStr)
               if method.contains("exit") then running = false
-              else server.handle(msg).foreach(m => writeMessage(out, J.print(m)))
+              else server.handle(msg).foreach(m =>
+                cairn.systemhandler.LspTransport.writeMessage(out, J.print(m)))
             case Left(_) => ()
 
-  def readMessage(in: java.io.InputStream): Option[String] =
-    var length = -1
-    var line = new StringBuilder
-    var b = in.read()
-    while b >= 0 do
-      if b == '\n' then
-        val l = line.toString.trim
-        line = new StringBuilder
-        if l.isEmpty then
-          if length >= 0 then
-            val buf = in.readNBytes(length)
-            return Some(new String(buf, "UTF-8"))
-          else return None
-        else if l.toLowerCase.startsWith("content-length:") then
-          length = l.drop("content-length:".length).trim.toInt
-      else if b != '\r' then line.append(b.toChar)
-      b = in.read()
-    None
-
-  def writeMessage(out: java.io.OutputStream, body: String): Unit =
-    val bytes = body.getBytes("UTF-8")
-    out.write(s"Content-Length: ${bytes.length}\r\n\r\n".getBytes("UTF-8"))
-    out.write(bytes)
-    out.flush()
+  export cairn.systemhandler.LspTransport.{readMessage, writeMessage}
 
 /** M44: a REPL over any registered language. */
 final class Repl(l: ComposedLanguage):
