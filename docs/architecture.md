@@ -58,14 +58,17 @@ each other, the way `core.Meta` already treats the Fragment IR as a Cairn
 language rather than an opaque Scala shape.
 
 - **`Random`, `Clock`, `Process`, `ExternalBackend`** (done):
-  `kernel.EffectMeta.{random,clock,process,externalBackend}` are
-  Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
-  requests are host-constructed, not user-typed source text) describing each
-  family's `Request`/`Response`/`Error` shapes. `EffectMeta.actionsOf`
-  projects a family's rights vocabulary from its Fragment and is checked
-  against `kernel.Effects.Action`'s hand-tagged cases and against the
-  matching `system-interface` object's actual Scala case names
-  (`EffectMetaSuite`) — both were previously free to drift independently.
+  `kernel.EffectMeta.{random,clock,process,externalBackend}` are each an
+  `EffectMeta.EffectFamily` — a Kernel-owned `Fragment` (sorts +
+  constructors, no grammar — effect requests are host-constructed, not
+  user-typed source text) describing the family's `Request`/`Response`/
+  `Error` shapes, paired with an explicit `requestActions: Map[String,
+  Effects.Action]` grouping (constructor name → the right that gates it).
+  `EffectMeta.actions` projects a family's rights vocabulary from that
+  grouping; `EffectMeta.completeness` checks it against
+  `kernel.Effects.Action`'s hand-tagged cases and (via `EffectMetaSuite`)
+  against the matching `system-interface` object's actual Scala case names —
+  both were previously free to drift independently.
   `Clock` had already drifted before this mechanism existed: `Request` had 2
   cases (`Now`, `TimestampSlug`) but `Action` had only 1 (`ClockNow`) —
   `system-handler.Clock` was executing a request with no corresponding
@@ -83,6 +86,25 @@ language rather than an opaque Scala shape.
   unvalidated by `Compose.compose` (confirmed by reading it in full; already
   relied on by `user.policy.PolicyLang`'s `"Name"` tags), so this needed no
   new Fragment-IR machinery.
+- **Many-to-one rights mechanism** (added after these four; a retrofit, zero
+  semantic change to any of them): the original `actionsOf` assumed one
+  `Action` per `Request`-sorted constructor, matched by exact name — true
+  for all four families above only because each had ≤2 distinct request
+  shapes, not because rights are actually designed that way. Scoping the
+  next family surfaced that they aren't: `Filesystem` has 12 `Request`
+  constructors but only 3 `Action`s (`FsRead`/`FsWrite`/`FsMkdirs` —
+  intentional capability classes, not a gap), `Workspace` has 5 constructors
+  and 1 `Action` (`WorkspaceRead`, matching none of the 5 by name at all),
+  `Terminal` has 3 and 1 (`TerminalWrite`), and `Lsp` has 2 and 1
+  (`LspServe`, matching neither). Applying the old exact-name-match logic to
+  these would misreport intentional groupings as bugs, and "fixing" it by
+  minting one Action per Request shape would be a real regression in the
+  authority model (more separately-revocable rights than intended). Fixed by
+  making the grouping an explicit, checked declaration
+  (`EffectFamily.requestActions`) instead of an inferred name match —
+  `EffectMeta.completeness` verifies every `Request` constructor has an
+  entry, every entry names a real constructor, and every mapped `Action`
+  belongs to the right family.
 - **Vestigial families** (found while scoping the `ExternalBackend` slice,
   by checking for a `def perform(req: X.Request)` entry point in
   `system-handler/`): `Http`, `Network`, `Crypto`, `LedgerTransport` have
@@ -98,17 +120,17 @@ language rather than an opaque Scala shape.
   Request/Response enum family, and is out of scope for this mechanism as
   designed.
 - **Remaining live families** (`Filesystem`, `Workspace`, `Terminal`,
-  `Lsp`) — not yet converted; the four done above are the template, each is
-  a separate future slice. `Lsp` needs a design decision first: its single
-  `Action` (`LspServe`) doesn't name-match either `Request` case
-  (`ReadMessage`/`WriteMessage`) at all, suggesting a session-level gate
-  rather than a per-request right — `actionsOf`'s current one-`Action`-per-
-  `Request`-constructor assumption doesn't fit `Lsp` as-is, so converting it
-  means either changing that assumption or deciding `Lsp` needs new,
-  per-message actions. Same incremental-adoption shape as `AuthorityGate`'s
-  per-family `Enforce` rollout below.
+  `Lsp`) — not yet converted, now unblocked by the many-to-one mechanism
+  above. Each still needs its own per-family judgment call about which
+  requests belong to which capability class (e.g. is `Filesystem.Delete` a
+  `FsWrite` operation or does it deserve its own right? is
+  `CreateTempDirectory` a `FsMkdirs` operation? does `Lsp` need new,
+  per-message actions, or is `LspServe` intentionally a session-level gate?)
+  — real design work per family, each a separate future slice. Same
+  incremental-adoption shape as `AuthorityGate`'s per-family `Enforce`
+  rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
-  hand-written Scala enum — `EffectMeta.actionsOf` checks it, doesn't
+  hand-written Scala enum — `EffectMeta.completeness` checks it, doesn't
   replace it) and typed per-family resources (`Authority.Resource` is still
   one shared untyped `(kind, path)` shape across every family).
 

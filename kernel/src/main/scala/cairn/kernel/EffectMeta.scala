@@ -9,11 +9,28 @@ package cairn.kernel
   * `system-interface`), matching [[Authority]]'s stated constraint that the
   * action vocabulary stays inside the TCB.
   *
-  * `random` is the template family; the remaining twelve are follow-on
-  * slices — see `docs/architecture.md`.
+  * Rights are many-to-one: several `Request`-sorted constructors can share
+  * one [[Effects.Action]] (e.g. `Filesystem`'s dozen request shapes reduce
+  * to three capability classes — read/write/mkdirs — by design, not by
+  * accident). `requestActions` makes that grouping an explicit, checked
+  * declaration instead of an inferred name match, which only happened to
+  * work for the first four families because each had ≤2 distinct request
+  * shapes.
+  *
+  * `random`/`clock`/`process`/`externalBackend` are the converted families;
+  * the remaining live ones (`Filesystem`, `Workspace`, `Terminal`, `Lsp`)
+  * are follow-on slices — see `docs/architecture.md`.
   */
 object EffectMeta:
-  val random: Fragment = Fragment(
+  /** A Fragment paired with the explicit constructor-name → Action grouping
+    * that governs it. `Action` stays a closed Scala enum in this slice
+    * (widening it to fully mint cases from the Fragment is a separate,
+    * larger move) — this makes the grouping authoritative and checked
+    * ([[completeness]]) rather than replacing `Action` outright.
+    */
+  final case class EffectFamily(fragment: Fragment, requestActions: Map[String, Effects.Action])
+
+  private val randomFragment: Fragment = Fragment(
     name = "effect.random",
     provides = List("effect.random"),
     requires = Nil,
@@ -26,7 +43,10 @@ object EffectMeta:
       CtorDef("bytesValue", "Response", List("Bytes")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val clock: Fragment = Fragment(
+  val random: EffectFamily = EffectFamily(randomFragment, Map(
+    "bytes" -> Effects.Action.RandomBytes))
+
+  private val clockFragment: Fragment = Fragment(
     name = "effect.clock",
     provides = List("effect.clock"),
     requires = Nil,
@@ -41,7 +61,11 @@ object EffectMeta:
       CtorDef("slug", "Response", List("Str")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val process: Fragment = Fragment(
+  val clock: EffectFamily = EffectFamily(clockFragment, Map(
+    "now" -> Effects.Action.ClockNow,
+    "timestampSlug" -> Effects.Action.ClockTimestampSlug))
+
+  private val processFragment: Fragment = Fragment(
     name = "effect.process",
     provides = List("effect.process"),
     requires = Nil,
@@ -55,7 +79,10 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val externalBackend: Fragment = Fragment(
+  val process: EffectFamily = EffectFamily(processFragment, Map(
+    "run" -> Effects.Action.ProcessRun))
+
+  private val externalBackendFragment: Fragment = Fragment(
     name = "effect.externalBackend",
     provides = List("effect.externalBackend"),
     requires = Nil,
@@ -71,21 +98,36 @@ object EffectMeta:
       CtorDef("processResult", "Response", List("Int", "Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val fragments: Map[Effects.Family, Fragment] = Map(
+  val externalBackend: EffectFamily = EffectFamily(externalBackendFragment, Map(
+    "find" -> Effects.Action.BackendFind,
+    "run" -> Effects.Action.BackendRun))
+
+  val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
     Effects.Family.Clock -> clock,
     Effects.Family.Process -> process,
     Effects.Family.ExternalBackend -> externalBackend)
 
-  /** The rights vocabulary for a family, projected from its Fragment: every
-    * declared [[Effects.Action]] whose name matches a `Request`-sorted
-    * constructor. `Action` stays a closed Scala enum in this slice (widening
-    * it to fully mint cases from the Fragment is a separate, larger move),
-    * so this is a checked correspondence, not yet full generation — but it
-    * makes the Fragment authoritative: an `Action` with no matching
-    * constructor, or a constructor with no matching `Action`, is now a
-    * detectable drift rather than a silent hand-maintenance gap.
+  /** The rights vocabulary for a family: every distinct [[Effects.Action]]
+    * its `requestActions` grouping declares.
     */
-  def actionsOf(family: Effects.Family, fragment: Fragment): List[Effects.Action] =
-    Effects.Action.values.toList.filter(a =>
-      a.family == family && fragment.constructors.exists(c => c.sort == "Request" && c.name == a.name))
+  def actions(family: EffectFamily): Set[Effects.Action] = family.requestActions.values.toSet
+
+  /** Checked correspondence between a family's Fragment and its grouping:
+    * every `Request`-sorted constructor must have a `requestActions` entry
+    * (no ungated request), every entry must name a real constructor (no
+    * dangling grouping), and every mapped `Action` must actually belong to
+    * `expected` (no cross-family mistagging). Empty result = consistent.
+    */
+  def completeness(family: EffectFamily, expected: Effects.Family): List[String] =
+    val reqCtorNames = family.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
+    val mappedNames = family.requestActions.keySet
+    val missing = reqCtorNames.diff(mappedNames).toList.map(n =>
+      s"constructor '$n' has no requestActions entry")
+    val dangling = mappedNames.diff(reqCtorNames).toList.map(n =>
+      s"requestActions entry '$n' has no matching Request constructor")
+    val misfamily = family.requestActions.toList.collect {
+      case (n, a) if a.family != expected =>
+        s"requestActions('$n') = $a is tagged ${a.family}, not $expected"
+    }
+    missing ++ dangling ++ misfamily
