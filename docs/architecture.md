@@ -254,11 +254,19 @@ real (Phase 7 language-pack activation), unlike the two confirmed
 "no real effect" precedents (`Filesystem.Resolve`, the `Lsp` test
 fixture).
 
-**Remaining** (`Process`, `PackFiles`/`Workspace`): each has real external
-callers needing an actual call-site migration before gating — separate
-future slices (`Process` smaller: 1 external + 1 internal cross-object
-caller from `ExternalBackend`; `PackFiles` largest at 6 sites in one
-file).
+**`Process`** (done): the last small family. `run` and `perform` already
+had matching return types (`Process` has no `Response` enum, just the
+`Result` case class) and `Request.Run` already had the same default
+parameters as `run`, so both call-site migrations were direct
+substitutions with no restructuring — `surface.Transcript.scala`'s real
+production caller (verifying a Rosetta scala port by running the host
+toolchain) and `ExternalBackend`'s internal cross-object call, which now
+goes through `Process.perform` too instead of bypassing it via the old
+raw `run` — so `ExternalBackend.perform`'s own gate no longer has an
+ungated escape hatch into `Process`.
+
+**Remaining** (`PackFiles`/`Workspace`): the last family, 6 call sites in
+one file (`runtime/PackLoader.scala`) — a separate future slice.
 
 ## Forbidden-import rules (ModuleBoundarySuite)
 

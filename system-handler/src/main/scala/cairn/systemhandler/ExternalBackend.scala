@@ -1,6 +1,6 @@
 package cairn.systemhandler
 
-import cairn.systeminterface.{ExternalBackend as EB, Filesystem as Fs}
+import cairn.systeminterface.{ExternalBackend as EB, Filesystem as Fs, Process as Proc}
 import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 
@@ -25,9 +25,9 @@ object ExternalBackend:
     find(host) match
       case None => Right(EB.Response.Missing(host))
       case Some(bin) =>
-        Process.run(bin.toString :: args, cwd).map(r =>
-          EB.Response.ProcessResult(r.exitCode, r.combined)).left.map(e =>
-          EB.Error.Io(e.toString))
+        Process.perform(Proc.Request.Run(bin.toString :: args, cwd.map(p => Fs.Path(p.toString))))
+          .map(r => EB.Response.ProcessResult(r.exitCode, r.combined))
+          .left.map(e => EB.Error.Io(e.toString))
 
   def perform(req: EB.Request): Either[EB.Error, EB.Response] =
     val action = req match

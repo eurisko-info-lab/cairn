@@ -259,8 +259,9 @@ object Transcript:
                     case Some(cli) =>
                       val f = Files.createTempDirectory(workDir, "port").resolve(out.fileName)
                       Files.writeString(f, out.text)
-                      cairn.systemhandler.Process.run(
-                        List(cli.toString, "run", "--server=false", f.toString)
+                      cairn.systemhandler.Process.perform(
+                        cairn.systeminterface.Process.Request.Run(
+                          List(cli.toString, "run", "--server=false", f.toString))
                       ) match
                         case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
                           Right(log += s"port $host tests pass in host")
