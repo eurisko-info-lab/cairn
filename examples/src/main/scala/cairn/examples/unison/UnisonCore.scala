@@ -2,8 +2,7 @@ package cairn.examples.unison
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.compute.TreeEngine
-import cairn.core.Search
+import cairn.core.{Search, TreeEngine}
 
 /** UnisonCore (§5b, §2c): a real term language for the Unison-inspired
   * content-addressed store (`Unison.Store`/`Unison.Codebase`), replacing the
@@ -24,7 +23,7 @@ import cairn.core.Search
   *
   * `handle`'s reduction is one rule per closed value shape (`handle-unit`,
   * `handle-nil`, `handle-cons`, ...) rather than one generic passthrough
-  * rule: `compute.TreeEngine.step` tries root rules before recursing into
+  * rule: `core.TreeEngine.step` tries root rules before recursing into
   * children, so a generic `handle($v,$h) => $v` would fire on an
   * un-reduced body immediately, discarding it before it ever gets the
   * chance to reduce to `abort()`. Enumerating the closed set of value

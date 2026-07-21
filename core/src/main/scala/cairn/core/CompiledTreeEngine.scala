@@ -1,4 +1,4 @@
-package cairn.compute
+package cairn.core
 
 import cairn.kernel.*
 
@@ -56,7 +56,7 @@ final class CompiledTreeEngine(l: ComposedLanguage):
             case None =>
               val (rule, matcher) = rm
               matcher(t, Map.empty) match
-                case Some(env) => TreeEngine.instantiate(l, rule.template, env).map(Some(_))
+                case Some(env) => Rewrite.instantiate(l, rule.template, env).map(Some(_))
                 case None      => Right(None)
           }
         }

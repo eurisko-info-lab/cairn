@@ -3,7 +3,7 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.workbench.*
 import cairn.systemhandler.{MemCas, DiskCas, Branches}
-import cairn.compute.*
+import cairn.core.TreeEngine
 import cairn.examples.stlc.Stlc
 
 /** Phase 0 acceptance (S2–S6): store/load round-trip, golden digests. */

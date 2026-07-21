@@ -2,8 +2,7 @@ package cairn.examples.leancore
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.compute.TreeEngine
-import cairn.core.Search
+import cairn.core.{Search, TreeEngine}
 
 /** LeanCore — the formal-methods IR ladder's rung past MiniTT (§5b, §2c
   * amendment "executable reference vs. optimized backend", §8b): everything
@@ -80,7 +79,7 @@ object LeanCore:
     case Cst.Node(tag, cs) => Cst.Node(tag, cs.map(resolveSubst))
     case other => other
 
-  /** Definitional equality: normalize (β/ι, `compute.TreeEngine`, generic)
+  /** Definitional equality: normalize (β/ι, `core.TreeEngine`, generic)
     * then compare up to alpha (`kernel.Alpha.normalize`, generic, M2).
     */
   def defeq(a: Cst, b: Cst): Either[String, Boolean] =

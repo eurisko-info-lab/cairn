@@ -2,7 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.compute.TreeEngine
+import cairn.core.TreeEngine
 
 /** M44: a language server for ANY registered language, built entirely on the
   * generic engine: diagnostics come from the parser (with spans/carets),

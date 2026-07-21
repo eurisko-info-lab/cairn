@@ -46,12 +46,21 @@ untrusted proposer half. `Derivation`/`CheckError`/`CheckerCfg`/`object
 Checker` (the independent, decidable validator half) moved into `kernel`
 instead. `proof` keeps only `Claim`/`Theorem`/`TestCase`/`TestSuite`/
 `Certificate`/`object Certify` — orchestration/data that sits above both and
-didn't fit either side cleanly. `compute`'s analogous `TreeEngine`/
-`TraceChecker` split is **not yet done** — `TraceChecker` currently reaches
-into `TreeEngine`'s own `matchPattern`/`instantiate` and the `EvalTrace`/
-`TraceStep` types nested inside it, which would invert the dependency
-direction (Kernel→Core) if split as-is; it needs a preparatory hoist first
-(pull those out to independent, non-nested definitions), not attempted yet.
+didn't fit either side cleanly.
+
+`core` (Phase 2, second slice): the same pattern applied to `compute`'s
+`TreeEngine`/`TraceChecker`. `TraceChecker` used to reach into `TreeEngine`'s
+own `matchPattern`/`instantiate` and the `EvalTrace`/`TraceStep` types nested
+inside it — splitting as-is would have inverted the dependency direction
+(Kernel→Core). Fixed by hoisting `matchPattern`/`instantiate` (as `object
+Rewrite`) and `TraceStep`/`EvalTrace` out to independent, top-level `kernel`
+definitions (`kernel/Rewrite.scala`), so `kernel.TraceChecker` calls only
+same-module code. `core.TreeEngine` now keeps just the proposer/search half
+(`stepRoot`/`step`/`normalize`/`stepLocated`/`normalizeTraced`), calling into
+`kernel.Rewrite`, Core→Kernel, correct direction. `core.CompiledTreeEngine`
+(the compiled/indexed rule-dispatch alternative proposer) moved alongside it.
+`compute` now holds only `NetBuilder`/`NetEngine` (interaction-net reduction,
+untouched — no coupling to any of the above).
 
 `surface`/`examples`/`tests` see all of the above transitively through
 `ledger`/`rosetta` — no `build.sbt` changes were needed at those layers,
@@ -87,7 +96,7 @@ they constrain don't exist yet:
 | ----- | ------ | ------------ |
 | 0. Freeze and characterize | Done | This doc; `ModuleBoundarySuite`; baseline suite/transcript/language-sync confirmed green |
 | 1. Split System Interface from System Handler | Done | `Cas` trait → `system-interface`; `MemCas`/`DiskCas`/`Branches`/`CasAdmin` → `system-handler`; `BranchManifest` → `kernel` |
-| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split landed. Still pending within Phase 2: `compute`'s `TreeEngine`/`TraceChecker` split (needs a preparatory hoist), `workbench`'s Meta/grammar/Delta machinery, `rosetta`'s projection engine |
+| 2. Introduce Core | In progress | First slice: `proof`'s `Checker`→`kernel` / `Search`+`Tactics`→`core` split. Second slice: `compute`'s `TreeEngine`/`TraceChecker` split, via a `kernel.Rewrite` hoist. Still pending within Phase 2: `workbench`'s Meta/grammar/Delta machinery, `rosetta`'s projection engine |
 | 3. Complete the System split (12 effect families) | Not started | |
 | 4–5. Authority: audit mode, then enforcement | Not started | |
 | 6. Establish the User boundary | Not started | |

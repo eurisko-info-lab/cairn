@@ -96,6 +96,6 @@ class WaveH1Suite extends munit.FunSuite:
       |}""".stripMargin
     val toy = Meta.parseFile(toySrc).fold(e => fail(e), identity)
     val term = Parser.parse(toy.grammar, "flip flip flip yes").fold(e => fail(e), identity)
-    assertEquals(cairn.compute.TreeEngine.normalize(toy, term), Right(Cst.node("no")))
+    assertEquals(cairn.core.TreeEngine.normalize(toy, term), Right(Cst.node("no")))
     // and of course the forced closure applies to a text-born language too
     assert(Delta.deltaOf(toy).isRight)

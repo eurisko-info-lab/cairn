@@ -2,8 +2,7 @@ package cairn.examples.minitt
 
 import cairn.kernel.*
 import cairn.workbench.*
-import cairn.compute.TreeEngine
-import cairn.core.Search
+import cairn.core.{Search, TreeEngine}
 
 /** MiniTT — a minimal, closed dependent type core (§5b, §2c; the "Formal-
   * methods IR ladder" rung, §8b), checked by the SAME generic kernel
@@ -20,7 +19,7 @@ import cairn.core.Search
   * `Checker.matchPat`'s pure syntactic pattern matching can produce on its
   * own — so it's checked via a `$defeq` side condition (same extension
   * mechanism as PKI's `$sig-ok`/`$anchor`), which normalizes both sides
-  * (`compute.TreeEngine`, unmodified/generic) and compares up to alpha
+  * (`core.TreeEngine`, unmodified/generic) and compares up to alpha
   * (`kernel.Alpha.normalize`, unmodified/generic — both already existed).
   *
   * `t-lam` vs `t-lam-conv`: a lambda's own domain annotation and its Pi
@@ -80,7 +79,7 @@ object MiniTT:
     case Cst.Node(tag, cs) => Cst.Node(tag, cs.map(resolveSubst))
     case other => other
 
-  /** Definitional equality: normalize (β/ι, `compute.TreeEngine`, generic)
+  /** Definitional equality: normalize (β/ι, `core.TreeEngine`, generic)
     * then compare up to alpha (`kernel.Alpha.normalize`, generic, M2).
     */
   def defeq(a: Cst, b: Cst): Either[String, Boolean] =
