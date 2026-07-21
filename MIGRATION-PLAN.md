@@ -504,6 +504,14 @@ artifacts (`EffectMeta.EffectFamily`) declare capability-class names and a
 Closed `Effects.Action` remains a host bridge (`toHost` / `.key`) for
 Cas/Ledger and completeness checks — not the policy-boundary type.
 
+**Authority calculus (priority #5) — DONE.** Conditions evaluated fail-closed
+and canonicalized; grant expiry + nonce in canon; gate replay sets for nonce /
+`requestId`; delegation chains validated; Kernel `AttenuationWitness` for
+non-widening attenuation/delegation. Injectable `EffectContext.clock` for
+expiry tests. **Priority #6 residual:** Core still proposes via re-decide;
+`AuthorizationProof` / `validateProof` are hooks only — not yet
+Core-generated proof objects checked without recomputing the decision.
+
 ## 7. Concrete old-to-new mapping
 
 | Current module                            | Target                   |

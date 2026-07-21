@@ -10,39 +10,44 @@ import cairn.kernel.Effects
   * and must not hold a gate — they accept only [[AuthorizedEffect]].
   *
   * Carries [[subject]] + [[gate]] for the authorize step; [[capabilities]] is
-  * a placeholder until grant bundles are threaded from Kernel validation.
+  * a placeholder until grant-bundle threading; [[clock]] supplies injectable
+  * time for grant expiry checks (defaults to wall clock).
   */
 final case class EffectContext(
     subject: Subject,
     gate: AuthorityGate,
     capabilities: List[CapabilityGrant] = Nil,
     audit: EffectContext.Audit = EffectContext.Audit.Local,
+    clock: () => Long = System.currentTimeMillis,
 ):
   def withSubject(s: Subject): EffectContext = copy(subject = s)
   def withGate(g: AuthorityGate): EffectContext = copy(gate = g)
+  def withClock(c: () => Long): EffectContext = copy(clock = c)
 
   /** Build an [[EffectRequest]] using this context's subject. */
   def effectRequest(
       action: Effects.ActionKey,
       resource: Resource,
       args: Map[String, String] = Map.empty,
+      requestId: Option[String] = None,
   ): EffectRequest =
-    EffectRequest(subject, action, resource, args)
+    EffectRequest(subject, action, resource, args, requestId)
 
   /** Single authorize entry point: gate check → Kernel token → [[AuthorizedEffect]].
     * Narrow pack-loader, bootstrap allow-all, and Audit-mode pass-through all
-    * flow through here.
+    * flow through here. Expiry uses [[clock]].
     */
   def authorize(req: EffectRequest): Either[String, AuthorizedEffect] =
-    gate.check(req).map(AuthorizedEffect.mint)
+    gate.check(req, clock()).map(AuthorizedEffect.mint)
 
   /** Authorize using this context's subject. */
   def authorize(
       action: Effects.ActionKey,
       resource: Resource,
       args: Map[String, String] = Map.empty,
+      requestId: Option[String] = None,
   ): Either[String, AuthorizedEffect] =
-    authorize(effectRequest(action, resource, args))
+    authorize(effectRequest(action, resource, args, requestId))
 
 object EffectContext:
   /** Audit-trail identity. Distinct from authorization [[Subject]] when a

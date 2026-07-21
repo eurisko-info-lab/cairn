@@ -5,14 +5,14 @@ import cairn.kernel.Authority
 import cairn.kernel.Authority.*
 import cairn.kernel.EffectMeta
 
-/** Authority gate (Phases 4–5, priority #2). Composition roots authorize via
+/** Authority gate (Phases 4–5, priority #2/#5). Composition roots authorize via
   * [[EffectContext.authorize]] (which calls [[check]]); handlers accept only
   * [[AuthorizedEffect]] and must not call [[check]]/[[checked]] themselves.
   *
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
-  * (`mode`/`policies`/`events`) is explicit and constructible rather than
-  * shared, hidden, JVM-wide mutable state. There is no process-global
+  * (`mode`/`policies`/`events`/replay sets) is explicit and constructible rather
+  * than shared, hidden, JVM-wide mutable state. There is no process-global
   * registry, default instance, or thread-local context: composition roots
   * and tests construct [[EffectContext]]s and authorize through them.
   *
@@ -20,11 +20,16 @@ import cairn.kernel.EffectMeta
   * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with
   * allow-all policies (test / non-pack-loader wiring). PackLoader production
   * wiring uses [[EffectContext.forPackLoader]] instead.
+  *
+  * Replay: successful Enforce authorizations consume grant [[CapabilityGrant.nonce]]
+  * and [[EffectRequest.requestId]] via [[Authority.Replay]] (deny on reuse).
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
     @volatile private var policies: List[EffectPolicy] = Nil):
   private val events = scala.collection.mutable.ListBuffer[AuthorityEvent]()
+  private var usedNonces: Set[String] = Set.empty
+  private var usedRequestIds: Set[String] = Set.empty
 
   def setMode(m: AuthorityGate.Mode): Unit = mode = m
   def currentMode: AuthorityGate.Mode = mode
@@ -33,9 +38,13 @@ final class AuthorityGate(
   def drainEvents(): List[AuthorityEvent] =
     synchronized { val out = events.toList; events.clear(); out }
 
+  /** Snapshot of consumed nonces / request ids (tests). */
+  def replayState: (Set[String], Set[String]) = synchronized { (usedNonces, usedRequestIds) }
+
   /** Check authorization. In Audit mode always returns the request wrapped as
     * authorized (after recording whether it *would* be permitted). In Enforce
-    * mode, only Kernel-validated allows proceed.
+    * mode, only Kernel-validated allows proceed; nonces / request ids are
+    * consumed so replays are denied.
     */
   def check(req: EffectRequest, nowMillis: Long = System.currentTimeMillis())
       : Either[String, AuthorizedRequest] =
@@ -49,12 +58,41 @@ final class AuthorityGate(
         Right(Authority.auditPass(req))
       case AuthorityGate.Mode.Enforce =>
         Authority.validate(req, policies, derivation, nowMillis) match
-          case Right(auth) =>
-            synchronized { events += AuthorityEvent.Enforced(derivation, Some(auth)) }
-            Right(auth)
           case Left(err) =>
             synchronized { events += AuthorityEvent.Rejected(derivation) }
             Left(err)
+          case Right(auth) =>
+            synchronized {
+              consumeReplay(derivation, req) match
+                case Left(err) =>
+                  events += AuthorityEvent.Rejected(derivation)
+                  Left(err)
+                case Right(()) =>
+                  events += AuthorityEvent.Enforced(derivation, Some(auth))
+                  Right(auth)
+            }
+
+  private def consumeReplay(derivation: AuthorizationDerivation, req: EffectRequest): Either[String, Unit] =
+    val afterNonce =
+      derivation.grant.flatMap(_.nonce) match
+        case None => Right(usedNonces)
+        case Some(n) =>
+          Authority.Replay.consumeNonce(n, usedNonces) match
+            case Left(err) => Left(err)
+            case Right(next) => Right(next)
+    afterNonce.flatMap { nonces =>
+      req.requestId match
+        case None =>
+          usedNonces = nonces
+          Right(())
+        case Some(id) =>
+          Authority.Replay.consumeRequestId(id, usedRequestIds) match
+            case Left(err) => Left(err)
+            case Right(nextIds) =>
+              usedNonces = nonces
+              usedRequestIds = nextIds
+              Right(())
+    }
 
   /** Phase 5 family enforcement helper — temporarily enforce for one check. */
   def enforcing[A](body: => Either[String, A]): Either[String, A] =

@@ -179,6 +179,17 @@ language rather than an opaque Scala shape.
   Workspace, and Process (plus the other live handlers) construct intents
   from the interface artifact. Completeness checks derived keys against
   the host enum.
+- **Authority calculus semantics (post-migration priority #5, done):**
+  Policy `conditions` are evaluated fail-closed during match (`args` exact
+  match; known `meta:expiresAtEpochMillis` / `meta:nonce` for grant
+  minting; unknown `meta:` keys deny) and included in policy canon. Grant
+  expiry and nonce are part of canonical grants; `EffectContext.clock` /
+  `AuthorityGate.check(..., nowMillis)` reject expired grants. Enforce
+  mode consumes grant nonces and `EffectRequest.requestId`s via
+  `Authority.Replay` (reuse denied). `PolicyEval.delegate` +
+  `Authority.Delegation.validateChain` check A→B→C hops; Kernel
+  `AttenuationWitness` rejects resource/expiry widening. Priority #6
+  (`AuthorizationProof` / `validateProof`) is hooked but still re-decides.
 - **Typed per-family resources — first slice (`Filesystem`)**:
   `Authority.Resource(kind, path)`'s `matches` already supports path-prefix
   scoping, and `AuthoritySuite`'s own tests already construct example
@@ -523,6 +534,7 @@ continuing to pass, not by reproducing the failure mode itself.
 - **Full AuthorityGate/PackAccess injection** — **DONE**: explicit constructor/`perform` params; composition roots pass `EffectContext` into `PackLoader` / handlers; no ambient `get`/`install`/`forFamily`/`default`
 - **EffectContext + AuthorizedEffect** — **DONE**: composition roots supply `EffectContext` and mint via `ctx.authorize` → opaque `AuthorizedEffect` (Kernel `AuthorizedRequest`); handlers `perform(req, auth: AuthorizedEffect)` only — no raw request+gate path; thin `run(req, ctx)` adapters at composition roots; `capabilities` still an empty placeholder pending grant-bundle threading
 - **Narrow pack-loader policy** — **DONE** (first restrictive deployment path): `EffectContext.forPackLoader()` installs Enforce + `PolicyEval.packLoaderWorkspace` — subject `local`, action `WorkspaceRead` only, resource `workspace`/`languages*`. Workspace rewrites paths under discovered language roots to that prefix. `examples.Main` and PackLoader call sites use it. Ledger/process/LSP still use allow-all `bootstrapped()` until they get their own scopes.
+- **Core-generated authorization proofs (priority #6)** — residual: Kernel still re-runs `decide` inside `validate` / `validateProof`; `AuthorizationProof` is a bridge type only.
 ## Final principle
 
 ```text
