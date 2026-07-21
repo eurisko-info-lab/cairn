@@ -57,8 +57,8 @@ and resource vocabularies instead of hand-maintaining them independently of
 each other, the way `core.Meta` already treats the Fragment IR as a Cairn
 language rather than an opaque Scala shape.
 
-- **`Random`, `Clock`** (done): `kernel.EffectMeta.{random,clock}` are
-  Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
+- **`Random`, `Clock`, `Process`** (done): `kernel.EffectMeta.{random,clock,process}`
+  are Kernel-owned `Fragment`s (sorts + constructors, no grammar — effect
   requests are host-constructed, not user-typed source text) describing each
   family's `Request`/`Response`/`Error` shapes. `EffectMeta.actionsOf`
   projects a family's rights vocabulary from its Fragment and is checked
@@ -69,12 +69,15 @@ language rather than an opaque Scala shape.
   cases (`Now`, `TimestampSlug`) but `Action` had only 1 (`ClockNow`) —
   `system-handler.Clock` was executing a request with no corresponding
   right. Fixed by adding `ClockTimestampSlug` alongside introducing the
-  Fragment, and now caught by `EffectMetaSuite` going forward.
-- **Remaining 11 families** (`Filesystem`, `Cas`, `Workspace`, `Process`,
-  `Crypto`, `Network`, `Http`, `LedgerTransport`, `Terminal`, `Lsp`,
-  `ExternalBackend`) — not yet converted; `Random`/`Clock` are the template,
-  each is a separate future slice. Same incremental-adoption shape as
-  `AuthorityGate`'s per-family `Enforce` rollout below.
+  Fragment, and now caught by `EffectMetaSuite` going forward. `Process`
+  confirmed the mechanism doesn't cry wolf (no drift found) and that a
+  plain `case class` response (`Process.Result`, not a `Response` enum)
+  maps to a single-constructor sort without friction.
+- **Remaining 10 families** (`Filesystem`, `Cas`, `Workspace`, `Crypto`,
+  `Network`, `Http`, `LedgerTransport`, `Terminal`, `Lsp`,
+  `ExternalBackend`) — not yet converted; `Random`/`Clock`/`Process` are the
+  template, each is a separate future slice. Same incremental-adoption
+  shape as `AuthorityGate`'s per-family `Enforce` rollout below.
 - **Not yet attempted**: replacing `Effects.Action` itself (still a closed,
   hand-written Scala enum — `EffectMeta.actionsOf` checks it, doesn't
   replace it) and typed per-family resources (`Authority.Resource` is still

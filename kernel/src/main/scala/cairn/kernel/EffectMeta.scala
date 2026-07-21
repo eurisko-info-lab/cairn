@@ -41,9 +41,24 @@ object EffectMeta:
       CtorDef("slug", "Response", List("Str")),
       CtorDef("unavailable", "Error", List("Str"))))
 
+  val process: Fragment = Fragment(
+    name = "effect.process",
+    provides = List("effect.process"),
+    requires = Nil,
+    sorts = List(
+      SortDef("Request", SortMode.Tree),
+      SortDef("Response", SortMode.Tree),
+      SortDef("Error", SortMode.Tree)),
+    constructors = List(
+      CtorDef("run", "Request", List("Command", "Path", "Bool")),
+      CtorDef("result", "Response", List("Int", "Str", "Str")),
+      CtorDef("notFound", "Error", List("Str")),
+      CtorDef("io", "Error", List("Str"))))
+
   val fragments: Map[Effects.Family, Fragment] = Map(
     Effects.Family.Random -> random,
-    Effects.Family.Clock -> clock)
+    Effects.Family.Clock -> clock,
+    Effects.Family.Process -> process)
 
   /** The rights vocabulary for a family, projected from its Fragment: every
     * declared [[Effects.Action]] whose name matches a `Request`-sorted

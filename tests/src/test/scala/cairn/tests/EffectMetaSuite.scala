@@ -3,10 +3,11 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.systeminterface.Random as RandomEffect
 import cairn.systeminterface.Clock as ClockEffect
+import cairn.systeminterface.Process as ProcessEffect
 
-/** Meta-defined effect interfaces (post-migration priority #1): `Random` and
-  * `Clock` are Fragment-defined template families. These are mechanical
-  * drift guards, same spirit as `ModuleBoundarySuite`.
+/** Meta-defined effect interfaces (post-migration priority #1): `Random`,
+  * `Clock`, and `Process` are Fragment-defined template families. These are
+  * mechanical drift guards, same spirit as `ModuleBoundarySuite`.
   */
 class EffectMetaSuite extends munit.FunSuite:
 
@@ -44,4 +45,23 @@ class EffectMetaSuite extends munit.FunSuite:
     val scalaReqCases = ClockEffect.Request.values.map(v =>
       (v.toString.head.toLower +: v.toString.tail)).toSet
     val fragmentReqCtors = EffectMeta.clock.constructors.filter(_.sort == "Request").map(_.name).toSet
+    assertEquals(scalaReqCases, fragmentReqCtors)
+
+  test("EffectMeta.process composes and lints cleanly as a Kernel Fragment"):
+    Compose.compose("effect.process", List(EffectMeta.process)).fold(
+      errs => fail(errs.map(_.render).mkString("\n")), identity)
+
+  test("actionsOf(Process, ...) matches the hand-tagged Process actions exactly (no drift)"):
+    val derived = EffectMeta.actionsOf(Effects.Family.Process, EffectMeta.process).toSet
+    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Process).toSet
+    assertEquals(derived, handTagged)
+    assertEquals(derived.size, 1) // Run — matched cleanly, unlike Clock
+
+  test("system-interface.Process.Request cases correspond 1:1 to the Fragment's Request constructors"):
+    // Run(command, cwd, mergeStderr) takes parameters, so exhaustive match
+    // like Random rather than Clock's .values.
+    def ctorNameOf(r: ProcessEffect.Request): String = r match
+      case ProcessEffect.Request.Run(_, _, _) => "run"
+    val scalaReqCases = Set(ctorNameOf(ProcessEffect.Request.Run(Nil)))
+    val fragmentReqCtors = EffectMeta.process.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
