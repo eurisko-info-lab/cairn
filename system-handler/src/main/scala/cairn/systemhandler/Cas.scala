@@ -344,6 +344,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
     * On ledger failure after refs, journal stays at phase=publish for recovery.
+    *
+    * If `branch` carries a pending [[Merge.Conflict]] ref (`conflictRefPath`),
+    * this accept is treated as resolving it: the conflict's digest is folded into
+    * this accept's provenance inputs, so the resolution is not just an ordinary
+    * commit that happens to supersede the conflict marker — [[Provenance.why]] on
+    * the resulting head surfaces the resolved conflict as a direct lineage input,
+    * permanently, even after [[clearConflict]] removes the branch's live ref.
     */
   private def transactionalAccept(
       branch: String,
@@ -360,11 +367,17 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     if module.digest != vcs.result then
       Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
     else
+      val resolvedConflict =
+        if refsExists(conflictRefPath(branch)) then Some(Digest(refsRead(conflictRefPath(branch)).trim))
+        else None
       val extraKeys = extraPuts.map(putArt)
       val vcsKey = putArt(vcs.artifact)
       val modKey = putArt(module.artifact)
       val provDig =
-        Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
+        Provenance.record(
+          cas, module.digest,
+          provenanceParents ++ resolvedConflict.toList :+ vcsKey.valueHash,
+          provenanceTool, ctx)
           .fold(e => throw RuntimeException(casErr(e)), identity)
       val extras = extraKeys.map(_.valueHash) :+ provDig
       var journal = AcceptJournal(

@@ -169,6 +169,26 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)
 
+  test("conflict resolution travels with history: resolving accept cites the Conflict digest in its provenance"):
+    val dir = Files.createTempDirectory("cairn-semrepo-resolve")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val cA = parseChange("{ replace a = false ; }")
+    val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
+    val conflict = branches.merge(lang, "main", m0, cA, cB) match
+      case Right(Left(c)) => c
+      case Right(Right(_)) => fail("expected conflict")
+      case Left(e) => fail(e)
+    // Resolve by hand: an ordinary tip commit on the same branch.
+    val resolving = parseChange("{ replace a = false ; }")
+    val tip = SemanticRepository.tipAfter(lang, m0, resolving).fold(e => fail(e), identity)
+    val manifest = branches.commitTip("main", tip)
+    val hops = Provenance.why(dir.resolve("cas"), manifest.head.get.valueHash, casCtx)
+      .fold(e => fail(e), identity)
+    assert(
+      hops.exists(_.record.inputs.contains(conflict.artifact.digest)),
+      s"resolving accept's provenance does not cite the resolved conflict: $hops")
+
   test("ValidatedTip forgery: claimed tip digest must match apply"):
     val cA = parseChange("{ replace a = false ; }")
     val real = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)

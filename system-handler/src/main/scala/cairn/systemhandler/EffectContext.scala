@@ -70,7 +70,7 @@ final case class EffectContext(
           if view.isRevoked(cap.capabilityId) then
             Left(s"grant revoked: ${cap.capabilityId}")
           else
-            gate.checkCapability(req, cap.grant, now).map(AuthorizedEffect.mint)
+            gate.checkCapability(req, cap, now).map(AuthorizedEffect.mint)
         case None => Left("no covering capability in context")
     else
       gate.check(req, now).map(AuthorizedEffect.mint)
