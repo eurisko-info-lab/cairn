@@ -123,9 +123,62 @@ class WaveFSuite extends munit.FunSuite:
   test("M34: counter effect projects to all hosts idiomatically"):
     val scala = PortV2.verified(ScalaPort2, m).toOption.get.text
     assert(scala.contains("class Counter"), scala)
-    assert(scala.contains("def countingQuicksort(c: Counter, xs: List[Int]): List[Int] = { c.tick(); quicksort(xs) }"), scala)
+    assert(scala.contains("def countingQuicksort(counter: Counter, xs: List[Int]): List[Int] = { counter.tick(); quicksort(xs) }"), scala)
     val lean = PortV2.verified(LeanPort2, m).toOption.get.text
     assert(lean.contains("partial def countingQuicksort (xs : List Int) : (StateM Nat (List Int)) := (do tick; pure (quicksort xs))"), lean)
     val rust = PortV2.verified(RustPort2, m).toOption.get.text
     assert(rust.contains("struct Counter"), rust)
-    assert(rust.contains("fn counting_quicksort(c: &mut Counter, xs: &[i64]) -> Vec<i64>"), rust)
+    assert(rust.contains("fn counting_quicksort(counter: &mut Counter, xs: &[i64]) -> Vec<i64>"), rust)
+
+  test("effect composition: a def can compose two effects, each with its own real instance"):
+    // A second, independent effect alongside "counter" — proves RDefV2.effects
+    // is genuine List-composition, not just a widened Option. Scala/Rust each
+    // get two independently named &mut/instance parameters; the auto-generated
+    // main-harness check (Ports2's effectCheck/tests block) asserts BOTH
+    // instances actually fired (n > 0), not just the first.
+    val twoEffectModule = RosettaModule2(
+      name = "twoeffects",
+      datas = Nil,
+      effects = List(REffectV2("counter", List("tick")), REffectV2("logger", List("mark"))),
+      defs = List(
+        RDefV2(
+          name = "quicksort",
+          typeParams = List("a"), constraints = List(("a", "Ord")),
+          params = List("xs" -> RTy.RList(RTy.RVar("a"))), ret = RTy.RList(RTy.RVar("a")),
+          body = QuickSort2.quicksortBody),
+        RDefV2(
+          name = "countAndMark",
+          typeParams = Nil, constraints = Nil,
+          params = List("xs" -> RTy.RList(RTy.RInt)), ret = RTy.RList(RTy.RInt),
+          body = Cst.node("rseq", Cst.node("rcall", Cst.Leaf("tick")),
+            Cst.node("rseq", Cst.node("rcall", Cst.Leaf("mark")),
+              Cst.node("rcall", Cst.Leaf("quicksort"), Cst.node("rvar", Cst.Leaf("xs"))))),
+          effects = List("counter", "logger"))),
+      theorems = Nil)
+
+    val scala = PortV2.verified(ScalaPort2, twoEffectModule).fold(e => fail(e), identity).text
+    assert(scala.contains(
+      "def countAndMark(counter: Counter, logger: Logger, xs: List[Int]): List[Int] = { counter.tick(); { logger.mark(); quicksort(xs) } }"),
+      scala)
+    assert(scala.contains("counter.n > 0 && logger.n > 0"), scala)
+    val rust = PortV2.verified(RustPort2, twoEffectModule).fold(e => fail(e), identity).text
+    assert(rust.contains(
+      "fn count_and_mark(counter: &mut Counter, logger: &mut Logger, xs: &[i64]) -> Vec<i64> { { counter.tick(); { logger.mark(); quicksort(xs) } } }"),
+      rust)
+
+    // Real execution, not just text: both hosts actually compile and run
+    // this two-effect composition (verified interactively via scala-cli run
+    // and cargo run against these exact generated files — both printed
+    // "ALL TESTS PASS", confirming counter.n > 0 && logger.n > 0 for real).
+    val scalaCli = sys.env.getOrElse("PATH", "").split(":").map(java.nio.file.Paths.get(_, "scala-cli"))
+      .find(java.nio.file.Files.isExecutable)
+    if scalaCli.isDefined then
+      val dir = java.nio.file.Files.createTempDirectory("cairn-twoeffect")
+      val f = dir.resolve("Twoeffects.scala")
+      java.nio.file.Files.writeString(f, scala)
+      val pb = new ProcessBuilder(scalaCli.get.toString, "run", "--server=false", f.toString)
+      pb.redirectErrorStream(true)
+      val proc = pb.start()
+      val stdout = new String(proc.getInputStream.readAllBytes())
+      assertEquals(proc.waitFor(), 0, s"scala-cli failed:\n$stdout")
+      assert(stdout.contains("ALL TESTS PASS"), stdout)

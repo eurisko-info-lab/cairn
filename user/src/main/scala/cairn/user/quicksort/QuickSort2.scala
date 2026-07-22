@@ -38,7 +38,7 @@ object QuickSort2:
         params = List("xs" -> RTy.RList(RTy.RInt)),
         ret = RTy.RList(RTy.RInt),
         body = Cst.node("rseq", call("tick"), call("quicksort", v("xs"))),
-        effect = Some("counter"))),
+        effects = List("counter"))),
     theorems = List(
       RTheorem("quicksort_sorted",
         Cst.node("rforall", Cst.Leaf("xs"), Cst.node("rsorted", call("quicksort", v("xs"))))),

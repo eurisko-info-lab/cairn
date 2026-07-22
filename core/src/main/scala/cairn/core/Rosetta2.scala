@@ -25,7 +25,7 @@ final case class RDefV2(
     params: List[(String, RTy)],
     ret: RTy,
     body: Cst,                                // host-neutral expression
-    effect: Option[String] = None,            // effect name, e.g. "counter"
+    effects: List[String] = Nil,              // effect names, e.g. List("counter", "logger")
 )
 
 final case class RDataV2(name: String, typeParams: List[String], ctors: List[(String, List[RTy])])
@@ -62,7 +62,7 @@ final case class RosettaModule2(
         "name" -> Canon.CStr(p), "type" -> tyCanon(t)))),
       "ret" -> tyCanon(d.ret),
       "body" -> Cst.toCanon(d.body),
-      "effect" -> d.effect.fold(Canon.CTag("none", Canon.CInt(0)))(e => Canon.CTag("some", Canon.CStr(e)))))),
+      "effects" -> Canon.cstrs(d.effects)))),
     "theorems" -> Canon.CList(theorems.map(t => Canon.cmap(
       "name" -> Canon.CStr(t.name), "statement" -> Cst.toCanon(t.statement)))))
   def artifact: Artifact = Artifact(ArtifactKind.RosettaDecl, Canon.CTag("rosetta-v2", canon))

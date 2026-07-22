@@ -115,13 +115,19 @@ object Ports2:
       top = "file")
 
     /** Host-neutral expr -> single-line Scala text. */
-    def body(e: Cst, effectCtx: Boolean): String = ExprUtil.foldE[String](e)(
+    /** `effectCtx`: op name -> effect-instance variable name, flattened over
+      * every effect a def declares (M-effects: a def may compose more than
+      * one effect; each instance gets its own named parameter, so `tick`
+      * (say) dispatches to whichever instance actually owns that op).
+      */
+    def body(e: Cst, effectCtx: Map[String, String]): String = ExprUtil.foldE[String](e)(
       varF = identity,
       numF = identity,
       nilF = "List()",
       callF = (f, as) =>
-        if effectCtx && f == "tick" && as.isEmpty then "c.tick()"
-        else s"$f(${as.mkString(", ")})",
+        effectCtx.get(f) match
+          case Some(inst) if as.isEmpty => s"$inst.$f()"
+          case _ => s"$f(${as.mkString(", ")})",
       ifF = (c, a, b) => s"(if $c then $a else $b)",
       matchF = (s, nilB, h, t, consB) => s"($s match { case Nil => $nilB; case $h :: $t => $consB })",
       seqF = (a, b) => s"{ $a; $b }",
@@ -139,7 +145,7 @@ object Ports2:
           defd("isEmpty", List("a"), Nil, List("xs" -> RTy.RList(RTy.RVar("a"))), RTy.RBool, "xs.isEmpty"),
           defd("filterLt", List("a"), List("a" -> "Ord"), List("p" -> RTy.RVar("a"), "xs" -> RTy.RList(RTy.RVar("a"))), RTy.RList(RTy.RVar("a")), "xs.filter(x => summon[Ordering[a]].lt(x, p))"),
           defd("filterGe", List("a"), List("a" -> "Ord"), List("p" -> RTy.RVar("a"), "xs" -> RTy.RList(RTy.RVar("a"))), RTy.RList(RTy.RVar("a")), "xs.filter(x => !summon[Ordering[a]].lt(x, p))"),
-          defd("isSorted", Nil, Nil, List("xs" -> RTy.RList(RTy.RInt)), RTy.RBool, body(isSortedBody, false)),
+          defd("isSorted", Nil, Nil, List("xs" -> RTy.RList(RTy.RInt)), RTy.RBool, body(isSortedBody, Map.empty)),
           defd("isPerm", Nil, Nil, List("x" -> RTy.RList(RTy.RInt), "y" -> RTy.RList(RTy.RInt)), RTy.RBool, "x.sorted == y.sorted"))
         val effectDecls: List[Cst] = m.effects.flatMap { e =>
           List(Cst.node("classD", leaf(e.name.capitalize),
@@ -150,8 +156,9 @@ object Ports2:
             leaf(s"case ${d.ctors.map(_._1).mkString(", ")} }"))
         }
         val userDefs: List[Cst] = m.defs.map { d =>
-          val eff = d.effect.isDefined
-          val extraParams = if eff then List(("c", d.effect.get.capitalize)) else Nil
+          val instances = d.effects.flatMap(en => m.effects.find(_.name == en).map(en -> _))
+          val effectCtx = instances.flatMap((en, e) => e.ops.map(_ -> en)).toMap
+          val extraParams = instances.map((en, _) => (en, en.capitalize))
           val tpsCst =
             if d.typeParams.isEmpty then Cst.node("none")
             else Cst.node("some", Cst.node("tparams", lst(d.typeParams.map(leaf))))
@@ -162,7 +169,7 @@ object Ports2:
           val usingCst =
             if d.constraints.isEmpty then Cst.node("none")
             else Cst.node("some", Cst.node("usingC", leaf(d.constraints.head._1)))
-          Cst.node("defD", leaf(d.name), tpsCst, paramsCst, usingCst, ty(d.ret), leaf(body(d.body, eff)))
+          Cst.node("defD", leaf(d.name), tpsCst, paramsCst, usingCst, ty(d.ret), leaf(body(d.body, effectCtx)))
         }
         val samples = """List(List(), List(1), List(3, 1, 2), List(5, 4, 3, 2, 1), List(2, 2, 1, 1))"""
         val checks = m.theorems.map { t =>
@@ -177,9 +184,12 @@ object Ports2:
             "true", "false", (a, b) => s"($a == $b)", (a, b) => s"($a <= $b)", (a, b) => s"($a && $b)")
           s"""assert(${prop(t.statement)}, "${t.name}")"""
         }
-        val effectCheck = m.defs.find(_.effect.isDefined).map { d =>
-          val cls = d.effect.get.capitalize
-          s"""val c = $cap.$cls(); assert($cap.${d.name}(c, List(3, 1, 2)) == List(1, 2, 3) && c.n > 0, "effect ${d.effect.get}")"""
+        val effectCheck = m.defs.find(_.effects.nonEmpty).map { d =>
+          val insts = d.effects.map(en => en -> en.capitalize)
+          val decls = insts.map((n, cls) => s"val $n = $cap.$cls()").mkString("; ")
+          val callArgs = (insts.map(_._1) :+ "List(3, 1, 2)").mkString(", ")
+          val instChecks = insts.map((n, _) => s"$n.n > 0").mkString(" && ")
+          s"""$decls; assert($cap.${d.name}($callArgs) == List(1, 2, 3) && $instChecks, "effects ${d.effects.mkString(",")}")"""
         }
         val checkAll = Cst.node("defD", leaf("checkAll"), Cst.node("none"),
           Cst.node("none"), Cst.node("none"), Cst.node("tyUnit"),
@@ -373,10 +383,15 @@ object Ports2:
              else d.typeParams.flatMap(tp => List(Cst.node("pImplicit", leaf(tp)))
                ++ d.constraints.filter(_._1 == tp).map(_ => Cst.node("pInstance", leaf(tp))))) ++
             d.params.map((n, t) => pE(n, ty(t)))
-          val retTy = d.effect match
-            case Some(_) => Cst.node("tyState", Cst.node("tyNat"), ty(d.ret))
-            case None    => ty(d.ret)
-          Cst.node("defD", leaf(d.name), lst(ps), retTy, leaf(" " + body(d.body, d.effect.isDefined)))
+          // Honest limit: Lean composes at most the FIRST declared effect into
+          // one StateM Nat — genuine multi-effect composition would need a
+          // monad-transformer stack (StateT ... (StateT ...)), not attempted
+          // here. Scala/Rust give each effect its own real instance/parameter;
+          // Haskell defers ALL effects regardless of count (unchanged).
+          val retTy = d.effects match
+            case Nil => ty(d.ret)
+            case _   => Cst.node("tyState", Cst.node("tyNat"), ty(d.ret))
+          Cst.node("defD", leaf(d.name), lst(ps), retTy, leaf(" " + body(d.body, d.effects.nonEmpty)))
         }
         val theorems = m.theorems.map(t =>
           Cst.node("thmD", leaf(t.name), prop(t.statement), leaf(" by sorry")))
@@ -498,7 +513,7 @@ object Ports2:
         val dataDecls = m.datas.map(d => Cst.node("dataD", leaf(d.name),
           leaf(d.ctors.map(_._1).mkString(" | "))))
         val userDecls = m.defs.flatMap { d =>
-          if d.effect.isDefined then Nil // Haskell effect projection: deferred honestly (no State import battle)
+          if d.effects.nonEmpty then Nil // Haskell effect projection: deferred honestly (no State import battle)
           else
             val constrained = d.constraints.headOption.map(_._1)
             List(
@@ -616,14 +631,19 @@ object Ports2:
     /** One renderer: slice params stay bare; every computed argument is
       * borrowed (`&Vec` / `&T` coerce to `&[T]` / `&T` at call sites).
       */
-    private def render(e: Cst, effectCtx: Boolean, varMap: String => String): String =
+    /** `effectCtx`: op name -> effect-instance parameter name (see Scala's
+      * `body` for the same shape/rationale — composing more than one effect
+      * needs to route each op to its own `&mut` instance, not one hardcoded `c`).
+      */
+    private def render(e: Cst, effectCtx: Map[String, String], varMap: String => String): String =
       ExprUtil.foldE[String](e)(
         varF = varMap,
         numF = identity,
         nilF = "vec![]",
         callF = (f, as) =>
-          if effectCtx && f == "tick" && as.isEmpty then "c.tick()"
-          else s"${snake(f)}(${as.map(a => if a == "xs" then a else s"&($a)").mkString(", ")})",
+          effectCtx.get(f) match
+            case Some(inst) if as.isEmpty => s"$inst.$f()"
+            case _ => s"${snake(f)}(${as.map(a => if a == "xs" then a else s"&($a)").mkString(", ")})",
         ifF = (c, a, b) => s"if $c { $a } else { $b }",
         matchF = (s, nilB, h, t, consB) => s"match $s.split_first() { None => $nilB, Some(($h, $t)) => $consB }",
         seqF = (a, b) => s"{ $a; $b }",
@@ -657,7 +677,7 @@ object Ports2:
           fn("filter_ge", true, List(p("p", refT), p("xs", sliceT)), Some(vecT),
             "xs.iter().filter(|x| *x >= p).cloned().collect() }"),
           fn("is_sorted", false, List(p("xs", sliceI)), Some(Cst.node("rBool")),
-            render(isSortedBody, false, identity) + " }"),
+            render(isSortedBody, Map.empty, identity) + " }"),
           fn("is_perm", false, List(p("x", sliceI), p("y", sliceI)), Some(Cst.node("rBool")),
             "let mut a = x.to_vec(); let mut b = y.to_vec(); a.sort(); b.sort(); a == b }"))
         val effectDecls = m.effects.flatMap { e =>
@@ -673,9 +693,10 @@ object Ports2:
         // when they are not already the slice param
         val userFns = m.defs.map { d =>
           val generic = d.typeParams.nonEmpty
-          val eff = d.effect.isDefined
+          val instances = d.effects.flatMap(en => m.effects.find(_.name == en).map(en -> _))
+          val effectCtx = instances.flatMap((en, e) => e.ops.map(_ -> en)).toMap
           val params =
-            (if eff then List(Cst.node("paramMut", leaf("c"), leaf(d.effect.get.capitalize))) else Nil) ++
+            instances.map((en, _) => Cst.node("paramMut", leaf(en), leaf(en.capitalize))) ++
             d.params.map((n, t) => p(n, t match
               case RTy.RList(RTy.RVar(_)) => sliceT
               case RTy.RList(RTy.RInt)    => sliceI
@@ -685,13 +706,13 @@ object Ports2:
               case RTy.RList(RTy.RVar(_)) => vecT
               case RTy.RList(RTy.RInt)    => vecI
               case other                  => ty(other)),
-            render(d.body, eff, identity) + " }")
+            render(d.body, effectCtx, identity) + " }")
         }
         val tests = m.theorems.map { t =>
           def prop(s: Cst): String = s match
             case Cst.Node("rforall", List(Cst.Leaf(_), b)) => prop(b)
-            case Cst.Node("rsorted", List(e))  => s"is_sorted(&(${render(e, false, v => s"&$v")}))"
-            case Cst.Node("rperm", List(a, b)) => s"is_perm(&(${render(a, false, v => s"&$v")}), &(${render(b, false, v => s"&$v")}))"
+            case Cst.Node("rsorted", List(e))  => s"is_sorted(&(${render(e, Map.empty, v => s"&$v")}))"
+            case Cst.Node("rperm", List(a, b)) => s"is_perm(&(${render(a, Map.empty, v => s"&$v")}), &(${render(b, Map.empty, v => s"&$v")}))"
             case other => throw CodecError(s"bad statement: ${other.render}")
           Cst.node("testD", leaf(snake(t.name)),
             leaf(s"for xs in [vec![], vec![1], vec![3, 1, 2], vec![5, 4, 3, 2, 1]] { assert!(${prop(t.statement)}); } }"))

@@ -47,7 +47,7 @@ object QuickSortApp:
         params = List("xs" -> RTy.RList(RTy.RInt)),
         ret = RTy.RList(RTy.RInt),
         body = Cst.node("rseq", call("tick"), call("quicksort", v("xs"))),
-        effect = Some("counter")),
+        effects = List("counter")),
       RDefV2(
         name = "runSample",
         typeParams = Nil,
