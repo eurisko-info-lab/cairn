@@ -28,7 +28,9 @@ What exists after PLAN-2 (M38–M39) and what remains deferred.
 
 - **Network gossip daemon**: `Gossip` is an in-process simulation over real
   stores; a daemon would run the same rounds over `HttpSync` on a timer.
-- **BFT finality**: multi-authority PoA with quorum governance and rotation
-  exists (M36); Byzantine agreement between authorities does not.
+- **BFT finality (production)**: multi-authority PoA with quorum governance and
+  rotation exists (M36). `BftQuorum` adds an in-process PBFT-lite research/sim
+  (`f < n/3`, authenticated static replica set, round-based delivery) — **not**
+  production finality, peer discovery, or a public ledger.
 - **Peer discovery** and **useful-work market hooks**: unchanged —
   `RecordCertificate` remains the natural anchor for work receipts.

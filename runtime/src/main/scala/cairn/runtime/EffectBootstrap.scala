@@ -13,6 +13,8 @@ import java.nio.file.Path
   *
   * Host seeds ([[EffectMeta.families]], [[EffectMeta.packDecls]]) remain for
   * handler cold start; disk under `languages/` is the runtime source of truth.
+  * Action names are **not** a hand-maintained enum — they register from packs.
+  * [[Effects.Family]] is the residual JVM routing tag (ids ↔ packDecls).
   */
 object EffectBootstrap:
 
@@ -90,19 +92,27 @@ object EffectBootstrap:
 
   /** Load all effect packs from disk; verify against host seeds. */
   def load(packs: PackLoader, fsCtx: EffectContext = EffectContext.forFilesystem()): Either[String, Loaded] =
-    val interfaceLang = packs.requireClosed("effect-interface")
-    EffectMeta.fragmentPackNames.foldLeft[Either[String, List[(Effects.Family, EffectMeta.EffectFamily, EffectMeta.PinnedInterface)]]](Right(Nil)) {
-      case (Left(e), _) => Left(e)
-      case (Right(acc), name) =>
-        loadOne(packs, interfaceLang, fsCtx, name).map(acc :+ _)
-    }.flatMap { rows =>
-      val familyMap = rows.map(r => r._1 -> r._2).toMap
-      val pinMap = rows.map(r => r._1 -> r._3).toMap
-      if familyMap.keySet != Effects.Family.values.toSet then
-        Left(s"loaded families ${familyMap.keySet} != enum ${Effects.Family.values.toSet}")
-      else
-        Right(Loaded(interfaceLang, familyMap, pinMap))
-    }
+    if !Effects.Family.idsMatchPackDecls then
+      Left(s"Family enum ids ${Effects.Family.values.map(_.toString).toSet} != packDecls family ids")
+    else
+      val interfaceLang = packs.requireClosed("effect-interface")
+      EffectMeta.fragmentPackNames.foldLeft[Either[String, List[(Effects.Family, EffectMeta.EffectFamily, EffectMeta.PinnedInterface)]]](Right(Nil)) {
+        case (Left(e), _) => Left(e)
+        case (Right(acc), name) =>
+          loadOne(packs, interfaceLang, fsCtx, name).map(acc :+ _)
+      }.flatMap { rows =>
+        val familyMap = rows.map(r => r._1 -> r._2).toMap
+        val pinMap = rows.map(r => r._1 -> r._3).toMap
+        if familyMap.keySet != Effects.Family.values.toSet then
+          Left(s"loaded families ${familyMap.keySet} != enum ${Effects.Family.values.toSet}")
+        else
+          val derivedNames = familyMap.values.flatMap(f => f.actions.map(a => s"${f.family}.$a")).toSet
+          val packNames = EffectMeta.packDecls.values.flatMap(d => d.actions.map(a => s"${d.familyId}.$a")).toSet
+          if derivedNames != packNames then
+            Left(s"bootstrap ActionKey names from disk $derivedNames != packDecls $packNames")
+          else
+            Right(Loaded(interfaceLang, familyMap, pinMap))
+      }
 
   /** Convenience: load or throw (composition-root / test helper). */
   def require(packs: PackLoader, fsCtx: EffectContext = EffectContext.forFilesystem()): Loaded =

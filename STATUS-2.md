@@ -43,8 +43,12 @@ orchestration residuals, plus a **quick evolution pass**: typed
 `PathPattern` across all effect families (Cas `Digest|Path`), explorer
 **Trust** tab (`RevocationLog` / `DelegationLog`), SDS
 `SdsCorpusTutorial` (capability-constrained editing), and Core-facing
-`query`/`policy` `.cairn` packs. Architecture: SDS language proper vs report surface
-packs stay separated (Phase 2/3). Full suite: **509 tests** (507 passed + 2 skipped; `tests` module; `sbt test`).
+`query`/`policy` `.cairn` packs, plus a **residuals pass**: removed hand-
+maintained `Effects.Action` enum (ActionKeys from packDecls /
+`EffectBootstrap`); generalized dirty-subtree `dirtyOps` (structural `==` +
+LCS deletes); `sds-report` **pdf** surface + `PdfMinimal` bytes; research
+`BftQuorum` sim (not production). Architecture: SDS language proper vs report surface
+packs stay separated (Phase 2/3). Full suite: **517 tests** (515 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -56,11 +60,11 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 1 | Typed SDS sections 1–16 | **Done** | all 16 typed ctors in `sds.cairn`; thin acetone/ethanol use typed bodies |
 | 2 | Regulatory-profile conformance (full module) | **Done** | `EuClp.conform` + Cairn judgments; ΔSDS validate uses `sectionNumberOk` |
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
-| 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `printSurface` = PackLoader + print; `toCst` host residual; PDF deferred |
+| 4 | Report projection surfaces (JSON/XML/CSV/PDF) | **Done** | `printSurface` + `pdf` surface; `PdfMinimal` bytes; `toCst` host residual |
 | 5 | Approve/sign/publication certs as linked CAS | **Done** | `certificateKindOk` + workflow-kinds module; BranchManifest digests |
-| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-interface` lang + `iface.cairn` decls SoT; Family/Action enums host bridge; vocab Fragment host seed; query/policy `.cairn` SoT |
+| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `iface.cairn` decls SoT; **no Action enum**; Family thin routing bridge; Fragment/`packDecls` cold-start seeds |
 | 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
-| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant` + explorer Trust UI; merge-only, **BFT deferred** |
+| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; **`BftQuorum` research sim** (not production / no peer discovery) |
 | 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + causal module; `SdsCorpusTutorial` capability editing; Scala runs effectful steps |
 
 ## Architecture note — SDS vs report formats
@@ -74,10 +78,10 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 
 | Limit | Reality |
 |---|---|
-| Replay sync | CAS `replay-snapshot` **merge** (union absorb) — **not** consensus / BFT |
+| Replay sync | CAS `replay-snapshot` **merge** (union absorb) — **not** consensus; `BftQuorum` is research/sim only |
 | Journaled recovery | Local accept journal — **≠** distributed atomic txn |
-| Effect interfaces | CAS-pinned; `effect-interface` + `iface.cairn` decls SoT; Family/Action enums + vocab Fragment host seed |
-| Report formats | `sds-report` text + JSON + XML + CSV; **PDF deferred**; Studio deferred |
+| Effect interfaces | CAS-pinned; `iface.cairn` decls SoT; **ActionKeys from packs** (no Action enum); Family thin routing + Fragment/`packDecls` seeds |
+| Report formats | `sds-report` text + JSON + XML + CSV + **pdf** (+ `PdfMinimal` bytes); Studio deferred |
 
 ## Post-parity priority scorecard (2026-07-22)
 
@@ -88,7 +92,7 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 | 3 | Typed section-specific structures | **Done** | typed sections 1–16 |
 | 4 | Section-numbering / phrase-staleness as judgments or ΔL | **Done** | `sectionNumberOk`; phrase + section-field derived ΔSDS |
 | 5 | Multilingual section fields: corpus refs + overrides | **Advanced** | deep FR + ethanol DE; corpus `fieldLocaleRef`; shadow; FR report |
-| 6 | Report formats as surface packs | **Advanced** | `sds-report` default+json+xml+csv; **not** SDS; PDF deferred |
+| 6 | Report formats as surface packs | **Done** | `sds-report` default+json+xml+csv+**pdf**; `PdfMinimal`; **not** SDS |
 | 7 | Branch manifests alone reach semantic history | **Done** | `changeHistory` + `certificates`; sidecars caches |
 | 8 | VerifiedCapability / issuer evidence at trust boundaries | **Advanced** | grant-bundle on EffectContext; SDS causal capability-first put |
 | 9 | Widen Lean/HVM only via explicit corpus claims | **Done (process)** | No new claim this pass |
@@ -141,9 +145,11 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
 ## Honest deviations from PLAN-2 ACs
 
 - **M7**: byte-identical round-trip holds for whole unedited files + span-precise
-  splicing / `RoundTrip.put` / format-preserving ΔL `remove`/`rename`, plus thin
-  dirty-subtree `putReassociated` (identity-preserved children). General
-  dirty-subtree re-association without identity preservation remains absent.
+  splicing / `RoundTrip.put` / format-preserving ΔL `remove`/`rename`, plus
+  dirty-subtree `putReassociated` / `dirtyOps` (structural equality, not only
+  identity; LCS **delete** alignment with leading-trivia removal). Residual:
+  **inserts** at a level without an original span still fall back to parent
+  reprint.
 - **M10**: incremental reparse retains prefix memo entries; suffix entries are
   discarded (index shift), so "O(affected)" is prefix-anchored.
 - **M17**: semantic merge operates on module change histories; `Branches` refs
@@ -248,17 +254,18 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Effect interfaces | `ActionKey` digest-bound; CAS-pinned; `effect-interface` + `iface.cairn` SoT; `EffectBootstrap`; Family/Action host bridge |
 | Replay sync | Digest-merge absorb only — **not** consensus / BFT (`ReplayReplication` + `checkGrant`) |
 | Journaled accept | Local CAS → journal → refs — **≠** distributed atomic txn |
-| Report surfaces | `sds-report` text+JSON+XML+CSV (**not** SDS language); PDF deferred |
+| Report surfaces | `sds-report` text+JSON+XML+CSV+pdf (**not** SDS); `PdfMinimal` bytes |
 
 ### Remaining honest gaps
 
 - GRANITE SDS: typed sections 1–16 in `sds.cairn`; chemicals from
   `languages/sds/chemicals/*.cairn`; EU-CLP via `eu-clp` judgments +
   `EuClp.conform`. Report encodings are the separate `sds-report` pack
-  (`default`/`json`/`xml`/`csv`) — used by SDS, not SDS vocabulary. PDF and
-  Studio UI remain deferred. Phrase + section-field staleness as derived ΔSDS.
-  Causal workflow attaches approval/sign/publication certificates on
-  `BranchManifest.certificates` — without Studio.
+  (`default`/`json`/`xml`/`csv`/`pdf`) — used by SDS, not SDS vocabulary.
+  Minimal PDF bytes via `PdfMinimal` (one-page Helvetica; not a full PDF
+  toolkit). Studio UI remains deferred. Phrase + section-field staleness as
+  derived ΔSDS. Causal workflow attaches approval/sign/publication certificates
+  on `BranchManifest.certificates` — without Studio.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
   `#check` (refl/subst/`natRec` ι corpus; live stdout digests when `lean` on
@@ -266,17 +273,20 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - HVM live differential: `HvmSurface` exports HVM2 CON/DUP/ERA books for the
   envelope corpus; live `hvm run` when on PATH. Still not full HVM ABI / Bend /
   HVM5 / labelled-konst isomorphism outside the corpus.
-- BFT / gossip daemon / public ledger (explicitly deferred). Replication is
-  digest-merge want/have + revocation absorb — not BFT.
+- **BFT**: `BftQuorum` is an in-process PBFT-lite sim (`f < n/3`, authenticated
+  static set, round-based delivery). **Not** production finality, peer
+  discovery, gossip daemon, or public ledger. Replay sync remains digest-merge.
 - Full granit-rust MetaLego catalog of host languages (Unison/ASN.1/JVM/…) as
   separate packs — absorbed as platform capability, not forked catalogs.
 - Crash may leave unreferenced CAS blobs until `reclaimOrphanBlobs`;
-  multi-node replay is digest-merge only (not consensus / BFT).
+  multi-node replay is digest-merge only (not consensus).
 - Effect-interface declarations load from `languages/effect-*/iface.cairn`
   (`effect-interface` language) via `EffectBootstrap`; vocabulary from
-  `languages/effect-*.cairn`. Residual host bridges: `Effects.Family` /
-  `Effects.Action` enums (interpreter routing) + cold-start Fragment /
-  `packDecls` seeds (verified against disk).
+  `languages/effect-*.cairn`. **No hand-maintained Action enum** — ActionKeys
+  register from pack decls / pins. Residual: `Effects.Family` thin JVM routing
+  tag (ids ↔ packDecls) + cold-start Fragment / `packDecls` seeds.
+- Dirty-subtree: structural re-association + delete alignment landed; **inserts**
+  without an original span still parent-reprint.
 - **Scala orchestration residual (SDS use-cases):** effectful causal steps
   (`Branches` / Ed25519 / ledger), `EuClp.conform` / `Sds.validate` outline
   walks (ascending/unique structural), `SectionReport.toCst` projection CST
@@ -284,4 +294,4 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   sequence (`sds-workflow`), certificate kinds (`sds-certificate`), EU-CLP
   judgments, chemical instances, and report *encodings* (`sds-report`
   surfaces) load via PackLoader/CAS without recompiling Scala.
-- GRANITE SDS depth / Lean proof bodies / BFT — see above.
+- GRANITE SDS depth / Lean proof bodies — see above.

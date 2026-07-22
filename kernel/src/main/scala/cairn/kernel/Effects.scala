@@ -1,16 +1,19 @@
 package cairn.kernel
 
 /** Unified effect vocabulary (Phase 3). Policies and Kernel authorization
-  * reference [[ActionKey]]s derived from effect-interface artifacts
-  * ([[EffectMeta]]); the closed [[Action]] enum remains a host bridge.
+  * reference digest-bound [[ActionKey]]s derived from effect-interface packs
+  * (`iface.cairn` / [[EffectMeta]] / [[EffectBootstrap]]). There is **no**
+  * hand-maintained action-case enum — action names come from pack
+  * declarations.
   *
-  * Meta-defined families bind [[ActionKey.interfaceDigest]] to the family's
-  * Fragment digest so keys are not freely constructible strings.
+  * [[Family]] remains a thin JVM routing tag: its cases must match
+  * `packDecls` family ids (checked by EffectBootstrap). Pack → Family is
+  * [[Family.forPack]] / [[EffectMeta.packFamily]], not a parallel SoT.
   */
 object Effects:
   /** Host routing tag for effect interpreters. Registered from loaded
-    * `effect-*` packs via [[EffectMeta.packFamily]]; not the declaration SoT
-    * (that is [[EffectMeta.InterfaceDecl]] / `iface.cairn`).
+    * `effect-*` packs via [[EffectMeta.packFamily]]; declaration SoT is
+    * [[EffectMeta.InterfaceDecl]] / `iface.cairn`.
     */
   enum Family:
     case Filesystem, Cas, Workspace, Process, Clock, Random,
@@ -24,14 +27,17 @@ object Effects:
     def forPack(pack: String): Option[Family] =
       EffectMeta.packFamily.get(pack)
 
+    /** Bootstrap invariant: every enum case is named by some packDecls family id. */
+    def idsMatchPackDecls: Boolean =
+      values.map(_.toString).toSet == EffectMeta.packDecls.values.map(_.familyId).toSet
+
   /** Typed action key — family id + capability-class name, optionally bound
     * to the effect-interface Fragment digest.
     *
-    * Derived from [[EffectMeta.EffectFamily]] / [[EffectMeta.PinnedInterface]]
-    * for Meta-defined families; constructible from [[Action]] for host bridge.
-    * Prefer [[ActionKey.fromPinned]] so the interface digest is the CAS pin.
-    * Equality includes digest when present so unbound host keys and
-    * digest-bound Meta keys stay distinct until both sides bind.
+    * Mint via [[ActionKey.fromPinned]] / [[EffectMeta.EffectFamily.actionKey]]
+    * so the interface digest is the CAS pin. Equality includes digest when
+    * present so unbound host keys and digest-bound Meta keys stay distinct
+    * until both sides bind.
     */
   final case class ActionKey(
       family: String,
@@ -41,12 +47,8 @@ object Effects:
     /** Same capability class ignoring interface binding. */
     def sameClass(other: ActionKey): Boolean =
       family == other.family && name == other.name
-    /** Host enum case, when one still exists for this key. */
-    def toHost: Option[Action] =
-      Action.values.find(a => a.family.toString == family && a.name == name)
 
   object ActionKey:
-    def of(a: Action): ActionKey = a.key
     def of(family: Family, name: String): ActionKey = ActionKey(family.toString, name)
     def bound(family: Family, name: String, digest: Digest): ActionKey =
       ActionKey(family.toString, name, Some(digest))
@@ -56,35 +58,3 @@ object Effects:
       if !pinned.actions.contains(name) then
         Left(s"action '$name' not declared on pinned ${pinned.family}")
       else Right(pinned.actionKey(name))
-
-  /** Host-bridge action tags. Prefer [[ActionKey]] / [[EffectMeta]] at the
-    * policy and EffectRequest boundary; keep these cases in sync via
-    * [[EffectMeta.completeness]].
-    */
-  enum Action(val family: Family, val name: String):
-    case FsRead           extends Action(Family.Filesystem, "read")
-    case FsWrite          extends Action(Family.Filesystem, "write")
-    case FsMkdirs         extends Action(Family.Filesystem, "mkdirs")
-    case CasPut           extends Action(Family.Cas, "put")
-    case CasGet           extends Action(Family.Cas, "get")
-    case CasFsck          extends Action(Family.Cas, "fsck")
-    case CasGc            extends Action(Family.Cas, "gc")
-    case CasStats         extends Action(Family.Cas, "stats")
-    case ProcessRun       extends Action(Family.Process, "run")
-    case LedgerAppend     extends Action(Family.LedgerTransport, "append")
-    case ClockNow         extends Action(Family.Clock, "now")
-    case ClockTimestampSlug extends Action(Family.Clock, "timestampSlug")
-    case RandomBytes      extends Action(Family.Random, "bytes")
-    case TerminalWrite    extends Action(Family.Terminal, "write")
-    case TerminalRead     extends Action(Family.Terminal, "read")
-    case LspRead          extends Action(Family.Lsp, "read")
-    case LspWrite         extends Action(Family.Lsp, "write")
-    case BackendRun       extends Action(Family.ExternalBackend, "run")
-    case BackendFind      extends Action(Family.ExternalBackend, "find")
-    case WorkspaceRead    extends Action(Family.Workspace, "read")
-
-    /** Digest-bound when the family is Meta-defined; unbound otherwise. */
-    def key: ActionKey =
-      EffectMeta.families.get(family) match
-        case Some(ef) => ActionKey.bound(family, name, ef.fragment.digest)
-        case None     => ActionKey.of(family, name)

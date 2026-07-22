@@ -22,7 +22,7 @@ class AuthoritySuite extends munit.FunSuite:
   private val fsRead = EffectMeta.filesystem.actionKey("read")
   private val fsWrite = EffectMeta.filesystem.actionKey("write")
   private val wsRead = EffectMeta.workspace.actionKey("read")
-  private val ledgerAppend = Effects.Action.LedgerAppend.key
+  private val ledgerAppend = EffectMeta.ledgerTransport.actionKey("append")
   private val readReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
   private val appendReq = EffectRequest(alice, ledgerAppend, Resource("ledger", "/tmp/node"))
 
@@ -152,10 +152,11 @@ class AuthoritySuite extends munit.FunSuite:
     val stlc = packs.requireOwn("stlc")
     assert(stlc.nonEmpty)
 
-  test("derived ActionKey round-trips through host bridge and policy match"):
+  test("derived ActionKey from packDecls matches policy boundary"):
     val key = EffectMeta.filesystem.actionKey("read")
-    assertEquals(key, Effects.Action.FsRead.key)
-    assertEquals(key.toHost, Some(Effects.Action.FsRead))
+    assertEquals(key.family, "Filesystem")
+    assertEquals(key.name, "read")
+    assert(key.interfaceDigest.contains(EffectMeta.filesystem.fragment.digest))
     assertEquals(EffectMeta.filesystem.resource.kind, "filesystem")
     val policies = List(PolicyEval.allowAll("allow", alice, key))
     val req = EffectRequest(alice, key, EffectMeta.filesystem.resource.at("/tmp/x"))

@@ -79,7 +79,8 @@ Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
 Snapshots publish as CAS `replay-snapshot` digests (`ReplayStore.publish` /
 `mergeFromCas`) for multi-node absorb — **merge, not distributed consensus**.
 Capability revocation digests sync via the same want/have shape
-(`ReplayReplication` / `RevocationLog`) — BFT deferred. Explorer **Trust**
+(`ReplayReplication` / `RevocationLog`) — production BFT deferred (`BftQuorum`
+sim only). Explorer **Trust**
 tab views/manages revocations and delegation hops (`DelegationLog` /
 CAS `capability-delegation`) — not Studio.
 
@@ -199,7 +200,9 @@ LeanCore `#check` envelope.
 
 ## Intentional residuals
 
-- **BFT / gossip daemon / peer discovery** — deferred ([distribution.md](distribution.md))
+- **BFT / gossip daemon / peer discovery** — gossip daemon + peer discovery
+  deferred; `BftQuorum` is an in-process research/sim slice (`f < n/3`), not
+  production finality ([distribution.md](distribution.md))
 - **Separate `grammar.cairn`** — deferred ([bootstrap.md](bootstrap.md))
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in
   `examples/` (need handler crypto/CAS/filesystem); pure packs that need no
@@ -220,17 +223,18 @@ LeanCore `#check` envelope.
   `ActionKey.fromPinned`). Bootstrap path: primordial Meta → load
   `languages/effect-interface.cairn` → load each `effect-*` vocabulary +
   `iface.cairn` declaration module (`EffectBootstrap`) → derive actions /
-  resources / pins. Residual host bridges: `Effects.Family` /
-  `Effects.Action` enums (opaque interpreter routing) and cold-start
-  Fragment + `packDecls` seeds (fixpoint-checked against disk shapes /
-  decls).
+  resources / pins. **No hand-maintained Action enum** — ActionKeys register
+  from packs. Residual: `Effects.Family` thin JVM routing tag (ids ↔ packDecls)
+  + cold-start Fragment / `packDecls` seeds (fixpoint-checked against disk).
 - **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
   (issuer-scoped absorb). Revocation via `ReplayReplication` / `checkGrant`.
-  Not multi-node consensus / BFT.
+  Not multi-node consensus; `BftQuorum` is separate research/sim.
 - **SDS vs report formats** — SDS (`languages/sds.cairn`) is semantic only.
-  JSON/XML/CSV(+ deferred PDF) are `sds-report` projection surfaces that
-  *consume* SDS modules — not SDS constructors. Host residual: `toCst`;
-  print path is `SectionReport.printSurface` (PackLoader + RoundTrip).
+  JSON/XML/CSV/PDF are `sds-report` projection surfaces that *consume* SDS
+  modules — not SDS constructors. Host residual: `toCst`; print path is
+  `SectionReport.printSurface`; PDF bytes via `PdfMinimal`.
+- **Dirty-subtree (M7)** — `dirtyOps` / `putReassociated`: structural equality
+  + LCS delete alignment; inserts without an original span still parent-reprint.
 - **SDS workflow / evidence packs** — `languages/sds-workflow.cairn` +
   `causal.cairn` declare the author→…→publish sequence (`workflowStepOk` /
   `workflowPhaseOk`). `languages/sds-certificate.cairn` +

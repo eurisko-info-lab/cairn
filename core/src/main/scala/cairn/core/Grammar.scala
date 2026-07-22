@@ -464,27 +464,112 @@ object Concrete:
       }
     }
 
-  /** Thin dirty-subtree re-association: walk `dirty` against `original` and
-    * collect leaf-most `(originalSpanTarget, replacement)` pairs where the
-    * trees diverge. Unchanged children that share [[AnyRef]] identity with the
-    * original parse keep their bytes (via [[putMany]]); dirty regions print
-    * canonically. Does **not** invent spans for freshly allocated subtrees that
-    * have no original counterpart — those must be printed as a whole dirty
-    * parent. General nested "parent whose every child was independently rebuilt"
-    * without identity preservation remains unsupported.
+  /** Dirty-subtree re-association: walk `dirty` against `original` and collect
+    * leaf-most ops where the trees diverge.
+    *
+    * - Structural equality (`==`) counts as unchanged — identity preservation
+    *   is **not** required.
+    * - Equal-arity same-tag nodes recurse into children.
+    * - Unequal arity: LCS alignment on structural shape; deletes become
+    *   [[DirtyOp.Delete]] (leading-trivia-aware); pure inserts at a level fall
+    *   back to replacing the parent (honest residual — no original span).
     */
-  def dirtyEdits(original: Cst, dirty: Cst): List[(Cst, Cst)] =
-    if original eq dirty then Nil
+  enum DirtyOp:
+    case Replace(original: Cst, dirty: Cst)
+    case Delete(original: Cst)
+
+  /** Structural shape key for child alignment (not identity). */
+  private def shapeKey(c: Cst): String = c match
+    case Cst.Leaf(t) => s"L:$t"
+    case Cst.Node(t, cs) => s"N:$t:${cs.length}:${cs.map(shapeKey).mkString("|")}"
+
+  /** LCS index pairs over shape keys; returns (i in xs, j in ys) matches. */
+  private def lcsMatches(xs: List[String], ys: List[String]): List[(Int, Int)] =
+    val n = xs.length
+    val m = ys.length
+    val dp = Array.ofDim[Int](n + 1, m + 1)
+    var i = n - 1
+    while i >= 0 do
+      var j = m - 1
+      while j >= 0 do
+        dp(i)(j) =
+          if xs(i) == ys(j) then dp(i + 1)(j + 1) + 1
+          else Math.max(dp(i + 1)(j), dp(i)(j + 1))
+        j -= 1
+      i -= 1
+    val out = List.newBuilder[(Int, Int)]
+    i = 0
+    var j = 0
+    while i < n && j < m do
+      if xs(i) == ys(j) then
+        out += ((i, j)); i += 1; j += 1
+      else if dp(i + 1)(j) >= dp(i)(j + 1) then i += 1
+      else j += 1
+    out.result()
+
+  def dirtyOps(original: Cst, dirty: Cst): List[DirtyOp] =
+    if (original eq dirty) || original == dirty then Nil
     else (original, dirty) match
-      case (Cst.Node(t1, cs1), Cst.Node(t2, cs2)) if t1 == t2 && cs1.length == cs2.length =>
-        val child = cs1.zip(cs2).flatMap { case (o, d) => dirtyEdits(o, d) }
-        if child.nonEmpty then child else List(original -> dirty)
-      case _ => List(original -> dirty)
+      case (Cst.Node(t1, cs1), Cst.Node(t2, cs2)) if t1 == t2 =>
+        if cs1.length == cs2.length then
+          val child = cs1.zip(cs2).flatMap { case (o, d) => dirtyOps(o, d) }
+          if child.nonEmpty then child else List(DirtyOp.Replace(original, dirty))
+        else
+          val keys1 = cs1.map(shapeKey)
+          val keys2 = cs2.map(shapeKey)
+          val matches = lcsMatches(keys1, keys2)
+          val matchedI = matches.map(_._1).toSet
+          val matchedJ = matches.map(_._2).toSet
+          val inserts = cs2.indices.exists(j => !matchedJ.contains(j))
+          if inserts then List(DirtyOp.Replace(original, dirty))
+          else
+            val deletes = cs1.indices.filter(i => !matchedI.contains(i)).map(i => DirtyOp.Delete(cs1(i))).toList
+            val nested = matches.flatMap { (i, j) => dirtyOps(cs1(i), cs2(j)) }
+            val ops = deletes ++ nested
+            if ops.nonEmpty then ops else List(DirtyOp.Replace(original, dirty))
+      case _ => List(DirtyOp.Replace(original, dirty))
+
+  /** Replace/delete pairs for [[putMany]] / delete passes — [[dirtyOps]] view. */
+  def dirtyEdits(original: Cst, dirty: Cst): List[(Cst, Cst)] =
+    dirtyOps(original, dirty).collect {
+      case DirtyOp.Replace(o, d) => (o, d)
+    }
 
   def putReassociated(
       g: GrammarSpec, source: String, out: ParseOut, original: Cst, dirty: Cst
   ): Either[String, String] =
-    putMany(g, source, out, dirtyEdits(original, dirty))
+    val ops = dirtyOps(original, dirty)
+    // Deletes first (rightmost-first among deletes), then replaces via putMany.
+    val deletes = ops.collect { case DirtyOp.Delete(o) => o }
+      .flatMap(o => out.spans.get(o).map(span => (span, o)))
+      .sortBy(-_._1._1)
+    val afterDeletes = deletes.foldLeft[Either[String, String]](Right(source)) { (acc, pair) =>
+      val ((startTok, endTok), _) = pair
+      acc.map { text =>
+        val startOff =
+          if startTok == 0 then 0
+          else { val prev = out.tokens(startTok - 1); prev.offset + prev.rawLen }
+        val endOff =
+          if endTok == 0 then startOff
+          else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+        text.substring(0, startOff) + text.substring(endOff)
+      }
+    }
+    val replaces = ops.collect { case DirtyOp.Replace(o, d) => (o, d) }
+    afterDeletes.flatMap { text =>
+      if replaces.isEmpty then Right(text)
+      else
+        // Spans still refer to the original parse; only valid when no deletes
+        // shifted the text. If we deleted, re-parse then put the replacements
+        // against the updated tree when possible; otherwise reprint dirty.
+        if deletes.isEmpty then putMany(g, text, out, replaces)
+        else
+          // Deletes already applied; replacements that survived must be
+          // re-associated by structure against a fresh parse of `text`.
+          Parser.parseFull(g, text).flatMap { out2 =>
+            putMany(g, text, out2, dirtyEdits(out2.cst, dirty))
+          }
+    }
 
 /** One generic printer (S11) interpreting the print table. */
 object Printer:
@@ -576,9 +661,10 @@ object Printer:
   * / [[Concrete.splice]] edit one spanned subtree and preserve every byte
   * outside that span (leading/trailing trivia, siblings). Module-level ΔL
   * uses the same primitive via [[Delta.applyPreservingFormat]] (including
-  * format-preserving `remove` / `rename`). Thin dirty-subtree re-association
-  * for identity-preserved children is [[putReassociated]]; general nested
-  * rebuilds without identity preservation remain unsupported.
+  * format-preserving `remove` / `rename`). Dirty-subtree re-association
+  * ([[putReassociated]] / [[dirtyOps]]) uses structural equality (not only
+  * identity), equal-arity recursion, and LCS delete alignment; inserts at a
+  * level without an original span still fall back to parent reprint.
   */
 object RoundTrip:
   /** Law 1: retraction (see object doc) — `parse(print(t)) == t`. */
@@ -613,10 +699,13 @@ object RoundTrip:
   def putMany(g: GrammarSpec, source: String, out: ParseOut, edits: List[(Cst, Cst)]): Either[String, String] =
     Concrete.putMany(g, source, out, edits)
 
-  /** [[Concrete.putReassociated]] — dirty-subtree thin slice over identity-
-    * preserved children (see [[Concrete.dirtyEdits]]).
+  /** [[Concrete.putReassociated]] — dirty-subtree re-association (structural
+    * equality + delete alignment; see [[Concrete.dirtyOps]]).
     */
   def putReassociated(
       g: GrammarSpec, source: String, out: ParseOut, original: Cst, dirty: Cst
   ): Either[String, String] =
     Concrete.putReassociated(g, source, out, original, dirty)
+
+  def dirtyOps(original: Cst, dirty: Cst): List[Concrete.DirtyOp] =
+    Concrete.dirtyOps(original, dirty)

@@ -79,9 +79,10 @@ What stays host-backed:
 - the initial Scala seed (`Meta.fragment`, STLC fragment constructors) for
   bootstrap fixpoint / digest-equality tests
 - effect cold-start: `EffectMeta` Fragment ASTs + `packDecls`, and
-  `Effects.Family` / `Effects.Action` enums for interpreter routing
+  `Effects.Family` thin JVM routing tag (ids ↔ packDecls; ActionKeys register
+  from packs — **no Action enum**)
   (disk SoT is `effect-interface` + `effect-*/iface.cairn` + vocab packs;
-  `EffectBootstrap` checks decl/shape fixpoint)
+  `EffectBootstrap` checks decl/shape/ActionKey fixpoint)
 - Core engines that *interpret* language data: `TreeEngine`, `Delta`, `Merge`,
   `PolicyEval.prove`, `Query.run` (execution), grammar VM, ports, nets —
   described-by vs executed-by: query/policy *vocabularies* are now `.cairn`

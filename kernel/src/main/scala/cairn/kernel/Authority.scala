@@ -8,7 +8,7 @@ package cairn.kernel
   * language capability manifests (`ArtifactKind.Capability` / `core.Capabilities`).
   *
   * Action vocabulary is [[Effects.ActionKey]], derived from [[EffectMeta]]
-  * effect-interface artifacts (with [[Effects.Action]] as host bridge).
+  * effect-interface packs (`iface.cairn` / digest-bound pins).
   *
   * Calculus dimensions (priority #5): policy [[EffectPolicy.conditions]], grant
   * expiry / nonce, replay sets, [[Delegation]] chains, and Kernel-minted

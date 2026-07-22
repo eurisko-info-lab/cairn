@@ -27,12 +27,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.random", List(EffectMeta.random.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.random's requestActions is complete and matches the hand-tagged Random actions exactly"):
+  test("EffectMeta.random's requestActions is complete and matches packDecls Random actions exactly"):
     assertEquals(EffectMeta.completeness(EffectMeta.random), Nil)
     val derived = EffectMeta.actions(EffectMeta.random)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Random).map(_.key).toSet
-    assertEquals(derived, handTagged)
-    assert(derived.forall(_.toHost.isDefined))
+    val fromPack = EffectMeta.packDecls("effect-random").actions.map(a =>
+      EffectMeta.random.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
 
   test("system-interface.Random.Request cases correspond 1:1 to the Fragment's Request constructors"):
     // Exhaustive match: adding a Request case without updating this table
@@ -47,11 +47,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.clock", List(EffectMeta.clock.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.clock's requestActions is complete and matches the hand-tagged actions (incl. the fixed drift)"):
+  test("EffectMeta.clock's requestActions is complete and matches packDecls actions (incl. the fixed drift)"):
     assertEquals(EffectMeta.completeness(EffectMeta.clock), Nil)
     val derived = EffectMeta.actions(EffectMeta.clock)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Clock).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-clock").actions.map(a =>
+      EffectMeta.clock.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 2) // Now + TimestampSlug — was 1 before that slice
 
   test("system-interface.Clock.Request cases correspond 1:1 to the Fragment's Request constructors"):
@@ -66,11 +67,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.process", List(EffectMeta.process.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.process's requestActions is complete and matches the hand-tagged actions (no drift)"):
+  test("EffectMeta.process's requestActions is complete and matches packDecls actions (no drift)"):
     assertEquals(EffectMeta.completeness(EffectMeta.process), Nil)
     val derived = EffectMeta.actions(EffectMeta.process)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Process).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-process").actions.map(a =>
+      EffectMeta.process.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 1) // Run — matched cleanly, unlike Clock
     assertEquals(EffectMeta.process.resource.kind, "process")
     assertEquals(EffectMeta.process.resource.pathPattern, "Command")
@@ -88,11 +90,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.externalBackend", List(EffectMeta.externalBackend.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.externalBackend's requestActions is complete and matches the hand-tagged actions (incl. the fixed drift)"):
+  test("EffectMeta.externalBackend's requestActions is complete and matches packDecls actions (incl. the fixed drift)"):
     assertEquals(EffectMeta.completeness(EffectMeta.externalBackend), Nil)
     val derived = EffectMeta.actions(EffectMeta.externalBackend)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.ExternalBackend).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-externalBackend").actions.map(a =>
+      EffectMeta.externalBackend.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 2) // Find + Run — was 1 (Run only) before that slice
 
   test("system-interface.ExternalBackend.Request cases correspond 1:1 to the Fragment's Request constructors"):
@@ -111,11 +114,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.terminal", List(EffectMeta.terminal.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.terminal's requestActions is complete and matches the hand-tagged actions (incl. the fixed drift)"):
+  test("EffectMeta.terminal's requestActions is complete and matches packDecls actions (incl. the fixed drift)"):
     assertEquals(EffectMeta.completeness(EffectMeta.terminal), Nil)
     val derived = EffectMeta.actions(EffectMeta.terminal)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Terminal).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-terminal").actions.map(a =>
+      EffectMeta.terminal.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 2) // TerminalRead + TerminalWrite — was 1 (write only) before this slice
 
   test("system-interface.Terminal.Request cases correspond 1:1 to the Fragment's Request constructors"):
@@ -136,11 +140,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.workspace", List(EffectMeta.workspace.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.workspace's requestActions is complete and matches the hand-tagged actions (no drift, 5-to-1)"):
+  test("EffectMeta.workspace's requestActions is complete and matches packDecls actions (no drift, 5-to-1)"):
     assertEquals(EffectMeta.completeness(EffectMeta.workspace), Nil)
     val derived = EffectMeta.actions(EffectMeta.workspace)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Workspace).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-workspace").actions.map(a =>
+      EffectMeta.workspace.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 1) // all 5 requests share WorkspaceRead
     assertEquals(EffectMeta.workspace.resource.kind, "workspace")
     assertEquals(EffectMeta.workspace.resource.pathPattern, "Path")
@@ -167,11 +172,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.filesystem", List(EffectMeta.filesystem.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.filesystem's requestActions is complete and matches the hand-tagged actions (no new action, 13-to-3)"):
+  test("EffectMeta.filesystem's requestActions is complete and matches packDecls actions (no new action, 13-to-3)"):
     assertEquals(EffectMeta.completeness(EffectMeta.filesystem), Nil)
     val derived = EffectMeta.actions(EffectMeta.filesystem)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Filesystem).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-filesystem").actions.map(a =>
+      EffectMeta.filesystem.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 3) // FsRead, FsWrite, FsMkdirs — unchanged from before this slice
     assertEquals(EffectMeta.filesystem.resource.kind, "filesystem")
     assertEquals(EffectMeta.filesystem.resource.pathPattern, "Path")
@@ -219,11 +225,12 @@ class EffectMetaSuite extends munit.FunSuite:
     Compose.compose("effect.lsp", List(EffectMeta.lsp.fragment)).fold(
       errs => fail(errs.map(_.render).mkString("\n")), identity)
 
-  test("EffectMeta.lsp's requestActions is complete and matches the hand-tagged actions (LspServe orphan replaced)"):
+  test("EffectMeta.lsp's requestActions is complete and matches packDecls actions (LspServe orphan replaced)"):
     assertEquals(EffectMeta.completeness(EffectMeta.lsp), Nil)
     val derived = EffectMeta.actions(EffectMeta.lsp)
-    val handTagged = Effects.Action.values.filter(_.family == Effects.Family.Lsp).map(_.key).toSet
-    assertEquals(derived, handTagged)
+    val fromPack = EffectMeta.packDecls("effect-lsp").actions.map(a =>
+      EffectMeta.lsp.actionKey(a)).toSet
+    assertEquals(derived, fromPack)
     assertEquals(derived.size, 2) // LspRead + LspWrite — replaces the orphaned LspServe
 
   test("system-interface.Lsp.Request cases correspond 1:1 to the Fragment's Request constructors"):
@@ -271,12 +278,14 @@ class EffectMetaSuite extends munit.FunSuite:
       EffectMeta.ledgerTransport.fragment.constructors.filter(_.sort == "Request").map(_.name).toSet
     assertEquals(scalaReqCases, fragmentReqCtors)
 
-  test("derived ActionKeys cover all host Actions; Cas/Ledger are Meta-defined"):
+  test("derived ActionKeys come from packDecls; no hand-maintained Action enum; Cas/Ledger Meta-defined"):
     val derived = EffectMeta.derivedActionKeys
-    val hostOnly = EffectMeta.hostOnlyActionKeys
-    assertEquals(hostOnly, Set.empty[Effects.ActionKey])
-    assertEquals(EffectMeta.allActionKeys, Effects.Action.values.map(_.key).toSet)
-    assert(derived.subsetOf(EffectMeta.allActionKeys))
+    assertEquals(EffectMeta.allActionKeys, derived)
+    // Unbound packDecl keys share family.name with digest-bound derived keys
+    assertEquals(
+      derived.map(k => (k.family, k.name)),
+      EffectMeta.packDeclActionKeys.map(k => (k.family, k.name)))
+    assert(Effects.Family.idsMatchPackDecls)
     assert(EffectMeta.families.contains(Effects.Family.Cas))
     assert(EffectMeta.families.contains(Effects.Family.LedgerTransport))
     EffectMeta.families.values.foreach { f =>

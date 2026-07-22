@@ -19,11 +19,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
 5. **Whitespace policy**: the tree-level law `parse(print(t)) == t` plus
    byte-exact concrete printing for UNEDITED files and span-precise splicing /
    `RoundTrip.put` / `Concrete.put` (M7) for format-preserving subtree edits.
-   General dirty-subtree re-association for freshly rebuilt trees without
-   identity preservation is not implemented; `put`/`splice`/`putMany` edit
-   recorded spans, and thin `putReassociated` reuses identity-preserved
-   children. Format-preserving ΔL `remove`/`rename` are supported. Default
-   print rules are derived from
+   Dirty-subtree re-association (`putReassociated` / `dirtyOps`) uses structural
+   equality (identity not required) and LCS **delete** alignment with
+   leading-trivia removal; **inserts** without an original span still fall back
+   to parent reprint. Format-preserving ΔL `remove`/`rename` are supported.
+   Default print rules are derived from
    syntax productions (`PrintDerive`); an explicit `print` line is an override.
    RoundTrip still gates trust — derivation is not trusted alone.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
@@ -51,24 +51,25 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    `ReplayStore` (memory or durable filesystem), shareable across gates;
    snapshots sync via CAS `replay-snapshot` digests (`publish` / `mergeFromCas`)
    — digest **merge**, not consensus. Capability revocation uses the same
-   want/have shape (`ReplayReplication` / `RevocationLog`); BFT deferred.
+   want/have shape (`ReplayReplication` / `RevocationLog`); production BFT
+   deferred (`BftQuorum` is research/sim only).
    Effect interfaces pin as CAS `effect-interface` artifacts
    (`PinnedInterface` / `ActionKey.fromPinned`). Runtime SoT:
    `languages/effect-interface.cairn` plus per-family vocabulary
    (`languages/effect-*.cairn`) and declaration modules
    (`languages/effect-*/iface.cairn`), loaded by `EffectBootstrap`.
-   Residual host bridges: `Effects.Family` / `Effects.Action` enums
-   (interpreter routing) and cold-start Fragment / `packDecls` seeds
-   (verified against disk). `EffectContext.capabilities`
+   **No hand-maintained Action enum** — ActionKeys from pack decls.
+   Residual: `Effects.Family` thin JVM routing tag + cold-start Fragment /
+   `packDecls` seeds (verified against disk). `EffectContext.capabilities`
    threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
    atomic transaction. SDS *uses* report projection pack `sds-report`
-   (text + JSON + XML + CSV surfaces under `languages/sds-report/surfaces/`);
+   (text + JSON + XML + CSV + pdf surfaces under `languages/sds-report/surfaces/`);
    print path is PackLoader + RoundTrip (`SectionReport.printSurface`);
-   `toCst` remains host projection. Causal workflow sequence and certificate
-   kinds are Cairn packs (`sds-workflow`, `sds-certificate`); Scala runs
-   effectful Branches/Ed25519/ledger steps under authority. Formats are
-   **not** SDS vocabulary. PDF deferred; BFT deferred.
+   PDF bytes via `PdfMinimal`; `toCst` remains host projection. Causal workflow
+   sequence and certificate kinds are Cairn packs (`sds-workflow`,
+   `sds-certificate`); Scala runs effectful Branches/Ed25519/ledger steps under
+   authority. Formats are **not** SDS vocabulary.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.
@@ -76,7 +77,8 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    injected extension evaluators (PKI uses `$sig-ok`/`$anchor`). The checker
    remains decidable and the sole certifier.
 9. ~~Single-authority PoA~~ — discharged by M36: on-chain authority sets,
-   majority-quorum add/remove, round-robin sealing. BFT finality still out.
+   majority-quorum add/remove, round-robin sealing. Production BFT finality
+   still out (`BftQuorum` sim only).
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
     Rosetta skeletons are golden-checked. All four pass whole-file byte

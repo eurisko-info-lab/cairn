@@ -11,13 +11,13 @@ import cairn.user.sds.Sds
   * SDS (`languages/sds.cairn`) is semantic documents (typed sections, outlines,
   * ΔSDS). This pack is an ordinary Cairn surface pack used *by* SDS workflows
   * to project those documents: `languages/sds-report.cairn` + surfaces under
-  * `languages/sds-report/surfaces/` (`default` text, `json`, `xml`, `csv`).
-  * Host maps ([[Chemicals.ChemicalDoc]]) and SDS modules both compile to the
-  * same report CST via [[toCst]] (host projection residual). Printing goes
-  * through [[printSurface]] — PackLoader surface bind + RoundTrip — so
-  * JSON/XML/CSV encodings load without recompiling Scala. PDF remains
-  * deferred. RoundTrip is the trust gate — same pattern as other surface
-  * packs, not SDS object vocabulary.
+  * `languages/sds-report/surfaces/` (`default` text, `json`, `xml`, `csv`,
+  * `pdf`). Host maps ([[Chemicals.ChemicalDoc]]) and SDS modules both compile
+  * to the same report CST via [[toCst]] (host projection residual). Printing
+  * goes through [[printSurface]] — PackLoader surface bind + RoundTrip — so
+  * encodings load without recompiling Scala. [[renderPdf]] emits minimal PDF
+  * 1.4 bytes via [[PdfMinimal]] (pure writer; the `pdf` surface is the
+  * RoundTrip-able text twin). RoundTrip is the trust gate for text surfaces.
   */
 object SectionReport:
   private lazy val packs = PackLoader(EffectContext.forPackLoader())
@@ -30,6 +30,8 @@ object SectionReport:
   lazy val xmlGrammar: GrammarSpec = xmlLanguage.grammar
   lazy val csvLanguage: ComposedLanguage = packs.requireClosed("sds-report", "csv")
   lazy val csvGrammar: GrammarSpec = csvLanguage.grammar
+  lazy val pdfLanguage: ComposedLanguage = packs.requireClosed("sds-report", "pdf")
+  lazy val pdfGrammar: GrammarSpec = pdfLanguage.grammar
 
   private def listToOpt(xs: List[Cst]): Cst =
     if xs.isEmpty then Cst.Node("none", Nil)
@@ -223,4 +225,51 @@ object SectionReport:
       cst <- toCst(module, outlineName, lang)
       text <- printSurface("csv", cst)
     yield text
+
+  /** Text twin of the PDF projection (`pdf` surface) — RoundTrip trust gate. */
+  def renderPdfSurface(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
+    for
+      cst <- toCst(module, outlineName, lang)
+      text <- printSurface("pdf", cst)
+    yield text
+
+  /** Flatten a report CST to title + body lines for [[PdfMinimal]]. */
+  def pdfLines(report: Cst): Either[String, (String, List[String])] = report match
+    case Cst.Node("report", List(Cst.Leaf(name), Cst.Leaf(cas), Cst.Node("list", sections))) =>
+      val lines = List.newBuilder[String]
+      lines += s"SDS REPORT: $name"
+      lines += s"CAS: $cas"
+      lines += ""
+      sections.foreach {
+        case Cst.Node("sectionBlock", List(Cst.Leaf(num), Cst.Leaf(title), Cst.Node("list", fields))) =>
+          lines += s"$num. $title"
+          fields.foreach {
+            case Cst.Node("fieldLine", List(Cst.Leaf(k), Cst.Leaf(v))) =>
+              lines += s"  $k: $v"
+            case _ => ()
+          }
+          lines += ""
+        case _ => ()
+      }
+      Right((name, lines.result()))
+    case other => Left(s"not a report CST: ${other.render}")
+
+  /** Minimal PDF 1.4 bytes from an SDS outline — projection used *by* SDS,
+    * not SDS vocabulary. Companion text surface: [[renderPdfSurface]].
+    */
+  def renderPdf(module: Module, outlineName: String, lang: String = "en"): Either[String, Array[Byte]] =
+    for
+      cst <- toCst(module, outlineName, lang)
+      pair <- pdfLines(cst)
+    yield
+      val (title, lines) = pair
+      PdfMinimal.writeText(title, lines)
+
+  def renderPdf(doc: Chemicals.ChemicalDoc): Either[String, Array[Byte]] =
+    for
+      _ <- doc.validateOutline.left.map(_.map(_.toString).mkString("; "))
+      pair <- pdfLines(toCst(doc))
+    yield
+      val (title, lines) = pair
+      PdfMinimal.writeText(title, lines)
 end SectionReport

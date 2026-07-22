@@ -75,8 +75,9 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 - Chemical instances: `.cairn` under `languages/sds/chemicals/` (acetone /
   ethanol full euSection + thin typed 1–16 subset) via `ChemicalSource`.
 - **Report projection (not SDS language):** `sds-report` pack under
-  `languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv`
-  *consume* SDS modules/outlines. PDF deferred. RoundTrip trust gate.
+  `languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv` / `pdf`
+  *consume* SDS modules/outlines. `PdfMinimal` emits one-page PDF bytes.
+  RoundTrip trust gate for text surfaces.
 - Causal workflow: `languages/sds-workflow.cairn` + `causal.cairn` (checked
   sequence); host `SdsCausalWorkflow` runs effectful Branches/ledger steps
   and attaches judgment-checked certificates (`sds-certificate` /
@@ -96,14 +97,14 @@ sbt "examples/runMain cairn.examples.Main sds-tutorial"
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
 - Studio-persisted phrase corpus / authoring UI.
-- PDF report surface (heavy; deferred).
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
-  runtime SoT (`EffectBootstrap`); `Family`/`Action` enums + Fragment/
-  `packDecls` cold-start seeds remain host bridges (verified against disk).
+  runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
+  `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
 - **Scala orchestration residual:** `Sds.validate` / `EuClp.conform` outline
   walks, `SectionReport.toCst`, and effectful causal/cert minting — facts and
   encodings are Cairn; drivers remain host.
-- BFT replication (replay sync is digest-merge only).
+- Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
+  research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
   lang-scoped shadows still absent (shadows are lang-blind).
 

@@ -11,8 +11,8 @@ import cairn.examples.stlc.Stlc
   * the same structural edit drops comments/spacing — the contrast test below
   * fails if `put` regresses to canonical reprint. Module-level ΔL uses the same
   * primitive via [[Delta.applyPreservingFormat]] (`replace`/`edit`/`add`/
-  * `remove`/`rename`). [[RoundTrip.putReassociated]] covers the thin dirty-
-  * subtree slice (identity-preserved children).
+  * `remove`/`rename`). [[RoundTrip.putReassociated]] covers dirty-subtree
+  * re-association (structural equality, not only identity; LCS deletes).
   */
 class DeltaFormatPreserveSuite extends munit.FunSuite:
   private val dl = Delta.deltaOf(Stlc.language).fold(e => fail(e.map(_.render).mkString), identity)
@@ -184,6 +184,54 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
     // Whole-tree print loses trivia — proves putReassociated is load-bearing.
     val viaPrint = Printer.print(g, dirty).fold(e => fail(e), identity)
     assert(!viaPrint.contains("-- keep me"), viaPrint)
-    // Without identity preservation, dirtyEdits would target the whole if —
-    // condition span would also be reprinted (still correct, but coarser).
     assertEquals(Concrete.dirtyEdits(out.cst, dirty).map(_._1), List(thenB, elseB))
+
+  test("dirty-subtree: structural equality without identity skips unchanged children"):
+    val g = Stlc.language.grammar
+    val src = "-- keep me\nif true then x else  y -- and me\n"
+    val out = Parser.parseFull(g, src).fold(e => fail(e), identity)
+    val (cond, thenB, elseB) = out.cst match
+      case Cst.Node("if", List(c, t, e)) => (c, t, e)
+      case other => fail(s"unexpected: ${other.render}")
+    // Fresh Node("true") — structurally equal to the parsed condition, NOT eq.
+    val freshTrue = Cst.node("true")
+    assert(!(cond eq freshTrue))
+    assertEquals(cond, freshTrue)
+    val dirty = Cst.node("if", freshTrue, Stlc.fls, Stlc.tru)
+    val ops = Concrete.dirtyOps(out.cst, dirty)
+    val replaceTargets = ops.collect { case Concrete.DirtyOp.Replace(o, _) => o }
+    // Without structural ==, the fresh cond would be a Replace target too.
+    assertEquals(replaceTargets, List(thenB, elseB))
+    val via = RoundTrip.putReassociated(g, src, out, out.cst, dirty).fold(e => fail(e), identity)
+    assert(via.contains("-- keep me"), via)
+    assert(via.contains("-- and me"), via)
+
+  test("dirty-subtree: delete-aligned child preserves sibling trivia (fails without LCS)"):
+    val src = "-- header\na = true ;\n-- b's comment\nb = false ;\n-- foot\nc = true ;\n"
+    val out = Parser.parseFull(mg, src).fold(e => fail(e), identity)
+    val defs = out.cst match
+      case Cst.Node("moduleFile", List(Cst.Node("list", ds))) => ds
+      case other => fail(s"unexpected: ${other.render}")
+    assertEquals(defs.length, 3)
+    // Rebuild module with only a and c — freshly allocated, structurally equal to originals.
+    val aPrint = Printer.print(mg, defs(0)).fold(e => fail(e), identity)
+    val cPrint = Printer.print(mg, defs(2)).fold(e => fail(e), identity)
+    val aFresh = Parser.parse(mg, aPrint).fold(e => fail(e), identity) match
+      case Cst.Node("moduleFile", List(Cst.Node("list", List(d)))) => d
+      case other => fail(s"aFresh: ${other.render}")
+    val cFresh = Parser.parse(mg, cPrint).fold(e => fail(e), identity) match
+      case Cst.Node("moduleFile", List(Cst.Node("list", List(d)))) => d
+      case other => fail(s"cFresh: ${other.render}")
+    val dirty = Cst.Node("moduleFile", List(Cst.Node("list", List(aFresh, cFresh))))
+    val ops = Concrete.dirtyOps(out.cst, dirty)
+    assert(ops.exists { case Concrete.DirtyOp.Delete(_) => true; case _ => false },
+      s"expected a Delete op, got $ops")
+    val via = RoundTrip.putReassociated(mg, src, out, out.cst, dirty).fold(e => fail(e), identity)
+    assert(via.contains("-- header"), via)
+    assert(via.contains("-- foot"), via)
+    assert(!via.contains("b = false"), via)
+    assert(!via.contains("-- b's comment"), via)
+    // Whole-tree print loses the header/foot comments — load-bearing contrast.
+    val viaPrint = Printer.print(mg, dirty).fold(e => fail(e), identity)
+    assert(!viaPrint.contains("-- header"), viaPrint)
+    assert(Parser.parse(mg, via).isRight, via)

@@ -160,7 +160,7 @@ object AuthorityGate:
       EffectPolicy(s"bootstrap-allow-${k.id}", "*", k, Resource("*", "*"), Decision.Allow))
 
   /** Test / non-pack-loader wiring helper: `Mode.Enforce` with one allow
-    * policy per known [[cairn.kernel.Effects.ActionKey]] (derived + host-only), any
+    * policy per known [[cairn.kernel.Effects.ActionKey]] (pack-derived), any
     * subject (`"*"`), any resource. Still used for ledger/process/LSP and
     * suites that do not exercise path-scoped denial. PackLoader production
     * uses [[EffectContext.forPackLoader]].

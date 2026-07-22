@@ -15,8 +15,9 @@ package cairn.kernel
   * languages/effect-<family>.cairn. Host [[packDecls]] + embedded Fragments are
   * cold-start seeds verified by runtime EffectBootstrap.
   *
-  * [[Effects.Action]] / [[Effects.Family]] remain closed host bridges for
-  * interpreter routing; [[completeness]] checks derived keys against Action.
+  * [[Effects.Family]] is a thin JVM routing tag (cases ↔ packDecls family ids);
+  * action lists are **not** hand-maintained — they come from pack declarations
+  * / [[ActionKey]] digests. [[completeness]] checks Request↔gate↔action decls.
   * Policies and EffectRequest construction use [[ActionKey]] /
   * [[ResourceSchema.at]].
   */
@@ -468,31 +469,29 @@ object EffectMeta:
     Effects.Family.Cas -> cas,
     Effects.Family.LedgerTransport -> ledgerTransport)
 
-  /** All action keys declared by Meta-defined families. */
+  /** All action keys declared by Meta-defined families (pack SoT). */
   def derivedActionKeys: Set[Effects.ActionKey] =
     families.values.flatMap(_.actionKeys).toSet
 
-  /** Formerly host-only Cas/Ledger; now empty — retained for migration checks. */
-  def hostOnlyActionKeys: Set[Effects.ActionKey] =
-    Effects.Action.values.map(_.key).toSet -- derivedActionKeys
+  /** Action keys implied by cold-start [[packDecls]] (unbound — no Fragment digest). */
+  def packDeclActionKeys: Set[Effects.ActionKey] =
+    packDecls.values.flatMap { d =>
+      Effects.Family.fromId(d.familyId).toList.flatMap(f =>
+        d.actions.map(a => Effects.ActionKey.of(f, a)))
+    }.toSet
 
-  /** Every known action key: derived + residual host-only bridge. */
-  def allActionKeys: Set[Effects.ActionKey] =
-    derivedActionKeys ++ hostOnlyActionKeys
+  /** Every known digest-bound action key (Meta families). No host Action enum. */
+  def allActionKeys: Set[Effects.ActionKey] = derivedActionKeys
 
   /** Rights vocabulary projected from declared actions. */
   def actions(family: EffectFamily): Set[Effects.ActionKey] = family.actionKeys
 
-  /** Host enum cases corresponding to a family's derived keys. */
-  def hostActions(family: EffectFamily): Set[Effects.Action] =
-    family.actionKeys.flatMap(_.toHost)
-
   def completeness(family: EffectFamily): List[String] =
     completeness(family, family.family)
 
-  /** Checked correspondence: Request ctors ↔ requestActions, declared
-    * action names ↔ requestActions targets, and derived keys ↔ host enum
-    * for the expected family. Empty result = consistent.
+  /** Checked correspondence: Request ctors ↔ requestActions and declared
+    * action names ↔ requestActions targets. Empty result = consistent.
+    * (No hand-maintained Action enum to cross-check.)
     */
   def completeness(family: EffectFamily, expected: Effects.Family): List[String] =
     val famErr =
@@ -511,17 +510,7 @@ object EffectMeta:
       s"requestActions targets undeclared action '$n'")
     val unusedDecl = declared.diff(usedNames).toList.map(n =>
       s"declared action '$n' is never targeted by requestActions")
-    val hostMismatch = family.actionKeys.toList.flatMap { k =>
-      k.toHost match
-        case None =>
-          List(s"derived ActionKey ${k.id} has no host Effects.Action bridge")
-        case Some(a) if a.family != expected =>
-          List(s"ActionKey ${k.id} bridges to $a tagged ${a.family}, not $expected")
-        case Some(_) => Nil
-    }
-    val hostExtra = Effects.Action.values.filter(_.family == expected).toSet.diff(hostActions(family)).toList.map(a =>
-      s"host Action $a has no matching derived ActionKey in the EffectFamily")
-    famErr ++ missing ++ dangling ++ undeclared ++ unusedDecl ++ hostMismatch ++ hostExtra
+    famErr ++ missing ++ dangling ++ undeclared ++ unusedDecl
 
   opaque type PinnedInterface = EffectFamily
   object PinnedInterface:

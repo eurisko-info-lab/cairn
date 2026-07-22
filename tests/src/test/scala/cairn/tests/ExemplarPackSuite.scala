@@ -723,22 +723,26 @@ class ExemplarPackSuite extends munit.FunSuite:
     assertEquals(Sds.sectionNumber(id), Some(1))
     assertEquals(Sds.sectionNumber(hz), Some(2))
 
-  test("sds-report projection surfaces (json/xml/csv) — not SDS language"):
+  test("sds-report projection surfaces (json/xml/csv/pdf) — not SDS language"):
     import cairn.examples.sds.{Chemicals, SectionReport}
     // Language digests identical across surfaces; surface digests differ.
     val d = packs.requireClosed("sds-report")
     val j = packs.requireClosed("sds-report", "json")
     val x = packs.requireClosed("sds-report", "xml")
     val c = packs.requireClosed("sds-report", "csv")
+    val p = packs.requireClosed("sds-report", "pdf")
     assertEquals(d.digest, j.digest)
     assertEquals(d.digest, x.digest)
     assertEquals(d.digest, c.digest)
+    assertEquals(d.digest, p.digest)
     assert(packs.requireSurface("sds-report", "default").digest !=
       packs.requireSurface("sds-report", "json").digest)
     assert(packs.requireSurface("sds-report", "json").digest !=
       packs.requireSurface("sds-report", "xml").digest)
     assert(packs.requireSurface("sds-report", "xml").digest !=
       packs.requireSurface("sds-report", "csv").digest)
+    assert(packs.requireSurface("sds-report", "csv").digest !=
+      packs.requireSurface("sds-report", "pdf").digest)
     // SDS object language has no report-format constructors
     assert(!packs.requireClosed("sds").constructors.contains("report"))
     assert(!packs.requireClosed("sds").constructors.contains("fieldLine"))
@@ -761,6 +765,16 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(csv.startsWith("SDS,CSV,\"Acetone\",\"67-64-1\""))
     assert(csv.contains("section,1,\"Identification\""))
     assert(csv.contains("field,productName,\"Acetone\""))
+    val pdfText = SectionReport.renderPdfSurface(Chemicals.Acetone.thinModule, "acetoneOutline")
+      .fold(e => fail(e), identity)
+    assert(pdfText.startsWith("PDF report:"), pdfText)
+    assert(pdfText.contains("Acetone") && pdfText.contains("67-64-1"), pdfText)
+    assert(pdfText.contains("section 1"), pdfText)
+    assert(pdfText.contains("Identification"), pdfText)
+    val pdfBytes = SectionReport.renderPdf(Chemicals.Acetone.thinModule, "acetoneOutline")
+      .fold(e => fail(e), identity)
+    assert(cairn.core.PdfMinimal.isPdf(pdfBytes), new String(pdfBytes.take(32)))
+    assert(new String(pdfBytes, java.nio.charset.StandardCharsets.ISO_8859_1).contains("Acetone"))
 
   test("SDS sectionFieldRef resolves corpus phrases + shadow override"):
     val src =

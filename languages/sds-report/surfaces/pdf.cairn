@@ -1,0 +1,17 @@
+surface pdf for sds-report {
+  fragment report {
+    keyword PDF;
+    keyword report;
+    keyword CAS;
+    keyword section;
+    keyword field;
+    punct ":";
+    syntax report += report : tok "PDF" tok "report" tok ":" str tok "CAS" tok ":" str star cat sectionBlock;
+    syntax sectionBlock += sectionBlock : tok "section" num str star cat fieldLine;
+    syntax fieldLine += fieldLine : tok "field" anyident tok ":" str;
+    print report : lit "PDF" sp lit "report" lit ":" sp strfield 0 sp lit "CAS" lit ":" sp strfield 1 nl sep 2 "\n";
+    print sectionBlock : lit "section" sp field 0 sp strfield 1 nl sep 2 "\n";
+    print fieldLine : lit "field" sp field 0 sp lit ":" sp strfield 1;
+    top report;
+  }
+}
