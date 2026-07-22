@@ -414,6 +414,32 @@ class ExemplarPackSuite extends munit.FunSuite:
     val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Danger"))
     assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
 
+  test("SDS chemicals fixtures: acetone thin FR section fields + optional restale"):
+    import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness}
+    val m = Chemicals.Acetone.thinModule
+    Sds.validate(m).fold(e => fail(e), identity)
+    assertEquals(Sds.sectionFieldText(m, "s1", "productName", "fr"), Some("Acétone"))
+    assertEquals(Sds.sectionFieldText(m, "s2", "signalWord", "fr"), Some("Danger"))
+    assertEquals(Sds.sectionFieldText(m, "s2", "hazardPhrases", "fr"), Some("H225 ; H319 ; H336"))
+    // untranslated EN-only key still falls back
+    assertEquals(
+      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "fr"),
+      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "en"))
+    assert(Sds.sectionFieldText(m, "s16", "otherInformation", "fr").exists(_.contains("démonstration")))
+    // host SectionReport stays EN-primary
+    assertEquals(Chemicals.Acetone.thin.sections(1).fields("productName"), "Acetone")
+    assert(Chemicals.Acetone.thin.sections(1).locales("fr").contains("productName"))
+    // optional restale over fixture-populated FR siblings
+    assertEquals(
+      SectionFieldStaleness.staleLangsAfterEnChange(m, "s1", "productName", "Acetone (lab)"),
+      Set("fr"))
+    val projected = SectionFieldStaleness.project(m, "s2", "signalWord")
+    assertEquals(projected("fr").state, PhraseStaleness.State.HumanReviewed)
+    val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Danger"))
+    assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
+    for (_, term) <- m.defs do
+      RoundTrip.check(Sds.language.grammar, term).fold(e => fail(e), identity)
+
   test("SDS section-field shadow: overrides text; rebase conflicts on section edit"):
     import cairn.examples.sds.Chemicals
     val base = Chemicals.Acetone.thinModule

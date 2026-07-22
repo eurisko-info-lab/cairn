@@ -14,14 +14,15 @@ books + live `hvm` when on PATH), plus a **Lean agreement expansion**
 (`natRec` ι corpus + live `#check` stdout digests), plus an **SDS
 phrase-staleness stub** (`corpusPhrase` + `PhraseStaleness.restale`), an
 **SDS regulatory section-numbering stub** (`SectionNumbering` EU-CLP 1..16),
-a **chemicals corpus fixture** (`Chemicals` acetone 1..16 + sparse ethanol),
+a **chemicals corpus fixture** (`Chemicals` acetone 1..16 + thin FR overlays +
+sparse ethanol),
 an **SDS section-report projection** (`SectionReport` GrammarSpec + RoundTrip
 over host section maps), **SDS language section maps** (`euSection` /
 `outline` / `sectionField` in `sds.cairn`, ΔSDS-editable; acetone wired through),
 and **multilingual section fields** (`sectionField` + lang; `sectionFieldText`
 fallback mirroring phrases), plus a **section-field shadow / restale stub**
 (`sectionFieldShadow` + `SectionFieldStaleness` reusing `PhraseStaleness.restale`).
-Full suite: **479 tests green** (+2 skipped; `tests` module; `sbt test`),
+Full suite: **480 tests green** (+2 skipped; `tests` module; `sbt test`),
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -185,11 +186,11 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   `outline` / lang-tagged `sectionField`, ΔSDS-editable; `sectionFieldText`
   mirrors phrase fallback + `sectionFieldShadow` overrides).
   `SectionFieldStaleness` reuses `PhraseStaleness.restale` for locale drift.
-  Secondary chemicals still sparse; chemicals fixtures remain EN-primary (FR
-  siblings ΔSDS-authorable / restale-tested, not fixture-populated).
-  Phrase-staleness + section-numbering *machine stubs* landed (projected
-  state, not Studio). Studio-persisted phrase-corpus UI and SDS Studio
-  authoring surface remain deferred (§8 anti-goal).
+  Secondary chemicals still sparse; thin acetone FR section-field siblings are
+  fixture-populated (full 16 / ethanol remain EN-primary). Phrase-staleness +
+  section-numbering *machine stubs* landed (projected state, not Studio).
+  Studio-persisted phrase-corpus UI and SDS Studio authoring surface remain
+  deferred (§8 anti-goal).
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
   `#check` (refl/subst/`natRec` ι corpus; live stdout digests when `lean` on

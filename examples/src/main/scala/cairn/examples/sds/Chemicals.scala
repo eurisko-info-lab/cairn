@@ -13,22 +13,32 @@ import cairn.core.*
   * remaining gaps.
   */
 object Chemicals:
-  /** One populated EU-CLP section body. Host maps stay EN-keyed; [[toTerm]]
-    * projects `sectionField` with `lang en`. Multilingual variants are authored
-    * as extra language terms (same key, other langs) — see SDS `sectionFieldText`.
+  /** One populated EU-CLP section body. Host [[fields]] stay EN-keyed (for
+    * [[SectionReport]]); [[locales]] carry non-EN overlays (`lang` → key → text).
+    * [[toTerm]] projects `sectionField` rows for EN then each locale — see SDS
+    * `sectionFieldText` / [[SectionFieldStaleness]].
     */
-  final case class SectionBody(number: Int, fields: Map[String, String]):
+  final case class SectionBody(
+      number: Int,
+      fields: Map[String, String],
+      locales: Map[String, Map[String, String]] = Map.empty
+  ):
     def title: String =
       SectionNumbering.byNumber.getOrElse(number, s"INVALID-$number")
     def outlineEntry: SectionNumbering.OutlineEntry =
       SectionNumbering.OutlineEntry(number, title)
 
-    /** Language term: `eu section N fields ( k lang en : "v", … )`. */
+    /** Language term: `eu section N fields ( k lang en : "v", … , k lang fr : "…" )`. */
     def toTerm: Cst =
-      val fs = fields.toList.map { case (k, v) =>
+      val en = fields.toList.map { case (k, v) =>
         Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf("en"), Cst.Leaf(v))
       }
-      Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", fs))
+      val loc = locales.toList.flatMap { case (lang, kv) =>
+        kv.toList.map { case (k, v) =>
+          Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(v))
+        }
+      }
+      Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", en ++ loc))
 
   /** A chemical document as a (possibly sparse) map of section bodies. */
   final case class ChemicalDoc(
@@ -166,16 +176,38 @@ object Chemicals:
     /** Full 16-section acetone as ΔSDS-editable `euSection` + `outline` terms. */
     def asModule: Module = pure.toModule("acetoneOutline")
 
-    /** Thin subset (identification + hazards + other information) for focused
-      * parse/ΔL tests without the full 16-section fixture.
+    /** Thin FR overlays for identification / hazards / other information —
+      * demonstration translations, not a regulatory filing. Untranslated EN
+      * keys still resolve via `sectionFieldText` fallback.
+      */
+    val thinFr: Map[Int, Map[String, String]] = Map(
+      1 -> Map(
+        "productName" -> "Acétone",
+        "synonyms" -> "propan-2-one ; 2-propanone",
+        "recommendedUse" ->
+          "Réactif de laboratoire ; solvant pour revêtements, adhésifs et nettoyage.",
+        "supplierName" ->
+          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)"),
+      2 -> Map(
+        "classificationSummary" ->
+          "Liquide inflammable catégorie 2 ; lésions oculaires graves/irritation oculaire catégorie 2 ; STOT SE catégorie 3 (SNC) — règlement (CE) n° 1272/2008",
+        "hazardPhrases" -> "H225 ; H319 ; H336",
+        "signalWord" -> "Danger",
+        "pictograms" -> "GHS02 ; GHS07"),
+      16 -> Map(
+        "otherInformation" ->
+          "Données de démonstration / exemple pour le corpus chimiques SDS Cairn — pas un conseil réglementaire ou de sécurité pour un usage réel."))
+
+    /** Thin subset (identification + hazards + other information) with FR
+      * section-field siblings for focused multilingual / restale tests.
       */
     val thin: ChemicalDoc = ChemicalDoc(
       name = "Acetone",
       cas = "67-64-1",
       sections = Map(
-        1 -> pure.sections(1),
-        2 -> pure.sections(2),
-        16 -> pure.sections(16)))
+        1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
+        2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
+        16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
     def thinModule: Module = thin.toModule("acetoneOutline")
 
