@@ -238,6 +238,19 @@ class WaveH2Suite extends munit.FunSuite:
     assert(out.contains("c comment"), out)
     assert(out.contains("inline"), out)
 
+  test("workspace/executeCommand cairn.editDefAtStructured: malformed structure is rejected, not silently spliced in"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///editstructbad.stlc"
+    openDoc(server, uri, "c = (f x) ;\n")
+    // an unknown constructor tag — the kind of thing only a structured edit
+    // can submit (a parsed-from-text term can never name a nonexistent ctor)
+    val bogus = J.obj("node" -> J.str("bogus"), "kids" -> J.arr(Nil))
+    val resp = execCommand(server, 16, "cairn.editDefAtStructured",
+      List(J.str(uri), J.str("c"), J.arr(List(J.num(1))), bogus))
+    val out = J.print(resp)
+    assert(out.contains("\"error\""), out)
+    assert(out.contains("unknown constructor"), out)
+
   test("cairn/schema: enumerates a sort's constructors and child sorts, derived from the composed language"):
     val server = LspServer(lspCfg)
     val resp = server.handle(J.obj(

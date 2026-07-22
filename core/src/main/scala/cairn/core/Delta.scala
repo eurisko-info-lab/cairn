@@ -33,6 +33,15 @@ object Delta:
 
   def deltaOf(l: ComposedLanguage): Either[List[ComposeError], ComposedLanguage] =
     val p = l.name
+    // termCat: the grammar CATEGORY name (e.g. "term", or Search's
+    // "searchObj") — used both for Elem.Cat(termCat) in the ΔL grammar below
+    // (which must reference a real CategorySpec name) AND, deliberately, as
+    // the CtorDefs' argSorts for add/replace/edit: LanguageChecker.checkTerm
+    // interprets a grammar-category argSort by tag membership rather than by
+    // resolving it to one semantic sort, since a category can legitimately
+    // span multiple sorts (Search's "searchObj" admits both "Fact"- and
+    // "Intent"-sorted constructors — there is no single correct sort name to
+    // put here).
     val termCat = l.grammar.top
     val chg = s"Δ$p.change"
     val chgs = s"Δ$p.changeset"
@@ -188,6 +197,7 @@ object Delta:
     case FootprintMismatch(name: String, declared: Set[String], actual: Set[String])
     case PathError(name: String, detail: String)
     case Malformed(detail: String)
+    case InvalidTerm(name: String, errors: List[LanguageChecker.TermError])
 
     def render: String = this match
       case AlreadyDefined("add", name)            => s"ΔL add: '$name' already defined (use replace)"
@@ -199,6 +209,8 @@ object Delta:
         s"ΔL rename footprint mismatch for '$name': declared {${declared.toList.sorted.mkString(",")}}, actual {${actual.toList.sorted.mkString(",")}}"
       case PathError(name, detail) => s"ΔL edit '$name': $detail"
       case Malformed(detail)       => detail
+      case InvalidTerm(name, errors) =>
+        s"ΔL '$name': invalid term (${errors.map(_.render).mkString("; ")})"
 
   /** [[apply]], but with [[Rejection]] left unstringified — the typed view. */
   def applyTyped(l: ComposedLanguage, module: Module, change: Cst): Either[Rejection, (Module, ValidatedChangeSet)] =
@@ -207,13 +219,24 @@ object Delta:
       val vc = l.varCtor.getOrElse("var")
       m.defs.collect { case (n, t) if n != name && Binding.freeVars(spec, vc)(t).contains(name) => n }.toSet
 
+    // Structural gate (M-validation): a parsed-from-text term is well-formed
+    // by construction, but a structurally-submitted one (cairn.editDefAtStructured)
+    // has no such guarantee — this is the check that closes that gap, for
+    // add/replace/edit alike. Only computed once per applyTyped call.
+    def checkAgainst(name: String, expectedSort: String, term: Cst): Either[Rejection, Unit] =
+      LanguageChecker.checkTerm(l, expectedSort, term) match
+        case Right(_)     => Right(())
+        case Left(errors) => Left(Rejection.InvalidTerm(name, errors))
+
     def applyOne(m: Module, ch: Cst): Either[Rejection, Module] = ch match
       case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>
         if m.get(name).isDefined then Left(Rejection.AlreadyDefined("add", name))
-        else Right(Module(m.defs :+ (name, term)))
+        else checkAgainst(name, l.grammar.top, term).map(_ => Module(m.defs :+ (name, term)))
       case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "replace") =>
         if m.get(name).isEmpty then Left(Rejection.NotDefined("replace", name))
-        else Right(Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))))
+        else
+          checkAgainst(name, l.grammar.top, term)
+            .map(_ => Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))))
       case Cst.Node(t, List(Cst.Leaf(name))) if t == tag(l, "remove") =>
         if m.get(name).isEmpty then Left(Rejection.NotDefined("remove", name))
         else
@@ -226,9 +249,11 @@ object Delta:
         m.get(name) match
           case None => Left(Rejection.NotDefined("edit", name))
           case Some(old) =>
-            replaceAt(old, path, term) match
-              case Right(updated) => Right(Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0))))
-              case Left(err)      => Left(Rejection.PathError(name, err))
+            for
+              sort <- LanguageChecker.expectedSortAt(l, old, path).left.map(Rejection.PathError(name, _))
+              _    <- checkAgainst(name, sort, term)
+              updated <- replaceAt(old, path, term).left.map(Rejection.PathError(name, _))
+            yield Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0)))
       case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
         val declared: Set[String] = fp match
           case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }.toSet
