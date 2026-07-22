@@ -85,6 +85,8 @@ object PortV2:
     */
   def verified(port: PortV2, m: RosettaModule2): Either[String, PortOutput] =
     for
+      _ <- RosettaChecker.validate(m)
+        .left.map(errs => s"invalid RosettaModule2 '${m.name}': ${errs.map(_.render).mkString("; ")}")
       out <- port.emit(m)
       _ <- RoundTrip.fixpoint(port.fileGrammar, out.text)
         .left.map(e => s"${port.hostName}: whole-file fixpoint failed: $e")
