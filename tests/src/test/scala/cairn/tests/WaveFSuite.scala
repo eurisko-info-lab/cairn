@@ -32,6 +32,28 @@ class WaveFSuite extends munit.FunSuite:
     for port <- allPorts do
       assertEquals(GrammarLint.errors(port.fileGrammar), Nil, s"${port.hostName} grammar lint")
 
+  test("isSorted is one shared decision procedure across Scala/Haskell/Rust; Lean keeps its own stdlib relation"):
+    // Scala/Haskell/Rust: same logical shape (nested match, <=, &&), derived
+    // from Ports2's single private isSortedBody — not three independently
+    // hand-written strings. Concrete Int now (not generic Ord), matching how
+    // isPerm was always Int-only; the shared vocabulary doesn't need generic
+    // Ordering machinery this way.
+    val scala = PortV2.verified(ScalaPort2, m).toOption.get.text
+    assert(scala.contains("def isSorted(xs: List[Int]): Boolean ="), scala)
+    assert(scala.contains("(h <= h2)") && scala.contains("&&") && scala.contains("isSorted(xs)"), scala)
+    val haskell = PortV2.verified(HaskellPort2, m).toOption.get.text
+    assert(haskell.contains("isSorted :: ([Int] -> Bool)"), haskell)
+    assert(haskell.contains("h <= h2") && haskell.contains("&&"), haskell)
+    val rust = PortV2.verified(RustPort2, m).toOption.get.text
+    assert(rust.contains("fn is_sorted(xs: &[i64]) -> bool"), rust)
+    assert(rust.contains("h <= h2") && rust.contains("&&"), rust)
+    // Lean untouched: still its own idiomatic stdlib-backed relation, not the
+    // shared boolean decision procedure (regressing a real Prop to `= true`
+    // would make Lean's port worse, not better).
+    val lean = PortV2.verified(LeanPort2, m).toOption.get.text
+    assert(lean.contains("List.Pairwise (fun x y => x <= y) xs"), lean)
+    assert(lean.contains("listSorted (quicksort xs)"), lean)
+
   test("M32/M34: scala port runs — generic + effect obligations pass in host"):
     val scalaCli = sys.env.getOrElse("PATH", "").split(":").map(java.nio.file.Paths.get(_, "scala-cli"))
       .find(java.nio.file.Files.isExecutable)

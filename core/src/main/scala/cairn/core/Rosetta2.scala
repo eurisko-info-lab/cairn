@@ -92,10 +92,17 @@ object PortV2:
 
 /** Shared host-neutral expression rendering helpers. */
 private[core] object ExprUtil:
+  /** `trueF`/`falseF`/`eqF`/`leF`/`andF` (M-relations): the minimal boolean
+    * vocabulary a relation body needs (comparison, equality, conjunction) —
+    * added so `sorted`/`perm`-style decision procedures can be expressed ONCE,
+    * host-neutrally, instead of hand-duplicated per host (see `rels` builders
+    * below and their use in `QuickSort2`).
+    */
   def foldE[A](r: Cst)(
       varF: String => A, numF: String => A, nilF: => A,
       callF: (String, List[A]) => A, ifF: (A, A, A) => A,
-      matchF: (A, A, String, String, A) => A, seqF: (A, A) => A): A =
+      matchF: (A, A, String, String, A) => A, seqF: (A, A) => A,
+      trueF: => A, falseF: => A, eqF: (A, A) => A, leF: (A, A) => A, andF: (A, A) => A): A =
     def go(t: Cst): A = t match
       case Cst.Node("rvar", List(Cst.Leaf(x)))  => varF(x)
       case Cst.Node("rnum", List(Cst.Leaf(n)))  => numF(n)
@@ -105,5 +112,20 @@ private[core] object ExprUtil:
       case Cst.Node("rmatch", List(scrut, nilB, Cst.Leaf(h), Cst.Leaf(t0), consB)) =>
         matchF(go(scrut), go(nilB), h, t0, go(consB))
       case Cst.Node("rseq", List(a, b))         => seqF(go(a), go(b))
+      case Cst.Node("rtrue", _)                 => trueF
+      case Cst.Node("rfalse", _)                => falseF
+      case Cst.Node("req", List(a, b))          => eqF(go(a), go(b))
+      case Cst.Node("rle", List(a, b))          => leF(go(a), go(b))
+      case Cst.Node("rand", List(a, b))         => andF(go(a), go(b))
       case other => throw CodecError(s"not a rosetta v2 expr: ${other.render}")
     go(r)
+
+/** Builders for the boolean vocabulary above — the shared surface pack
+  * authors (e.g. `QuickSort2`) use to state a relation exactly once.
+  */
+object RelBuilders:
+  def rtrue: Cst = Cst.node("rtrue")
+  def rfalse: Cst = Cst.node("rfalse")
+  def req(a: Cst, b: Cst): Cst = Cst.node("req", a, b)
+  def rle(a: Cst, b: Cst): Cst = Cst.node("rle", a, b)
+  def rand(a: Cst, b: Cst): Cst = Cst.node("rand", a, b)

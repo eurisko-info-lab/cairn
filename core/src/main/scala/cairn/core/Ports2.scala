@@ -14,6 +14,27 @@ object Ports2:
     if items.isEmpty then Cst.node("none") else Cst.node("some", Cst.Node("list", items))
   private def lst(items: List[Cst]): Cst = Cst.Node("list", items)
 
+  /** `isSorted`'s decision procedure, expressed ONCE in the host-neutral expr
+    * vocabulary (`rmatch`/`rle`/`rand`/`rtrue`) and rendered per host via each
+    * port's own `body()` — replacing three independently hand-written native
+    * strings (Scala/Haskell/Rust each used to hardcode their own version) with
+    * one shared source of truth. `isPerm` stays per-host: expressing
+    * permutation equivalence host-neutrally would need a fold/reduce
+    * primitive this vocabulary doesn't have, not worth adding for one relation.
+    */
+  private val isSortedBody: Cst =
+    // Tail-binder reuses the name "xs" at both nesting levels (rather than
+    // fresh t/t2 names): Rust's call-arg renderer only skips its `&`-wrapping
+    // heuristic for an argument literally named "xs", so recursing on a
+    // differently-named tail variable would double-borrow an already-borrowed
+    // slice. Shadowing "xs" in each nested match arm is legal in all four
+    // hosts and keeps the recursive call exactly `isSorted(xs)` everywhere.
+    Cst.node("rmatch", Cst.node("rvar", leaf("xs")), Cst.node("rtrue"), leaf("h"), leaf("xs"),
+      Cst.node("rmatch", Cst.node("rvar", leaf("xs")), Cst.node("rtrue"), leaf("h2"), leaf("xs"),
+        Cst.node("rand",
+          Cst.node("rle", Cst.node("rvar", leaf("h")), Cst.node("rvar", leaf("h2"))),
+          Cst.node("rcall", leaf("isSorted"), Cst.node("rvar", leaf("xs"))))))
+
   // =========================== SCALA ===========================
 
   object ScalaPort2 extends PortV2:
@@ -103,7 +124,9 @@ object Ports2:
         else s"$f(${as.mkString(", ")})",
       ifF = (c, a, b) => s"(if $c then $a else $b)",
       matchF = (s, nilB, h, t, consB) => s"($s match { case Nil => $nilB; case $h :: $t => $consB })",
-      seqF = (a, b) => s"{ $a; $b }")
+      seqF = (a, b) => s"{ $a; $b }",
+      trueF = "true", falseF = "false",
+      eqF = (a, b) => s"($a == $b)", leF = (a, b) => s"($a <= $b)", andF = (a, b) => s"($a && $b)")
 
     def emit(m: RosettaModule2): Either[String, PortOutput] =
       try
@@ -116,7 +139,7 @@ object Ports2:
           defd("isEmpty", List("a"), Nil, List("xs" -> RTy.RList(RTy.RVar("a"))), RTy.RBool, "xs.isEmpty"),
           defd("filterLt", List("a"), List("a" -> "Ord"), List("p" -> RTy.RVar("a"), "xs" -> RTy.RList(RTy.RVar("a"))), RTy.RList(RTy.RVar("a")), "xs.filter(x => summon[Ordering[a]].lt(x, p))"),
           defd("filterGe", List("a"), List("a" -> "Ord"), List("p" -> RTy.RVar("a"), "xs" -> RTy.RList(RTy.RVar("a"))), RTy.RList(RTy.RVar("a")), "xs.filter(x => !summon[Ordering[a]].lt(x, p))"),
-          defd("isSorted", List("a"), List("a" -> "Ord"), List("xs" -> RTy.RList(RTy.RVar("a"))), RTy.RBool, "xs.zip(xs.drop(1)).forall((p, q) => !summon[Ordering[a]].lt(q, p))"),
+          defd("isSorted", Nil, Nil, List("xs" -> RTy.RList(RTy.RInt)), RTy.RBool, body(isSortedBody, false)),
           defd("isPerm", Nil, Nil, List("x" -> RTy.RList(RTy.RInt), "y" -> RTy.RList(RTy.RInt)), RTy.RBool, "x.sorted == y.sorted"))
         val effectDecls: List[Cst] = m.effects.flatMap { e =>
           List(Cst.node("classD", leaf(e.name.capitalize),
@@ -150,7 +173,8 @@ object Ports2:
             case other => throw CodecError(s"bad statement: ${other.render}")
           def expr(e: Cst): String = ExprUtil.foldE[String](e)(identity, identity, "List()",
             (f, as) => s"$f(${as.mkString(", ")})", (c, a, b) => s"(if $c then $a else $b)",
-            (_, _, _, _, _) => throw CodecError("match in statement"), (_, _) => throw CodecError("seq in statement"))
+            (_, _, _, _, _) => throw CodecError("match in statement"), (_, _) => throw CodecError("seq in statement"),
+            "true", "false", (a, b) => s"($a == $b)", (a, b) => s"($a <= $b)", (a, b) => s"($a && $b)")
           s"""assert(${prop(t.statement)}, "${t.name}")"""
         }
         val effectCheck = m.defs.find(_.effect.isDefined).map { d =>
@@ -301,7 +325,9 @@ object Ports2:
         else if as.isEmpty then f else s"($f ${as.mkString(" ")})",
       ifF = (c, a, b) => s"(bif $c then $a else $b)",
       matchF = (s, nilB, h, t, consB) => s"(match $s with | [] => $nilB | $h :: $t => $consB)",
-      seqF = (a, b) => s"(do $a; pure $b)")
+      seqF = (a, b) => s"(do $a; pure $b)",
+      trueF = "true", falseF = "false",
+      eqF = (a, b) => s"($a == $b)", leF = (a, b) => s"($a <= $b)", andF = (a, b) => s"($a && $b)")
 
     private def statementExpr(e: Cst): Cst = e match
       case Cst.Node("rvar", List(Cst.Leaf(x)))  => Cst.node("evar", leaf(x))
@@ -435,7 +461,9 @@ object Ports2:
         else if as.isEmpty then f else s"($f ${as.mkString(" ")})",
       ifF = (c, a, b) => s"(if $c then $a else $b)",
       matchF = (s, nilB, h, t, consB) => s"(case $s of { [] -> $nilB ; ($h : $t) -> $consB })",
-      seqF = (a, b) => s"($a >> return $b)")
+      seqF = (a, b) => s"($a >> return $b)",
+      trueF = "True", falseF = "False",
+      eqF = (a, b) => s"($a == $b)", leF = (a, b) => s"($a <= $b)", andF = (a, b) => s"($a && $b)")
 
     private def arrowTy(params: List[RTy], ret: Cst): Cst =
       params.foldRight(ret)((p, acc) => Cst.node("hArrow", ty(p), acc))
@@ -461,8 +489,8 @@ object Ports2:
           bind("filterLt", List("p", "xs"), "filter (< p) xs"),
           sig("filterGe", Some("a"), arr(Cst.node("hVar", leaf("a")), arr(la, la))),
           bind("filterGe", List("p", "xs"), "filter (>= p) xs"),
-          sig("isSorted", Some("a"), arr(la, Cst.node("hBool"))),
-          bind("isSorted", List("xs"), "and (zipWith (<=) xs (drop 1 xs))"),
+          sig("isSorted", None, arr(li, Cst.node("hBool"))),
+          bind("isSorted", List("xs"), body(isSortedBody, false)),
           sig("isPerm", None, arr(li, arr(li, Cst.node("hBool")))),
           bind("isPerm", List("x", "y"), "foldr insertSorted [] x == foldr insertSorted [] y"),
           sig("insertSorted", None, arr(Cst.node("hInt"), arr(li, li))),
@@ -485,7 +513,8 @@ object Ports2:
             case other => throw CodecError(s"bad statement: ${other.render}")
           def expr(e: Cst): String = ExprUtil.foldE[String](e)(identity, identity, "[]",
             (f, as) => s"($f ${as.mkString(" ")})", (c, a, b) => s"(if $c then $a else $b)",
-            (_, _, _, _, _) => throw CodecError("match"), (_, _) => throw CodecError("seq"))
+            (_, _, _, _, _) => throw CodecError("match"), (_, _) => throw CodecError("seq"),
+            "True", "False", (a, b) => s"($a == $b)", (a, b) => s"($a <= $b)", (a, b) => s"($a && $b)")
           prop(t.statement)
         }
         val mainDecls = List(
@@ -597,7 +626,9 @@ object Ports2:
           else s"${snake(f)}(${as.map(a => if a == "xs" then a else s"&($a)").mkString(", ")})",
         ifF = (c, a, b) => s"if $c { $a } else { $b }",
         matchF = (s, nilB, h, t, consB) => s"match $s.split_first() { None => $nilB, Some(($h, $t)) => $consB }",
-        seqF = (a, b) => s"{ $a; $b }")
+        seqF = (a, b) => s"{ $a; $b }",
+        trueF = "true", falseF = "false",
+        eqF = (a, b) => s"($a == $b)", leF = (a, b) => s"($a <= $b)", andF = (a, b) => s"($a && $b)")
 
     def emit(m: RosettaModule2): Either[String, PortOutput] =
       try
@@ -625,8 +656,8 @@ object Ports2:
             "xs.iter().filter(|x| *x < p).cloned().collect() }"),
           fn("filter_ge", true, List(p("p", refT), p("xs", sliceT)), Some(vecT),
             "xs.iter().filter(|x| *x >= p).cloned().collect() }"),
-          fn("is_sorted", true, List(p("xs", sliceT)), Some(Cst.node("rBool")),
-            "xs.windows(2).all(|w| w[0] <= w[1]) }"),
+          fn("is_sorted", false, List(p("xs", sliceI)), Some(Cst.node("rBool")),
+            render(isSortedBody, false, identity) + " }"),
           fn("is_perm", false, List(p("x", sliceI), p("y", sliceI)), Some(Cst.node("rBool")),
             "let mut a = x.to_vec(); let mut b = y.to_vec(); a.sort(); b.sort(); a == b }"))
         val effectDecls = m.effects.flatMap { e =>
