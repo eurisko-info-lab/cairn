@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.core.{TreeEngine, CompiledTreeEngine, NetBuilder, NetEngine, PortRef}
+import cairn.core.{TreeEngine, CompiledTreeEngine, CompiledNetEngine, NetBuilder, NetEngine, Net, PortRef}
 import cairn.examples.stlc.Stlc
 import cairn.examples.affinenet.AffineNet
 import cairn.examples.icnet.IcNet
@@ -106,6 +106,73 @@ class WaveESuite extends munit.FunSuite:
     assertEquals(IcNet.readback(par, root), IcNet.readback(seq, root))
     assert(stats.sweeps > 0)
     assert(stats.pairsPerSweep.sum >= stats.sweeps) // some sweep did >1 pair or all single
+
+  test("property: net reduction is confluent — random reduction order reaches the same normal form"):
+    // Confluence was previously asserted only by a code comment plus one
+    // fixed-term example (the M27 test above). This upgrades it to the same
+    // evidentiary standard the rest of the suite uses for its invariants
+    // (e.g. the seeded causal-LCA property test): many random reduction
+    // SCHEDULES (not just parallel-vs-sequential) over a real corpus, all
+    // required to land on the identical readback.
+    def stepRandom(rng: scala.util.Random, net: Net): Either[String, Option[Net]] =
+      val candidates = NetEngine.activePairs(net).flatMap(NetEngine.ruleFor(ic, net, _))
+      if candidates.isEmpty then Right(None)
+      else
+        val (rule, l, r) = candidates(rng.nextInt(candidates.length))
+        NetEngine.applyPair(net, rule, l, r).map(Some(_))
+    def normalizeRandom(rng: scala.util.Random, net: Net, fuel: Int = 10_000): Either[String, Net] =
+      if fuel <= 0 then Left("out of fuel")
+      else stepRandom(rng, net).flatMap {
+        case Some(n2) => normalizeRandom(rng, n2, fuel - 1)
+        case None     => Right(net)
+      }
+    val two = Stlc.lam1("f", Stlc.tBool,
+      Stlc.lam1("x", Stlc.tBool, Stlc.app1(Stlc.v("f"), Stlc.app1(Stlc.v("f"), Stlc.v("x")))))
+    val corpus = List(
+      Stlc.app1(Stlc.idBool, Stlc.tru),
+      Stlc.app1(Stlc.app1(Stlc.churchTrue, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(Stlc.churchFalse, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.tru))
+    for term <- corpus do
+      val Right((net, root)) = IcNet.lower(term): @unchecked
+      val Right(canonical) = NetEngine.normalize(ic, net): @unchecked
+      val canonicalReadback = IcNet.readback(canonical, root)
+      for seed <- 1 to 40 do
+        val rng = new scala.util.Random(seed * 7919 + term.render.hashCode)
+        val Right(shuffled) = normalizeRandom(rng, net): @unchecked
+        assertEquals(IcNet.readback(shuffled, root), canonicalReadback, s"seed=$seed term=${term.render}")
+
+  // ---- compiled net dispatch (mirrors M28's CompiledTreeEngine, for nets) ----
+
+  test("compiled net dispatch agrees with the interpretive NetEngine over the STLC-lowered corpus"):
+    val compiled = CompiledNetEngine(ic)
+    val two = Stlc.lam1("f", Stlc.tBool,
+      Stlc.lam1("x", Stlc.tBool, Stlc.app1(Stlc.v("f"), Stlc.app1(Stlc.v("f"), Stlc.v("x")))))
+    val corpus = List(
+      Stlc.app1(Stlc.idBool, Stlc.tru),
+      Stlc.app1(Stlc.app1(Stlc.churchTrue, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(Stlc.churchFalse, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.tru))
+    for term <- corpus do
+      val Right((net, root)) = IcNet.lower(term): @unchecked
+      val Right(expected) = NetEngine.normalize(ic, net): @unchecked
+      val Right(actual) = compiled.normalize(net): @unchecked
+      assertEquals(IcNet.readback(actual, root), IcNet.readback(expected, root), term.render)
+
+  test("compiled net dispatch agrees on the M25 fixed-net fixtures and actually dispatches"):
+    val compiled = CompiledNetEngine(ic)
+    val b1 = NetBuilder()
+    val d1 = b1.agent("dup"); val d2 = b1.agent("dup")
+    val frees1 = List.fill(4)(b1.agent("free"))
+    b1.wire(PortRef(d1, 0), PortRef(d2, 0))
+    b1.wire(PortRef(d1, 1), PortRef(frees1(0), 0)); b1.wire(PortRef(d1, 2), PortRef(frees1(1), 0))
+    b1.wire(PortRef(d2, 1), PortRef(frees1(2), 0)); b1.wire(PortRef(d2, 2), PortRef(frees1(3), 0))
+    assertEquals(compiled.normalize(b1.net), NetEngine.normalize(ic, b1.net))
+    compiled.visits = 0
+    assert(compiled.normalize(b1.net).isRight)
+    assert(compiled.visits > 0)
 
   // ---- M28: compiled rules ----
 
