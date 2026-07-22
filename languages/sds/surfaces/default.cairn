@@ -22,6 +22,20 @@ surface default for sds {
     keyword outline;
     keyword sections;
     keyword ref;
+    keyword identification;
+    keyword hazards;
+    keyword locales;
+    keyword productName;
+    keyword synonyms;
+    keyword recommendedUse;
+    keyword usesAdvisedAgainst;
+    keyword supplierName;
+    keyword emergencyPhone;
+    keyword classificationSummary;
+    keyword hazardsNotOtherwiseClassified;
+    keyword hazardPhrases;
+    keyword signalWord;
+    keyword pictograms;
     punct "(";
     punct ")";
     punct ",";
@@ -32,13 +46,23 @@ surface default for sds {
     syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
     syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
-    syntax sdsObj += sectionFieldShadow : tok "field" tok "shadow" name tok "overrides" name tok "with" str;
+    syntax sdsObj += sectionFieldShadow : tok "field" tok "shadow" name tok "overrides" anyident tok "with" str;
     syntax sdsObj += basis : tok "basis" name tok "section" str;
     syntax sdsObj += euSection : tok "eu" tok "section" num tok "fields" tok "(" sepby1 cat sectionField "," tok ")";
+    syntax sdsObj += identificationSection : tok "identification" tok "section" tok "("
+      tok "productName" str tok "synonyms" str tok "recommendedUse" str
+      tok "usesAdvisedAgainst" str tok "supplierName" str tok "emergencyPhone" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += hazardsSection : tok "hazards" tok "section" tok "("
+      tok "classificationSummary" str tok "hazardsNotOtherwiseClassified" str
+      tok "hazardPhrases" str tok "signalWord" str tok "pictograms" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
     syntax sdsObj += outline : tok "outline" str str tok "sections" tok "(" opt sepby1 name "," tok ")";
     syntax component += component : name tok "pct" num;
-    syntax sectionField += sectionField : name tok "lang" name tok ":" str;
-    syntax sectionField += sectionFieldRef : name tok "lang" name tok "ref" name;
+    syntax sectionField += sectionField : anyident tok "lang" name tok ":" str;
+    syntax sectionField += sectionFieldRef : anyident tok "lang" name tok "ref" name;
+    syntax fieldLocale += fieldLocale : anyident tok "lang" name tok ":" str;
+    syntax fieldLocale += fieldLocaleRef : anyident tok "lang" name tok "ref" name;
     top sdsObj;
   }
 }

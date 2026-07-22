@@ -1,0 +1,27 @@
+surface json for sds-report {
+  fragment report {
+    keyword name;
+    keyword cas;
+    keyword sections;
+    keyword number;
+    keyword title;
+    keyword fields;
+    punct "{";
+    punct "}";
+    punct "[";
+    punct "]";
+    punct ":";
+    punct ",";
+    syntax report += report : tok "{" tok "name" tok ":" str tok "," tok "cas" tok ":" str tok ","
+      tok "sections" tok ":" tok "[" opt sepby1 cat sectionBlock "," tok "]" tok "}";
+    syntax sectionBlock += sectionBlock : tok "{" tok "number" tok ":" num tok "," tok "title" tok ":" str tok ","
+      tok "fields" tok ":" tok "{" opt sepby1 cat fieldLine "," tok "}" tok "}";
+    syntax fieldLine += fieldLine : anyident tok ":" str;
+    print report : lit "{" lit "name" lit ":" strfield 0 lit "," lit "cas" lit ":" strfield 1 lit ","
+      lit "sections" lit ":[" field 2 lit "]}";
+    print sectionBlock : lit "{" lit "number" lit ":" field 0 lit "," lit "title" lit ":" strfield 1 lit ","
+      lit "fields" lit ":{" field 2 lit "}}";
+    print fieldLine : field 0 lit ":" strfield 1;
+    top report;
+  }
+}

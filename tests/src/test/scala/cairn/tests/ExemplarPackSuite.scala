@@ -67,9 +67,12 @@ class ExemplarPackSuite extends munit.FunSuite:
       "SDS closed must include Law constructors")
     assert(sds.constructors.contains("basis"), "SDS cites Law via basis")
     assert(sds.constructors.contains("euSection"), "SDS EU-CLP section bodies")
+    assert(sds.constructors.contains("identificationSection"), "SDS typed identification")
+    assert(sds.constructors.contains("hazardsSection"), "SDS typed hazards")
     assert(sds.constructors.contains("outline"), "SDS section outlines")
     assert(sds.constructors.contains("sectionField"), "SDS section fields")
     assert(sds.constructors.contains("sectionFieldShadow"), "SDS section-field shadows")
+    assert(sds.constructors.contains("fieldLocale"), "SDS typed section locale overlays")
     assert(sds.fragments.exists(_.provides.contains("sds")))
     assert(sds.fragments.exists(_.provides.contains("law")))
     assert(sds.fragments.exists(_.provides.contains("cert")))
@@ -329,9 +332,17 @@ class ExemplarPackSuite extends munit.FunSuite:
     import cairn.examples.sds.Chemicals
     val m = Chemicals.Acetone.thinModule
     Sds.validate(m).fold(e => fail(e), identity)
+    assert(m.get("s1").exists {
+      case Cst.Node("identificationSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s2").exists {
+      case Cst.Node("hazardsSection", _) => true
+      case _ => false
+    })
     assertEquals(m.defs.count(_._2 match
       case Cst.Node("euSection", _) => true
-      case _ => false), 3)
+      case _ => false), 1)
     assert(m.get("acetoneOutline").exists {
       case Cst.Node("outline", List(Cst.Leaf("Acetone"), Cst.Leaf("67-64-1"),
           Cst.Node("some", List(Cst.Node("list", refs))))) =>
@@ -350,15 +361,24 @@ class ExemplarPackSuite extends munit.FunSuite:
       case _ => false), 16)
     // pack still closes with the new constructors
     assert(Sds.language.constructors.contains("euSection"))
+    assert(Sds.language.constructors.contains("identificationSection"))
     assert(packs.requireClosed("sds").digest == Sds.language.digest)
 
   test("SDS language sections: ethanol thin module validates and round-trips"):
     import cairn.examples.sds.Chemicals
     val m = Chemicals.Ethanol.thinModule
     Sds.validate(m).fold(e => fail(e), identity)
+    assert(m.get("s1").exists {
+      case Cst.Node("identificationSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s2").exists {
+      case Cst.Node("hazardsSection", _) => true
+      case _ => false
+    })
     assertEquals(m.defs.count(_._2 match
       case Cst.Node("euSection", _) => true
-      case _ => false), 3)
+      case _ => false), 1)
     assert(m.get("ethanolOutline").exists {
       case Cst.Node("outline", List(Cst.Leaf("Ethanol"), Cst.Leaf("64-17-5"),
           Cst.Node("some", List(Cst.Node("list", refs))))) =>
@@ -568,10 +588,50 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(m.get("acetoneOutline").isDefined)
     val fromDisk = ChemicalSource.acetoneThin(Sds.language).fold(e => fail(e), identity)
     assertEquals(fromDisk.digest, m.digest)
+    assertEquals(fromDisk.digest, Chemicals.Acetone.thin.toTypedModule("acetoneOutline").digest)
     val report = SectionReport.render(m, "acetoneOutline").fold(e => fail(e), identity)
     assert(report.startsWith("SDS REPORT: \"Acetone\""))
     assert(report.contains("section 1 \"Identification\""))
     assertEquals(SectionReport.language.name, "sds-report")
+
+  test("SDS typed identification/hazards parse + multilingual fallback"):
+    val g = Sds.language.grammar
+    val id = Parser.parse(g,
+      """identification section (
+        |  productName "Acetone" synonyms "2-Propanone" recommendedUse "solvent"
+        |  usesAdvisedAgainst "food" supplierName "Demo" emergencyPhone "+00"
+        |  locales ( productName lang fr : "Acétone" )
+        |)""".stripMargin).fold(e => fail(e), identity)
+    RoundTrip.check(g, id).fold(e => fail(e), identity)
+    assertEquals(Sds.sectionFieldText(id, "productName", "fr"), Some("Acétone"))
+    assertEquals(Sds.sectionFieldText(id, "synonyms", "fr"), Some("2-Propanone"))
+    val hz = Parser.parse(g,
+      """hazards section (
+        |  classificationSummary "Flam. Liq. 2" hazardsNotOtherwiseClassified "dryness"
+        |  hazardPhrases "H225" signalWord "Danger" pictograms "GHS02"
+        |  locales ( )
+        |)""".stripMargin).fold(e => fail(e), identity)
+    RoundTrip.check(g, hz).fold(e => fail(e), identity)
+    assertEquals(Sds.sectionNumber(id), Some(1))
+    assertEquals(Sds.sectionNumber(hz), Some(2))
+
+  test("SDS section-report json surface: digest split + RoundTrip + domain shape"):
+    import cairn.examples.sds.{Chemicals, SectionReport}
+    val d = packs.requireClosed("sds-report")
+    val j = packs.requireClosed("sds-report", "json")
+    assertEquals(d.digest, j.digest)
+    assert(packs.requireSurface("sds-report", "default").digest !=
+      packs.requireSurface("sds-report", "json").digest)
+    val text = SectionReport.renderJson(Chemicals.Acetone.pure).fold(e => fail(e), identity)
+    assert(text.startsWith("{name:\"Acetone\",cas:\"67-64-1\",sections:["))
+    assert(text.contains("number:1,title:\"Identification\""))
+    assert(text.contains("productName:\"Acetone\""))
+    // domain JSON-ish — not the generic JsonSurface {node,kids} encoding
+    assert(!text.contains("\"node\""))
+    val thin = SectionReport.renderJson(Chemicals.Acetone.thinModule, "acetoneOutline")
+      .fold(e => fail(e), identity)
+    assert(thin.contains("number:1,title:\"Identification\""))
+    assert(thin.contains("number:2,title:\"Hazards identification\""))
 
   test("SDS sectionFieldRef resolves corpus phrases + shadow override"):
     val src =

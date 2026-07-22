@@ -21,7 +21,8 @@ maps** (`euSection` / `outline` / `sectionField` / `sectionFieldRef` in
 `sds.cairn`), **multilingual section fields** (corpus refs + free-text +
 shadow overrides), **BranchManifest.changeHistory** (sidecars as caches), and
 an **SDS causal workflow** (`SdsCausalWorkflow`: author → shadow → rebase →
-conflict → approve → sign → publish). Full suite: **489 tests green** (+2 skipped;
+conflict → approve → sign → publish), **typed identification/hazards sections**,
+and an **sds-report `json` surface**. Full suite: **491 tests green** (+2 skipped;
 `tests` module; `sbt test`),
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
@@ -33,10 +34,10 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 |---|---|---|---|
 | 1 | Chemical instances as `.cairn` sources | **Partial→advanced** | `languages/sds/chemicals/{acetone,ethanol}{,-thin}.cairn`; `ChemicalSource`; host maps remain emit fixtures |
 | 2 | Versioned regulatory-profile languages (EU REACH/CLP) | **Partial** | `languages/eu-clp.cairn` + `languages/sds/profiles/eu-clp-annex-ii.cairn` (v1); `EuClp` / `sectionNumberOk` |
-| 3 | Typed section-specific structures | **Missing** | Still generic `sectionField` maps — not faked this pass |
+| 3 | Typed section-specific structures | **Partial** | `identificationSection` / `hazardsSection` (+ `fieldLocale`); thin acetone/ethanol s1/s2 typed; sections 3–16 remain `euSection` maps |
 | 4 | Section-numbering / phrase-staleness as judgments or ΔL | **Partial** | `sectionNumberOk` judgment; phrase/section-field staleness remain projected restale over EN-hash drift |
-| 5 | Multilingual section fields: corpus refs + overrides | **Partial** | `sectionFieldRef` + `sectionFieldShadow`; thin FR overlays on acetone/ethanol |
-| 6 | Report formats as surface packs | **Partial** | `languages/sds-report.cairn` + surface; JSON/XML/PDF/XLS not started |
+| 5 | Multilingual section fields: corpus refs + overrides | **Partial** | `sectionFieldRef` + `sectionFieldShadow`; thin FR overlays; typed locales via `fieldLocale` |
+| 6 | Report formats as surface packs | **Partial→advanced** | `sds-report` `default` text + `json` (unquoted-key JSON-ish); XML/PDF/XLS not started |
 | 7 | Branch manifests alone reach semantic history | **Partial→advanced** | `BranchManifest.changeHistory`; `loadChangeHistory` prefers manifest; sidecars write-through caches |
 | 8 | VerifiedCapability / issuer evidence at trust boundaries | **Partial** | `SdsCausalWorkflow` mints `VerifiedCapability` + Ed25519 tip-signature certificate on publish path |
 | 9 | Widen Lean/HVM only via explicit corpus claims | **Done (process)** | No new claim this pass; envelopes unchanged |
@@ -64,7 +65,7 @@ language law    6d39fe8e82738f0da994d62064e4bc74035d5476e570ce85923f4741d127072a
 language pki    bebf85a46279c76fb90c3dae71b138e85def650449912bc691aae5e5b72eb3e8
 language policy df25113d6bd70b5af73d8eb3a7f86660b742caad33c2e45e0141d630432a01b6
 language query  14a04e0fbdbc91a07da588c10ff909dfb8cba28544722e97052e38dfc031150b
-language sds    bdacebac6c1b7fbb05166358a68abb4c291ccac594d94319f647fc8983fc068a
+language sds    c1b5f87edb106e50a6614bba825475caa7f26ca53e4aebd371c03590a86c9f6f
 language sds-report e1506ddf2c9e8ce66b794f2ec229e8606b016fb5aa802f5e8edf4491c7dd810b
 language search a5e2f932d079c1b0d4ba6d19e8b6a3e2aefba105c7a29a733ff046d0722a85a9
 language stlc   ef1188f151541c1e7dcb738cce62dd3ec0f7172e32313ce4b9d4aa2676bc2f2e
@@ -163,7 +164,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | parity | parity | Waves A–C, H1; `languages/meta.cairn` fixpoint |
 | GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | partial | **parity** | `languages/pki.cairn` + glue; `PkiMax`/`DemoPki`/`PkiTutorial`; ParitySuite |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | missing | **parity** | `ledger/Encryption.scala`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (+ `sectionFieldRef`); `eu-clp` / `sds-report` packs; `languages/sds/chemicals/*.cairn`; `SdsCausalWorkflow`; ExemplarPackSuite / ParitySuite |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (+ `sectionFieldRef` / typed `identificationSection`+`hazardsSection`); `eu-clp` / `sds-report`(+json) packs; `languages/sds/chemicals/*.cairn`; `SdsCausalWorkflow`; ExemplarPackSuite / ParitySuite |
 | GRANITE | Law pack (PKI→Law→SDS) | missing | **parity** (thin) | `languages/law.cairn` (requires cert); `enactedBy`; LawTutorial |
 | GRANITE | Computation / Bend profile | partial | parity | `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / auth web app | N/A | **N/A deferred** | §8 anti-goal (full IDE/studio) |
@@ -199,9 +200,10 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 
 - GRANITE SDS depth beyond the spine: chemical instances load from
   `languages/sds/chemicals/*.cairn`; EU-CLP titles from `eu-clp` profile v1;
-  section report is the `sds-report` surface pack; `sectionFieldRef` cites
-  corpus phrases with `sectionFieldShadow` overrides. Typed per-section
-  structures (#3), JSON/XML/PDF report surfaces, Studio UI, and full
+  section report is the `sds-report` surface pack (`default` + `json`);
+  `sectionFieldRef` cites corpus phrases with `sectionFieldShadow` overrides.
+  Typed identification/hazards (#3 partial; thin s1/s2); sections 3–16 still
+  generic `euSection` maps. XML/PDF report surfaces, Studio UI, and full
   phrase-staleness-as-ΔL remain open. Causal workflow
   (`SdsCausalWorkflow`) covers author/shadow/rebase/conflict/approve/sign/
   publish without Studio.

@@ -51,7 +51,8 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 `SdsCausalWorkflow`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
-  `sectionFieldShadow` / `basis` / `euSection` / `outline` / lang-tagged
+  `sectionFieldShadow` / `basis` / `euSection` / typed `identificationSection` +
+  `hazardsSection` with `fieldLocale` overlays / `outline` / lang-tagged
   `sectionField` / `sectionFieldRef`); rendered document is a compiled
   bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
@@ -75,7 +76,8 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   ethanol full + thin) loaded via `ChemicalSource`; host maps remain emit
   fixtures (`EmitChemicalCairn`).
 - Section report: ordinary `sds-report` surface pack (not host GrammarSpec);
-  RoundTrip trust gate. JSON/XML/PDF/XLS not started.
+  `default` text + `json` unquoted-key machine surface; RoundTrip trust gate.
+  XML/PDF/XLS not started.
 - Causal workflow (`SdsCausalWorkflow`): author → shadow tip → merge rebase →
   conflict → approve → VerifiedCapability + tip signature → `publishHead`.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
@@ -84,11 +86,12 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Typed per-section structures (still generic field maps).
+- Typed per-section structures beyond identification/hazards (sections 3–16
+  still generic field maps).
 - Broader multilingual coverage beyond thin 1/2/16 FR overlays.
 - Phrase-staleness / section-numbering as full derived ΔL languages (numbering
   judgment landed; staleness remains projected).
-- Additional report surfaces (JSON/XML/PDF/XLS).
+- Additional report surfaces (XML/PDF/XLS).
 - Studio-persisted phrase-corpus / staleness UI / authoring surface.
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)

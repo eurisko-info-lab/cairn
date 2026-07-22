@@ -42,6 +42,42 @@ object Chemicals:
       }
       Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", en ++ loc))
 
+    private def localeField(overlays: Map[String, Map[String, String]]): Cst =
+      val rows = overlays.toList.flatMap { case (lang, kv) =>
+        kv.toList.map { case (k, v) =>
+          Cst.node("fieldLocale", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(v))
+        }
+      }
+      if rows.isEmpty then Cst.Node("none", Nil)
+      else Cst.Node("some", List(Cst.Node("list", rows)))
+
+    /** Typed identification (1) / hazards (2) terms; other numbers stay `euSection`. */
+    def toTypedTerm: Cst = number match
+      case 1 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"identification section missing EN key '$k'"))
+        Cst.node(
+          "identificationSection",
+          Cst.Leaf(req("productName")),
+          Cst.Leaf(req("synonyms")),
+          Cst.Leaf(req("recommendedUse")),
+          Cst.Leaf(req("usesAdvisedAgainst")),
+          Cst.Leaf(req("supplierName")),
+          Cst.Leaf(req("emergencyPhone")),
+          localeField(locales))
+      case 2 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"hazards section missing EN key '$k'"))
+        Cst.node(
+          "hazardsSection",
+          Cst.Leaf(req("classificationSummary")),
+          Cst.Leaf(req("hazardsNotOtherwiseClassified")),
+          Cst.Leaf(req("hazardPhrases")),
+          Cst.Leaf(req("signalWord")),
+          Cst.Leaf(req("pictograms")),
+          localeField(locales))
+      case _ => toTerm
+
   /** A chemical document as a (possibly sparse) map of section bodies. */
   final case class ChemicalDoc(
       name: String,
@@ -66,6 +102,22 @@ object Chemicals:
     def toModule(outlineName: String = "docOutline"): Module =
       val secDefs = populatedNumbers.map { n =>
         sectionRef(n) -> sections(n).toTerm
+      }
+      val refs = populatedNumbers.map(n => Cst.Leaf(sectionRef(n)))
+      val sectionsField =
+        if refs.isEmpty then Cst.Node("none", Nil)
+        else Cst.Node("some", List(Cst.Node("list", refs)))
+      val outlineTerm = Cst.node(
+        "outline",
+        Cst.Leaf(name),
+        Cst.Leaf(cas),
+        sectionsField)
+      Module(secDefs :+ (outlineName -> outlineTerm)).sorted
+
+    /** Like [[toModule]] but sections 1/2 use typed identification/hazards ctors. */
+    def toTypedModule(outlineName: String = "docOutline"): Module =
+      val secDefs = populatedNumbers.map { n =>
+        sectionRef(n) -> sections(n).toTypedTerm
       }
       val refs = populatedNumbers.map(n => Cst.Leaf(sectionRef(n)))
       val sectionsField =

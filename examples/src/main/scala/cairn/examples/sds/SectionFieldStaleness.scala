@@ -4,7 +4,8 @@ import cairn.kernel.*
 import cairn.core.*
 
 /** Multilingual section-field staleness machine — thin sibling of
-  * [[PhraseStaleness]] for `euSection` / `sectionField` rows.
+  * [[PhraseStaleness]] for `euSection` / typed identification+hazards /
+  * `sectionField` rows.
   *
   * Reuses [[PhraseStaleness.restale]] / [[PhraseStaleness.TranslatedText]]:
   * free-text locale siblings become [[PhraseStaleness.State.StaleBecauseSourceChanged]]
@@ -19,15 +20,56 @@ import cairn.core.*
 object SectionFieldStaleness:
   import PhraseStaleness.{State, TranslatedText, restale, textHash}
 
-  /** Project all locale variants of one field key inside an `euSection` binding. */
+  private def localeRows(overlays: Cst): List[Cst] = overlays match
+    case Cst.Node("none", _) => Nil
+    case Cst.Node("some", List(Cst.Node("list", xs))) => xs
+    case Cst.Node("list", xs) => xs
+    case _ => Nil
+
+  private def rowsForKey(sec: Cst, fieldKey: String): List[(String, String)] = sec match
+    case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
+      fields.collect {
+        case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
+            if k == fieldKey =>
+          (lang, text)
+      }
+    case Cst.Node("identificationSection", List(
+        Cst.Leaf(pn), Cst.Leaf(syn), Cst.Leaf(use), Cst.Leaf(against),
+        Cst.Leaf(supplier), Cst.Leaf(phone), overlays)) =>
+      val en = Map(
+        "productName" -> pn, "synonyms" -> syn, "recommendedUse" -> use,
+        "usesAdvisedAgainst" -> against, "supplierName" -> supplier,
+        "emergencyPhone" -> phone)
+      val enRow = en.get(fieldKey).toList.map(t => ("en", t))
+      val loc = localeRows(overlays).collect {
+        case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
+            if k == fieldKey =>
+          (lang, text)
+      }
+      enRow ++ loc
+    case Cst.Node("hazardsSection", List(
+        Cst.Leaf(cls), Cst.Leaf(hnoc), Cst.Leaf(phrases), Cst.Leaf(signal),
+        Cst.Leaf(pictos), overlays)) =>
+      val en = Map(
+        "classificationSummary" -> cls,
+        "hazardsNotOtherwiseClassified" -> hnoc,
+        "hazardPhrases" -> phrases,
+        "signalWord" -> signal,
+        "pictograms" -> pictos)
+      val enRow = en.get(fieldKey).toList.map(t => ("en", t))
+      val loc = localeRows(overlays).collect {
+        case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
+            if k == fieldKey =>
+          (lang, text)
+      }
+      enRow ++ loc
+    case _ => Nil
+
+  /** Project all locale variants of one field key inside a section binding. */
   def project(m: Module, sectionRef: String, fieldKey: String): Map[String, TranslatedText] =
     m.get(sectionRef) match
-      case Some(Cst.Node("euSection", List(_, Cst.Node("list", fields)))) =>
-        val rows = fields.collect {
-          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
-              if k == fieldKey =>
-            (lang, text)
-        }
+      case Some(sec) =>
+        val rows = rowsForKey(sec, fieldKey)
         val enText = rows.collectFirst { case ("en", t) => t }.getOrElse("")
         val enHash = textHash(enText)
         rows.map { case (lang, text) =>
