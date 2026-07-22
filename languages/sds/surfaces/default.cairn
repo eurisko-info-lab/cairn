@@ -21,6 +21,7 @@ surface default for sds {
     keyword fields;
     keyword outline;
     keyword sections;
+    keyword ref;
     punct "(";
     punct ")";
     punct ",";
@@ -37,6 +38,7 @@ surface default for sds {
     syntax sdsObj += outline : tok "outline" str str tok "sections" tok "(" opt sepby1 name "," tok ")";
     syntax component += component : name tok "pct" num;
     syntax sectionField += sectionField : name tok "lang" name tok ":" str;
+    syntax sectionField += sectionFieldRef : name tok "lang" name tok "ref" name;
     top sdsObj;
   }
 }

@@ -22,12 +22,16 @@ import java.nio.file.Path
     val law = cairn.examples.law.Law(packLoader)
     val sds = cairn.examples.sds.Sds(packLoader)
     val search = cairn.examples.search.Search(packLoader)
+    val euClp = packLoader.requireClosed("eu-clp")
+    val sdsReport = packLoader.requireClosed("sds-report")
     val packs = Map(
       "stlc" -> cairn.examples.stlc.Stlc.language,
       "pki" -> pki.language,
       "sds" -> sds.language,
       "law" -> law.language,
       "search" -> search.language,
+      "eu-clp" -> euClp,
+      "sds-report" -> sdsReport,
       "query" -> cairn.core.Query.language,
       "policy" -> cairn.ledger.PolicyLang.language)
     val portModules = Map(

@@ -46,12 +46,14 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
 
 `languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` +
-`PhraseStaleness` + `SectionNumbering` + `Chemicals` + `SectionReport` +
-`SectionFieldStaleness` + `SdsTutorial`):
+`PhraseStaleness` + `SectionNumbering` / `EuClp` + `Chemicals` /
+`ChemicalSource` + `SectionReport` + `SectionFieldStaleness` + `SdsTutorial` +
+`SdsCausalWorkflow`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
   `sectionFieldShadow` / `basis` / `euSection` / `outline` / lang-tagged
-  `sectionField`); rendered document is a compiled bidirectional view.
+  `sectionField` / `sectionFieldRef`); rendered document is a compiled
+  bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
 - ΔSDS = generic free ΔL + domain gate; multilingual phrase + section-field
   fallback; domain-aware shadow rebase with semantic conflict on overridden
@@ -64,40 +66,30 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   `sectionFieldShadow`): reuses `PhraseStaleness.restale` for EN-hash drift on
   locale siblings; `field shadow <euSection> overrides <key> with "…"` applies
   industrial text overrides (lang-agnostic) and participates in
-  `rebaseShadow` footprint. Projected state, not Studio.
-- Regulatory section numbering stub (`SectionNumbering`): EU-CLP / REACH Annex II
-  sections 1..16 with canonical titles; sparse outlines must be ascending, unique,
-  and title-matched (gaps allowed). Tutorial language objects still speak to a
-  2+3 sparse outline.
-- Chemicals corpus fixture (`Chemicals`): acetone host document populates all 16
-  EU-CLP sections with honest EN placeholder/content (demo, not a filing);
-  thin acetone also carries FR `sectionField` locale overlays (identification /
-  hazards / other information) projected by `toModule`; ethanol stays sparse
-  (1+2). Outlines pass `SectionNumbering.validateOutline`.
-  `Chemicals.toModule` projects into `euSection` + `outline` language terms.
-- SDS language section maps (`euSection` / `outline` / `sectionField` in
-  `sds.cairn`): ΔSDS-editable Cairn terms (Law already owns `section`, so EU-CLP
-  bodies use `euSection`). `sectionField` carries `lang` like phrases; domain
-  gate checks 1..16 numbers, outline ref integrity, ascending order, and
-  unique (key, lang) pairs. `sectionFieldText` reuses phrase multilingual
-  fallback (exact → `en` → any) then applies `sectionFieldShadow` overrides.
-  Acetone host maps stay EN-primary for `SectionReport`; thin FR siblings are
-  fixture-populated and restale-tested via `SectionFieldStaleness`. Not Studio.
-- Section report projection (`SectionReport`): host `GrammarSpec`
-  (`sds-section-report`) prints outline-validated section maps with
-  `RoundTrip.check` — same trust gate as `Sds.docGrammar`, for EU-CLP bodies
-  rather than product hazard lines. Not Studio.
+  `rebaseShadow` footprint. `sectionFieldRef` resolves through phrase/corpus
+  text. Projected state, not Studio.
+- Regulatory profile: versioned `languages/eu-clp.cairn` + annex-II v1 module
+  (`languages/sds/profiles/eu-clp-annex-ii.cairn`); `sectionNumberOk` judgment;
+  `SectionNumbering` prefers the profile.
+- Chemical instances: `.cairn` under `languages/sds/chemicals/` (acetone /
+  ethanol full + thin) loaded via `ChemicalSource`; host maps remain emit
+  fixtures (`EmitChemicalCairn`).
+- Section report: ordinary `sds-report` surface pack (not host GrammarSpec);
+  RoundTrip trust gate. JSON/XML/PDF/XLS not started.
+- Causal workflow (`SdsCausalWorkflow`): author → shadow tip → merge rebase →
+  conflict → approve → VerifiedCapability + tip signature → `publishHead`.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Broader multilingual section-field coverage beyond thin acetone FR (full 16
-  sections / secondary chemicals still EN-primary).
-- Broader secondary-chemical pack depth.
-- Studio-persisted phrase-corpus / staleness UI.
-- SDS Studio authoring surface (explicit anti-goal / deferred).
+- Typed per-section structures (still generic field maps).
+- Broader multilingual coverage beyond thin 1/2/16 FR overlays.
+- Phrase-staleness / section-numbering as full derived ΔL languages (numbering
+  judgment landed; staleness remains projected).
+- Additional report surfaces (JSON/XML/PDF/XLS).
+- Studio-persisted phrase-corpus / staleness UI / authoring surface.
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)
 

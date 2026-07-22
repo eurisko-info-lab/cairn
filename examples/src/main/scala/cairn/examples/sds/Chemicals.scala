@@ -2,17 +2,19 @@ package cairn.examples.sds
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.PackLoader
+import cairn.systemhandler.EffectContext
 
-/** Chemicals corpus fixture for SDS EU-CLP outlines.
-  *
-  * Host maps ([[ChemicalDoc]]) remain convenient fixtures; they also project
-  * into first-class `sds.cairn` terms via [[toModule]] (`euSection` +
-  * `outline`, ΔSDS-editable). Report projection of host maps is
-  * [[SectionReport]]. Not Studio: no report UI, no persisted phrase-corpus
-  * editor, no section authoring surface — see STATUS-2 / docs/exemplars
-  * remaining gaps.
+/** Chemicals corpus — host maps remain convenient fixtures for EN-primary
+  * report views; **instance modules** load from `.cairn` under
+  * `languages/sds/chemicals/` via [[ChemicalSource]] (source of truth).
+  * [[EmitChemicalCairn]] regenerates those files from host maps when content
+  * changes. Not Studio.
   */
 object Chemicals:
+  private lazy val sdsLanguage: ComposedLanguage =
+    PackLoader(EffectContext.forPackLoader()).requireClosed("sds")
+
   /** One populated EU-CLP section body. Host [[fields]] stay EN-keyed (for
     * [[SectionReport]]); [[locales]] carry non-EN overlays (`lang` → key → text).
     * [[toTerm]] projects `sectionField` rows for EN then each locale — see SDS
@@ -173,8 +175,9 @@ object Chemicals:
 
     def outline: List[SectionNumbering.OutlineEntry] = pure.outline
 
-    /** Full 16-section acetone as ΔSDS-editable `euSection` + `outline` terms. */
-    def asModule: Module = pure.toModule("acetoneOutline")
+    /** Full 16-section acetone from `languages/sds/chemicals/acetone.cairn`. */
+    def asModule: Module =
+      ChemicalSource.acetone(sdsLanguage).fold(e => throw RuntimeException(e), identity)
 
     /** Thin FR overlays for identification / hazards / other information —
       * demonstration translations, not a regulatory filing. Untranslated EN
@@ -209,11 +212,147 @@ object Chemicals:
         2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
         16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
-    def thinModule: Module = thin.toModule("acetoneOutline")
+    def thinModule: Module =
+      ChemicalSource.acetoneThin(sdsLanguage).fold(e => throw RuntimeException(e), identity)
 
-  /** Ethanol: sparse secondary substance (identification + hazards only). */
+  /** Ethanol: secondary chemical with fuller EU-CLP outline (all 16 sections).
+    * Content is demonstration / literature-shaped placeholder — not a filing.
+    * Thin FR overlays mirror acetone's multilingual / restale slice.
+    */
   object Ethanol:
     val pure: ChemicalDoc = ChemicalDoc(
+      name = "Ethanol",
+      cas = "64-17-5",
+      sections = Map(
+        1 -> SectionBody(1, Map(
+          "productName" -> "Ethanol",
+          "synonyms" -> "Ethyl alcohol; ethanol absolute; spirit of wine",
+          "recommendedUse" -> "Laboratory reagent; solvent; disinfectant formulation feedstock.",
+          "usesAdvisedAgainst" -> "Food, drug, or biocidal product use without further authorisation.",
+          "supplierName" -> "Cairn Chemicals Demo Ltd. (fictional, for demonstration only)",
+          "emergencyPhone" -> "+32 000 000 000 (demo number)")),
+        2 -> SectionBody(2, Map(
+          "classificationSummary" ->
+            "Flammable liquid Category 2; Serious eye damage/eye irritation Category 2 — Regulation (EC) No 1272/2008",
+          "hazardsNotOtherwiseClassified" -> "Highly flammable liquid and vapour; vapours may form explosive mixtures with air.",
+          "hazardPhrases" -> "H225; H319",
+          "signalWord" -> "Danger",
+          "pictograms" -> "GHS02; GHS07")),
+        3 -> SectionBody(3, Map(
+          "componentName" -> "Ethanol",
+          "cas" -> "64-17-5",
+          "ec" -> "200-578-6",
+          "concentration" -> ">= 99.5 %")),
+        4 -> SectionBody(4, Map(
+          "generalAdvice" -> "If symptoms persist, call a physician.",
+          "inhalation" -> "Remove to fresh air. If breathing is difficult, give oxygen.",
+          "skinContact" -> "Wash off with soap and plenty of water. Remove contaminated clothing.",
+          "eyeContact" -> "Rinse cautiously with water for several minutes. Remove contact lenses if present.",
+          "ingestion" -> "Rinse mouth. Do NOT induce vomiting.")),
+        5 -> SectionBody(5, Map(
+          "extinguishingMedia" -> "Alcohol-resistant foam, dry chemical, or carbon dioxide.",
+          "unsuitableExtinguishingMedia" -> "Water jet may spread the fire.",
+          "specialHazards" -> "Vapours may travel to ignition source and flash back; containers may rupture when heated.",
+          "firefighterProtection" -> "Wear SCBA and full protective gear.")),
+        6 -> SectionBody(6, Map(
+          "personalPrecautions" -> "Remove ignition sources. Ventilate. Wear appropriate PPE.",
+          "environmentalPrecautions" -> "Prevent entry into drains and waterways.",
+          "cleanupMethods" -> "Contain spill; soak up with inert absorbent; dispose as hazardous waste.")),
+        7 -> SectionBody(7, Map(
+          "handling" -> "Keep away from heat, sparks, and open flames. Use only in well-ventilated areas.",
+          "storage" -> "Store cool, well-ventilated, away from ignition sources. Keep container tightly closed.",
+          "storageIncompatibilities" -> "Strong oxidizers, alkali metals, strong acids, peroxides.")),
+        8 -> SectionBody(8, Map(
+          "occupationalExposureLimit" -> "EU indicative OELV 1000 ppm (1920 mg/m3), 8-hour TWA; ACGIH STEL 1000 ppm.",
+          "engineeringControls" -> "Adequate ventilation; explosion-proof electrical equipment; eyewash nearby.",
+          "eyeProtection" -> "Chemical safety goggles (e.g. EN166).",
+          "skinProtection" -> "Protective gloves and clothing.",
+          "respiratoryProtection" -> "Organic vapor respirator if exposure limits exceeded.")),
+        9 -> SectionBody(9, Map(
+          "appearance" -> "Colourless liquid.",
+          "odor" -> "Characteristic, alcoholic.",
+          "molecularWeight" -> "46.07 g/mol",
+          "meltingPoint" -> "-114.1 degC",
+          "boilingPoint" -> "78.3 degC at 1013 hPa",
+          "flashPoint" -> "13 degC (closed cup)",
+          "density" -> "0.79 g/cm3 at 20 degC",
+          "solubility" -> "Miscible with water in all proportions.",
+          "explosiveLimits" -> "Lower 3.3% / Upper 19% (v/v in air)")),
+        10 -> SectionBody(10, Map(
+          "stability" -> "Stable under recommended storage conditions.",
+          "conditionsToAvoid" -> "Heat, flames, sparks, and static discharge.",
+          "incompatibleMaterials" -> "Strong oxidizing agents, alkali metals, strong acids, peroxides.",
+          "hazardousDecomposition" -> "CO, CO2 under fire conditions.")),
+        11 -> SectionBody(11, Map(
+          "LD50Oral" -> "7060 mg/kg (rat, oral)",
+          "irritation" -> "Causes serious eye irritation. Prolonged skin contact may cause dryness.",
+          "inhalationEffects" -> "High vapour concentrations may cause dizziness and narcosis.",
+          "carcinogenicity" -> "IARC Group 1 for alcoholic beverages; ethanol as industrial substance not classified as a carcinogen in this demo note.")),
+        12 -> SectionBody(12, Map(
+          "ecotoxicity" -> "Fish LC50 ~14200 mg/L (96h); daphnia EC50 ~9268 mg/L (48h).",
+          "persistence" -> "Readily biodegradable; persistence unlikely.",
+          "bioaccumulation" -> "Low (log Pow = -0.31).",
+          "mobility" -> "Likely mobile in soil and water due to miscibility.")),
+        13 -> SectionBody(13, Map(
+          "disposalMethods" -> "Dispose per local/regional/national regulations. Do not discharge to drains.",
+          "wasteClassification" -> "Consult local regulations; flammable liquid waste stream.")),
+        14 -> SectionBody(14, Map(
+          "unNumber" -> "UN1170",
+          "properShippingName" -> "ETHANOL (ETHYL ALCOHOL) or ETHANOL SOLUTION",
+          "transportHazardClass" -> "Class 3 (Flammable liquid)",
+          "packingGroup" -> "II")),
+        15 -> SectionBody(15, Map(
+          "regulatoryInfo" -> "Classified and labelled per Regulation (EC) No 1272/2008 (CLP).",
+          "reachStatus" -> "Registered under REACH (demo note).",
+          "usInventory" -> "Listed on US TSCA Inventory (active).")),
+        16 -> SectionBody(16, Map(
+          "revisionDate" -> "2026-07-22",
+          "otherInformation" ->
+            "Demo/example data for the Cairn SDS chemicals corpus (secondary ethanol) — not regulatory or safety advice for real use."))))
+
+    def outline: List[SectionNumbering.OutlineEntry] = pure.outline
+
+    /** Full 16-section ethanol as ΔSDS-editable `euSection` + `outline` terms. */
+    def asModule: Module =
+      ChemicalSource.ethanol(sdsLanguage).fold(e => throw RuntimeException(e), identity)
+
+    /** Thin FR overlays for identification / hazards / other information —
+      * demonstration translations, not a regulatory filing.
+      */
+    val thinFr: Map[Int, Map[String, String]] = Map(
+      1 -> Map(
+        "productName" -> "Éthanol",
+        "synonyms" -> "alcool éthylique ; éthanol absolu",
+        "recommendedUse" ->
+          "Réactif de laboratoire ; solvant ; matière première pour formulations désinfectantes.",
+        "supplierName" ->
+          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)"),
+      2 -> Map(
+        "classificationSummary" ->
+          "Liquide inflammable catégorie 2 ; lésions oculaires graves/irritation oculaire catégorie 2 — règlement (CE) n° 1272/2008",
+        "hazardPhrases" -> "H225 ; H319",
+        "signalWord" -> "Danger",
+        "pictograms" -> "GHS02 ; GHS07"),
+      16 -> Map(
+        "otherInformation" ->
+          "Données de démonstration / exemple pour le corpus chimiques SDS Cairn (éthanol secondaire) — pas un conseil réglementaire ou de sécurité pour un usage réel."))
+
+    /** Thin subset (identification + hazards + other information) with FR
+      * section-field siblings for focused multilingual / restale tests.
+      */
+    val thin: ChemicalDoc = ChemicalDoc(
+      name = "Ethanol",
+      cas = "64-17-5",
+      sections = Map(
+        1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
+        2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
+        16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
+
+    def thinModule: Module =
+      ChemicalSource.ethanolThin(sdsLanguage).fold(e => throw RuntimeException(e), identity)
+
+    /** Pre-expansion sparse 1+2 outline retained for contrast with the fuller pack. */
+    val sparseLegacy: ChemicalDoc = ChemicalDoc(
       name = "Ethanol",
       cas = "64-17-5",
       sections = Map(
@@ -221,8 +360,6 @@ object Chemicals:
         2 -> SectionBody(2, Map(
           "hazardPhrases" -> "H225; H319",
           "signalWord" -> "Danger"))))
-
-    def asModule: Module = pure.toModule("ethanolOutline")
 
   /** Tutorial spine still speaks only to hazards + composition; kept here so
     * the sparse vs fuller acetone outlines stay explicit.

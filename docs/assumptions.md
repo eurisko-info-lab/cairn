@@ -30,9 +30,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    exists (M17) and `Branches.merge` is merge-aware through
    `SemanticRepository` (conflict → CAS artifact, accept → new head +
    provenance). Everyday branch path persists `ValidatedTip` via `commitTip`
-   (opaque tip + replay-checked change-sets; tip sidecar + `.changes` history;
-   causal digests on `BranchManifest`) and merges via `mergeBranches`
-   (causal LCA by shared module-result digests) / `loadTip`.    Accepts are
+  (opaque tip + replay-checked change-sets; tip sidecar + `.changes` history
+   as caches; `changeHistory` + causal digests on `BranchManifest`) and merges
+   via `mergeBranches`
+  (causal LCA by shared module-result digests) / `loadTip`.    Accepts are
    journaled (CAS → journal → refs → optional ledger).
    `Branches.reclaimOrphanBlobs` recovers then GCs with `liveCasRoots`.
    Ledger `SetBranchHead`

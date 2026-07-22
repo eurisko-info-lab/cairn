@@ -150,9 +150,11 @@ branch state
 `ValidatedTip`. Loaded histories are replay-checked before merge.
 
 `BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
-`conflictState` (CAS digests). Refs `.change` / `.changes` sidecars remain for
-compat. `mergeBranches` finds a causal LCA by shared module-result digests
-(not only identical linear change prefixes), then merges divergent suffixes.
+`changeHistory`, `conflictState` (CAS digests). Refs `.change` / `.changes`
+sidecars remain write-through caches; `loadChangeHistory` / `loadChange`
+prefer manifest digests. `mergeBranches` finds a causal LCA by shared
+module-result digests (not only identical linear change prefixes), then merges
+divergent suffixes.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
 `Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via

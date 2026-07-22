@@ -1,0 +1,26 @@
+language eu-clp {
+  fragment annex-ii provides euClp {
+    sort RegObj tree;
+    ctor sectionDef : RegObj(Number, Title);
+    ctor profile : RegObj(Id, Version, SectionRefs);
+    varctor euClpRef;
+    judgment sectionNumberOk {
+      rule sn-1 :  |- sectionNumberOk("1");
+      rule sn-2 :  |- sectionNumberOk("2");
+      rule sn-3 :  |- sectionNumberOk("3");
+      rule sn-4 :  |- sectionNumberOk("4");
+      rule sn-5 :  |- sectionNumberOk("5");
+      rule sn-6 :  |- sectionNumberOk("6");
+      rule sn-7 :  |- sectionNumberOk("7");
+      rule sn-8 :  |- sectionNumberOk("8");
+      rule sn-9 :  |- sectionNumberOk("9");
+      rule sn-10 :  |- sectionNumberOk("10");
+      rule sn-11 :  |- sectionNumberOk("11");
+      rule sn-12 :  |- sectionNumberOk("12");
+      rule sn-13 :  |- sectionNumberOk("13");
+      rule sn-14 :  |- sectionNumberOk("14");
+      rule sn-15 :  |- sectionNumberOk("15");
+      rule sn-16 :  |- sectionNumberOk("16");
+    }
+  }
+}

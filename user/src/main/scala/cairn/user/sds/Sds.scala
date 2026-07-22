@@ -15,14 +15,13 @@ import cairn.core.*
   * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
   * Phrase staleness (official corpus vs free-text restale) lives in the
   * examples host machine — see `cairn.examples.sds.PhraseStaleness`.
-  * Regulatory section numbering (EU-CLP 1..16 + ordering) lives in
-  * `cairn.examples.sds.SectionNumbering`. Chemicals fixtures and host report
-  * projection (`Chemicals` / `SectionReport`) can project into / from
-  * language `euSection` + `outline` terms. Section-field text resolves with
-  * the same multilingual fallback as phrases (exact lang → `en` → any), then
-  * `sectionFieldShadow` industrial overrides (parallel to phrase `shadow`).
-  * Section-field staleness lives in `cairn.examples.sds.SectionFieldStaleness`
-  * (reuses `PhraseStaleness.restale`).
+  * Regulatory section numbering prefers the versioned `eu-clp` pack
+  * (`cairn.examples.sds.EuClp` / `SectionNumbering`). Chemical instances load
+  * from `languages/sds/chemicals/` `.cairn` files (`ChemicalSource`); host maps remain
+  * emit fixtures. Section report is the `sds-report` surface pack.
+  * `sectionField` / `sectionFieldRef` resolve with multilingual fallback, then
+  * `sectionFieldShadow` overrides. Section-field staleness lives in
+  * `cairn.examples.sds.SectionFieldStaleness` (reuses `PhraseStaleness.restale`).
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -80,6 +79,14 @@ final class Sds(packs: PackAccess):
           case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
             if k.isEmpty then errs += s"euSection '$name': empty field key"
             else if lang.isEmpty then errs += s"euSection '$name' field '$k': empty lang"
+            else if !seen.add((k, lang)) then
+              errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
+          case Cst.Node("sectionFieldRef", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))) =>
+            if k.isEmpty then errs += s"euSection '$name': empty field key"
+            else if lang.isEmpty then errs += s"euSection '$name' field '$k': empty lang"
+            else if ref.isEmpty then errs += s"euSection '$name' field '$k': empty phrase ref"
+            else if !defined(ref) then
+              errs += s"euSection '$name' field '$k' references unknown phrase '$ref'"
             else if !seen.add((k, lang)) then
               errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
           case other => errs += s"euSection '$name': bad field ${other.render}"
@@ -220,6 +227,7 @@ final class Sds(packs: PackAccess):
 
   /** Lookup [[sectionFieldText]] by module binding (section ref), applying
     * any `sectionFieldShadow` industrial override for that (section, key).
+    * `sectionFieldRef` rows resolve through [[phraseText]] (corpus or free-text).
     */
   def sectionFieldText(m: Module, sectionRef: String, fieldKey: String, lang: String)
       : Option[String] =
@@ -228,7 +236,23 @@ final class Sds(packs: PackAccess):
           if s == sectionRef && k == fieldKey =>
         text
     }
-    overridden.orElse(m.get(sectionRef).flatMap(sectionFieldText(_, fieldKey, lang)))
+    overridden.orElse {
+      m.get(sectionRef).flatMap {
+        case sec @ Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
+          val refs = fields.collect {
+            case Cst.Node("sectionFieldRef", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(ref)))
+                if k == fieldKey =>
+              (l, ref)
+          }
+          val viaRef =
+            refs.collectFirst { case (l, ref) if l == lang => ref }
+              .orElse(refs.collectFirst { case (l, ref) if l == "en" => ref })
+              .orElse(refs.headOption.map(_._2))
+              .flatMap(r => phraseText(m, r, lang))
+          viaRef.orElse(sectionFieldText(sec, fieldKey, lang))
+        case other => sectionFieldText(other, fieldKey, lang)
+      }
+    }
 
   /** Compile a product's document: phrases in the requested language (with
     * fallback), shadow overrides applied — a view over typed objects.

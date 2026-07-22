@@ -11,6 +11,7 @@ language sds {
     ctor sectionFieldShadow : SdsObj(Ref, Name, Text);
     ctor basis : SdsObj(Name, Str);
     ctor sectionField : SectionField(Name, Lang, Text);
+    ctor sectionFieldRef : SectionField(Name, Lang, PhraseRef);
     ctor euSection : SdsObj(Number, Fields);
     ctor outline : SdsObj(Label, Cas, SectionRefs);
     varctor sdsRef;

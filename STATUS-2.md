@@ -1,6 +1,6 @@
 # STATUS-2 — end of the maximalization plan (PLAN-2)
 
-Date: 2026-07-21. All 50 stories M1–M50 of [PLAN-2.md](PLAN-2.md) landed on top of
+Date: 2026-07-22. All 50 stories M1–M50 of [PLAN-2.md](PLAN-2.md) landed on top of
 the S1–S50 base, plus a **top-level parity pass** (constitution §4.16), an
 **exemplar elevation** (PKI/Law/SDS as `.cairn` languages with a real
 `PKI → Law → SDS` `requires`/`provides` DAG), and a **trust-hardening pass**
@@ -13,19 +13,34 @@ causal-LCA merge) plus **reclaim / sync** (`reclaimOrphanBlobs`, CAS
 books + live `hvm` when on PATH), plus a **Lean agreement expansion**
 (`natRec` ι corpus + live `#check` stdout digests), plus an **SDS
 phrase-staleness stub** (`corpusPhrase` + `PhraseStaleness.restale`), an
-**SDS regulatory section-numbering stub** (`SectionNumbering` EU-CLP 1..16),
-a **chemicals corpus fixture** (`Chemicals` acetone 1..16 + thin FR overlays +
-sparse ethanol),
-an **SDS section-report projection** (`SectionReport` GrammarSpec + RoundTrip
-over host section maps), **SDS language section maps** (`euSection` /
-`outline` / `sectionField` in `sds.cairn`, ΔSDS-editable; acetone wired through),
-and **multilingual section fields** (`sectionField` + lang; `sectionFieldText`
-fallback mirroring phrases), plus a **section-field shadow / restale stub**
-(`sectionFieldShadow` + `SectionFieldStaleness` reusing `PhraseStaleness.restale`).
-Full suite: **480 tests green** (+2 skipped; `tests` module; `sbt test`),
+**SDS regulatory section-numbering** path (`SectionNumbering` + versioned
+`eu-clp` pack + `sectionNumberOk` judgment), **chemical `.cairn` instance
+sources** (`languages/sds/chemicals/` acetone/ethanol; host maps emit/load),
+an **SDS section-report surface pack** (`sds-report`), **SDS language section
+maps** (`euSection` / `outline` / `sectionField` / `sectionFieldRef` in
+`sds.cairn`), **multilingual section fields** (corpus refs + free-text +
+shadow overrides), **BranchManifest.changeHistory** (sidecars as caches), and
+an **SDS causal workflow** (`SdsCausalWorkflow`: author → shadow → rebase →
+conflict → approve → sign → publish). Full suite: **489 tests green** (+2 skipped;
+`tests` module; `sbt test`),
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
+
+## Post-parity priority scorecard (2026-07-22)
+
+| # | Priority | Status | Evidence |
+|---|---|---|---|
+| 1 | Chemical instances as `.cairn` sources | **Partial→advanced** | `languages/sds/chemicals/{acetone,ethanol}{,-thin}.cairn`; `ChemicalSource`; host maps remain emit fixtures |
+| 2 | Versioned regulatory-profile languages (EU REACH/CLP) | **Partial** | `languages/eu-clp.cairn` + `languages/sds/profiles/eu-clp-annex-ii.cairn` (v1); `EuClp` / `sectionNumberOk` |
+| 3 | Typed section-specific structures | **Missing** | Still generic `sectionField` maps — not faked this pass |
+| 4 | Section-numbering / phrase-staleness as judgments or ΔL | **Partial** | `sectionNumberOk` judgment; phrase/section-field staleness remain projected restale over EN-hash drift |
+| 5 | Multilingual section fields: corpus refs + overrides | **Partial** | `sectionFieldRef` + `sectionFieldShadow`; thin FR overlays on acetone/ethanol |
+| 6 | Report formats as surface packs | **Partial** | `languages/sds-report.cairn` + surface; JSON/XML/PDF/XLS not started |
+| 7 | Branch manifests alone reach semantic history | **Partial→advanced** | `BranchManifest.changeHistory`; `loadChangeHistory` prefers manifest; sidecars write-through caches |
+| 8 | VerifiedCapability / issuer evidence at trust boundaries | **Partial** | `SdsCausalWorkflow` mints `VerifiedCapability` + Ed25519 tip-signature certificate on publish path |
+| 9 | Widen Lean/HVM only via explicit corpus claims | **Done (process)** | No new claim this pass; envelopes unchanged |
+| 10 | Complete SDS workflow through causal repo | **Partial→advanced** | `SdsCausalWorkflow` + ParitySuite: author/shadow/rebase/conflict/approve/sign/publish |
 
 ## Story scorecard
 
@@ -44,11 +59,13 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 ## Golden digests (`sbt "examples/runMain cairn.examples.Main digests"`)
 
 ```text
+language eu-clp e89b47154f856831680c4f85c0b2049d1fc7a2bc482f79d4e9f39fa77f86ac79
 language law    6d39fe8e82738f0da994d62064e4bc74035d5476e570ce85923f4741d127072a
 language pki    bebf85a46279c76fb90c3dae71b138e85def650449912bc691aae5e5b72eb3e8
 language policy df25113d6bd70b5af73d8eb3a7f86660b742caad33c2e45e0141d630432a01b6
 language query  14a04e0fbdbc91a07da588c10ff909dfb8cba28544722e97052e38dfc031150b
-language sds    e9cc293528d564ae4df828888da0ce4405e5ac776fa1d33c9ec04e45ce39ecd9
+language sds    bdacebac6c1b7fbb05166358a68abb4c291ccac594d94319f647fc8983fc068a
+language sds-report e1506ddf2c9e8ce66b794f2ec229e8606b016fb5aa802f5e8edf4491c7dd810b
 language search a5e2f932d079c1b0d4ba6d19e8b6a3e2aefba105c7a29a733ff046d0722a85a9
 language stlc   ef1188f151541c1e7dcb738cce62dd3ec0f7172e32313ce4b9d4aa2676bc2f2e
 rosetta quicksort2   c2de9525e314f240a4dea977e9ad3992e31d1789b03bce8d5e70ce87dc9d04fb
@@ -146,7 +163,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | parity | parity | Waves A–C, H1; `languages/meta.cairn` fixpoint |
 | GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | partial | **parity** | `languages/pki.cairn` + glue; `PkiMax`/`DemoPki`/`PkiTutorial`; ParitySuite |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | missing | **parity** | `ledger/Encryption.scala`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law; `euSection`/`outline`/`sectionField`+lang/`sectionFieldShadow`); `CompositionSealing`/`PhraseStaleness`/`SectionFieldStaleness`/`SectionNumbering`/`Chemicals`/`SectionReport`/`SdsTutorial`; ExemplarPackSuite |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (+ `sectionFieldRef`); `eu-clp` / `sds-report` packs; `languages/sds/chemicals/*.cairn`; `SdsCausalWorkflow`; ExemplarPackSuite / ParitySuite |
 | GRANITE | Law pack (PKI→Law→SDS) | missing | **parity** (thin) | `languages/law.cairn` (requires cert); `enactedBy`; LawTutorial |
 | GRANITE | Computation / Bend profile | partial | parity | `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / auth web app | N/A | **N/A deferred** | §8 anti-goal (full IDE/studio) |
@@ -174,23 +191,20 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Delegation | Root grant expiry/nonce/resource justified before hop validation |
 | Tips / ΔL | Opaque `ValidatedTip` + `ValidatedChangeSet`; Branches accepts only checked tips; loads replay |
 | Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS; CAS `replay-snapshot` publish/merge) |
-| BranchManifest | Causal digests; sidecars kept; causal-LCA merge by shared module results; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
+| BranchManifest | Causal digests + `changeHistory`; sidecars write-through caches; causal-LCA merge; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
 | Agreement | Certificate carries `envelopeDigest` + `nativeEvidence`; Lean `natRec` ι + live stdout digests |
 | Effect interfaces | `ActionKey` digest-bound; CAS-pinned `effect-interface` via `PinnedInterface` / `ActionKey.fromPinned`; host Meta remains bootstrap |
 
 ### Remaining honest gaps
 
-- GRANITE SDS depth beyond the spine: acetone chemicals fixture populates all
-  16 EU-CLP sections; outlines pass `SectionNumbering`; `SectionReport` projects
-  host maps; section bodies are first-class `sds.cairn` terms (`euSection` /
-  `outline` / lang-tagged `sectionField`, ΔSDS-editable; `sectionFieldText`
-  mirrors phrase fallback + `sectionFieldShadow` overrides).
-  `SectionFieldStaleness` reuses `PhraseStaleness.restale` for locale drift.
-  Secondary chemicals still sparse; thin acetone FR section-field siblings are
-  fixture-populated (full 16 / ethanol remain EN-primary). Phrase-staleness +
-  section-numbering *machine stubs* landed (projected state, not Studio).
-  Studio-persisted phrase-corpus UI and SDS Studio authoring surface remain
-  deferred (§8 anti-goal).
+- GRANITE SDS depth beyond the spine: chemical instances load from
+  `languages/sds/chemicals/*.cairn`; EU-CLP titles from `eu-clp` profile v1;
+  section report is the `sds-report` surface pack; `sectionFieldRef` cites
+  corpus phrases with `sectionFieldShadow` overrides. Typed per-section
+  structures (#3), JSON/XML/PDF report surfaces, Studio UI, and full
+  phrase-staleness-as-ΔL remain open. Causal workflow
+  (`SdsCausalWorkflow`) covers author/shadow/rebase/conflict/approve/sign/
+  publish without Studio.
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
   `#check` (refl/subst/`natRec` ι corpus; live stdout digests when `lean` on

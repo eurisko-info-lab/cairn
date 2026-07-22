@@ -66,6 +66,17 @@ class ParitySuite extends munit.FunSuite:
     assert(r.sealedWrongKeyFails)
     assert(r.ledgerBranch)
 
+  test("parity: SDS causal workflow author/shadow/rebase/conflict/approve/sign/publish"):
+    import cairn.examples.sds.SdsCausalWorkflow
+    val work = java.nio.file.Files.createTempDirectory("cairn-sds-causal")
+    val r = SdsCausalWorkflow.run(work)
+    assert(r.rebaseMerged, "disjoint industrial+pct merge should accept")
+    assert(r.conflictOverlap.contains("h225"), r.conflictOverlap.toString)
+    assertEquals(r.historyFromManifestAlone, 2)
+    assert(r.verifiedCapabilityOk)
+    assert(r.tipSignatureHex.nonEmpty)
+    assert(r.ledgerPublished)
+
   test("parity: SDS composition sealing open/clear bands"):
     val base = SdsTutorial.acetoneBase
     val kp = Encryption.generateKeyPair()

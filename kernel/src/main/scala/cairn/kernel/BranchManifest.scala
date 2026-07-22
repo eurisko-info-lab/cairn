@@ -7,8 +7,9 @@ package cairn.kernel
   * accepted state.
   *
   * Causal fields (`causalHistoryRoot`, `parents`, `acceptedChange`,
-  * `conflictState`) are CAS digests so history is content-addressed rather
-  * than only mutable refs sidecars. Older manifests omit them (decoded as empty).
+  * `changeHistory`, `conflictState`) are CAS digests so semantic history is
+  * reachable from the manifest alone. Refs `.change` / `.changes` sidecars
+  * remain write-through caches. Older manifests omit new fields (decoded empty).
   */
 final case class BranchManifest(
     branch: String,
@@ -18,6 +19,8 @@ final case class BranchManifest(
     parents: List[Digest] = Nil,
     acceptedChange: Option[Digest] = None,
     conflictState: Option[Digest] = None,
+    /** Oldest → newest ValidatedChangeSet digests (semantic history). */
+    changeHistory: List[Digest] = Nil,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -26,7 +29,8 @@ final case class BranchManifest(
     "causalHistoryRoot" -> optDigest(causalHistoryRoot),
     "parents" -> Canon.CList(parents.map(d => Canon.CStr(d.hex))),
     "acceptedChange" -> optDigest(acceptedChange),
-    "conflictState" -> optDigest(conflictState))
+    "conflictState" -> optDigest(conflictState),
+    "changeHistory" -> Canon.CList(changeHistory.map(d => Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -54,4 +58,5 @@ object BranchManifest:
       causalHistoryRoot = m.get("causalHistoryRoot").flatMap(dig),
       parents = m.get("parents").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
       acceptedChange = m.get("acceptedChange").flatMap(dig),
-      conflictState = m.get("conflictState").flatMap(dig))
+      conflictState = m.get("conflictState").flatMap(dig),
+      changeHistory = m.get("changeHistory").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil))

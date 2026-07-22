@@ -1,0 +1,17 @@
+surface default for sds-report {
+  fragment report {
+    keyword SDS;
+    keyword REPORT;
+    keyword CAS;
+    keyword section;
+    keyword field;
+    punct ":";
+    syntax report += report : tok "SDS" tok "REPORT" tok ":" str tok "CAS" tok ":" str star cat sectionBlock;
+    syntax sectionBlock += sectionBlock : tok "section" num str star cat fieldLine;
+    syntax fieldLine += fieldLine : tok "field" name tok ":" str;
+    print report : lit "SDS" sp lit "REPORT" lit ":" sp strfield 0 sp lit "CAS" lit ":" sp strfield 1 nl sep 2 "\n";
+    print sectionBlock : lit "section" sp field 0 sp strfield 1 nl sep 2 "\n";
+    print fieldLine : lit "field" sp field 0 sp lit ":" sp strfield 1;
+    top report;
+  }
+}

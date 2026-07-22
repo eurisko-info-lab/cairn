@@ -467,6 +467,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     val m = BranchManifest.fromCanon(a.body)
                     m.head.foreach(k => roots += k.valueHash)
                     m.acceptedChange.foreach(roots += _)
+                    m.changeHistory.foreach(roots += _)
                     m.causalHistoryRoot.foreach(roots += _)
                     m.conflictState.foreach(roots += _)
                     m.parents.foreach(roots += _)
@@ -583,7 +584,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       getByDigest(d).map(a => BranchManifest.fromCanon(a.body)).fold(e => throw RuntimeException(e), identity)
 
   /** Append: new head goes to history head; manifest itself stored in CAS.
-    * Optional causal digests are recorded on the manifest.
+    * Optional causal digests are recorded on the manifest. When
+    * `acceptedChange` is set, it is appended to [[BranchManifest.changeHistory]]
+    * (sidecars remain write-through caches of the same digests).
     */
   def advance(
       branch: String,
@@ -594,6 +597,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       conflictState: Option[Digest] = None,
   ): BranchManifest =
     val cur = load(branch)
+    val nextHistory = acceptedChange match
+      case Some(d) if cur.changeHistory.lastOption.contains(d) => cur.changeHistory
+      case Some(d) => cur.changeHistory :+ d
+      case None => cur.changeHistory
     val next = BranchManifest(
       branch,
       Some(newHead),
@@ -601,7 +608,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       causalHistoryRoot = causalHistoryRoot.orElse(cur.causalHistoryRoot),
       parents = if parents.nonEmpty then parents else cur.head.toList.map(_.valueHash),
       acceptedChange = acceptedChange.orElse(cur.acceptedChange),
-      conflictState = conflictState)
+      conflictState = conflictState,
+      changeHistory = nextHistory)
     val key = putArt(next.artifact)
     refsMkdirs()
     refsWrite(refPath(branch), key.valueHash.hex)
@@ -646,21 +654,36 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       extraPuts = List(tip.base.artifact),
     ).fold(e => throw RuntimeException(e), identity)
 
-  /** Load + replay-check the tip ValidatedChangeSet. */
+  /** Load + replay-check the tip ValidatedChangeSet.
+    * Prefers [[BranchManifest.acceptedChange]]; `.change` sidecar is a cache.
+    */
   def loadChange(
       branch: String, language: ComposedLanguage
   ): Either[String, Delta.ValidatedChangeSet] =
-    val p = changeRefPath(branch)
-    if !refsExists(p) then Left(s"branch '$branch' has no persisted change (commit via commitTip)")
-    else loadVcs(language, Digest(refsRead(p).trim))
+    val fromManifest = load(branch).acceptedChange
+    val fromSidecar =
+      val p = changeRefPath(branch)
+      if refsExists(p) then Some(Digest(refsRead(p).trim)) else None
+    fromManifest.orElse(fromSidecar) match
+      case Some(d) => loadVcs(language, d)
+      case None =>
+        Left(s"branch '$branch' has no persisted change (commit via commitTip)")
 
-  /** Full change history (oldest → newest), each entry replay-checked. */
+  /** Full change history (oldest → newest), each entry replay-checked.
+    * Prefers [[BranchManifest.changeHistory]]; `.changes` sidecar is a cache.
+    */
   def loadChangeHistory(
       branch: String, language: ComposedLanguage
   ): Either[String, List[Delta.ValidatedChangeSet]] =
-    val hist = changeHistoryPath(branch)
-    if refsExists(hist) then
-      val digests = refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
+    val manifestHist = load(branch).changeHistory
+    val digests =
+      if manifestHist.nonEmpty then manifestHist
+      else
+        val hist = changeHistoryPath(branch)
+        if refsExists(hist) then
+          refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
+        else Nil
+    if digests.nonEmpty then
       digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
         acc.flatMap(xs => loadVcs(language, d).map(xs :+ _))
       }
@@ -706,7 +729,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         val cur = load(into)
         val marked = BranchManifest(
           into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
-          cur.acceptedChange, conflictState = Some(conflictKey.valueHash))
+          cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
+          changeHistory = cur.changeHistory)
         putArt(marked.artifact) // conflictState recorded; head unchanged
         refsMkdirs()
         refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)

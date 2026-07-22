@@ -1,0 +1,17 @@
+s1 = section def 1 "Identification" ;
+s2 = section def 2 "Hazards identification" ;
+s3 = section def 3 "Composition/information on ingredients" ;
+s4 = section def 4 "First-aid measures" ;
+s5 = section def 5 "Firefighting measures" ;
+s6 = section def 6 "Accidental release measures" ;
+s7 = section def 7 "Handling and storage" ;
+s8 = section def 8 "Exposure controls/personal protection" ;
+s9 = section def 9 "Physical and chemical properties" ;
+s10 = section def 10 "Stability and reactivity" ;
+s11 = section def 11 "Toxicological information" ;
+s12 = section def 12 "Ecological information" ;
+s13 = section def 13 "Disposal considerations" ;
+s14 = section def 14 "Transport information" ;
+s15 = section def 15 "Regulatory information" ;
+s16 = section def 16 "Other information" ;
+euClpAnnexIi = profile euClpAnnexIiV1 version "1" sections (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16) ;

@@ -1,0 +1,15 @@
+surface default for eu-clp {
+  fragment annex-ii {
+    keyword section;
+    keyword def;
+    keyword profile;
+    keyword version;
+    keyword sections;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax regObj += sectionDef : tok "section" tok "def" num str;
+    syntax regObj += profile : tok "profile" name tok "version" str tok "sections" tok "(" sepby1 name "," tok ")";
+    top regObj;
+  }
+}

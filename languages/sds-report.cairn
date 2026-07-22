@@ -1,0 +1,11 @@
+language sds-report {
+  fragment report provides sdsReport {
+    sort Report tree;
+    sort SectionBlock tree;
+    sort FieldLine tree;
+    ctor report : Report(Label, Cas, Sections);
+    ctor sectionBlock : SectionBlock(Number, Title, Fields);
+    ctor fieldLine : FieldLine(Name, Text);
+    varctor reportRef;
+  }
+}

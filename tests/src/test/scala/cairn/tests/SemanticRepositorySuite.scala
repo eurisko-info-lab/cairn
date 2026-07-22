@@ -118,6 +118,17 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val hist = branches.loadChangeHistory("feat", lang).fold(e => fail(e), identity)
     assertEquals(hist.length, 2)
     assertEquals(hist.last.result, tip2.tipDigest)
+    // Manifest alone carries changeHistory; sidecars are caches
+    val m = branches.load("feat")
+    assertEquals(m.changeHistory.length, 2)
+    assertEquals(m.acceptedChange, Some(tip2.vcs.artifact.digest))
+    Files.deleteIfExists(dir.resolve("refs/feat.change"))
+    Files.deleteIfExists(dir.resolve("refs/feat.changes"))
+    val histManifest = branches.loadChangeHistory("feat", lang).fold(e => fail(e), identity)
+    assertEquals(histManifest.length, 2)
+    assertEquals(histManifest.last.result, tip2.tipDigest)
+    val tipAlone = branches.loadTip("feat", lang).fold(e => fail(e), identity)
+    assertEquals(tipAlone.tipDigest, tip2.tipDigest)
 
   test("Branches.mergeBranches: stacked histories compose (not tip-only)"):
     val dir = Files.createTempDirectory("cairn-semrepo-stack")

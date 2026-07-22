@@ -2,58 +2,22 @@ package cairn.examples.sds
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.PackLoader
+import cairn.systemhandler.EffectContext
 
-/** Thin report projection over host [[Chemicals.ChemicalDoc]] section maps.
+/** Section-report projection as an ordinary surface pack (`sds-report`).
   *
-  * Compiles an outline-validated chemical document to a bidirectional
-  * `GrammarSpec` surface (`sds-section-report`) — same RoundTrip trust gate as
-  * `Sds.docGrammar`, but for EU-CLP section bodies rather than product hazard
-  * lines. Language-side section maps live as `euSection` / `outline` in
-  * `sds.cairn` (see [[Chemicals.ChemicalDoc.toModule]]); this host grammar
-  * remains a report view, not Studio.
-  *
-  * See STATUS-2 / docs/exemplars remaining gaps.
+  * Language + default surface live under `languages/sds-report*`. Host maps
+  * ([[Chemicals.ChemicalDoc]]) and SDS `euSection`/`outline` modules both
+  * compile to the same report CST. PDF/XLS remain future surfaces — not this
+  * pack. RoundTrip is the trust gate (same as product `Sds.docGrammar`).
   */
 object SectionReport:
-  val grammar: GrammarSpec = GrammarSpec(
-    name = "sds-section-report",
-    tokens = TokenSpec(
-      keywords = List("SDS", "REPORT", "CAS", "section", "field"),
-      puncts = List(":"),
-      lineComment = None),
-    categories = List(
-      CategorySpec("report", List(
-        ConstructorSpec("report", List(
-          Elem.Tok("SDS"), Elem.Tok("REPORT"), Elem.Tok(":"), Elem.StrLeaf,
-          Elem.Tok("CAS"), Elem.Tok(":"), Elem.StrLeaf,
-          Elem.Star(Elem.Cat("sectionBlock")))))),
-      CategorySpec("sectionBlock", List(
-        ConstructorSpec("sectionBlock", List(
-          Elem.Tok("section"), Elem.NumLeaf, Elem.StrLeaf,
-          Elem.Star(Elem.Cat("fieldLine")))))),
-      CategorySpec("fieldLine", List(
-        ConstructorSpec("fieldLine", List(
-          Elem.Tok("field"), Elem.NameLeaf, Elem.Tok(":"), Elem.StrLeaf))))),
-    precCategories = Nil,
-    printRules = List(
-      PrintRule("report", List(
-        PrintSeg.Lit("SDS"), PrintSeg.Space, PrintSeg.Lit("REPORT"),
-        PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.StrField(0),
-        PrintSeg.Space, PrintSeg.Lit("CAS"), PrintSeg.Lit(":"), PrintSeg.Space,
-        PrintSeg.StrField(1), PrintSeg.Newline,
-        PrintSeg.SepFields(2, "\n"))),
-      PrintRule("sectionBlock", List(
-        PrintSeg.Lit("section"), PrintSeg.Space, PrintSeg.Field(0),
-        PrintSeg.Space, PrintSeg.StrField(1), PrintSeg.Newline,
-        PrintSeg.SepFields(2, "\n"))),
-      PrintRule("fieldLine", List(
-        PrintSeg.Lit("field"), PrintSeg.Space, PrintSeg.Field(0),
-        PrintSeg.Space, PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.StrField(1)))),
-    top = "report")
+  private lazy val packs = PackLoader(EffectContext.forPackLoader())
+  lazy val language: ComposedLanguage = packs.requireClosed("sds-report")
+  lazy val grammar: GrammarSpec = language.grammar
 
-  /** Build the report CST from a chemical doc (no validation). Fields within
-    * each section keep map iteration order; sections ascend by number.
-    */
+  /** Build the report CST from a chemical doc (no validation). */
   def toCst(doc: Chemicals.ChemicalDoc): Cst =
     val sections = doc.populatedNumbers.map { n =>
       val body = doc.sections(n)
@@ -72,13 +36,43 @@ object SectionReport:
       Cst.Leaf(doc.cas),
       Cst.Node("list", sections))
 
-  /** Validate EU-CLP outline, print, and RoundTrip-check. */
+  /** Project an SDS language module with `outline` + `euSection` defs. */
+  def toCst(module: Module, outlineName: String): Either[String, Cst] =
+    module.get(outlineName) match
+      case Some(Cst.Node("outline", List(Cst.Leaf(name), Cst.Leaf(cas), sectionsField))) =>
+        val refs = sectionsField match
+          case Cst.Node("none", _) => Nil
+          case Cst.Node("some", List(Cst.Node("list", rs))) => rs.collect { case Cst.Leaf(r) => r }
+          case Cst.Node("list", rs) => rs.collect { case Cst.Leaf(r) => r }
+          case other => return Left(s"bad outline sections: ${other.render}")
+        val blocks = refs.flatMap { ref =>
+          module.get(ref).collect {
+            case Cst.Node("euSection", List(Cst.Leaf(num), Cst.Node("list", fields))) =>
+              val title = SectionNumbering.byNumber.getOrElse(num.toIntOption.getOrElse(-1), s"section-$num")
+              val fieldLines = fields.collect {
+                case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf("en"), Cst.Leaf(v))) =>
+                  Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
+              }
+              Cst.node("sectionBlock", Cst.Leaf(num), Cst.Leaf(title), Cst.Node("list", fieldLines))
+          }
+        }
+        Right(Cst.node("report", Cst.Leaf(name), Cst.Leaf(cas), Cst.Node("list", blocks)))
+      case Some(other) => Left(s"'$outlineName' is not an outline: ${other.render}")
+      case None => Left(s"no outline '$outlineName'")
+
   def render(doc: Chemicals.ChemicalDoc): Either[String, String] =
     for
       _ <- doc.validateOutline.left.map { errs =>
         errs.map(_.toString).mkString("; ")
       }
       cst = toCst(doc)
+      text <- Printer.print(grammar, cst)
+      _ <- RoundTrip.check(grammar, cst)
+    yield text
+
+  def render(module: Module, outlineName: String): Either[String, String] =
+    for
+      cst <- toCst(module, outlineName)
       text <- Printer.print(grammar, cst)
       _ <- RoundTrip.check(grammar, cst)
     yield text

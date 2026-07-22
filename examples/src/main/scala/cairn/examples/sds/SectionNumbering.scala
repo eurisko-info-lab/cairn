@@ -2,23 +2,22 @@ package cairn.examples.sds
 
 /** Regulatory SDS section numbering (REACH Annex II / EU-CLP / GHS).
   *
-  * Thin honest stub: the official 16-section shape and ordering rules exist
-  * independent of any chemical. Numbers must be in 1..16; titles must match
-  * the canonical heading for that number; when listing a (possibly sparse)
-  * outline, sections appear in ascending number order with no duplicates.
-  * Gaps are allowed — sparse secondary chemicals populate only a few sections;
-  * acetone's fuller fixture lives in [[Chemicals]] (host maps and
-  * `sds.cairn` `euSection`/`outline` via [[Chemicals.ChemicalDoc.toModule]]).
+  * Prefer the versioned [[EuClp]] profile language + annex-II instance module
+  * (`languages/eu-clp.cairn`, `languages/sds/profiles/eu-clp-annex-ii.cairn`).
+  * The host [[euClp]] list is the fallback mirror when the pack is unavailable.
+  * Numbers must be in 1..16; titles must match the canonical heading; sparse
+  * outlines are ascending, unique, and title-matched (gaps allowed).
   *
-  * Not Studio section UI; see STATUS-2 / docs/exemplars remaining gaps.
+  * Section-number legality is also a Cairn judgment (`sectionNumberOk` on
+  * eu-clp). Phrase/section-field staleness remains a projected restale over ΔL
+  * EN-source drift ([[PhraseStaleness]] / [[SectionFieldStaleness]]) — not a
+  * Studio field.
   */
 object SectionNumbering:
   final case class SectionDef(number: Int, title: String)
 
-  /** Official EU-CLP / REACH Annex II 16-section shape (titles match GRANITE
-    * `SdsReports.eucClp`).
-    */
-  val euClp: List[SectionDef] = List(
+  /** Official EU-CLP / REACH Annex II 16-section shape. Prefer [[EuClp.annexIiSections]]. */
+  val euClpFallback: List[SectionDef] = List(
     SectionDef(1, "Identification"),
     SectionDef(2, "Hazards identification"),
     SectionDef(3, "Composition/information on ingredients"),
@@ -36,15 +35,20 @@ object SectionNumbering:
     SectionDef(15, "Regulatory information"),
     SectionDef(16, "Other information"))
 
-  val numbers: List[Int] = euClp.map(_.number)
-  val byNumber: Map[Int, String] = euClp.map(s => s.number -> s.title).toMap
+  /** Profile-backed titles when the eu-clp pack loads; else host fallback. */
+  lazy val euClp: List[SectionDef] =
+    try EuClp.annexIiSections.map((n, t) => SectionDef(n, t))
+    catch case _: Throwable => euClpFallback
+
+  val numbers: List[Int] = euClpFallback.map(_.number)
+  def byNumber: Map[Int, String] = euClp.map(s => s.number -> s.title).toMap
 
   def isValidNumber(n: Int): Boolean = byNumber.contains(n)
 
   def parseNumber(raw: String): Either[String, Int] =
     raw.trim.toIntOption match
       case None => Left(s"section number '$raw' is not an integer")
-      case Some(n) if !isValidNumber(n) =>
+      case Some(n) if !byNumber.contains(n) =>
         Left(s"section number $n out of range (expected 1..16)")
       case Some(n) => Right(n)
 
@@ -60,15 +64,12 @@ object SectionNumbering:
     case Duplicate(number: Int)
     case OutOfOrder(numbers: List[Int])
 
-  /** Validate a (possibly sparse) outline against EU-CLP numbering rules.
-    * Does not require all 16 sections — only that present entries are legal,
-    * titles match, and the list is strictly ascending by number.
-    */
+  /** Validate a (possibly sparse) outline against EU-CLP numbering rules. */
   def validateOutline(entries: List[OutlineEntry]): Either[List[OutlineError], List[SectionDef]] =
     val errs = List.newBuilder[OutlineError]
     val seen = scala.collection.mutable.LinkedHashSet.empty[Int]
     for e <- entries do
-      if !isValidNumber(e.number) then
+      if !byNumber.contains(e.number) then
         errs += OutlineError.BadNumber(e.number.toString, "out of range (expected 1..16)")
       else
         byNumber.get(e.number).foreach { expected =>
@@ -85,13 +86,12 @@ object SectionNumbering:
   /** Order an unordered bag of valid section numbers ascending (1..16). */
   def order(numbers: Iterable[Int]): Either[String, List[SectionDef]] =
     val uniq = numbers.toList.distinct
-    val bad = uniq.filterNot(isValidNumber)
+    val bad = uniq.filterNot(byNumber.contains)
     if bad.nonEmpty then Left(s"invalid section number(s): ${bad.mkString(", ")}")
     else Right(uniq.sorted.map(n => SectionDef(n, byNumber(n))))
 
   /** Acetone tutorial spine: sparse outline of sections the host *language*
-    * objects actually speak to (hazards + composition). The fuller 16-section
-    * host fixture is [[Chemicals.Acetone]].
+    * objects actually speak to (hazards + composition).
     */
   def acetoneSparseOutline: List[OutlineEntry] = List(
     OutlineEntry(2, "Hazards identification"),
