@@ -50,49 +50,47 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 `ChemicalSource` + `SectionReport` + `SectionFieldStaleness` + `SdsTutorial` +
 `SdsCausalWorkflow`):
 
-- Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
-  `sectionFieldShadow` / `basis` / `euSection` / typed `identificationSection` +
-  `hazardsSection` with `fieldLocale` overlays / `outline` / lang-tagged
+- Typed objects (substance / mixture / phrase / `corpusPhrase` /
+  `translationState` / product / shadow /
+  `sectionFieldShadow` / `basis` / `euSection` / typed sections 1–16
+  with `fieldLocale` overlays / `outline` / lang-tagged
   `sectionField` / `sectionFieldRef`); rendered document is a compiled
   bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
 - ΔSDS = generic free ΔL + domain gate; multilingual phrase + section-field
   fallback; domain-aware shadow rebase with semantic conflict on overridden
   phrases and shadowed euSections.
-- Phrase-staleness machine stub (`PhraseStaleness`): official `corpusPhrase`
-  never stales; free-text `phrase` translations restale to
-  `StaleBecauseSourceChanged` when the English source hash drifts (GRANITE
-  Multilingual.restale). State is projected, not Studio-persisted.
-- Section-field staleness + shadow stub (`SectionFieldStaleness` +
-  `sectionFieldShadow`): reuses `PhraseStaleness.restale` for EN-hash drift on
-  locale siblings; `field shadow <euSection> overrides <key> with "…"` applies
-  industrial text overrides (lang-agnostic) and participates in
-  `rebaseShadow` footprint. `sectionFieldRef` resolves through phrase/corpus
-  text. Projected state, not Studio.
-- Regulatory profile: versioned `languages/eu-clp.cairn` + annex-II v1 module
-  (`languages/sds/profiles/eu-clp-annex-ii.cairn`); `sectionNumberOk` judgment;
+- Phrase-staleness (`PhraseStaleness`): official `corpusPhrase` never stales;
+  free-text EN rewrite is a **derived ΔSDS** changeset
+  (`deriveEnRewrite` / `applyEnRewrite`) that materializes `translationState`
+  marks; `translationStateTag` judgment gates tags; [[project]] prefers marks
+  over pure projection.
+- Section-field staleness (`SectionFieldStaleness`): same restale machine;
+  EN rewrite derives ΔSDS with `sectionFieldState` marks. Industrial overrides
+  remain `sectionFieldShadow` (not Studio).
+- Regulatory profile: versioned `languages/eu-clp.cairn` + annex-II v1;
+  `sectionNumberOk` / `sectionTitleOk` / `profileVersionOk`;
+  `EuClp.conform` host orchestration over those Cairn judgments;
   `SectionNumbering` prefers the profile.
 - Chemical instances: `.cairn` under `languages/sds/chemicals/` (acetone /
-  ethanol full + thin) loaded via `ChemicalSource`; host maps remain emit
-  fixtures (`EmitChemicalCairn`).
-- Section report: ordinary `sds-report` surface pack (not host GrammarSpec);
-  `default` text + `json` unquoted-key machine surface; RoundTrip trust gate.
-  XML/PDF/XLS not started.
+  ethanol full euSection + thin typed 1–16 subset) via `ChemicalSource`.
+- **Report projection (not SDS language):** `sds-report` pack under
+  `languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv`
+  *consume* SDS modules/outlines. PDF deferred. RoundTrip trust gate.
 - Causal workflow (`SdsCausalWorkflow`): author → shadow tip → merge rebase →
-  conflict → approve → VerifiedCapability + tip signature → `publishHead`.
+  conflict → approve → linked approval/sign/publication certificates →
+  `publishHead`.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Typed per-section structures beyond identification/hazards (sections 3–16
-  still generic field maps).
-- Broader multilingual coverage beyond thin 1/2/16 FR overlays.
-- Phrase-staleness / section-numbering as full derived ΔL languages (numbering
-  judgment landed; staleness remains projected).
-- Additional report surfaces (XML/PDF/XLS).
-- Studio-persisted phrase-corpus / staleness UI / authoring surface.
+- Broader multilingual coverage beyond thin FR overlays.
+- Studio-persisted phrase corpus / authoring UI.
+- PDF report surface (heavy; deferred).
+- Effect-interface action maps still host-seeded (clock+random fragment load).
+- BFT replication (replay sync is digest-merge only).
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)
 

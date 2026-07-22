@@ -9,9 +9,10 @@ package cairn.examples.sds
   * outlines are ascending, unique, and title-matched (gaps allowed).
   *
   * Section-number legality is also a Cairn judgment (`sectionNumberOk` on
-  * eu-clp). Phrase/section-field staleness remains a projected restale over ΔL
-  * EN-source drift ([[PhraseStaleness]] / [[SectionFieldStaleness]]) — not a
-  * Studio field.
+  * eu-clp). Phrase + section-field staleness materialize via derived ΔSDS
+  * ([[PhraseStaleness.deriveEnRewrite]] / [[SectionFieldStaleness.deriveEnRewrite]]
+  * + `translationState` / `sectionFieldState`). Full module conformance is
+  * [[EuClp.conform]] — not Studio.
   */
 object SectionNumbering:
   final case class SectionDef(number: Int, title: String)

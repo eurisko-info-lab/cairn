@@ -471,6 +471,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     m.causalHistoryRoot.foreach(roots += _)
                     m.conflictState.foreach(roots += _)
                     m.parents.foreach(roots += _)
+                    m.certificates.foreach(roots += _)
                     m.history.foreach(k => roots += k.valueHash)
                 }
               }
@@ -609,7 +610,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       parents = if parents.nonEmpty then parents else cur.head.toList.map(_.valueHash),
       acceptedChange = acceptedChange.orElse(cur.acceptedChange),
       conflictState = conflictState,
-      changeHistory = nextHistory)
+      changeHistory = nextHistory,
+      certificates = cur.certificates)
     val key = putArt(next.artifact)
     refsMkdirs()
     refsWrite(refPath(branch), key.valueHash.hex)
@@ -730,7 +732,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         val marked = BranchManifest(
           into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
           cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
-          changeHistory = cur.changeHistory)
+          changeHistory = cur.changeHistory,
+          certificates = cur.certificates)
         putArt(marked.artifact) // conflictState recorded; head unchanged
         refsMkdirs()
         refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
@@ -833,3 +836,20 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         authority.signTx(Tx.PublishArtifact(key)),
         authority.signTx(Tx.SetBranchHead(branch, key))))
     }
+
+  /** Put a certificate artifact and append its digest to the branch manifest
+    * `certificates` list (linked CAS reference from branch state).
+    */
+  def attachCertificate(branch: String, cert: Artifact): Either[String, (BranchManifest, Digest)] =
+    if cert.kind != ArtifactKind.Certificate then
+      Left(s"attachCertificate expects certificate kind, got ${cert.kind.name}")
+    else
+      val dig = putArt(cert).valueHash
+      val cur = load(branch)
+      if cur.certificates.contains(dig) then Right((cur, dig))
+      else
+        val next = cur.copy(certificates = cur.certificates :+ dig)
+        val key = putArt(next.artifact)
+        refsMkdirs()
+        refsWrite(refPath(branch), key.valueHash.hex)
+        Right((next, dig))

@@ -462,6 +462,45 @@ object EffectMeta:
   def pinHost(family: EffectFamily): PinnedInterface =
     PinnedInterface.fromHost(family)
 
+  /** Thin bootstrap reduction: rebuild an [[EffectFamily]] from a Fragment
+    * loaded out-of-band (e.g. `languages/effect-clock.cairn`) instead of the
+    * host-embedded AST. Action names / `requestActions` / Family enum remain
+    * host-seeded — residual honest gap vs fully language-described effect
+    * interfaces.
+    */
+  def familyFromFragment(
+      fragment: Fragment,
+      family: Effects.Family,
+      actions: List[String],
+      resourceKind: String,
+      resourcePathPattern: String,
+      requestActions: Map[String, Option[String]]
+  ): Either[String, EffectFamily] =
+    val ef = EffectFamily(
+      fragment, family, actions, resourceKind, resourcePathPattern, requestActions)
+    val errs = completeness(ef)
+    if errs.nonEmpty then Left(errs.mkString("; ")) else Right(ef)
+
+  def clockFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment,
+      Effects.Family.Clock,
+      actions = List("now", "timestampSlug"),
+      resourceKind = "clock",
+      resourcePathPattern = "*",
+      requestActions = Map(
+        "now" -> Some("now"),
+        "timestampSlug" -> Some("timestampSlug")))
+
+  def randomFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment,
+      Effects.Family.Random,
+      actions = List("bytes"),
+      resourceKind = "random",
+      resourcePathPattern = "*",
+      requestActions = Map("bytes" -> Some("bytes")))
+
   private def encodeFamily(ef: EffectFamily): Canon =
     val reqActs = ef.requestActions.toList.sortBy(_._1).map { (ctor, act) =>
       Canon.cmap(

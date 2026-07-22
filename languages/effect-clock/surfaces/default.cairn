@@ -1,0 +1,17 @@
+surface default for effect-clock {
+  fragment effect-clock {
+    keyword now;
+    keyword timestampSlug;
+    keyword instant;
+    keyword slug;
+    keyword unavailable;
+    punct "(";
+    punct ")";
+    syntax Request += now : tok "now" tok "(" tok ")";
+    syntax Request += timestampSlug : tok "timestampSlug" tok "(" tok ")";
+    syntax Response += instant : tok "instant" tok "(" num tok ")";
+    syntax Response += slug : tok "slug" tok "(" str tok ")";
+    syntax Error += unavailable : tok "unavailable" tok "(" str tok ")";
+    top Request;
+  }
+}

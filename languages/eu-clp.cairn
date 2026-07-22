@@ -22,5 +22,26 @@ language eu-clp {
       rule sn-15 :  |- sectionNumberOk("15");
       rule sn-16 :  |- sectionNumberOk("16");
     }
+    judgment sectionTitleOk {
+      rule st-1 :  |- sectionTitleOk("1", "Identification");
+      rule st-2 :  |- sectionTitleOk("2", "Hazards identification");
+      rule st-3 :  |- sectionTitleOk("3", "Composition/information on ingredients");
+      rule st-4 :  |- sectionTitleOk("4", "First-aid measures");
+      rule st-5 :  |- sectionTitleOk("5", "Firefighting measures");
+      rule st-6 :  |- sectionTitleOk("6", "Accidental release measures");
+      rule st-7 :  |- sectionTitleOk("7", "Handling and storage");
+      rule st-8 :  |- sectionTitleOk("8", "Exposure controls/personal protection");
+      rule st-9 :  |- sectionTitleOk("9", "Physical and chemical properties");
+      rule st-10 : |- sectionTitleOk("10", "Stability and reactivity");
+      rule st-11 : |- sectionTitleOk("11", "Toxicological information");
+      rule st-12 : |- sectionTitleOk("12", "Ecological information");
+      rule st-13 : |- sectionTitleOk("13", "Disposal considerations");
+      rule st-14 : |- sectionTitleOk("14", "Transport information");
+      rule st-15 : |- sectionTitleOk("15", "Regulatory information");
+      rule st-16 : |- sectionTitleOk("16", "Other information");
+    }
+    judgment profileVersionOk {
+      rule pv-1 : |- profileVersionOk("1");
+    }
   }
 }

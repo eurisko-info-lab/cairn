@@ -1,0 +1,16 @@
+surface csv for sds-report {
+  fragment report {
+    keyword SDS;
+    keyword CSV;
+    keyword section;
+    keyword field;
+    punct ",";
+    syntax report += report : tok "SDS" tok "," tok "CSV" tok "," str tok "," str star cat sectionBlock;
+    syntax sectionBlock += sectionBlock : tok "section" tok "," num tok "," str star cat fieldLine;
+    syntax fieldLine += fieldLine : tok "field" tok "," anyident tok "," str;
+    print report : lit "SDS" lit "," lit "CSV" lit "," strfield 0 lit "," strfield 1 nl sep 2 "\n";
+    print sectionBlock : lit "section" lit "," field 0 lit "," strfield 1 nl sep 2 "\n";
+    print fieldLine : lit "field" lit "," field 0 lit "," strfield 1;
+    top report;
+  }
+}

@@ -1,0 +1,10 @@
+language effect-random {
+  fragment effect-random provides effectRandom {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor bytes : Request(Int);
+    ctor bytesValue : Response(Bytes);
+    ctor unavailable : Error(Str);
+  }
+}

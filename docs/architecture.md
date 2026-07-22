@@ -77,7 +77,9 @@ proof / delegation building — it cannot enter `withCapabilities`.
 Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
 (default in-memory; durable `ReplayStore.filesystem` may be shared across gates).
 Snapshots publish as CAS `replay-snapshot` digests (`ReplayStore.publish` /
-`mergeFromCas`) for multi-node absorb — not distributed consensus.
+`mergeFromCas`) for multi-node absorb — **merge, not distributed consensus**.
+Capability revocation digests sync via the same want/have shape
+(`ReplayReplication` / `RevocationLog`) — BFT deferred.
 
 ## Authority
 
@@ -208,9 +210,14 @@ LeanCore `#check` envelope.
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
   `ActionKey.fromPinned`). Host-embedded Meta fragments remain the bootstrap
-  vocabulary.
+  vocabulary; thin reduction via `languages/effect-clock.cairn` +
+  `languages/effect-random.cairn` (`clockFromFragment` / `randomFromFragment`).
 - **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
-  (issuer-scoped absorb). Not multi-node consensus / BFT.
+  (issuer-scoped absorb). Revocation via `ReplayReplication` / `checkGrant`.
+  Not multi-node consensus / BFT.
+- **SDS vs report formats** — SDS (`languages/sds.cairn`) is semantic only.
+  JSON/XML/CSV(+ deferred PDF) are `sds-report` projection surfaces that
+  *consume* SDS modules — not SDS constructors.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches

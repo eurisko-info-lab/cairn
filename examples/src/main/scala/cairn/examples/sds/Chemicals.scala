@@ -51,7 +51,9 @@ object Chemicals:
       if rows.isEmpty then Cst.Node("none", Nil)
       else Cst.Node("some", List(Cst.Node("list", rows)))
 
-    /** Typed identification (1) / hazards (2) terms; other numbers stay `euSection`. */
+    /** Typed EU-CLP section terms for numbers 1–16; unknown numbers stay `euSection`.
+      * Host map key `LD50Oral` maps to typed slot `ld50Oral`.
+      */
     def toTypedTerm: Cst = number match
       case 1 =>
         def req(k: String): String =
@@ -75,6 +77,151 @@ object Chemicals:
           Cst.Leaf(req("hazardPhrases")),
           Cst.Leaf(req("signalWord")),
           Cst.Leaf(req("pictograms")),
+          localeField(locales))
+      case 3 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"composition section missing EN key '$k'"))
+        Cst.node(
+          "compositionSection",
+          Cst.Leaf(req("componentName")),
+          Cst.Leaf(req("cas")),
+          Cst.Leaf(req("ec")),
+          Cst.Leaf(req("concentration")),
+          localeField(locales))
+      case 4 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"first-aid section missing EN key '$k'"))
+        Cst.node(
+          "firstAidSection",
+          Cst.Leaf(req("generalAdvice")),
+          Cst.Leaf(req("inhalation")),
+          Cst.Leaf(req("skinContact")),
+          Cst.Leaf(req("eyeContact")),
+          Cst.Leaf(req("ingestion")),
+          localeField(locales))
+      case 5 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"firefighting section missing EN key '$k'"))
+        Cst.node(
+          "firefightingSection",
+          Cst.Leaf(req("extinguishingMedia")),
+          Cst.Leaf(req("unsuitableExtinguishingMedia")),
+          Cst.Leaf(req("specialHazards")),
+          Cst.Leaf(req("firefighterProtection")),
+          localeField(locales))
+      case 6 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"accidental-release section missing EN key '$k'"))
+        Cst.node(
+          "accidentalReleaseSection",
+          Cst.Leaf(req("personalPrecautions")),
+          Cst.Leaf(req("environmentalPrecautions")),
+          Cst.Leaf(req("cleanupMethods")),
+          localeField(locales))
+      case 7 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"handling/storage section missing EN key '$k'"))
+        Cst.node(
+          "handlingStorageSection",
+          Cst.Leaf(req("handling")),
+          Cst.Leaf(req("storage")),
+          Cst.Leaf(req("storageIncompatibilities")),
+          localeField(locales))
+      case 8 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"exposure-controls section missing EN key '$k'"))
+        Cst.node(
+          "exposureControlsSection",
+          Cst.Leaf(req("occupationalExposureLimit")),
+          Cst.Leaf(req("engineeringControls")),
+          Cst.Leaf(req("eyeProtection")),
+          Cst.Leaf(req("skinProtection")),
+          Cst.Leaf(req("respiratoryProtection")),
+          localeField(locales))
+      case 9 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"physical/chemical section missing EN key '$k'"))
+        Cst.node(
+          "physicalChemicalSection",
+          Cst.Leaf(req("appearance")),
+          Cst.Leaf(req("odor")),
+          Cst.Leaf(req("molecularWeight")),
+          Cst.Leaf(req("meltingPoint")),
+          Cst.Leaf(req("boilingPoint")),
+          Cst.Leaf(req("flashPoint")),
+          Cst.Leaf(req("density")),
+          Cst.Leaf(req("solubility")),
+          Cst.Leaf(req("explosiveLimits")),
+          localeField(locales))
+      case 10 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"stability/reactivity section missing EN key '$k'"))
+        Cst.node(
+          "stabilityReactivitySection",
+          Cst.Leaf(req("stability")),
+          Cst.Leaf(req("conditionsToAvoid")),
+          Cst.Leaf(req("incompatibleMaterials")),
+          Cst.Leaf(req("hazardousDecomposition")),
+          localeField(locales))
+      case 11 =>
+        def req(k: String): String =
+          val host = if k == "ld50Oral" then fields.get("ld50Oral").orElse(fields.get("LD50Oral"))
+          else fields.get(k)
+          host.getOrElse(sys.error(s"toxicological section missing EN key '$k'"))
+        val remapped = locales.view.mapValues { kv =>
+          kv.map { case (k, v) => (if k == "LD50Oral" then "ld50Oral" else k) -> v }
+        }.toMap
+        Cst.node(
+          "toxicologicalSection",
+          Cst.Leaf(req("ld50Oral")),
+          Cst.Leaf(req("irritation")),
+          Cst.Leaf(req("inhalationEffects")),
+          Cst.Leaf(req("carcinogenicity")),
+          localeField(remapped))
+      case 12 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"ecological section missing EN key '$k'"))
+        Cst.node(
+          "ecologicalSection",
+          Cst.Leaf(req("ecotoxicity")),
+          Cst.Leaf(req("persistence")),
+          Cst.Leaf(req("bioaccumulation")),
+          Cst.Leaf(req("mobility")),
+          localeField(locales))
+      case 13 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"disposal section missing EN key '$k'"))
+        Cst.node(
+          "disposalSection",
+          Cst.Leaf(req("disposalMethods")),
+          Cst.Leaf(req("wasteClassification")),
+          localeField(locales))
+      case 14 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"transport section missing EN key '$k'"))
+        Cst.node(
+          "transportSection",
+          Cst.Leaf(req("unNumber")),
+          Cst.Leaf(req("properShippingName")),
+          Cst.Leaf(req("transportHazardClass")),
+          Cst.Leaf(req("packingGroup")),
+          localeField(locales))
+      case 15 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"regulatory section missing EN key '$k'"))
+        Cst.node(
+          "regulatorySection",
+          Cst.Leaf(req("regulatoryInfo")),
+          Cst.Leaf(req("reachStatus")),
+          Cst.Leaf(req("usInventory")),
+          localeField(locales))
+      case 16 =>
+        def req(k: String): String =
+          fields.getOrElse(k, sys.error(s"other-information section missing EN key '$k'"))
+        Cst.node(
+          "otherInformationSection",
+          Cst.Leaf(req("revisionDate")),
+          Cst.Leaf(req("otherInformation")),
           localeField(locales))
       case _ => toTerm
 
@@ -114,7 +261,7 @@ object Chemicals:
         sectionsField)
       Module(secDefs :+ (outlineName -> outlineTerm)).sorted
 
-    /** Like [[toModule]] but sections 1/2 use typed identification/hazards ctors. */
+    /** Like [[toModule]] but all populated 1–16 sections use typed ctors. */
     def toTypedModule(outlineName: String = "docOutline"): Module =
       val secDefs = populatedNumbers.map { n =>
         sectionRef(n) -> sections(n).toTypedTerm
@@ -253,8 +400,8 @@ object Chemicals:
         "otherInformation" ->
           "Données de démonstration / exemple pour le corpus chimiques SDS Cairn — pas un conseil réglementaire ou de sécurité pour un usage réel."))
 
-    /** Thin subset (identification + hazards + other information) with FR
-      * section-field siblings for focused multilingual / restale tests.
+    /** Thin subset with FR overlays: typed 1/2/3/9/11/14/16 (+ locale on 1/2/16).
+      * Focused multilingual / restale / typed-section tests.
       */
     val thin: ChemicalDoc = ChemicalDoc(
       name = "Acetone",
@@ -262,6 +409,10 @@ object Chemicals:
       sections = Map(
         1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
         2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
+        3 -> pure.sections(3),
+        9 -> pure.sections(9),
+        11 -> pure.sections(11),
+        14 -> pure.sections(14),
         16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
     def thinModule: Module =
@@ -398,6 +549,10 @@ object Chemicals:
       sections = Map(
         1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
         2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
+        3 -> pure.sections(3),
+        9 -> pure.sections(9),
+        11 -> pure.sections(11),
+        14 -> pure.sections(14),
         16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
     def thinModule: Module =

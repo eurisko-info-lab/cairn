@@ -1,0 +1,13 @@
+surface default for effect-random {
+  fragment effect-random {
+    keyword bytes;
+    keyword bytesValue;
+    keyword unavailable;
+    punct "(";
+    punct ")";
+    syntax Request += bytes : tok "bytes" tok "(" num tok ")";
+    syntax Response += bytesValue : tok "bytesValue" tok "(" str tok ")";
+    syntax Error += unavailable : tok "unavailable" tok "(" str tok ")";
+    top Request;
+  }
+}

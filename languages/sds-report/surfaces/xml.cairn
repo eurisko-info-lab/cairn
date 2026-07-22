@@ -1,0 +1,33 @@
+surface xml for sds-report {
+  fragment report {
+    keyword sdsReport;
+    keyword name;
+    keyword cas;
+    keyword sections;
+    keyword section;
+    keyword number;
+    keyword title;
+    keyword fields;
+    keyword field;
+    keyword key;
+    punct "<";
+    punct ">";
+    punct "/";
+    punct "=";
+    syntax report += report : tok "<" tok "sdsReport" tok "name" tok "=" str
+      tok "cas" tok "=" str tok ">"
+      tok "<" tok "sections" tok ">" star cat sectionBlock tok "<" tok "/" tok "sections" tok ">"
+      tok "<" tok "/" tok "sdsReport" tok ">";
+    syntax sectionBlock += sectionBlock : tok "<" tok "section" tok "number" tok "=" num
+      tok "title" tok "=" str tok ">"
+      tok "<" tok "fields" tok ">" star cat fieldLine tok "<" tok "/" tok "fields" tok ">"
+      tok "<" tok "/" tok "section" tok ">";
+    syntax fieldLine += fieldLine : tok "<" tok "field" tok "key" tok "=" anyident tok ">" str tok "<" tok "/" tok "field" tok ">";
+    print report : lit "<sdsReport" sp lit "name=" strfield 0 sp lit "cas=" strfield 1 lit ">"
+      lit "<sections>" sep 2 "" lit "</sections></sdsReport>";
+    print sectionBlock : lit "<section" sp lit "number=" field 0 sp lit "title=" strfield 1 lit ">"
+      lit "<fields>" sep 2 "" lit "</fields></section>";
+    print fieldLine : lit "<field" sp lit "key=" field 0 lit ">" strfield 1 lit "</field>";
+    top report;
+  }
+}

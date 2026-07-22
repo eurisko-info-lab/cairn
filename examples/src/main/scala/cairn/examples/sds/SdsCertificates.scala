@@ -1,0 +1,57 @@
+package cairn.examples.sds
+
+import cairn.kernel.*
+import cairn.systemhandler.{Branches, Ed25519}
+import cairn.ledger.Keypair
+
+/** Approval / signing / publication certificates as CAS `certificate`
+  * artifacts fully linked from [[BranchManifest.certificates]].
+  *
+  * Not Studio approval UI — digests are content-addressed and reachable from
+  * branch state alone (same recovery story as changeHistory).
+  */
+object SdsCertificates:
+  enum Kind:
+    case Approval, Signature, Publication
+
+  def kindTag(k: Kind): String = k match
+    case Kind.Approval     => "sds-approval"
+    case Kind.Signature    => "sds-tip-signature"
+    case Kind.Publication  => "sds-publication"
+
+  def mint(
+      kind: Kind,
+      issuer: String,
+      tipDigest: Digest,
+      extra: Map[String, String] = Map.empty
+  ): Artifact =
+    val fields = List(
+      "kind" -> Canon.CStr(kindTag(kind)),
+      "issuer" -> Canon.CStr(issuer),
+      "tip" -> Canon.CStr(tipDigest.hex)) ++
+      extra.toList.sortBy(_._1).map((k, v) => k -> Canon.CStr(v))
+    Artifact(ArtifactKind.Certificate, Canon.cmap(fields*))
+
+  def tipSignature(issuer: Keypair, tipDigest: Digest): Artifact =
+    val tipSig = Ed25519.sign(issuer.privateKey, tipDigest.hex.getBytes("UTF-8"))
+    val tipSigHex = tipSig.map(b => f"${b & 0xff}%02x").mkString
+    mint(Kind.Signature, issuer.name, tipDigest, Map("sig" -> tipSigHex))
+
+  def approval(issuer: String, tipDigest: Digest, note: String = "approved"): Artifact =
+    mint(Kind.Approval, issuer, tipDigest, Map("note" -> note))
+
+  def publication(issuer: String, tipDigest: Digest, branch: String): Artifact =
+    mint(Kind.Publication, issuer, tipDigest, Map("branch" -> branch))
+
+  /** Attach approval + tip-signature + publication certs; returns digests in order. */
+  def attachWorkflow(
+      branches: Branches,
+      branch: String,
+      issuer: Keypair,
+      tipDigest: Digest
+  ): Either[String, List[Digest]] =
+    for
+      r1 <- branches.attachCertificate(branch, approval(issuer.name, tipDigest))
+      r2 <- branches.attachCertificate(branch, tipSignature(issuer, tipDigest))
+      r3 <- branches.attachCertificate(branch, publication(issuer.name, tipDigest, branch))
+    yield List(r1._2, r2._2, r3._2)

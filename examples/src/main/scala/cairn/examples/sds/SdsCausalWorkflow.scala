@@ -6,7 +6,6 @@ import cairn.kernel.Authority.*
 import cairn.core.*
 import cairn.ledger.Keypair
 import cairn.runtime.PackLoader
-import cairn.systemhandler.CasEffects
 import java.nio.file.{Files, Path}
 
 /** First complete SDS workflow through the causal repository:
@@ -14,8 +13,9 @@ import java.nio.file.{Files, Path}
   *
   * Uses [[Branches.commitTip]] / [[Branches.mergeBranches]] /
   * [[Branches.publishHead]]. Issuer evidence at the publish boundary is a
-  * [[Authority.VerifiedCapability]] (fromProof) plus an Ed25519 tip-digest
-  * signature artifact — not Studio approval UI.
+  * [[Authority.VerifiedCapability]] (fromProof) plus approval / tip-signature /
+  * publication certificates linked on [[BranchManifest.certificates]] —
+  * not Studio approval UI.
   */
 object SdsCausalWorkflow:
   final case class Report(
@@ -27,6 +27,7 @@ object SdsCausalWorkflow:
       historyFromManifestAlone: Int,
       verifiedCapabilityOk: Boolean,
       tipSignatureHex: String,
+      certificateDigests: List[Digest],
       ledgerPublished: Boolean,
   )
 
@@ -74,20 +75,16 @@ object SdsCausalWorkflow:
     branches.commitTip("sds-approved", industrialTip)
     val approved = branches.headModule("sds-approved").fold(e => throw RuntimeException(e), identity)
 
-    // 6. Sign: VerifiedCapability at CAS put boundary + tip digest signature
+    // 6. Sign + link certificates on branch manifest
     val alice = Keypair.dev("alice-sds")
     val tipDigest = approved.digest
     val tipSig = Ed25519.sign(alice.privateKey, tipDigest.hex.getBytes("UTF-8"))
     val tipSigHex = tipSig.map(b => f"${b & 0xff}%02x").mkString
-    val evidence = Artifact(
-      ArtifactKind.Certificate,
-      Canon.cmap(
-        "kind" -> Canon.CStr("sds-tip-signature"),
-        "issuer" -> Canon.CStr(alice.name),
-        "tip" -> Canon.CStr(tipDigest.hex),
-        "sig" -> Canon.CStr(tipSigHex)))
-    CasEffects.put(cas, evidence, EffectContext.forBranches())
-      .fold(e => throw RuntimeException(e.toString), identity)
+    val certificateDigests = SdsCertificates.attachWorkflow(branches, "sds-approved", alice, tipDigest)
+      .fold(e => throw RuntimeException(e), identity)
+    val manifestCerts = branches.load("sds-approved").certificates
+    if manifestCerts != certificateDigests then
+      throw RuntimeException(s"manifest certificates mismatch: $manifestCerts vs $certificateDigests")
 
     val subject = Subject(alice.name)
     val putKey = EffectMeta.cas.actionKey("put")
@@ -129,4 +126,5 @@ object SdsCausalWorkflow:
       historyFromManifestAlone = historyFromManifestAlone,
       verifiedCapabilityOk = verifiedCapabilityOk,
       tipSignatureHex = tipSigHex,
+      certificateDigests = certificateDigests,
       ledgerPublished = ledgerPublished)

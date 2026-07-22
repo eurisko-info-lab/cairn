@@ -69,9 +69,25 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(sds.constructors.contains("euSection"), "SDS EU-CLP section bodies")
     assert(sds.constructors.contains("identificationSection"), "SDS typed identification")
     assert(sds.constructors.contains("hazardsSection"), "SDS typed hazards")
+    assert(sds.constructors.contains("compositionSection"), "SDS typed composition")
+    assert(sds.constructors.contains("firstAidSection"), "SDS typed first-aid")
+    assert(sds.constructors.contains("firefightingSection"), "SDS typed firefighting")
+    assert(sds.constructors.contains("accidentalReleaseSection"), "SDS typed accidental release")
+    assert(sds.constructors.contains("handlingStorageSection"), "SDS typed handling/storage")
+    assert(sds.constructors.contains("exposureControlsSection"), "SDS typed exposure controls")
+    assert(sds.constructors.contains("physicalChemicalSection"), "SDS typed physical/chemical")
+    assert(sds.constructors.contains("stabilityReactivitySection"), "SDS typed stability/reactivity")
+    assert(sds.constructors.contains("toxicologicalSection"), "SDS typed toxicological")
+    assert(sds.constructors.contains("ecologicalSection"), "SDS typed ecological")
+    assert(sds.constructors.contains("disposalSection"), "SDS typed disposal")
+    assert(sds.constructors.contains("transportSection"), "SDS typed transport")
+    assert(sds.constructors.contains("regulatorySection"), "SDS typed regulatory")
+    assert(sds.constructors.contains("otherInformationSection"), "SDS typed other information")
     assert(sds.constructors.contains("outline"), "SDS section outlines")
     assert(sds.constructors.contains("sectionField"), "SDS section fields")
     assert(sds.constructors.contains("sectionFieldShadow"), "SDS section-field shadows")
+    assert(sds.constructors.contains("sectionFieldState"), "SDS section-field translation state")
+    assert(sds.constructors.contains("translationState"), "SDS phrase translation state")
     assert(sds.constructors.contains("fieldLocale"), "SDS typed section locale overlays")
     assert(sds.fragments.exists(_.provides.contains("sds")))
     assert(sds.fragments.exists(_.provides.contains("law")))
@@ -178,6 +194,45 @@ class ExemplarPackSuite extends munit.FunSuite:
     // matching hash keeps FR fresh
     val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Acetone Cleaner"))
     assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
+
+  test("SDS phrase-staleness: derived ΔL materializes translationState on EN rewrite"):
+    import cairn.examples.sds.PhraseStaleness
+    val base = cairn.examples.sds.SdsTutorial.acetoneBase
+    val oldHash = PhraseStaleness.textHash("Acetone Cleaner")
+    val Right((m2, vcs)) = PhraseStaleness.applyEnRewrite(
+      Sds.applySds, Sds.language, base, "prodName", "Acetone Cleaner (industrial)"): @unchecked
+    assertEquals(vcs.base, base.digest)
+    assertEquals(vcs.result, m2.digest)
+    assert(m2.get("prodNameEn").exists {
+      case Cst.Node("phrase", List(Cst.Leaf("prodName"), Cst.Leaf("en"),
+          Cst.Leaf("Acetone Cleaner (industrial)"))) => true
+      case _ => false
+    })
+    val mark = PhraseStaleness.markName("prodName", "fr")
+    assert(m2.get(mark).exists {
+      case Cst.Node("translationState", List(
+          Cst.Leaf("prodName"), Cst.Leaf("fr"), Cst.Leaf(h),
+          Cst.Leaf("staleBecauseSourceChanged"))) =>
+        h == oldHash.hex
+      case _ => false
+    })
+    val projected = PhraseStaleness.project(m2, "prodName")
+    assertEquals(projected("fr").state, PhraseStaleness.State.StaleBecauseSourceChanged)
+    assertEquals(projected("fr").translatedFromHash, oldHash.hex)
+    assertEquals(projected("en").text, "Acetone Cleaner (industrial)")
+    // corpus EN rewrite rejected; no mark added for h225 FR
+    assert(PhraseStaleness.deriveEnRewrite(
+      Sds.language, base, "h225", "rewritten").swap.exists(_.contains("corpusPhrase")))
+    assert(Sds.checkTranslationStateTag("staleBecauseSourceChanged"))
+    assert(Sds.checkTranslationStateTag("officialCorpus"))
+    assert(!Sds.checkTranslationStateTag("notARealTag"))
+    assert(Sds.language.judgments.contains("translationStateTag"))
+    // gate rejects unknown state tags
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val bad = Parser.parse(dl.grammar,
+      """{ add badMark = translation state prodName lang de from "abc" as "bogus" ; }""")
+      .fold(e => fail(e), identity)
+    assert(Sds.applySds(base, bad).swap.exists(_.contains("unknown state tag")))
 
   test("SDS section numbering: EU-CLP has exactly sections 1..16 in order"):
     import cairn.examples.sds.SectionNumbering
@@ -340,13 +395,34 @@ class ExemplarPackSuite extends munit.FunSuite:
       case Cst.Node("hazardsSection", _) => true
       case _ => false
     })
+    assert(m.get("s3").exists {
+      case Cst.Node("compositionSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s9").exists {
+      case Cst.Node("physicalChemicalSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s11").exists {
+      case Cst.Node("toxicologicalSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s14").exists {
+      case Cst.Node("transportSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s16").exists {
+      case Cst.Node("otherInformationSection", _) => true
+      case _ => false
+    })
     assertEquals(m.defs.count(_._2 match
       case Cst.Node("euSection", _) => true
-      case _ => false), 1)
+      case _ => false), 0)
     assert(m.get("acetoneOutline").exists {
       case Cst.Node("outline", List(Cst.Leaf("Acetone"), Cst.Leaf("67-64-1"),
           Cst.Node("some", List(Cst.Node("list", refs))))) =>
-        refs.map { case Cst.Leaf(n) => n; case _ => "?" } == List("s1", "s2", "s16")
+        refs.map { case Cst.Leaf(n) => n; case _ => "?" } ==
+          List("s1", "s2", "s3", "s9", "s11", "s14", "s16")
       case _ => false
     })
     for (_, term) <- m.defs do
@@ -376,13 +452,22 @@ class ExemplarPackSuite extends munit.FunSuite:
       case Cst.Node("hazardsSection", _) => true
       case _ => false
     })
+    assert(m.get("s3").exists {
+      case Cst.Node("compositionSection", _) => true
+      case _ => false
+    })
+    assert(m.get("s16").exists {
+      case Cst.Node("otherInformationSection", _) => true
+      case _ => false
+    })
     assertEquals(m.defs.count(_._2 match
       case Cst.Node("euSection", _) => true
-      case _ => false), 1)
+      case _ => false), 0)
     assert(m.get("ethanolOutline").exists {
       case Cst.Node("outline", List(Cst.Leaf("Ethanol"), Cst.Leaf("64-17-5"),
           Cst.Node("some", List(Cst.Node("list", refs))))) =>
-        refs.map { case Cst.Leaf(n) => n; case _ => "?" } == List("s1", "s2", "s16")
+        refs.map { case Cst.Leaf(n) => n; case _ => "?" } ==
+          List("s1", "s2", "s3", "s9", "s11", "s14", "s16")
       case _ => false
     })
     for (_, term) <- m.defs do
@@ -574,11 +659,16 @@ class ExemplarPackSuite extends munit.FunSuite:
     import cairn.examples.sds.{EuClp, SectionNumbering}
     assert(EuClp.language.constructors.contains("sectionDef"))
     assert(EuClp.language.judgments.contains("sectionNumberOk"))
+    assert(EuClp.language.judgments.contains("sectionTitleOk"))
+    assert(EuClp.language.judgments.contains("profileVersionOk"))
     assertEquals(EuClp.annexIiSections.map(_._1), (1 to 16).toList)
     assertEquals(EuClp.annexIiSections.map(_._2), SectionNumbering.euClpFallback.map(_.title))
     assert(EuClp.checkSectionNumber("1"))
     assert(EuClp.checkSectionNumber("16"))
     assert(!EuClp.checkSectionNumber("17"))
+    assert(EuClp.checkSectionTitle("1", "Identification"))
+    assert(EuClp.checkProfileVersion("1"))
+    assert(!EuClp.checkProfileVersion("9"))
     assertEquals(SectionNumbering.euClp.map(_.title), SectionNumbering.euClpFallback.map(_.title))
 
   test("SDS chemical instances load from languages/sds/chemicals/*.cairn"):
@@ -615,23 +705,44 @@ class ExemplarPackSuite extends munit.FunSuite:
     assertEquals(Sds.sectionNumber(id), Some(1))
     assertEquals(Sds.sectionNumber(hz), Some(2))
 
-  test("SDS section-report json surface: digest split + RoundTrip + domain shape"):
+  test("sds-report projection surfaces (json/xml/csv) — not SDS language"):
     import cairn.examples.sds.{Chemicals, SectionReport}
+    // Language digests identical across surfaces; surface digests differ.
     val d = packs.requireClosed("sds-report")
     val j = packs.requireClosed("sds-report", "json")
+    val x = packs.requireClosed("sds-report", "xml")
+    val c = packs.requireClosed("sds-report", "csv")
     assertEquals(d.digest, j.digest)
+    assertEquals(d.digest, x.digest)
+    assertEquals(d.digest, c.digest)
     assert(packs.requireSurface("sds-report", "default").digest !=
       packs.requireSurface("sds-report", "json").digest)
-    val text = SectionReport.renderJson(Chemicals.Acetone.pure).fold(e => fail(e), identity)
-    assert(text.startsWith("{name:\"Acetone\",cas:\"67-64-1\",sections:["))
-    assert(text.contains("number:1,title:\"Identification\""))
-    assert(text.contains("productName:\"Acetone\""))
-    // domain JSON-ish — not the generic JsonSurface {node,kids} encoding
-    assert(!text.contains("\"node\""))
-    val thin = SectionReport.renderJson(Chemicals.Acetone.thinModule, "acetoneOutline")
+    assert(packs.requireSurface("sds-report", "json").digest !=
+      packs.requireSurface("sds-report", "xml").digest)
+    assert(packs.requireSurface("sds-report", "xml").digest !=
+      packs.requireSurface("sds-report", "csv").digest)
+    // SDS object language has no report-format constructors
+    assert(!packs.requireClosed("sds").constructors.contains("report"))
+    assert(!packs.requireClosed("sds").constructors.contains("fieldLine"))
+    val json = SectionReport.renderJson(Chemicals.Acetone.pure).fold(e => fail(e), identity)
+    assert(json.startsWith("{name:\"Acetone\",cas:\"67-64-1\",sections:["))
+    assert(json.contains("number:1,title:\"Identification\""))
+    assert(json.contains("productName:\"Acetone\""))
+    assert(!json.contains("\"node\""))
+    val thinJson = SectionReport.renderJson(Chemicals.Acetone.thinModule, "acetoneOutline")
       .fold(e => fail(e), identity)
-    assert(thin.contains("number:1,title:\"Identification\""))
-    assert(thin.contains("number:2,title:\"Hazards identification\""))
+    assert(thinJson.contains("number:1,title:\"Identification\""))
+    assert(thinJson.contains("number:2,title:\"Hazards identification\""))
+    val xml = SectionReport.renderXml(Chemicals.Acetone.thinModule, "acetoneOutline")
+      .fold(e => fail(e), identity)
+    assert(xml.startsWith("<sdsReport name=\"Acetone\" cas=\"67-64-1\">"))
+    assert(xml.contains("<section number=1 title=\"Identification\">"))
+    assert(xml.contains("<field key=productName>\"Acetone\"</field>"))
+    val csv = SectionReport.renderCsv(Chemicals.Acetone.thinModule, "acetoneOutline")
+      .fold(e => fail(e), identity)
+    assert(csv.startsWith("SDS,CSV,\"Acetone\",\"67-64-1\""))
+    assert(csv.contains("section,1,\"Identification\""))
+    assert(csv.contains("field,productName,\"Acetone\""))
 
   test("SDS sectionFieldRef resolves corpus phrases + shadow override"):
     val src =
@@ -657,3 +768,70 @@ class ExemplarPackSuite extends munit.FunSuite:
     assertEquals(
       Sds.sectionFieldText(shadowed, "s2", "hazardPhrases", "fr"),
       Some("Industrial H225 wording"))
+
+  test("SDS section-field staleness: derived ΔL materializes sectionFieldState"):
+    import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness}
+    val base = Chemicals.Acetone.thinModule
+    val oldHash = PhraseStaleness.textHash(
+      Sds.sectionFieldText(base, "s2", "signalWord", "en").get)
+    val Right((m2, _)) = SectionFieldStaleness.applyEnRewrite(
+      Sds.applySds, Sds.language, base, "s2", "signalWord", "Warning"): @unchecked
+    val mark = SectionFieldStaleness.markName("s2", "signalWord", "fr")
+    assert(m2.get(mark).exists {
+      case Cst.Node("sectionFieldState", List(
+          Cst.Leaf("s2"), Cst.Leaf("signalWord"), Cst.Leaf("fr"), Cst.Leaf(h),
+          Cst.Leaf("staleBecauseSourceChanged"))) =>
+        h == oldHash.hex
+      case _ => false
+    })
+    assertEquals(
+      SectionFieldStaleness.project(m2, "s2", "signalWord")("fr").state,
+      PhraseStaleness.State.StaleBecauseSourceChanged)
+    assertEquals(Sds.sectionFieldText(m2, "s2", "signalWord", "en"), Some("Warning"))
+
+  test("EU-CLP profile conformance over SDS module (not numbering alone)"):
+    import cairn.examples.sds.{Chemicals, EuClp}
+    val ok = EuClp.conform(Chemicals.Acetone.thinModule)
+    assert(ok.ok, ok.errors.mkString("; "))
+    assertEquals(ok.profileVersion, "1")
+    assert(ok.sectionNumbers.contains(1) && ok.sectionNumbers.contains(14))
+    val full = EuClp.conform(Chemicals.Acetone.asModule)
+    assert(full.ok, full.errors.mkString("; "))
+    assertEquals(full.sectionNumbers, (1 to 16).toList)
+
+  test("effect fragments load; clock/random FromFragment pins without host AST"):
+    val clockLang = packs.requireClosed("effect-clock")
+    val clockFrag = clockLang.fragments.find(_.name == "effect-clock").getOrElse(fail("no clock fragment"))
+    val clockEf = EffectMeta.clockFromFragment(clockFrag).fold(e => fail(e), identity)
+    assertEquals(EffectMeta.completeness(clockEf), Nil)
+    assert(clockEf.fragment.digest != EffectMeta.clock.fragment.digest)
+    val pinned = EffectMeta.PinnedInterface.fromArtifact(EffectMeta.interfaceArtifact(clockEf))
+      .fold(e => fail(e), identity)
+    assert(Effects.ActionKey.fromPinned(pinned, "now").isRight)
+    val randomLang = packs.requireClosed("effect-random")
+    val randomFrag = randomLang.fragments.find(_.name == "effect-random").getOrElse(fail("no random fragment"))
+    val randomEf = EffectMeta.randomFromFragment(randomFrag).fold(e => fail(e), identity)
+    assertEquals(EffectMeta.completeness(randomEf), Nil)
+    assert(randomEf.fragment.digest != EffectMeta.random.fragment.digest)
+
+  test("ReplayReplication: want/have + revocation absorb + checkGrant (merge, not BFT)"):
+    import cairn.systemhandler.{MemCas, ReplayReplication, ReplayStore, RevocationLog}
+    val cas = MemCas()
+    val ctx = EffectContext.forCas()
+    val a = ReplayStore.memory()
+    val b = ReplayStore.memory()
+    a.consumeNonce("alice", "n1").fold(e => fail(e), identity)
+    val snap = ReplayStore.publish(a, cas, ctx).fold(e => fail(e.toString), identity)
+    val rev = RevocationLog()
+    val revDig = rev.publish(cas, ctx, List("grant-1")).fold(e => fail(e), identity)
+    val plan = ReplayReplication.plan(
+      ReplayReplication.WantHave(Set.empty, Set.empty),
+      Set(snap), Set(revDig))
+    assertEquals(plan.snapshotsToFetch, List(snap))
+    assertEquals(plan.revocationsToFetch, List(revDig))
+    val revB = RevocationLog()
+    ReplayReplication.applyPlan(b, revB, cas, ctx, plan).fold(e => fail(e), identity)
+    assert(b.snapshot.flatNonces.contains("n1"))
+    assert(revB.isRevoked("grant-1"))
+    assert(ReplayReplication.checkGrant(revB, "grant-1").isLeft)
+    assert(ReplayReplication.checkGrant(revB, "grant-ok").isRight)

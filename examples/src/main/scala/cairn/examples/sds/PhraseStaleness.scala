@@ -5,10 +5,16 @@ import cairn.core.*
 
 /** Multilingual phrase-staleness machine (GRANITE PROMPT §15 / Multilingual.restale).
   *
-  * Thin honest stub: official `corpusPhrase` entries never go stale; free-text
-  * `phrase` translations become [[State.StaleBecauseSourceChanged]] when their
-  * English source hash drifts. State is a *projected* judgment over Module
-  * objects — not yet persisted as SDS Studio fields or a full phrase corpus.
+  * Official `corpusPhrase` entries never go stale; free-text `phrase`
+  * translations become [[State.StaleBecauseSourceChanged]] when their English
+  * source hash drifts.
+  *
+  * Two paths:
+  *   - [[restale]] / [[project]] — pure projection (legacy host judgment)
+  *   - [[deriveEnRewrite]] — real ΔSDS changeset that rewrites EN and
+  *     materializes `translationState` marks (derived ΔL, not Studio UI)
+  *
+  * [[project]] prefers persisted `translationState` marks when present.
   */
 object PhraseStaleness:
   enum State:
@@ -16,7 +22,34 @@ object PhraseStaleness:
 
   final case class TranslatedText(text: String, translatedFromHash: String, state: State)
 
+  final case class PhraseRow(defName: String, lang: String, official: Boolean, text: String)
+
+  val stateTag: Map[State, String] = Map(
+    State.OfficialCorpus -> "officialCorpus",
+    State.HumanReviewed -> "humanReviewed",
+    State.AiDraft -> "aiDraft",
+    State.StaleBecauseSourceChanged -> "staleBecauseSourceChanged",
+    State.Rejected -> "rejected")
+
+  val tagState: Map[String, State] = stateTag.map(_.swap)
+
   def textHash(text: String): Digest = Digest.of(Canon.CStr(text))
+
+  def markName(phraseName: String, lang: String): String =
+    s"${phraseName}__${lang}__state"
+
+  def stateTerm(
+      phraseName: String,
+      lang: String,
+      fromHash: Digest,
+      state: State
+  ): Cst =
+    Cst.node(
+      "translationState",
+      Cst.Leaf(phraseName),
+      Cst.Leaf(lang),
+      Cst.Leaf(fromHash.hex),
+      Cst.Leaf(stateTag(state)))
 
   /** Pure restale (GRANITE `Multilingual.restale`). Keys are lang codes. */
   def restale(
@@ -39,19 +72,37 @@ object PhraseStaleness:
     if official then TranslatedText(text, enHash.hex, State.OfficialCorpus)
     else TranslatedText(text, enHash.hex, State.HumanReviewed)
 
-  /** Project all locale variants of a phrase name from a Module. */
-  def project(m: Module, phraseName: String): Map[String, TranslatedText] =
-    val rows: List[(String, Boolean, String)] = m.defs.collect {
-      case (_, Cst.Node("corpusPhrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
+  def phraseRows(m: Module, phraseName: String): List[PhraseRow] =
+    m.defs.collect {
+      case (defName, Cst.Node("corpusPhrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
           if n == phraseName =>
-        (lang, true, text)
-      case (_, Cst.Node("phrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
+        PhraseRow(defName, lang, true, text)
+      case (defName, Cst.Node("phrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
           if n == phraseName =>
-        (lang, false, text)
+        PhraseRow(defName, lang, false, text)
     }.toList
-    val enText = rows.collectFirst { case ("en", _, t) => t }.getOrElse("")
+
+  /** Persisted marks: lang → (fromHash, state). */
+  def stateMarks(m: Module, phraseName: String): Map[String, (String, State)] =
+    m.defs.collect {
+      case (_, Cst.Node("translationState", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))))
+          if n == phraseName =>
+        tagState.get(tag).map(st => lang -> (hash, st))
+    }.flatten.toMap
+
+  /** Project all locale variants of a phrase name from a Module.
+    * Materialized `translationState` marks override default projection.
+    */
+  def project(m: Module, phraseName: String): Map[String, TranslatedText] =
+    val rows = phraseRows(m, phraseName)
+    val marks = stateMarks(m, phraseName)
+    val enText = rows.collectFirst { case PhraseRow(_, "en", _, t) => t }.getOrElse("")
     val enHash = textHash(enText)
-    rows.map { case (lang, official, text) => lang -> entry(official, text, enHash) }.toMap
+    rows.map { case PhraseRow(_, lang, official, text) =>
+      marks.get(lang) match
+        case Some((hash, st)) => lang -> TranslatedText(text, hash, st)
+        case None             => lang -> entry(official, text, enHash)
+    }.toMap
 
   /** Langs (other than `en`) that become stale if English free-text becomes `newEnText`. */
   def staleLangsAfterEnChange(m: Module, phraseName: String, newEnText: String): Set[String] =
@@ -59,3 +110,46 @@ object PhraseStaleness:
     after.collect {
       case (lang, t) if lang != "en" && t.state == State.StaleBecauseSourceChanged => lang
     }.toSet
+
+  /** Derive a ΔSDS changeset: replace EN free-text and add/replace
+    * `translationState` marks for free-text langs that go stale.
+    * Corpus EN is rejected (official phrases are not restale-rewritten).
+    */
+  def deriveEnRewrite(
+      l: ComposedLanguage,
+      m: Module,
+      phraseName: String,
+      newEnText: String
+  ): Either[String, Cst] =
+    val rows = phraseRows(m, phraseName)
+    rows.find(_.lang == "en") match
+      case None => Left(s"no EN phrase '$phraseName'")
+      case Some(enRow) if enRow.official =>
+        Left(s"corpusPhrase '$phraseName' EN is not restale-rewritten")
+      case Some(enRow) =>
+        val oldHash = textHash(enRow.text)
+        val newHash = textHash(newEnText)
+        val after = restale(project(m, phraseName), newHash)
+        val ops = List.newBuilder[Cst]
+        ops += Cst.Node(
+          Delta.tag(l, "replace"),
+          List(
+            Cst.Leaf(enRow.defName),
+            Cst.node("phrase", Cst.Leaf(phraseName), Cst.Leaf("en"), Cst.Leaf(newEnText))))
+        for (lang, t) <- after.toList.sortBy(_._1)
+        if lang != "en" && t.state == State.StaleBecauseSourceChanged do
+          val name = markName(phraseName, lang)
+          val term = stateTerm(phraseName, lang, oldHash, State.StaleBecauseSourceChanged)
+          val op = if m.get(name).isDefined then "replace" else "add"
+          ops += Cst.Node(Delta.tag(l, op), List(Cst.Leaf(name), term))
+        Right(Cst.Node(Delta.tag(l, "changeset"), List(Cst.Node("list", ops.result()))))
+
+  /** Apply [[deriveEnRewrite]] through the SDS domain gate. */
+  def applyEnRewrite(
+      applySds: (Module, Cst) => Either[String, (Module, Delta.ValidatedChangeSet)],
+      l: ComposedLanguage,
+      m: Module,
+      phraseName: String,
+      newEnText: String
+  ): Either[String, (Module, Delta.ValidatedChangeSet)] =
+    deriveEnRewrite(l, m, phraseName, newEnText).flatMap(ch => applySds(m, ch))

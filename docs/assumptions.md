@@ -47,9 +47,17 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    MemCas/DiskCas and WaveA M4 algo tests remain intentional trait-contract
    exceptions. Capability nonce/requestId replay uses issuer-scoped
    `ReplayStore` (memory or durable filesystem), shareable across gates;
-   snapshots sync via CAS `replay-snapshot` digests (`publish` / `mergeFromCas`).
+   snapshots sync via CAS `replay-snapshot` digests (`publish` / `mergeFromCas`)
+   — digest **merge**, not consensus. Capability revocation uses the same
+   want/have shape (`ReplayReplication` / `RevocationLog`); BFT deferred.
    Effect interfaces pin as CAS `effect-interface` artifacts
-   (`PinnedInterface` / `ActionKey.fromPinned`).
+   (`PinnedInterface` / `ActionKey.fromPinned`); families remain largely
+   host-seeded (thin: `languages/effect-clock.cairn` + `effect-random.cairn`
+   via `clockFromFragment` / `randomFromFragment`).
+   Journaled accept is local (CAS → journal → refs) — not a distributed
+   atomic transaction. SDS *uses* report projection pack `sds-report`
+   (text + JSON + XML + CSV surfaces under `languages/sds-report/surfaces/`);
+   formats are **not** SDS vocabulary. PDF deferred; BFT deferred.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

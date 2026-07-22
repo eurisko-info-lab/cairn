@@ -268,6 +268,70 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)
 
+  test("property: causal-LCA merge over nontrivial DAG shapes (seeded)"):
+    // For each seed, build a diamond/fork DAG where two branches reach a shared
+    // intermediate module via commuting edits in opposite order, then diverge
+    // with disjoint adds. Merge must accept and contain every suffix binding.
+    // Trials 0..23: classic diamond. Trials 24..47: deeper optional mid commits
+    // plus a third commuting replace before the fork (wider DAG).
+    val rng = new scala.util.Random(20260722L)
+    var accepted = 0
+    for trial <- 0 until 48 do
+      val dir = Files.createTempDirectory(s"cairn-lca-prop-$trial")
+      val branches = branchesAt(dir)
+      val names = (0 until (if trial < 24 then 4 else 5)).map(i => s"v${trial}_$i").toList
+      val baseDefs = names.map(n => n -> (if rng.nextBoolean() then Stlc.tru else Stlc.fls))
+      val base = Module(baseDefs)
+      branches.commitModule("root", base)
+      val pair = names.take(2)
+      val cA = parseChange(s"{ replace ${pair(0)} = false ; }")
+      val cB = parseChange(s"{ replace ${pair(1)} = true ; }")
+      assert(SemanticRepository.commutes(lang, cA, cB), clues(trial, pair))
+      val tip1a = SemanticRepository.tipAfter(lang, base, cA).fold(e => fail(e), identity)
+      val tip1ab = SemanticRepository.tipAfter(lang, tip1a.tip, cB).fold(e => fail(e), identity)
+      val tip2b = SemanticRepository.tipAfter(lang, base, cB).fold(e => fail(e), identity)
+      val tip2ba = SemanticRepository.tipAfter(lang, tip2b.tip, cA).fold(e => fail(e), identity)
+      assertEquals(tip1ab.tipDigest, tip2ba.tipDigest)
+      val shared = tip1ab.tip
+      val afterShared =
+        if trial >= 24 then
+          val cC = parseChange(s"{ replace ${names(2)} = false ; }")
+          val tipC = SemanticRepository.tipAfter(lang, shared, cC).fold(e => fail(e), identity)
+          tipC.tip
+        else shared
+      val sufA = s"sufA$trial"
+      val sufB = s"sufB$trial"
+      val tipA = SemanticRepository.tipAfter(lang, afterShared,
+        parseChange(s"{ add $sufA = true ; }")).fold(e => fail(e), identity)
+      val tipB = SemanticRepository.tipAfter(lang, afterShared,
+        parseChange(s"{ add $sufB = false ; }")).fold(e => fail(e), identity)
+      if rng.nextBoolean() then
+        branches.commitTip(s"a$trial", tip1a)
+      branches.commitTip(s"a$trial", tip1ab)
+      if trial >= 24 then
+        val midA = SemanticRepository.tipAfter(lang, tip1ab.tip,
+          parseChange(s"{ replace ${names(2)} = false ; }")).fold(e => fail(e), identity)
+        branches.commitTip(s"a$trial", midA)
+      branches.commitTip(s"a$trial", tipA)
+      if rng.nextBoolean() then
+        branches.commitTip(s"b$trial", tip2b)
+      branches.commitTip(s"b$trial", tip2ba)
+      if trial >= 24 then
+        val midB = SemanticRepository.tipAfter(lang, tip2ba.tip,
+          parseChange(s"{ replace ${names(2)} = false ; }")).fold(e => fail(e), identity)
+        branches.commitTip(s"b$trial", midB)
+      branches.commitTip(s"b$trial", tipB)
+      branches.mergeBranches(lang, s"m$trial", s"a$trial", s"b$trial") match
+        case Right(Right(_)) =>
+          val head = branches.headModule(s"m$trial").fold(e => fail(e), identity)
+          assertEquals(head.get(pair(0)), Some(Stlc.fls))
+          assertEquals(head.get(pair(1)), Some(Stlc.tru))
+          assert(head.get(sufA).isDefined && head.get(sufB).isDefined)
+          accepted += 1
+        case Right(Left(c)) => fail(s"trial $trial conflict: ${c.render}")
+        case Left(e) => fail(s"trial $trial: $e")
+    assertEquals(accepted, 48)
+
   test("spine: optional migration step before accepted state"):
     val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get
     val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)

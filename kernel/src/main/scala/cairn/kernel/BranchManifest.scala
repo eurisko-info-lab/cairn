@@ -10,6 +10,9 @@ package cairn.kernel
   * `changeHistory`, `conflictState`) are CAS digests so semantic history is
   * reachable from the manifest alone. Refs `.change` / `.changes` sidecars
   * remain write-through caches. Older manifests omit new fields (decoded empty).
+  *
+  * `certificates` links approval / signing / publication certificate digests
+  * stored as CAS `certificate` artifacts — fully referenced by branch state.
   */
 final case class BranchManifest(
     branch: String,
@@ -21,6 +24,8 @@ final case class BranchManifest(
     conflictState: Option[Digest] = None,
     /** Oldest → newest ValidatedChangeSet digests (semantic history). */
     changeHistory: List[Digest] = Nil,
+    /** Linked CAS certificate digests (approval / signature / publication). */
+    certificates: List[Digest] = Nil,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -30,7 +35,8 @@ final case class BranchManifest(
     "parents" -> Canon.CList(parents.map(d => Canon.CStr(d.hex))),
     "acceptedChange" -> optDigest(acceptedChange),
     "conflictState" -> optDigest(conflictState),
-    "changeHistory" -> Canon.CList(changeHistory.map(d => Canon.CStr(d.hex))))
+    "changeHistory" -> Canon.CList(changeHistory.map(d => Canon.CStr(d.hex))),
+    "certificates" -> Canon.CList(certificates.map(d => Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -59,4 +65,5 @@ object BranchManifest:
       parents = m.get("parents").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
       acceptedChange = m.get("acceptedChange").flatMap(dig),
       conflictState = m.get("conflictState").flatMap(dig),
-      changeHistory = m.get("changeHistory").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil))
+      changeHistory = m.get("changeHistory").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
+      certificates = m.get("certificates").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil))

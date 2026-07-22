@@ -75,6 +75,7 @@ class ParitySuite extends munit.FunSuite:
     assertEquals(r.historyFromManifestAlone, 2)
     assert(r.verifiedCapabilityOk)
     assert(r.tipSignatureHex.nonEmpty)
+    assertEquals(r.certificateDigests.length, 3)
     assert(r.ledgerPublished)
 
   test("parity: SDS composition sealing open/clear bands"):

@@ -1,0 +1,12 @@
+language effect-clock {
+  fragment effect-clock provides effectClock {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor now : Request;
+    ctor timestampSlug : Request;
+    ctor instant : Response(Int);
+    ctor slug : Response(Str);
+    ctor unavailable : Error(Str);
+  }
+}
