@@ -48,7 +48,7 @@ maintained `Effects.Action` enum (ActionKeys from packDecls /
 `EffectBootstrap`); generalized dirty-subtree `dirtyOps` (structural `==` +
 LCS deletes); `sds-report` **pdf** surface + `PdfMinimal` bytes; research
 `BftQuorum` sim (not production). Architecture: SDS language proper vs report surface
-packs stay separated (Phase 2/3). Full suite: **525 tests** (523 passed + 2 skipped; `tests` module; `sbt test`).
+packs stay separated (Phase 2/3). Full suite: **535 tests** (533 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -61,7 +61,7 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 2 | Mandatory revocation in capability authorize | **Done** | `RevocationView` on gate/context; `CapabilityGrant.capabilityId`; `checkCapability` / `authorize` consult before mint |
 | 3 | AuditedEffect ≠ AuthorizedEffect | **Done** | Kernel `AuditedRequest` / `AuthorizedRequest`; Audit cannot mint Authorized; ModuleBoundarySuite |
 | 4 | Bootstrap/import vs ΔL branch advancement | **Done** | `Branches.importModule` (+ deprecated `commitModule` alias); `commitTip` = ordinary ΔL path |
-| 5 | Explicit causal patch graph | **Advanced** | `core.PatchGraph` DAG + LCA; `mergeBranches` prefers graph LCA; residual vs full Pijul theory |
+| 5 | Explicit causal patch graph | **Advanced+** | `PatchGraph` DAG + LCA + `commuteOk` / `inverseStep` / multi-parent merge nodes; residual vs full Pijul theory |
 | 6 | Generic language workflow runner | **Done** | `WorkflowRunner` drives full SDS causal chain (author→…→publish); Scala handlers only |
 | 7 | README / CAIRN-PROMPT live architecture | **Done** | Kernel/Core/System/User/Runtime; no phantom workbench/ledger; L0–L6 ownership retired |
 
@@ -312,6 +312,9 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   (`sds-workflow`), certificate kinds (`sds-certificate`), EU-CLP judgments,
   chemical instances, and report *encodings* (`sds-report` surfaces) load via
   PackLoader/CAS without recompiling Scala.
-- **PatchGraph residual:** explicit parent DAG + LCA wired into merge; not full
-  Pijul commutation/inverse/conflict algebra (still ChangeAlgebra / Merge).
+- **PatchGraph residual:** explicit parent DAG + LCA + ChangeAlgebra
+  `commuteOk` / `inverseStep` / multi-parent merge nodes wired; **not** full
+  Pijul commutation/inverse/conflict algebra on the graph (still ChangeAlgebra
+  / Merge for accept). BftQuorum deepened with equivocation + quorum-intersection
+  tests — still research/sim, not production finality.
 - GRANITE SDS depth / Lean proof bodies — see above.

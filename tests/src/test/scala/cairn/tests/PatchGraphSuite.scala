@@ -1,7 +1,8 @@
 package cairn.tests
 
-import cairn.core.PatchGraph
-import cairn.kernel.Digest
+import cairn.core.{ChangeAlgebra, Delta, Module, PatchGraph}
+import cairn.examples.stlc.Stlc
+import cairn.kernel.{Cst, Digest}
 import cairn.runtime.WorkflowRunner
 import cairn.systemhandler.{Branches, EffectContext, MemCas}
 
@@ -10,6 +11,11 @@ class PatchGraphSuite extends munit.FunSuite:
 
   private def dig(tag: String): Digest =
     Digest.of(cairn.kernel.Canon.CStr(tag))
+
+  private val lang = Stlc.language
+  private val dl = Delta.deltaOf(lang).toOption.get
+  private def parseChange(src: String): Cst =
+    cairn.core.Parser.parse(dl.grammar, src).fold(e => fail(e), identity)
 
   test("PatchGraph: linear chain + diamond LCA"):
     val root = dig("root-change")
@@ -61,3 +67,30 @@ class PatchGraphSuite extends munit.FunSuite:
     assertEquals(frag.completed, List("author", "shadow"))
     assert(WorkflowRunner.run(steps, s =>
       if s.name == "shadow" then Left("boom") else Right("ok")).isLeft)
+
+  test("PatchGraph.commuteOk + inverseStep deepen ChangeAlgebra bridge"):
+    val m0 = Module(List("a" -> Stlc.tru, "b" -> Stlc.fls))
+    val chA = parseChange("{ replace a = false ; }")
+    val chB = parseChange("{ replace b = true ; }")
+    val chOverlap = parseChange("{ remove a ; }")
+    assert(PatchGraph.commuteOk(lang, chA, chB))
+    assert(!PatchGraph.commuteOk(lang, chA, chOverlap))
+    assert(ChangeAlgebra.commutes(lang, chA, chB))
+    val (fwd, fwdVcs) = Delta.apply(lang, m0, chA).toOption.get
+    val inv = PatchGraph.inverseStep(lang, m0, chA, fwdVcs.artifact.digest)
+      .fold(e => fail(e), identity)
+    assertEquals(inv._1.result, m0.sorted.digest)
+    assertEquals(inv._1.parents, List(fwdVcs.artifact.digest))
+    val g = PatchGraph.Graph.empty
+      .add(PatchGraph.Node(fwdVcs.artifact.digest, Nil, m0.digest, fwd.digest)).toOption.get
+      .add(inv._1).toOption.get
+    assertEquals(g.lca(fwdVcs.artifact.digest, inv._1.id), Some(fwdVcs.artifact.digest))
+    // Multi-parent merge node
+    val left = dig("L"); val right = dig("R"); val merge = dig("M")
+    val g2 = PatchGraph.Graph.empty
+      .add(PatchGraph.Node(dig("root"), Nil, dig("b0"), dig("r0"))).toOption.get
+      .add(PatchGraph.Node(left, List(dig("root")), dig("r0"), dig("rL"))).toOption.get
+      .add(PatchGraph.Node(right, List(dig("root")), dig("r0"), dig("rR"))).toOption.get
+      .add(PatchGraph.mergeNode(merge, List(left, right), dig("r0"), dig("rM"))).toOption.get
+    assertEquals(g2.lca(left, right), Some(dig("root")))
+    assertEquals(g2.lca(merge, left), Some(left))

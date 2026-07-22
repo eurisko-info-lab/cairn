@@ -1,9 +1,9 @@
 # Architecture: trust and effect boundaries
 
-Present-tense source of truth for Cairn’s Kernel / Core / System / User /
-Runtime split. Chronological migration notes and superseded designs live in
-[migration-history.md](migration-history.md). The operational refactor checklist
-remains [MIGRATION-PLAN.md](../MIGRATION-PLAN.md) (phases 0–8 landed).
+Present-tense source of truth for Cairn's Kernel / Core / System / User /
+Runtime split, current test health, and parity against the summarized prior
+projects (§13 of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md)). This file describes
+what *is*, not the history of how it got here.
 
 ## Areas
 
@@ -29,16 +29,17 @@ system-handler      → kernel, core, system-interface
 user                → kernel, core, system-interface   (↛ system-handler)
 runtime             → user, system-handler, core, kernel, system-interface
 
-# Compatibility façades
-workbench           → runtime (+ kernel, core, system-handler)
-proof               → workbench, core, kernel
-compute             → workbench, core          # NetEngine re-export from core
-rosetta             → proof, compute, core, system-handler
-ledger              → rosetta, system-interface, system-handler, user
-surface             → ledger, runtime, system-handler
+# Aggregation above the DAG (not CAS/Meta/authority owners)
+proof               → core, kernel
+rosetta             → proof, core, system-handler
+surface             → proof, runtime, system-handler
 examples            → surface, user, runtime   # demos / host glue
-tests               → examples, runtime, user
+tests               → examples, rosetta, runtime, user
 ```
+
+`workbench` and `ledger` (former re-export façades) have been retired outright
+— their real owners (`runtime.PackLoader`, `system-handler.{Node,Encryption,...}`,
+`user.policy.PolicyLang`) are imported directly now.
 
 Key prohibition: `user ↛ system-handler`.
 
@@ -216,8 +217,11 @@ LeanCore `#check` envelope.
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in
   `examples/` (need handler crypto/CAS/filesystem); pure packs that need no
   handlers live in `user/`
-- **Facade modules** (`workbench`, `proof`, `compute`, `ledger` re-exports,
-  `rosetta.Scaffold`) — documented compatibility shims
+- **Aggregation modules** (`proof`, `rosetta.Scaffold`) — thin layers above
+  the trust-tier DAG (certification helpers, scaffold emit), not owners of
+  CAS/grammar/ΔL/Meta/authority. `workbench`, `compute`, and `ledger` — former
+  re-export façades — have been retired; callers import the real owners
+  directly.
 - **HVM surface limits** — `HvmSurface` projects the envelope corpus to HVM2
   CON/DUP/ERA books (not full ABI / Bend / HVM5); live `hvm` optional on PATH
 - **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
@@ -256,6 +260,44 @@ LeanCore `#check` envelope.
   refs FS, and Node/Sync chain-file I/O go through `CasEffects` /
   `CasAdminEffects` / `Filesystem` (`forBranches` / `forLedger` /
   `forFilesystem`).
+
+## Test health and golden digests
+
+Full suite: `sbt test`. Golden digests for every shipped language and Rosetta
+artifact: `sbt "examples/runMain cairn.examples.Main digests"` — checked
+against the values recorded in CI (`.github/workflows/ci.yml`), not frozen
+here, since they change whenever a language's semantic content changes.
+Both bootstrap transcripts (`sbt "examples/runMain cairn.examples.Main
+transcript transcripts/mvp.cairn"` and `.../max.cairn`) exercise the full
+publish/fetch/gossip/query path end to end. `emit-languages` regenerates the
+checked-in `.cairn` mirrors for `pki`/`law`/`sds`/`search`/`stlc`/`meta`;
+`git diff --exit-code languages/` must be clean after running it — CI enforces
+this (the language-sync check).
+
+## Parity vs summarized sources (§13)
+
+Constitution rule 16 requires matching each summarized source's top-level
+(README-advertised, flagship) surface — not every deep experiment. Current
+state, at the level that stays true across individual pack changes:
+
+| Source | Top-level capability | State |
+|---|---|---|
+| GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | Parity — Waves A–C, H1; `languages/meta.cairn` fixpoint |
+| GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | Parity — `languages/pki.cairn` + `PkiMax`/`DemoPki`/`PkiTutorial` |
+| GRANITE | Sharing encryption (X25519 hybrid seal) | Parity — `system-handler.Encryption`; seal/open tests |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `languages/sds.cairn` + `eu-clp` + `sds-report` (incl. PDF) + `sds-workflow`/`sds-certificate` packs |
+| GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `languages/law.cairn` requires `cert`; `LawTutorial` |
+| GRANITE | Computation / Bend profile | Parity — `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
+| GRANITE | SDS Studio UI / auth web app | N/A — explicit anti-goal (§8), not attempted |
+| ROSETTA | QuickSort Ord + effects + multi-host ports + sample entrypoints | Parity — `QuickSort2` + `QuickSortApp`; four host ports pass the whole-file byte fixpoint |
+| granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | Parity — L0–L6 engines; Unison pack; CLI/transcript |
+| marblego | Grammar VM + artifact/branch/store crates | Parity (absorbed) — same story in Scala |
+| MetaLego / Kiwi | Composable fragments + STLC | Parity — STLC fragments + pushout |
+| Eurisko / HVM | Lattice meta / IC lineage | Envelope, not full compatibility — see Agreement envelopes above |
+
+Full granit-rust's MetaLego catalog of other host languages (Unison/ASN.1/JVM/…)
+is absorbed as a platform capability here, not forked into separate packs —
+a deliberate scope decision, not a gap.
 
 ## Final principle
 

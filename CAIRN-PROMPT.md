@@ -235,8 +235,8 @@ universe polymorphism; no real Lean 4 syntax).
 ## 3. Architecture modules (live)
 
 Enforce an import DAG. Lower layers must not depend on upper layers. Domain
-examples must not leak into the kernel. **L0–L6 ownership labels are historical**
-(PLAN.md era); the live boundary is Kernel / Core / System / User / Runtime.
+examples must not leak into the kernel. **L0–L6 ownership labels are historical**;
+the live boundary is Kernel / Core / System / User / Runtime.
 
 ```text
 kernel           — digests, canonical forms, artifact types, fragment laws,
@@ -257,7 +257,7 @@ user             — language packs / policies / workflows; never imports handle
 
 runtime          — PackLoader, EffectBootstrap, WorkflowRunner (composition root)
 
-proof / compute / rosetta / surface / examples / tests
+proof / rosetta / surface / examples / tests
                  — aggregation & façades above the DAG (not CAS/Meta owners)
 ```
 
@@ -290,7 +290,7 @@ Distilled from the family of prior prompts; treat violations as bugs.
 13. **Tests before features.** Each phase lands with an acceptance suite; do not skip phases.
 14. **Primordial bootstrap.** Start from a meta-language and a grammar-language (defined using the meta-language); define every other language from those; derive or language-define tooling. See §2b.
 15. **Uniform capability model.** Grammar/surfaces, interpreters, ΔL, projections, judgments, obligations, traces, migrations, queries, laws, provenance, trust, effects, workflows, and import/export are one coherent per-language model (§2b) — not ad-hoc one-offs.
-16. **Parity with summarized projects’ top-level.** For each major source Cairn claims to distill (§13), match that project’s README-advertised / flagship surface (packs, CLIs, demos) — not every deep experiment. Thin name-drop stubs are not parity. Track the matrix in [STATUS-2.md](STATUS-2.md).
+16. **Parity with summarized projects’ top-level.** For each major source Cairn claims to distill (§13), match that project’s README-advertised / flagship surface (packs, CLIs, demos) — not every deep experiment. Thin name-drop stubs are not parity. Track the matrix in [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -480,7 +480,6 @@ cairn/
   user/                     # language packs (no handler imports)
   runtime/                  # PackLoader / EffectBootstrap / WorkflowRunner
   proof/                    # certification helpers
-  compute/                  # thin Core net façade
   rosetta/                  # scaffold emit façade
   surface/                  # CLI + transcript + LSP + explorer
   examples/
@@ -510,7 +509,7 @@ Adapt crate/module names to the chosen host; keep the layer boundaries.
 4. Prefer small certified interfaces over large unfinished frameworks.
 5. When prior projects disagree (Lean-first Granit vs Rust Granit vs Scala GRANITE vs Phi), **prefer**: content-addressed fragments + bidirectional grammar + primordial meta/grammar bootstrap (§2b) + recursive ΔL + kernel gates + local PoA ledger + Rosetta projections — and keep host choice pragmatic.
 6. Do not ask clarifying questions that block progress; state assumptions in `docs/assumptions.md` and proceed.
-7. At each phase end, update a `STATUS.md` with digests of golden artifacts and transcript results.
+7. Keep golden-artifact digests and transcript results current in `docs/architecture.md` as work lands — one present-tense source of truth, not a separate dated scorecard.
 
 ---
 

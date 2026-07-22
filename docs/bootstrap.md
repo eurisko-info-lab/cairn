@@ -24,7 +24,7 @@ citing both fragment names. Order of composition does not change the language di
 ## 2. One grammar engine, both directions (L1)
 
 The composed `GrammarSpec` is interpreted by ONE generic lexer, parser, and printer
-(`workbench/Grammar.scala`). There is no STLC-specific parsing code anywhere.
+(`core/Grammar.scala`). There is no STLC-specific parsing code anywhere.
 `RoundTrip.check` asserts `parse(print(t)) == t` — a law, enforced per grammar in CI.
 `RoundTrip.put` / `Concrete.splice` edit one spanned subtree while preserving
 bytes outside the span (format-preserving lens slice). A static left-recursion
@@ -66,11 +66,11 @@ second node pull blocks + blobs by hash, replay the chain through the pure
 
 ## 7. Self-description (fixpoint achieved, §2b)
 
-Self-description fixpoint achieved: `workbench/Meta.scala` is a fused meta
+Self-description fixpoint achieved: `core/Meta.scala` is a fused meta
 surface (fragment IR + grammar vocabulary, including the Phase 3
 `surface <style> for <lang>` top) that can describe and reconstruct
 itself — `languages/meta.cairn` matches the seed digest-for-digest
-([docs/assumptions.md](assumptions.md) §11; STATUS-2 Wave H). Meta stays fused;
+([docs/assumptions.md](assumptions.md) §11). Meta stays fused;
 object languages split semantics vs surfaces under `languages/<name>/surfaces/`.
 A separate `grammar.cairn` split remains deferred.
 

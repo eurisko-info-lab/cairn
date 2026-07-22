@@ -22,7 +22,7 @@ Single-node proof-of-authority publication spine (§6 Phase 5, §4.9).
   bodies. Bodies live in CAS and travel by digest (§4.9).
 - A branch head may only point at a **published** typed key.
 - Re-registering an identity with a different key is rejected.
-- Only the kernel certifies: `ledger.Node.append` seals a block and then re-validates
+- Only the kernel certifies: `systemhandler.Node.append` seals a block and then re-validates
   it through `LedgerKernel.applyBlock` before committing (§4.6).
 
 ## Out of scope (design hooks only, §6 Phase 5)

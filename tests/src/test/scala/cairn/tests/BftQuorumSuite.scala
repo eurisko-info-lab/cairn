@@ -44,3 +44,19 @@ class BftQuorumSuite extends munit.FunSuite:
     assertEquals(quorumSize(n), 3) // coincides at n=4; diverge at n=7
     assertEquals(7 / 2 + 1, 4)
     assertEquals(quorumSize(7), 5)
+
+  test("quorum intersection lemma at n=7 f=2"):
+    assert(quorumsIntersect(7))
+    assertEquals(maxFaults(7), 2)
+    assertEquals(quorumSize(7), 5)
+    assertEquals(5 + 5 - 7, 3) // |Q1 ∩ Q2| ≥ f+1
+
+  test("equivocating primary: honestAgree holds (no split brain)"):
+    val valueB = Value("other-digest".getBytes.toVector)
+    val decisions = runEquivocation(
+      ids, Set.empty, primary = ReplicaId("a"), view = 0, seq = 1, value, valueB)
+      .fold(e => fail(e), identity)
+    assert(honestAgree(decisions, Set.empty), clues(decisions))
+    // First PrePrepare locks; honest may decide valueA or stay undecided — never valueB alone vs valueA
+    val decided = decisions.values.flatten.map(_.value.digest).toSet
+    assert(!decided.contains(valueB.digest) || decided == Set(value.digest), clues(decided))

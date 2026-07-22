@@ -41,7 +41,7 @@ claim certificate, publish (PoA block), fetch on second node by hash.
 | 5 | Δ-net optional path | ✅ AffineNet (fan/era) reduces; well-formedness judgments; no replicator constructible; HVM/IC agreement envelope (`HvmSurface`; live `hvm` when on PATH) |
 | 6 | Polyglot projection ≥2 ports build/test | ✅ Scala port runs under scala-cli (`ALL TESTS PASS`); Lean skeleton golden-checked (toolchain not assumed); LeanCore agreement envelope separate from Rosetta |
 | 7 | Ledger publication + second-consumer verification | ✅ Phase5Suite + transcript publish/fetch |
-| 8 | Layering matches L0–L6 | ✅ enforced by sbt module DAG; examples never imported by kernel layers |
+| 8 | Layering matches Kernel/Core/System/User/Runtime DAG | ✅ enforced by sbt module DAG; examples never imported by kernel layers |
 | 9 | Reproducibility: clean machine runs mvp transcript | ✅ `sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"` |
 | 10 | Exemplars: PKI or SDS real; Bend/Unison honest | ✅ PKI real (ΔPKI = generic ΔL, Ed25519 chains, ledger anchor); SDS/Bend/Unison documented deferrals, no stubs |
 | 11 | Universal closure: recursive ΔL + bootstrap staged | ✅ `Δ(Δ(ΔL))` constructible; meta fixpoint — see [STATUS-2.md](STATUS-2.md) (no longer “staged”) |

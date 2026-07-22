@@ -1,8 +1,8 @@
 # Exemplars (§5b)
 
-Status of exemplar case studies after PLAN-2 **and** the top-level parity pass
-(see [STATUS-2.md](../STATUS-2.md) parity matrix). Packs are real code + tests,
-not name-drops.
+Current status of exemplar case studies, including the top-level parity pass
+against summarized sources (see [docs/architecture.md](architecture.md) for
+the parity matrix). Packs are real code + tests, not name-drops.
 
 **Expression:** PKI, Law, and SDS object languages live in checked-in `.cairn`
 files under [languages/](../languages/) (same meta+grammar surface as
@@ -257,8 +257,8 @@ re-proved in Cairn — by design (§4.10).
 ## Riemann — an open claim, not a parity item
 
 Not a §13 source — no summarized prior project claims the Riemann Hypothesis,
-so this pack is exploratory, outside the parity matrix, and does not appear
-in [STATUS-2.md](STATUS-2.md)'s scorecard. It exists to demonstrate the
+so this pack is exploratory, outside the parity matrix in
+[docs/architecture.md](architecture.md). It exists to demonstrate the
 `Claim` vs `Theorem` vocabulary (§2) at its honest limit: RH is unproved (an
 open problem in mathematics) and undecidable by Cairn's kernel (a decidable
 syntactic term checker, §2b/L2, with no business in continuous complex

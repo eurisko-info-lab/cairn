@@ -16,8 +16,7 @@ Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 ## Layout (live architecture)
 
 Trust and effect boundaries are the live module story (detail in
-[docs/architecture.md](docs/architecture.md); migration archaeology in
-[docs/migration-history.md](docs/migration-history.md)):
+[docs/architecture.md](docs/architecture.md)):
 
 | Module | Role | Contents |
 |---|---|---|
@@ -38,7 +37,6 @@ L0–L6 owners of CAS / grammar / ΔL / Meta (that story is retired):
 | Module | What it actually is |
 |---|---|
 | `proof/` | Certification / property helpers on top of Core + Kernel |
-| `compute/` | Thin re-export of Core net engine / builder (aggregated separately for historical callers) |
 | `rosetta/` | Scaffold emit façade (projection engine lives in `core`) |
 | `surface/` | CLI, transcript DSL, LSP, Web explorer |
 | `examples/` | Host-glue demos (PKI, SDS sealing, Search, Riemann, …); never imported by Kernel/Core |
@@ -59,8 +57,7 @@ user                → kernel, core, system-interface
 runtime             → user, system-handler, core, kernel, system-interface
 
 proof               → core, kernel
-compute             → core
-rosetta             → proof, compute, core, system-handler
+rosetta             → proof, core, system-handler
 surface             → proof, runtime, system-handler
 examples            → surface, user, runtime
 tests               → examples, rosetta, runtime, user
@@ -98,12 +95,7 @@ Search is another standalone pack: Fact–Intent–Hint board objects on CAS
 
 ## Documents
 
-- [docs/architecture.md](docs/architecture.md) — **current** module / trust / effect boundaries (source of truth)
-- [docs/migration-history.md](docs/migration-history.md) — chronological archaeology (superseded designs, phase narrative)
-- [PLAN.md](PLAN.md) — the original 50-story plan (S1–S50, all landed)
-- [PLAN-2.md](PLAN-2.md) — the 50-story maximalization plan (M1–M50, all landed)
-- [STATUS.md](STATUS.md) / [STATUS-2.md](STATUS-2.md) — scorecards, golden digests, honest deviations, **parity vs sources**
-- [MIGRATION-PLAN.md](MIGRATION-PLAN.md) — Kernel/Core/System/User refactor operational plan (phases 0–8 landed)
+- [docs/architecture.md](docs/architecture.md) — **current** module / trust / effect boundaries, golden digests, honest deviations, and parity-vs-sources (single source of truth)
 - [docs/bootstrap.md](docs/bootstrap.md) — empty CAS → published STLC in one sitting
 - [docs/vocabulary.md](docs/vocabulary.md), [docs/ledger.md](docs/ledger.md),
   [docs/rosetta.md](docs/rosetta.md), [docs/lowering.md](docs/lowering.md),

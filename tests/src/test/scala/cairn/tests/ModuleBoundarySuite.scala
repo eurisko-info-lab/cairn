@@ -4,7 +4,7 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 /** MIGRATION-PLAN.md Phase 0/6/8: mechanical regression guards for
-  * forbidden-import rules.
+  * forbidden-import rules and trust-boundary patterns.
   */
 class ModuleBoundarySuite extends munit.FunSuite:
 
@@ -16,8 +16,13 @@ class ModuleBoundarySuite extends munit.FunSuite:
     "java.io.FileOutputStream",
     "java.io.FileReader",
     "java.io.FileWriter",
+    "java.io.RandomAccessFile",
+    "scala.io.",
     "java.lang.ProcessBuilder",
-    "scala.sys.process")
+    "scala.sys.process",
+    "java.net.Socket",
+    "java.net.URL",
+    "java.net.http.HttpClient")
 
   private def scalaFilesUnder(root: Path): List[Path] =
     if !Files.exists(root) then Nil
@@ -33,6 +38,21 @@ class ModuleBoundarySuite extends munit.FunSuite:
       bad <- forbidden.find(line.contains)
     yield s"${file}:${i + 1}: imports '$bad' — ${line.trim}"
 
+  private def codeHits(
+      roots: List[Path],
+      banned: List[String],
+      allowFiles: Set[String] = Set.empty,
+  ): List[String] =
+    for
+      root <- roots if Files.exists(root)
+      file <- scalaFilesUnder(root)
+      if !allowFiles.contains(file.getFileName.toString)
+      if !file.toString.contains("ModuleBoundarySuite")
+      (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+      bad <- banned.find(line.contains)
+      if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+    yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
+
   test("kernel imports no filesystem, networking, or process APIs"):
     val violations = importViolations(Path.of("kernel/src/main/scala"), "kernel", forbiddenIo)
     assert(violations.isEmpty, violations.mkString("\n"))
@@ -41,10 +61,17 @@ class ModuleBoundarySuite extends munit.FunSuite:
     val violations = importViolations(Path.of("core/src/main/scala"), "core", forbiddenIo)
     assert(violations.isEmpty, violations.mkString("\n"))
 
+  test("kernel and core do not import system-handler or runtime"):
+    val banned = List("cairn.systemhandler", "cairn.runtime", "cairn.surface")
+    val hits =
+      importViolations(Path.of("kernel/src/main/scala"), "kernel", banned) ++
+        importViolations(Path.of("core/src/main/scala"), "core", banned)
+    assert(hits.isEmpty, hits.mkString("\n"))
+
   test("user imports no system-handler packages"):
     val violations = importViolations(
       Path.of("user/src/main/scala"), "user",
-      List("cairn.systemhandler", "java.nio.file", "java.net.", "java.lang.ProcessBuilder", "scala.sys.process"))
+      List("cairn.systemhandler", "cairn.runtime", "java.nio.file", "java.net.", "java.lang.ProcessBuilder", "scala.sys.process"))
     assert(violations.isEmpty, violations.mkString("\n"))
 
   test("user module sources exist"):
@@ -53,22 +80,12 @@ class ModuleBoundarySuite extends munit.FunSuite:
   test("no PackAccess.get/install or AuthorityGate.forFamily/default escape hatches"):
     val roots = List(
       "kernel", "core", "system-interface", "system-handler", "runtime",
-      "user", "surface", "examples", "rosetta", "ledger", "tests"
+      "user", "surface", "examples", "rosetta", "proof", "tests"
     ).map(d => Path.of(s"$d/src"))
     val banned = List(
       "PackAccess.get", "PackAccess.install",
       "AuthorityGate.forFamily", "AuthorityGate.default")
-    val hits =
-      for
-        root <- roots if Files.exists(root)
-        file <- scalaFilesUnder(root)
-        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
-        bad <- banned.find(line.contains)
-        // allow docs of the ban itself and this suite's string literals
-        if !file.toString.contains("ModuleBoundarySuite")
-        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
-      yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
-    assert(hits.isEmpty, hits.mkString("\n"))
+    assert(codeHits(roots, banned).isEmpty, codeHits(roots, banned).mkString("\n"))
 
   test("handlers do not invent Subject(\"local\") — subject comes from EffectContext"):
     val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
@@ -85,8 +102,6 @@ class ModuleBoundarySuite extends munit.FunSuite:
 
   test("handlers do not call gate.check/checked — authorize then AuthorizedEffect.perform"):
     val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
-    // EffectContext.authorize is the sole mint path for AuthorizedEffect (calls gate.check).
-    // Handlers must not call the gate themselves. AuditedEffect is a separate type.
     val allow = Set(
       "AuthorityGate.scala", "EffectContext.scala",
       "AuthorizedEffect.scala", "AuditedEffect.scala")
@@ -101,7 +116,6 @@ class ModuleBoundarySuite extends munit.FunSuite:
     assert(hits.isEmpty, hits.mkString("\n"))
 
   test("auditPass / AuditedEffect are distinct from AuthorizedEffect at the type level"):
-    // Mechanical: handlers accept AuthorizedEffect only — never AuditedEffect.
     val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
     val hits =
       for
@@ -112,4 +126,39 @@ class ModuleBoundarySuite extends munit.FunSuite:
         if line.contains("AuditedEffect") && line.contains("perform")
         if !line.trim.startsWith("//") && !line.trim.startsWith("*")
       yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("AuthorizedEffect.mint only from EffectContext"):
+    val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
+    val hits =
+      for
+        file <- scalaFilesUnder(handlerRoot)
+        name = file.getFileName.toString
+        if name != "EffectContext.scala" && name != "AuthorizedEffect.scala"
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        if line.contains("AuthorizedEffect.mint")
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+      yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("handlers do not resolve EffectMeta.* static seeds for live authorize"):
+    // Runtime vocabulary must come from RuntimeEffectRegistry; static EffectMeta
+    // family vals are cold-start seeds only (allowed in RuntimeEffectRegistry).
+    val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
+    val allow = Set("RuntimeEffectRegistry.scala")
+    val banned = List(
+      "EffectMeta.filesystem", "EffectMeta.cas", "EffectMeta.workspace",
+      "EffectMeta.process", "EffectMeta.clock", "EffectMeta.random",
+      "EffectMeta.terminal", "EffectMeta.lsp", "EffectMeta.externalBackend",
+      "EffectMeta.ledgerTransport")
+    val hits =
+      for
+        file <- scalaFilesUnder(handlerRoot)
+        if !allow.contains(file.getFileName.toString)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        bad <- banned.find(line.contains)
+        // KDoc [[EffectMeta.foo]] and prose mentions are fine
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+        if !line.contains("[[") // scaladoc link
+      yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
     assert(hits.isEmpty, hits.mkString("\n"))

@@ -7,9 +7,9 @@ import cairn.kernel.*
   *
   * Thin advance toward Pijul-style patch theory: nodes are ValidatedChangeSet
   * digests; edges are causal parents (linear history or multi-parent merge).
-  * [[lca]] is a DAG least-common-ancestor over explicit edges. Full Pijul
-  * commutation / inverse / conflict algebra remains on ChangeAlgebra / Merge;
-  * this graph is the causal substrate those engines can consult.
+  * [[lca]] is a DAG least-common-ancestor over explicit edges.
+  * [[commuteOk]] / [[inverseStep]] bridge to [[ChangeAlgebra]] without claiming
+  * full Pijul commutation / inverse / conflict algebra on the graph itself.
   */
 object PatchGraph:
 
@@ -122,3 +122,41 @@ object PatchGraph:
           val parents = if i == 0 then Nil else List(entries(i - 1)._1)
           g.add(Node(id, parents, base, result))
       }
+
+  /** Footprint commutation: when true, sibling order under a shared parent is
+    * interchangeable for merge purposes (ChangeAlgebra). Overlapping writes ⇒
+    * false — graph still records both parents; Merge surfaces conflict.
+    */
+  def commuteOk(language: ComposedLanguage, changeA: Cst, changeB: Cst): Boolean =
+    ChangeAlgebra.commutes(language, changeA, changeB)
+
+  /** Inverse step: apply `change` then its [[ChangeAlgebra.invert]]; prove the
+    * tip restores `base`. Returns the inverse change + a patch [[Node]] whose
+    * parent is `forwardId` and whose result equals the original base.
+    */
+  def inverseStep(
+      language: ComposedLanguage,
+      base: Module,
+      change: Cst,
+      forwardId: Digest,
+  ): Either[String, (Node, Cst, Delta.ValidatedChangeSet)] =
+    Delta.apply(language, base, change).flatMap { (tip, _) =>
+      ChangeAlgebra.invert(language, base, change).flatMap { inv =>
+        Delta.apply(language, tip, inv).flatMap { (restored, invVcs) =>
+          if restored.digest != base.digest && restored.digest != base.sorted.digest then
+            Left(s"inverse did not restore base: ${restored.digest.short} ≠ ${base.digest.short}")
+          else
+            val node = Node(invVcs.artifact.digest, List(forwardId), tip.digest, base.digest)
+            Right((node, inv, invVcs))
+        }
+      }
+    }
+
+  /** Explicit multi-parent merge node (e.g. after Merge.threeWay accept). */
+  def mergeNode(
+      id: Digest,
+      parentIds: List[Digest],
+      base: Digest,
+      result: Digest,
+  ): Node =
+    Node(id, parentIds, base, result)

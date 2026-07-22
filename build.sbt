@@ -36,12 +36,8 @@ lazy val proof = project.in(file("proof"))
   .dependsOn(core, kernel)
   .settings(libraryDependencies += munit)
 
-lazy val compute = project.in(file("compute"))
-  .dependsOn(core)
-  .settings(libraryDependencies += munit)
-
 lazy val rosetta = project.in(file("rosetta"))
-  .dependsOn(proof, compute, core, systemHandler)
+  .dependsOn(proof, core, systemHandler)
   .settings(libraryDependencies += munit)
 
 lazy val surface = project.in(file("surface"))

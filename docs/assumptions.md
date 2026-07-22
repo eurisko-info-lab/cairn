@@ -1,8 +1,8 @@
 # Assumptions (§11.6)
 
 Assumptions taken to keep progress unblocked, stated rather than asked.
-Items struck through were assumptions of the MINIMAL build (PLAN.md) that the
-maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
+Items struck through were early assumptions since discharged by later work —
+see [docs/architecture.md](architecture.md) for the current state each refers to.
 
 1. **Host = Scala 3.3 LTS, sbt, JDK 17+.** Zero runtime deps beyond the JDK
    (SHA-256/SHA-512 via `MessageDigest`, Ed25519 via `java.security`,
@@ -13,7 +13,7 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
 3. **typeHash** = digest of (kind, recursive structural fingerprint of the body)
    since M1. Values with the same schema share a fingerprint; any shape change
    splits it.
-4. ~~Grammar engine subset~~ — discharged by M6: the full vocabulary
+4. ~~Grammar engine subset~~ — discharged: the full vocabulary
    (block/run/adjacent1/restOfLine/anyident/tokfield) is implemented; the
    shipped surfaces use layout combinators where natural (Bend, demo grammars).
 5. **Whitespace policy**: the tree-level law `parse(print(t)) == t` plus
@@ -73,10 +73,10 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.
-8. ~~No side conditions~~ — discharged by M19: `$neq/$fresh/$lt/$le` plus
+8. ~~No side conditions~~ — discharged: `$neq/$fresh/$lt/$le` plus
    injected extension evaluators (PKI uses `$sig-ok`/`$anchor`). The checker
    remains decidable and the sole certifier.
-9. ~~Single-authority PoA~~ — discharged by M36: on-chain authority sets,
+9. ~~Single-authority PoA~~ — discharged: on-chain authority sets,
    majority-quorum add/remove, round-robin sealing. Production BFT finality
    still out (`BftQuorum` sim only).
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
@@ -87,7 +87,7 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     AffineNet/IcNet ↔ classical IC) are separate from Rosetta — see
     [docs/agreement.md](agreement.md); native tools optional with goldens /
     `HvmSurface` export (live `hvm` when on PATH).
-11. ~~Meta-language staging~~ — discharged by M41/M42: the fused meta surface
+11. ~~Meta-language staging~~ — discharged: the fused meta surface
     covers grammar productions, print rules, infix tables, rewrite rules, and
     judgments; `languages/meta.cairn` passes the self-description fixpoint
     (Meta can describe/reconstruct itself). **STLC/meta `.cairn` are runtime
