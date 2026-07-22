@@ -16,9 +16,14 @@ surface default for sds {
     keyword with;
     keyword basis;
     keyword section;
+    keyword eu;
+    keyword fields;
+    keyword outline;
+    keyword sections;
     punct "(";
     punct ")";
     punct ",";
+    punct ":";
     syntax sdsObj += substance : tok "substance" str str;
     syntax sdsObj += phrase : tok "phrase" name tok "lang" name tok "text" str;
     syntax sdsObj += corpusPhrase : tok "corpus" tok "phrase" name tok "lang" name tok "text" str;
@@ -26,7 +31,10 @@ surface default for sds {
     syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
     syntax sdsObj += basis : tok "basis" name tok "section" str;
+    syntax sdsObj += euSection : tok "eu" tok "section" num tok "fields" tok "(" sepby1 cat sectionField "," tok ")";
+    syntax sdsObj += outline : tok "outline" str str tok "sections" tok "(" opt sepby1 name "," tok ")";
     syntax component += component : name tok "pct" num;
+    syntax sectionField += sectionField : name tok ":" str;
     top sdsObj;
   }
 }

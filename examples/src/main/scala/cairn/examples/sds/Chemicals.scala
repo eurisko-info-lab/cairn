@@ -1,17 +1,16 @@
 package cairn.examples.sds
 
-/** Thin chemicals corpus fixture for SDS EU-CLP outlines.
+import cairn.kernel.*
+import cairn.core.*
+
+/** Chemicals corpus fixture for SDS EU-CLP outlines.
   *
-  * Host-side only: Cairn's `sds.cairn` objects cover substances / mixtures /
-  * products / phrases; section bodies are not yet first-class language
-  * constructors. This pack advances acetone toward a fuller REACH Annex II
-  * (EU-CLP) 16-section outline with honest placeholder/content where known,
-  * validated by [[SectionNumbering]]. Secondary chemicals stay sparse.
-  *
-  * Report projection of these maps is [[SectionReport]] (host GrammarSpec +
-  * RoundTrip) — still not `sds.cairn` constructors. Not Studio: no report UI,
-  * no persisted phrase-corpus editor, no section authoring surface — see
-  * STATUS-2 / docs/exemplars remaining gaps.
+  * Host maps ([[ChemicalDoc]]) remain convenient fixtures; they also project
+  * into first-class `sds.cairn` terms via [[toModule]] (`euSection` +
+  * `outline`, ΔSDS-editable). Report projection of host maps is
+  * [[SectionReport]]. Not Studio: no report UI, no persisted phrase-corpus
+  * editor, no section authoring surface — see STATUS-2 / docs/exemplars
+  * remaining gaps.
   */
 object Chemicals:
   /** One populated EU-CLP section body (EN text fields; demo data only). */
@@ -20,6 +19,13 @@ object Chemicals:
       SectionNumbering.byNumber.getOrElse(number, s"INVALID-$number")
     def outlineEntry: SectionNumbering.OutlineEntry =
       SectionNumbering.OutlineEntry(number, title)
+
+    /** Language term: `eu section N fields ( k : "v", … )`. */
+    def toTerm: Cst =
+      val fs = fields.toList.map { case (k, v) =>
+        Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf(v))
+      }
+      Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", fs))
 
   /** A chemical document as a (possibly sparse) map of section bodies. */
   final case class ChemicalDoc(
@@ -34,6 +40,28 @@ object Chemicals:
 
     def validateOutline: Either[List[SectionNumbering.OutlineError], List[SectionNumbering.SectionDef]] =
       SectionNumbering.validateOutline(outline)
+
+    /** Stable def name for section `n` inside [[toModule]]. */
+    def sectionRef(n: Int): String = s"s$n"
+
+    /** Project into SDS language terms: one `euSection` per populated number
+      * plus a named `outline` binding section refs in ascending order.
+      * Outline section-list uses the surface `opt sepby1` shape (`some`/`none`).
+      */
+    def toModule(outlineName: String = "docOutline"): Module =
+      val secDefs = populatedNumbers.map { n =>
+        sectionRef(n) -> sections(n).toTerm
+      }
+      val refs = populatedNumbers.map(n => Cst.Leaf(sectionRef(n)))
+      val sectionsField =
+        if refs.isEmpty then Cst.Node("none", Nil)
+        else Cst.Node("some", List(Cst.Node("list", refs)))
+      val outlineTerm = Cst.node(
+        "outline",
+        Cst.Leaf(name),
+        Cst.Leaf(cas),
+        sectionsField)
+      Module(secDefs :+ (outlineName -> outlineTerm)).sorted
 
   /** Acetone: fuller EU-CLP outline (all 16 sections). Content is
     * demonstration / literature-shaped placeholder — not a regulatory filing.
@@ -132,6 +160,22 @@ object Chemicals:
 
     def outline: List[SectionNumbering.OutlineEntry] = pure.outline
 
+    /** Full 16-section acetone as ΔSDS-editable `euSection` + `outline` terms. */
+    def asModule: Module = pure.toModule("acetoneOutline")
+
+    /** Thin subset (identification + hazards + other information) for focused
+      * parse/ΔL tests without the full 16-section fixture.
+      */
+    val thin: ChemicalDoc = ChemicalDoc(
+      name = "Acetone",
+      cas = "67-64-1",
+      sections = Map(
+        1 -> pure.sections(1),
+        2 -> pure.sections(2),
+        16 -> pure.sections(16)))
+
+    def thinModule: Module = thin.toModule("acetoneOutline")
+
   /** Ethanol: sparse secondary substance (identification + hazards only). */
   object Ethanol:
     val pure: ChemicalDoc = ChemicalDoc(
@@ -142,6 +186,8 @@ object Chemicals:
         2 -> SectionBody(2, Map(
           "hazardPhrases" -> "H225; H319",
           "signalWord" -> "Danger"))))
+
+    def asModule: Module = pure.toModule("ethanolOutline")
 
   /** Tutorial spine still speaks only to hazards + composition; kept here so
     * the sparse vs fuller acetone outlines stay explicit.

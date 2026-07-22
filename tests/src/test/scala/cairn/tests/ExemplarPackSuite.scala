@@ -66,6 +66,9 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(sds.constructors.contains("section") || sds.constructors.contains("enactedBy"),
       "SDS closed must include Law constructors")
     assert(sds.constructors.contains("basis"), "SDS cites Law via basis")
+    assert(sds.constructors.contains("euSection"), "SDS EU-CLP section bodies")
+    assert(sds.constructors.contains("outline"), "SDS section outlines")
+    assert(sds.constructors.contains("sectionField"), "SDS section fields")
     assert(sds.fragments.exists(_.provides.contains("sds")))
     assert(sds.fragments.exists(_.provides.contains("law")))
     assert(sds.fragments.exists(_.provides.contains("cert")))
@@ -281,3 +284,75 @@ class ExemplarPackSuite extends munit.FunSuite:
     val empty = Chemicals.ChemicalDoc("Empty", "0-0-0", Map.empty)
     val text = SectionReport.render(empty).fold(e => fail(e), identity)
     assertEquals(text.trim, "SDS REPORT: \"Empty\" CAS: \"0-0-0\"")
+
+  test("SDS language sections: euSection/outline parse/print round-trip"):
+    val g = Sds.language.grammar
+    val sec = Parser.parse(g,
+      """eu section 2 fields ( hazardPhrases : "H225; H319" , signalWord : "Danger" )""")
+      .fold(e => fail(e), identity)
+    RoundTrip.check(g, sec).fold(e => fail(e), identity)
+    assertEquals(sec,
+      Cst.node("euSection", Cst.Leaf("2"),
+        Cst.Node("list", List(
+          Cst.node("sectionField", Cst.Leaf("hazardPhrases"), Cst.Leaf("H225; H319")),
+          Cst.node("sectionField", Cst.Leaf("signalWord"), Cst.Leaf("Danger"))))))
+    val outline = Parser.parse(g, """outline "Acetone" "67-64-1" sections ( s1 , s2 )""")
+      .fold(e => fail(e), identity)
+    RoundTrip.check(g, outline).fold(e => fail(e), identity)
+    assertEquals(outline,
+      Cst.node("outline", Cst.Leaf("Acetone"), Cst.Leaf("67-64-1"),
+        Cst.Node("some", List(Cst.Node("list", List(Cst.Leaf("s1"), Cst.Leaf("s2")))))))
+    val emptyOutline = Parser.parse(g, """outline "Empty" "0-0-0" sections ( )""")
+      .fold(e => fail(e), identity)
+    RoundTrip.check(g, emptyOutline).fold(e => fail(e), identity)
+    assertEquals(emptyOutline,
+      Cst.node("outline", Cst.Leaf("Empty"), Cst.Leaf("0-0-0"), Cst.Node("none", Nil)))
+
+  test("SDS language sections: acetone thin module validates and round-trips"):
+    import cairn.examples.sds.Chemicals
+    val m = Chemicals.Acetone.thinModule
+    Sds.validate(m).fold(e => fail(e), identity)
+    assertEquals(m.defs.count(_._2 match
+      case Cst.Node("euSection", _) => true
+      case _ => false), 3)
+    assert(m.get("acetoneOutline").exists {
+      case Cst.Node("outline", List(Cst.Leaf("Acetone"), Cst.Leaf("67-64-1"),
+          Cst.Node("some", List(Cst.Node("list", refs))))) =>
+        refs.map { case Cst.Leaf(n) => n; case _ => "?" } == List("s1", "s2", "s16")
+      case _ => false
+    })
+    for (_, term) <- m.defs do
+      RoundTrip.check(Sds.language.grammar, term).fold(e => fail(e), identity)
+
+  test("SDS language sections: full acetone 16-section module loads through pack"):
+    import cairn.examples.sds.Chemicals
+    val m = Chemicals.Acetone.asModule
+    Sds.validate(m).fold(e => fail(e), identity)
+    assertEquals(m.defs.count(_._2 match
+      case Cst.Node("euSection", _) => true
+      case _ => false), 16)
+    // pack still closes with the new constructors
+    assert(Sds.language.constructors.contains("euSection"))
+    assert(packs.requireClosed("sds").digest == Sds.language.digest)
+
+  test("SDS language sections: ΔSDS edits euSection; domain gate rejects bad numbers/refs"):
+    import cairn.examples.sds.Chemicals
+    val base = Chemicals.Acetone.thinModule
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val ok = Parser.parse(dl.grammar,
+      """{ replace s2 = eu section 2 fields ( signalWord : "Warning" ) ; }""")
+      .fold(e => fail(e), identity)
+    val Right((m2, _)) = Sds.applySds(base, ok): @unchecked
+    assert(m2.get("s2").exists {
+      case Cst.Node("euSection", List(Cst.Leaf("2"), Cst.Node("list", List(
+          Cst.Node("sectionField", List(Cst.Leaf("signalWord"), Cst.Leaf("Warning"))))))) => true
+      case _ => false
+    })
+    val badNum = Parser.parse(dl.grammar,
+      """{ replace s2 = eu section 99 fields ( oops : "nope" ) ; }""")
+      .fold(e => fail(e), identity)
+    assert(Sds.applySds(base, badNum).swap.exists(_.contains("out of range")))
+    val dangling = Parser.parse(dl.grammar,
+      """{ replace acetoneOutline = outline "Acetone" "67-64-1" sections ( s1 , phantom ) ; }""")
+      .fold(e => fail(e), identity)
+    assert(Sds.applySds(base, dangling).swap.exists(_.contains("unknown section 'phantom'")))

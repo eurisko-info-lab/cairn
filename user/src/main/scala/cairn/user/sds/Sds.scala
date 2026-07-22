@@ -7,7 +7,8 @@ import cairn.core.*
 /** SDS pack (M47, §5b): Safety Data Sheet authoring — flagship of
   * `PKI → Law → SDS`. An SDS is NOT a flat document: it is a compiled view
   * over typed objects (substances, mixtures, phrases / corpus phrases,
-  * products, shadows, regulatory `basis` citations into Law sections).
+  * products, shadows, regulatory `basis` citations into Law sections,
+  * EU-CLP `euSection` / `outline` section maps).
   *
   * Object language: [[languages/sds.cairn]] (`provides sds requires law`).
   * Closed composition pulls Law + PKI; compose without them fails.
@@ -15,9 +16,9 @@ import cairn.core.*
   * Phrase staleness (official corpus vs free-text restale) lives in the
   * examples host machine — see `cairn.examples.sds.PhraseStaleness`.
   * Regulatory section numbering (EU-CLP 1..16 + ordering) lives in
-  * `cairn.examples.sds.SectionNumbering`. Host chemicals fixtures (acetone
-  1..16 outline) live in `cairn.examples.sds.Chemicals`. Section-map report
-  projection lives in `cairn.examples.sds.SectionReport`.
+  * `cairn.examples.sds.SectionNumbering`. Chemicals fixtures and host report
+  * projection (`Chemicals` / `SectionReport`) can project into / from
+  * language `euSection` + `outline` terms.
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -28,6 +29,9 @@ final class Sds(packs: PackAccess):
 
   /** Closed language: SDS + demoted Law + demoted PKI. */
   lazy val language: ComposedLanguage = packs.requireClosed("sds")
+
+  /** EU-CLP section numbers accepted by the ΔSDS domain gate (1..16). */
+  private val euClpNumbers: Set[Int] = (1 to 16).toSet
 
   // ---- domain validation (ΔSDS = generic ΔL + these checks) ----
 
@@ -54,6 +58,43 @@ final class Sds(packs: PackAccess):
       case Cst.Node("basis", List(Cst.Leaf(target), Cst.Leaf(section))) =>
         if !defined(target) then errs += s"basis '$name' references unknown product '$target'"
         if section.isEmpty then errs += s"basis '$name' missing Law section number"
+      case Cst.Node("euSection", List(Cst.Leaf(num), Cst.Node("list", fields))) =>
+        num.toIntOption match
+          case Some(n) if euClpNumbers.contains(n) => ()
+          case Some(n) => errs += s"euSection '$name' number $n out of range (expected 1..16)"
+          case None => errs += s"euSection '$name' number '$num' is not an integer"
+        for f <- fields do f match
+          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(_))) if k.nonEmpty => ()
+          case other => errs += s"euSection '$name': bad field ${other.render}"
+      case Cst.Node("outline", List(_, _, sectionsField)) =>
+        val refs = sectionsField match
+          case Cst.Node("none", _) => Nil
+          case Cst.Node("some", List(Cst.Node("list", rs))) => rs
+          case Cst.Node("list", rs) => rs // tolerate non-opt shape
+          case other =>
+            errs += s"outline '$name': bad sections ${other.render}"
+            Nil
+        val nums = List.newBuilder[Int]
+        for r <- refs do r match
+          case Cst.Leaf(ref) =>
+            m.get(ref) match
+              case Some(Cst.Node("euSection", List(Cst.Leaf(num), _))) =>
+                num.toIntOption match
+                  case Some(n) if euClpNumbers.contains(n) => nums += n
+                  case Some(n) =>
+                    errs += s"outline '$name' section '$ref' number $n out of range"
+                  case None =>
+                    errs += s"outline '$name' section '$ref' has non-integer number '$num'"
+              case Some(_) =>
+                errs += s"outline '$name' references '$ref' which is not an euSection"
+              case None =>
+                errs += s"outline '$name' references unknown section '$ref'"
+          case other => errs += s"outline '$name': bad section ref ${other.render}"
+        val ns = nums.result()
+        if ns.distinct.sizeIs != ns.size then
+          errs += s"outline '$name' has duplicate section numbers"
+        if ns != ns.sorted then
+          errs += s"outline '$name' section numbers not ascending: ${ns.mkString(",")}"
       case _ => ()
     val es = errs.result()
     if es.isEmpty then Right(()) else Left(es.mkString("; "))

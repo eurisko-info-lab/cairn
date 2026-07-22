@@ -50,7 +50,8 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 `SdsTutorial`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
-  `basis`); rendered document is a compiled bidirectional view.
+  `basis` / `euSection` / `outline` / `sectionField`); rendered document is a
+  compiled bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
 - ΔSDS = generic free ΔL + domain gate; multilingual phrase fallback; domain-aware
   shadow rebase with semantic conflict on overridden phrases.
@@ -65,18 +66,22 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 - Chemicals corpus fixture (`Chemicals`): acetone host document populates all 16
   EU-CLP sections with honest EN placeholder/content (demo, not a filing);
   ethanol stays sparse (1+2). Outlines pass `SectionNumbering.validateOutline`.
-  Section bodies are host-side maps — not yet `sds.cairn` constructors.
+  `Chemicals.toModule` projects into `euSection` + `outline` language terms.
+- SDS language section maps (`euSection` / `outline` / `sectionField` in
+  `sds.cairn`): ΔSDS-editable Cairn terms (Law already owns `section`, so EU-CLP
+  bodies use `euSection`). Domain gate checks 1..16 numbers, outline ref
+  integrity, and ascending order. Acetone thin + full modules round-trip the
+  surface.
 - Section report projection (`SectionReport`): host `GrammarSpec`
   (`sds-section-report`) prints outline-validated section maps with
   `RoundTrip.check` — same trust gate as `Sds.docGrammar`, for EU-CLP bodies
-  rather than product hazard lines. Not language constructors / not Studio.
+  rather than product hazard lines. Not Studio.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Section bodies not first-class SDS language objects / ΔSDS-editable fields.
 - Multilingual section fields (EN-only placeholders today).
 - Broader secondary-chemical pack depth.
 - Studio-persisted phrase-corpus / staleness UI.

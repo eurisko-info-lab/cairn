@@ -9,6 +9,9 @@ language sds {
     ctor product : SdsObj(Label, Ref, PhraseRefs);
     ctor shadow : SdsObj(Ref, Ref, Text);
     ctor basis : SdsObj(Name, Str);
+    ctor sectionField : SectionField(Name, Text);
+    ctor euSection : SdsObj(Number, Fields);
+    ctor outline : SdsObj(Label, Cas, SectionRefs);
     varctor sdsRef;
   }
 }

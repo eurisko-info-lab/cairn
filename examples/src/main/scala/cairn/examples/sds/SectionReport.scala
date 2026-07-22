@@ -8,8 +8,9 @@ import cairn.core.*
   * Compiles an outline-validated chemical document to a bidirectional
   * `GrammarSpec` surface (`sds-section-report`) — same RoundTrip trust gate as
   * `Sds.docGrammar`, but for EU-CLP section bodies rather than product hazard
-  * lines. Host-side only: section maps are not yet `sds.cairn` constructors /
-  * ΔSDS-editable fields / multilingual / Studio.
+  * lines. Language-side section maps live as `euSection` / `outline` in
+  * `sds.cairn` (see [[Chemicals.ChemicalDoc.toModule]]); this host grammar
+  * remains a report view, not Studio.
   *
   * See STATUS-2 / docs/exemplars remaining gaps.
   */

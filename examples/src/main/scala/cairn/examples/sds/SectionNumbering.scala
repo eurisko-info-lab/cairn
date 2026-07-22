@@ -7,7 +7,8 @@ package cairn.examples.sds
   * the canonical heading for that number; when listing a (possibly sparse)
   * outline, sections appear in ascending number order with no duplicates.
   * Gaps are allowed — sparse secondary chemicals populate only a few sections;
-  * acetone's fuller host fixture lives in [[Chemicals]].
+  * acetone's fuller fixture lives in [[Chemicals]] (host maps and
+  * `sds.cairn` `euSection`/`outline` via [[Chemicals.ChemicalDoc.toModule]]).
   *
   * Not Studio section UI; see STATUS-2 / docs/exemplars remaining gaps.
   */
