@@ -7,8 +7,11 @@ import cairn.ledger.Keypair
 /** Approval / signing / publication certificates as CAS `certificate`
   * artifacts fully linked from [[BranchManifest.certificates]].
   *
-  * Not Studio approval UI — digests are content-addressed and reachable from
-  * branch state alone (same recovery story as changeHistory).
+  * Kind tags are Cairn judgments (`certificateKindOk` in
+  * [[languages/sds-certificate.cairn]]); the workflow evidence chain module
+  * ([[SdsCertificateKinds]]) is disk SoT. Host minting remains effectful
+  * (Ed25519 / tip digests) — not Studio approval UI. Digests are
+  * content-addressed and reachable from branch state alone.
   */
 object SdsCertificates:
   enum Kind:
@@ -19,14 +22,20 @@ object SdsCertificates:
     case Kind.Signature    => "sds-tip-signature"
     case Kind.Publication  => "sds-publication"
 
+  private def requireKind(tag: String): Unit =
+    if !SdsCertificateKinds.checkKind(tag) then
+      throw RuntimeException(s"certificate kind '$tag' fails certificateKindOk")
+
   def mint(
       kind: Kind,
       issuer: String,
       tipDigest: Digest,
       extra: Map[String, String] = Map.empty
   ): Artifact =
+    val tag = kindTag(kind)
+    requireKind(tag)
     val fields = List(
-      "kind" -> Canon.CStr(kindTag(kind)),
+      "kind" -> Canon.CStr(tag),
       "issuer" -> Canon.CStr(issuer),
       "tip" -> Canon.CStr(tipDigest.hex)) ++
       extra.toList.sortBy(_._1).map((k, v) => k -> Canon.CStr(v))

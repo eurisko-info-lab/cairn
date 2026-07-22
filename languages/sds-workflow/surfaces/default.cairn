@@ -1,0 +1,13 @@
+surface default for sds-workflow {
+  fragment workflow {
+    keyword step;
+    keyword workflow;
+    keyword steps;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax wfObj += step : tok "step" name name;
+    syntax wfObj += workflow : tok "workflow" name tok "steps" tok "(" sepby1 name "," tok ")";
+    top wfObj;
+  }
+}

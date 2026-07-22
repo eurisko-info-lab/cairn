@@ -77,9 +77,10 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 - **Report projection (not SDS language):** `sds-report` pack under
   `languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv`
   *consume* SDS modules/outlines. PDF deferred. RoundTrip trust gate.
-- Causal workflow (`SdsCausalWorkflow`): author → shadow tip → merge rebase →
-  conflict → approve → linked approval/sign/publication certificates →
-  `publishHead`.
+- Causal workflow: `languages/sds-workflow.cairn` + `causal.cairn` (checked
+  sequence); host `SdsCausalWorkflow` runs effectful Branches/ledger steps
+  and attaches judgment-checked certificates (`sds-certificate` /
+  `certificateKindOk`).
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
@@ -91,6 +92,9 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); `Family`/`Action` enums + Fragment/
   `packDecls` cold-start seeds remain host bridges (verified against disk).
+- **Scala orchestration residual:** `Sds.validate` / `EuClp.conform` outline
+  walks, `SectionReport.toCst`, and effectful causal/cert minting — facts and
+  encodings are Cairn; drivers remain host.
 - BFT replication (replay sync is digest-merge only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
   lang-scoped shadows still absent (shadows are lang-blind).

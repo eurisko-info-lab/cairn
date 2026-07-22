@@ -506,7 +506,7 @@ class ExemplarPackSuite extends munit.FunSuite:
     val badNum = Parser.parse(dl.grammar,
       """{ replace s2 = eu section 99 fields ( oops lang en : "nope" ) ; }""")
       .fold(e => fail(e), identity)
-    assert(Sds.applySds(base, badNum).swap.exists(_.contains("out of range")))
+    assert(Sds.applySds(base, badNum).swap.exists(_.contains("sectionNumberOk")))
     val dangling = Parser.parse(dl.grammar,
       """{ replace acetoneOutline = outline "Acetone" "67-64-1" sections ( s1 , phantom ) ; }""")
       .fold(e => fail(e), identity)
@@ -817,6 +817,46 @@ class ExemplarPackSuite extends munit.FunSuite:
     val full = EuClp.conform(Chemicals.Acetone.asModule)
     assert(full.ok, full.errors.mkString("; "))
     assertEquals(full.sectionNumbers, (1 to 16).toList)
+
+  test("SDS workflow + certificate packs: language-checked sequence/evidence; PackLoader load"):
+    import cairn.examples.sds.{
+      ChemicalSource, Chemicals, EuClp, SectionReport, SdsCertificateKinds, SdsWorkflow}
+    // Workflow script + cert kinds are ordinary Cairn modules (no Scala recompile).
+    assert(SdsWorkflow.language.judgments.contains("workflowStepOk"))
+    assert(SdsWorkflow.language.judgments.contains("workflowPhaseOk"))
+    assertEquals(
+      SdsWorkflow.causalStepNames,
+      List("author", "shadow", "rebase", "conflict", "approve", "sign", "publish"))
+    assert(SdsWorkflow.checkStep("author"))
+    assert(!SdsWorkflow.checkStep("notAStep"))
+    assert(SdsCertificateKinds.language.judgments.contains("certificateKindOk"))
+    assertEquals(
+      SdsCertificateKinds.workflowKinds,
+      List("sds-approval", "sds-tip-signature", "sds-publication"))
+    assert(SdsCertificateKinds.checkKind("sds-approval"))
+    assert(!SdsCertificateKinds.checkKind("sds-bogus"))
+    // Verified application spine: chemical + EU-CLP conform + report surface print.
+    val chem = Chemicals.Acetone.thinModule
+    Sds.validate(chem).fold(e => fail(e), identity)
+    assert(Sds.checkSectionNumber("1"))
+    assert(!Sds.checkSectionNumber("17"))
+    val conf = EuClp.conform(chem)
+    assert(conf.ok, conf.errors.mkString("; "))
+    val report = SectionReport.printSurface(
+      "json",
+      SectionReport.toCst(chem, "acetoneOutline").fold(e => fail(e), identity))
+      .fold(e => fail(e), identity)
+    assert(report.contains("number:1,title:\"Identification\""))
+    // Digests stable across reload (content-addressed distribution).
+    val wfReload = ChemicalSource.loadModule(
+      SdsWorkflow.language, java.nio.file.Path.of("languages/sds-workflow/causal.cairn"))
+      .fold(e => fail(e), identity)
+    assertEquals(wfReload.digest, SdsWorkflow.causalModule.digest)
+    val certReload = ChemicalSource.loadModule(
+      SdsCertificateKinds.language,
+      java.nio.file.Path.of("languages/sds-certificate/workflow-kinds.cairn"))
+      .fold(e => fail(e), identity)
+    assertEquals(certReload.digest, SdsCertificateKinds.workflowKindsModule.digest)
 
   test("effect bootstrap: interface lang + all packs; ActionKey.fromPinned; host seed fixpoint"):
     val loaded = cairn.runtime.EffectBootstrap.load(packs).fold(e => fail(e), identity)

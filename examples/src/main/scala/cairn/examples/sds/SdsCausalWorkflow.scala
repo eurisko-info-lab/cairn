@@ -8,17 +8,19 @@ import cairn.ledger.Keypair
 import cairn.runtime.PackLoader
 import java.nio.file.{Files, Path}
 
-/** First complete SDS workflow through the causal repository:
-  * author → shadow tip → rebase (merge) → conflict → approve → sign → publish.
+/** SDS verified-application path through the causal repository.
   *
-  * Uses [[Branches.commitTip]] / [[Branches.mergeBranches]] /
-  * [[Branches.publishHead]]. Issuer evidence at the publish boundary is a
-  * [[Authority.VerifiedCapability]] (fromProof) plus approval / tip-signature /
-  * publication certificates linked on [[BranchManifest.certificates]] —
-  * not Studio approval UI.
+  * Scripted sequence is disk SoT ([[SdsWorkflow.causal]]: author → shadow →
+  * rebase → conflict → approve → sign → publish). This host runs the
+  * *effectful* steps under authority (CAS / Branches / Ed25519 / ledger) and
+  * attaches judgment-checked certificate kinds ([[SdsCertificateKinds]]).
+  * Not Studio approval UI.
   */
 object SdsCausalWorkflow:
   final case class Report(
+      workflowDigest: Digest,
+      workflowSteps: List[String],
+      certificateKindTags: List[String],
       authorDigest: Digest,
       industrialDigest: Digest,
       rebaseMerged: Boolean,
@@ -41,10 +43,24 @@ object SdsCausalWorkflow:
     def parse(src: String): Cst =
       Parser.parse(dl.grammar, src).fold(e => throw RuntimeException(e), identity)
 
+    // Load + judgment-check workflow / certificate packs before effectful steps.
+    val wf = SdsWorkflow.causal
+    if wf.steps.map(_.name) != List(
+        "author", "shadow", "rebase", "conflict", "approve", "sign", "publish") then
+      throw RuntimeException(s"unexpected causal steps: ${wf.steps}")
+    val certKinds = SdsCertificateKinds.workflowKinds
+    if certKinds != List("sds-approval", "sds-tip-signature", "sds-publication") then
+      throw RuntimeException(s"unexpected certificate kinds: $certKinds")
+
     val cas = DiskCas(work.resolve("cas"))
     val branches = Branches(cas, work.resolve("refs"), EffectContext.forBranches())
     val base = SdsTutorial.acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
+    // Language-checked chemical path (outline + EU-CLP) is orthogonal to the
+    // phrase-corpus acetoneBase used for causal rebase/conflict demos.
+    EuClp.conform(Chemicals.Acetone.thinModule) match
+      case r if !r.ok => throw RuntimeException(s"EU-CLP conform: ${r.errors.mkString("; ")}")
+      case _ => ()
 
     // 1. Author
     branches.commitModule("sds-author", base)
@@ -132,6 +148,9 @@ object SdsCausalWorkflow:
     val ledgerPublished = node.state(auth).fold(e => throw RuntimeException(e), _.heads.contains("sds-approved"))
 
     Report(
+      workflowDigest = SdsWorkflow.causalModule.digest,
+      workflowSteps = wf.steps.map(_.name),
+      certificateKindTags = certKinds,
       authorDigest = base.digest,
       industrialDigest = industrialTip.tipDigest,
       rebaseMerged = rebaseMerged,

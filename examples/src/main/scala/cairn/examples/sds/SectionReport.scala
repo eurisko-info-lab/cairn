@@ -13,8 +13,11 @@ import cairn.user.sds.Sds
   * to project those documents: `languages/sds-report.cairn` + surfaces under
   * `languages/sds-report/surfaces/` (`default` text, `json`, `xml`, `csv`).
   * Host maps ([[Chemicals.ChemicalDoc]]) and SDS modules both compile to the
-  * same report CST. PDF remains deferred (no library). RoundTrip is the trust
-  * gate — same pattern as other surface packs, not SDS object vocabulary.
+  * same report CST via [[toCst]] (host projection residual). Printing goes
+  * through [[printSurface]] — PackLoader surface bind + RoundTrip — so
+  * JSON/XML/CSV encodings load without recompiling Scala. PDF remains
+  * deferred. RoundTrip is the trust gate — same pattern as other surface
+  * packs, not SDS object vocabulary.
   */
 object SectionReport:
   private lazy val packs = PackLoader(EffectContext.forPackLoader())
@@ -153,8 +156,21 @@ object SectionReport:
   def render(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
       cst <- toCst(module, outlineName, lang)
-      text <- Printer.print(grammar, cst)
-      _ <- RoundTrip.check(grammar, cst)
+      text <- printSurface("default", cst)
+    yield text
+
+  /** Thin host printer: PackLoader surface bind + RoundTrip.print.
+    * Projection CST building ([[toCst]]) remains host; encodings are
+    * ordinary `sds-report` surfaces loadable without recompiling Scala.
+    */
+  def printSurface(surface: String, report: Cst): Either[String, String] =
+    val g = packs.requireClosed("sds-report", surface).grammar
+    // json uses `opt sepby1` (some/none); xml/csv/default use `star`/`list`.
+    val adapted = if surface == "json" then forOptSurface(report) else Right(report)
+    for
+      cst <- adapted
+      text <- Printer.print(g, cst)
+      _ <- RoundTrip.check(g, cst)
     yield text
 
   def renderJson(doc: Chemicals.ChemicalDoc): Either[String, String] =
@@ -170,9 +186,7 @@ object SectionReport:
   def renderJson(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
       base <- toCst(module, outlineName, lang)
-      cst <- forOptSurface(base)
-      text <- Printer.print(jsonGrammar, cst)
-      _ <- RoundTrip.check(jsonGrammar, cst)
+      text <- printSurface("json", base)
     yield text
 
   def renderXml(doc: Chemicals.ChemicalDoc): Either[String, String] =
@@ -188,8 +202,7 @@ object SectionReport:
   def renderXml(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
       cst <- toCst(module, outlineName, lang)
-      text <- Printer.print(xmlGrammar, cst)
-      _ <- RoundTrip.check(xmlGrammar, cst)
+      text <- printSurface("xml", cst)
     yield text
 
   def renderCsv(doc: Chemicals.ChemicalDoc): Either[String, String] =
@@ -205,7 +218,6 @@ object SectionReport:
   def renderCsv(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
       cst <- toCst(module, outlineName, lang)
-      text <- Printer.print(csvGrammar, cst)
-      _ <- RoundTrip.check(csvGrammar, cst)
+      text <- printSurface("csv", cst)
     yield text
 end SectionReport

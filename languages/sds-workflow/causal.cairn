@@ -1,0 +1,8 @@
+author = step author write ;
+shadow = step shadow write ;
+rebase = step rebase merge ;
+conflict = step conflict detect ;
+approve = step approve authority ;
+sign = step sign evidence ;
+publish = step publish ledger ;
+sdsCausal = workflow sdsCausal steps (author, shadow, rebase, conflict, approve, sign, publish) ;

@@ -64,11 +64,11 @@ object EuClp:
     *   - at least one `outline` with ascending unique section refs
     *   - each body resolves to an EU-CLP number accepted by `sectionNumberOk`
     *   - annex-II titles accepted by `sectionTitleOk` (not host-only compare)
-    *   - SDS domain validate passes
+    *   - SDS domain validate passes (`sectionNumberOk` + `translationStateTag`)
     *   - profile version accepted by `profileVersionOk`
     *
-    * This is still a host orchestration over SDS modules; the *facts* are
-    * Cairn judgments in `eu-clp`. Not Studio.
+    * Residual Scala orchestration: outline walk / ascending-unique structural
+    * checks. The *facts* are Cairn judgments in `eu-clp`. Not Studio.
     */
   def conform(m: Module, outlineName: Option[String] = None): ConformanceReport =
     val errs = List.newBuilder[String]

@@ -65,18 +65,28 @@ object SectionNumbering:
     case Duplicate(number: Int)
     case OutOfOrder(numbers: List[Int])
 
-  /** Validate a (possibly sparse) outline against EU-CLP numbering rules. */
+  /** Validate a (possibly sparse) outline against EU-CLP numbering rules.
+    * Number/title legality prefer Cairn judgments (`sectionNumberOk` /
+    * `sectionTitleOk`); ascending/unique remain host structural checks.
+    */
   def validateOutline(entries: List[OutlineEntry]): Either[List[OutlineError], List[SectionDef]] =
     val errs = List.newBuilder[OutlineError]
     val seen = scala.collection.mutable.LinkedHashSet.empty[Int]
     for e <- entries do
-      if !byNumber.contains(e.number) then
-        errs += OutlineError.BadNumber(e.number.toString, "out of range (expected 1..16)")
+      val numOk =
+        try EuClp.checkSectionNumber(e.number.toString)
+        catch case _: Throwable => byNumber.contains(e.number)
+      if !numOk then
+        errs += OutlineError.BadNumber(e.number.toString, "fails sectionNumberOk / out of range")
       else
-        byNumber.get(e.number).foreach { expected =>
-          if e.title != expected then
-            errs += OutlineError.TitleMismatch(e.number, e.title, expected)
+        val expectedTitle = byNumber.get(e.number)
+        val titleOk = expectedTitle.exists { expected =>
+          try EuClp.checkSectionTitle(e.number.toString, expected) && e.title == expected
+          catch case _: Throwable => e.title == expected
         }
+        if !titleOk then
+          errs += OutlineError.TitleMismatch(
+            e.number, e.title, expectedTitle.getOrElse("?"))
         if !seen.add(e.number) then errs += OutlineError.Duplicate(e.number)
     val nums = entries.map(_.number)
     if nums != nums.sorted then errs += OutlineError.OutOfOrder(nums)

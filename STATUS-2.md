@@ -35,8 +35,12 @@ lang-aware report), all ten effect-interface `.cairn` packs +
 grant-bundle threading in SDS causal, STLC/meta runtime SoT, format-preserving
 remove/rename docs + dirty-subtree `putReassociated`, process command
 narrowing, Bend Church numerals / LeanCore transparent unfold / Unison
-`call` graph. Architecture: SDS language proper vs report surface packs stay
-separated (Phase 2/3). Full suite: **504 tests** (502 passed + 2 skipped; `tests` module; `sbt test`).
+`call` graph, plus a **domain/workflow Cairn-ization pass**: SDS ΔSDS gates
+via `sectionNumberOk`/`translationStateTag` judgments, `sds-workflow` +
+`sds-certificate` packs (causal sequence + evidence kinds as checked
+artifacts), thin `SectionReport.printSurface`, and honest Scala
+orchestration residuals. Architecture: SDS language proper vs report surface
+packs stay separated (Phase 2/3). Full suite: **505 tests** (503 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -46,13 +50,14 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | # | Priority | Status | Evidence |
 |---|---|---|---|
 | 1 | Typed SDS sections 1–16 | **Done** | all 16 typed ctors in `sds.cairn`; thin acetone/ethanol use typed bodies |
-| 2 | Regulatory-profile conformance (full module) | **Done** | `EuClp.conform` + Cairn `sectionNumberOk`/`sectionTitleOk`/`profileVersionOk` |
+| 2 | Regulatory-profile conformance (full module) | **Done** | `EuClp.conform` + Cairn judgments; ΔSDS validate uses `sectionNumberOk` |
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
-| 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `sds-report` surfaces only — **not** SDS language; PDF deferred |
-| 5 | Approve/sign/publication certs as linked CAS | **Done** | `BranchManifest.certificates` + `SdsCertificates.attachWorkflow` |
+| 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `printSurface` = PackLoader + print; `toCst` host residual; PDF deferred |
+| 5 | Approve/sign/publication certs as linked CAS | **Done** | `certificateKindOk` + workflow-kinds module; BranchManifest digests |
 | 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-interface` lang + `iface.cairn` decls SoT; Family/Action enums host bridge; vocab Fragment host seed |
 | 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
 | 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; merge-only, **BFT deferred** |
+| 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + causal module; Scala runs effectful steps |
 
 ## Architecture note — SDS vs report formats
 
@@ -83,7 +88,7 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 | 7 | Branch manifests alone reach semantic history | **Done** | `changeHistory` + `certificates`; sidecars caches |
 | 8 | VerifiedCapability / issuer evidence at trust boundaries | **Advanced** | grant-bundle on EffectContext; SDS causal capability-first put |
 | 9 | Widen Lean/HVM only via explicit corpus claims | **Done (process)** | No new claim this pass |
-| 10 | Complete SDS workflow through causal repo | **Advanced** | `SdsCausalWorkflow` + ParitySuite; **Studio deferred** |
+| 10 | Complete SDS workflow through causal repo | **Advanced** | `sds-workflow` pack + `SdsCausalWorkflow` effectful driver; **Studio deferred** |
 
 ## Story scorecard
 
@@ -268,4 +273,11 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   `languages/effect-*.cairn`. Residual host bridges: `Effects.Family` /
   `Effects.Action` enums (interpreter routing) + cold-start Fragment /
   `packDecls` seeds (verified against disk).
+- **Scala orchestration residual (SDS use-cases):** effectful causal steps
+  (`Branches` / Ed25519 / ledger), `EuClp.conform` / `Sds.validate` outline
+  walks (ascending/unique structural), `SectionReport.toCst` projection CST
+  build, and certificate *minting* remain host. Disk SoT for workflow
+  sequence (`sds-workflow`), certificate kinds (`sds-certificate`), EU-CLP
+  judgments, chemical instances, and report *encodings* (`sds-report`
+  surfaces) load via PackLoader/CAS without recompiling Scala.
 - GRANITE SDS depth / Lean proof bodies / BFT — see above.

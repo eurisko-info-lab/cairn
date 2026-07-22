@@ -1,0 +1,13 @@
+language sds-certificate {
+  fragment certificate provides sdsCertificate {
+    sort CertObj tree;
+    ctor kind : CertObj(Tag);
+    ctor evidenceChain : CertObj(Id, KindRefs);
+    varctor certRef;
+    judgment certificateKindOk {
+      rule ck-approval :    |- certificateKindOk("sds-approval");
+      rule ck-signature :   |- certificateKindOk("sds-tip-signature");
+      rule ck-publication : |- certificateKindOk("sds-publication");
+    }
+  }
+}

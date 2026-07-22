@@ -1,0 +1,13 @@
+surface default for sds-certificate {
+  fragment certificate {
+    keyword kind;
+    keyword evidence;
+    keyword chain;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax certObj += kind : tok "kind" str;
+    syntax certObj += evidenceChain : tok "evidence" tok "chain" name tok "(" sepby1 name "," tok ")";
+    top certObj;
+  }
+}

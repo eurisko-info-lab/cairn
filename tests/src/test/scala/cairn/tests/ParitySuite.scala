@@ -70,6 +70,13 @@ class ParitySuite extends munit.FunSuite:
     import cairn.examples.sds.SdsCausalWorkflow
     val work = java.nio.file.Files.createTempDirectory("cairn-sds-causal")
     val r = SdsCausalWorkflow.run(work)
+    assertEquals(
+      r.workflowSteps,
+      List("author", "shadow", "rebase", "conflict", "approve", "sign", "publish"))
+    assertEquals(
+      r.certificateKindTags,
+      List("sds-approval", "sds-tip-signature", "sds-publication"))
+    assert(r.workflowDigest.hex.nonEmpty)
     assert(r.rebaseMerged, "disjoint industrial+pct merge should accept")
     assert(r.conflictOverlap.contains("h225"), r.conflictOverlap.toString)
     assertEquals(r.historyFromManifestAlone, 2)

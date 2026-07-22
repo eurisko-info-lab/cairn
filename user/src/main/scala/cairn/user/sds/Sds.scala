@@ -16,12 +16,14 @@ import cairn.core.*
   * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
   * Phrase + section-field staleness: `translationState` / `sectionFieldState`
   * + `translationStateTag` judgment; host derive/apply emit real ΔSDS
-  * changesets. Regulatory conformance prefers the versioned `eu-clp` pack
-  * (`EuClp.conform` / `sectionNumberOk`). Chemical instances load from
-  * `languages/sds/chemicals/` `.cairn` files (`ChemicalSource`); host maps
-  * remain emit fixtures. Report encodings (JSON/XML/CSV/PDF/XLS) are **not**
-  * SDS vocabulary — they live in the separate `sds-report` projection pack
-  * ([[cairn.examples.sds.SectionReport]]) that *consumes* SDS modules/outlines.
+  * changesets. Regulatory conformance: ΔSDS domain gate calls `eu-clp`
+  * `sectionNumberOk` and SDS `translationStateTag` judgments (not host-only
+  * Sets); full-module [[EuClp.conform]] remains a thin host walk over those
+  * facts. Chemical instances load from `languages/sds/chemicals/` `.cairn`
+  * files (`ChemicalSource`); host maps remain emit fixtures. Report encodings
+  * (JSON/XML/CSV/PDF/XLS) are **not** SDS vocabulary — they live in the
+  * separate `sds-report` projection pack ([[cairn.examples.sds.SectionReport]])
+  * that *consumes* SDS modules/outlines.
   * `sectionField` / `sectionFieldRef` resolve with multilingual fallback, then
   * `sectionFieldShadow` overrides. Typed sections flatten to the same
   * key/lang resolution path.
@@ -36,8 +38,8 @@ final class Sds(packs: PackAccess):
   /** Closed language: SDS + demoted Law + demoted PKI. */
   lazy val language: ComposedLanguage = packs.requireClosed("sds")
 
-  /** EU-CLP section numbers accepted by the ΔSDS domain gate (1..16). */
-  private val euClpNumbers: Set[Int] = (1 to 16).toSet
+  /** EU-CLP regulatory judgments (`sectionNumberOk`) — disk SoT via PackLoader. */
+  private lazy val euClpLanguage: ComposedLanguage = packs.requireClosed("eu-clp")
 
   private val identificationKeys: Set[String] = Set(
     "productName", "synonyms", "recommendedUse", "usesAdvisedAgainst",
@@ -123,9 +125,13 @@ final class Sds(packs: PackAccess):
     "regulatorySection" -> List("regulatoryInfo", "reachStatus", "usInventory"),
     "otherInformationSection" -> List("revisionDate", "otherInformation"))
 
-  private val translationStateTags: Set[String] = Set(
-    "officialCorpus", "humanReviewed", "aiDraft",
-    "staleBecauseSourceChanged", "rejected")
+  /** Kernel-check `sectionNumberOk` (eu-clp pack) — ΔSDS domain gate uses this,
+    * not a host-only 1..16 Set.
+    */
+  def checkSectionNumber(n: String): Boolean =
+    val cfg = CheckerCfg(euClpLanguage.judgments.values.toList)
+    val goal = Cst.node("sectionNumberOk", Cst.Leaf(n))
+    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
 
   /** EU-CLP number implied by a section body ctor. */
   def sectionNumber(sec: Cst): Option[Int] = sec match
@@ -226,7 +232,7 @@ final class Sds(packs: PackAccess):
           } then errs += s"translationState '$name' references unknown phrase '$phrase'"
         if lang.isEmpty then errs += s"translationState '$name': empty lang"
         if hash.isEmpty then errs += s"translationState '$name': empty from-hash"
-        if !translationStateTags.contains(tag) then
+        if !checkTranslationStateTag(tag) then
           errs += s"translationState '$name': unknown state tag '$tag'"
         else if phrase.nonEmpty && lang.nonEmpty && !seenTranslationStates.add((phrase, lang)) then
           errs += s"translationState '$name' duplicate mark for '$phrase' lang '$lang'"
@@ -242,7 +248,7 @@ final class Sds(packs: PackAccess):
         if key.isEmpty then errs += s"sectionFieldState '$name': empty field key"
         if lang.isEmpty then errs += s"sectionFieldState '$name': empty lang"
         if hash.isEmpty then errs += s"sectionFieldState '$name': empty from-hash"
-        if !translationStateTags.contains(tag) then
+        if !checkTranslationStateTag(tag) then
           errs += s"sectionFieldState '$name': unknown state tag '$tag'"
         else if sec.nonEmpty && key.nonEmpty && lang.nonEmpty &&
             !seenFieldStates.add((sec, key, lang)) then
@@ -252,8 +258,8 @@ final class Sds(packs: PackAccess):
         if section.isEmpty then errs += s"basis '$name' missing Law section number"
       case Cst.Node("euSection", List(Cst.Leaf(num), Cst.Node("list", fields))) =>
         num.toIntOption match
-          case Some(n) if euClpNumbers.contains(n) => ()
-          case Some(n) => errs += s"euSection '$name' number $n out of range (expected 1..16)"
+          case Some(n) if checkSectionNumber(n.toString) => ()
+          case Some(n) => errs += s"euSection '$name' number $n fails sectionNumberOk"
           case None => errs += s"euSection '$name' number '$num' is not an integer"
         val seen = scala.collection.mutable.HashSet.empty[(String, String)]
         for f <- fields do f match
@@ -405,9 +411,9 @@ final class Sds(packs: PackAccess):
             m.get(ref) match
               case Some(sec) =>
                 sectionNumber(sec) match
-                  case Some(n) if euClpNumbers.contains(n) => nums += n
+                  case Some(n) if checkSectionNumber(n.toString) => nums += n
                   case Some(n) =>
-                    errs += s"outline '$name' section '$ref' number $n out of range"
+                    errs += s"outline '$name' section '$ref' number $n fails sectionNumberOk"
                   case None =>
                     errs += s"outline '$name' references '$ref' which is not a section body"
               case None =>

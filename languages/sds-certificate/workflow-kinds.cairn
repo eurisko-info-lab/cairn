@@ -1,0 +1,4 @@
+approval = kind "sds-approval" ;
+signature = kind "sds-tip-signature" ;
+publication = kind "sds-publication" ;
+sdsWorkflowEvidence = evidence chain sdsWorkflow (approval, signature, publication) ;

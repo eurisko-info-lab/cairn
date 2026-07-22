@@ -64,7 +64,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    Journaled accept is local (CAS → journal → refs) — not a distributed
    atomic transaction. SDS *uses* report projection pack `sds-report`
    (text + JSON + XML + CSV surfaces under `languages/sds-report/surfaces/`);
-   formats are **not** SDS vocabulary. PDF deferred; BFT deferred.
+   print path is PackLoader + RoundTrip (`SectionReport.printSurface`);
+   `toCst` remains host projection. Causal workflow sequence and certificate
+   kinds are Cairn packs (`sds-workflow`, `sds-certificate`); Scala runs
+   effectful Branches/Ed25519/ledger steps under authority. Formats are
+   **not** SDS vocabulary. PDF deferred; BFT deferred.
 7. **Rename footprint in the MVP transcript** is `[]` because the demo module's
    other definitions do not reference `id`; max.cairn exercises the non-empty
    and failing cases.

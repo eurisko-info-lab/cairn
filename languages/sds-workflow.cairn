@@ -1,0 +1,25 @@
+language sds-workflow {
+  fragment workflow provides sdsWorkflow {
+    sort WfObj tree;
+    ctor step : WfObj(Name, Phase);
+    ctor workflow : WfObj(Id, StepRefs);
+    varctor workflowRef;
+    judgment workflowStepOk {
+      rule ws-author :   |- workflowStepOk("author");
+      rule ws-shadow :   |- workflowStepOk("shadow");
+      rule ws-rebase :   |- workflowStepOk("rebase");
+      rule ws-conflict : |- workflowStepOk("conflict");
+      rule ws-approve :  |- workflowStepOk("approve");
+      rule ws-sign :     |- workflowStepOk("sign");
+      rule ws-publish :  |- workflowStepOk("publish");
+    }
+    judgment workflowPhaseOk {
+      rule wp-write :    |- workflowPhaseOk("write");
+      rule wp-merge :    |- workflowPhaseOk("merge");
+      rule wp-detect :   |- workflowPhaseOk("detect");
+      rule wp-authority :|- workflowPhaseOk("authority");
+      rule wp-evidence : |- workflowPhaseOk("evidence");
+      rule wp-ledger :   |- workflowPhaseOk("ledger");
+    }
+  }
+}

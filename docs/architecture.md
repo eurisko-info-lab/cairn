@@ -225,7 +225,14 @@ LeanCore `#check` envelope.
   Not multi-node consensus / BFT.
 - **SDS vs report formats** — SDS (`languages/sds.cairn`) is semantic only.
   JSON/XML/CSV(+ deferred PDF) are `sds-report` projection surfaces that
-  *consume* SDS modules — not SDS constructors.
+  *consume* SDS modules — not SDS constructors. Host residual: `toCst`;
+  print path is `SectionReport.printSurface` (PackLoader + RoundTrip).
+- **SDS workflow / evidence packs** — `languages/sds-workflow.cairn` +
+  `causal.cairn` declare the author→…→publish sequence (`workflowStepOk` /
+  `workflowPhaseOk`). `languages/sds-certificate.cairn` +
+  `workflow-kinds.cairn` declare approval/sign/publication kinds
+  (`certificateKindOk`). `SdsCausalWorkflow` is the thin effectful driver.
+  Residual: CAS/Branches/Ed25519/ledger orchestration stays Scala.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches
