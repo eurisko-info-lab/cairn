@@ -1,8 +1,7 @@
 package cairn.tests
 
-import cairn.systemhandler.{CasEffects, EffectContext}
+import cairn.systemhandler.{CasEffects, EffectContext, Keypair, Node}
 import cairn.kernel.*
-import cairn.ledger.{Keypair, Node}
 import cairn.surface.BrowserServer
 import cairn.core.Module
 import java.net.URI
@@ -115,4 +114,51 @@ class BrowserSuite extends munit.FunSuite:
       val (byDig, digBody) = get(port, s"/api/board?digest=${board.digest.hex}")
       assertEquals(byDig, 200)
       assert(digBody.contains(board.digest.hex), digBody)
+    finally srv.stop()
+
+  test("browser trust API: revoke + delegate publish CAS digests"):
+    import cairn.systemhandler.{DelegationLog, RevocationLog}
+    val root = Files.createTempDirectory("cairn-ui-trust")
+    val node = Node(root, EffectContext.forLedger())
+    val rev = RevocationLog()
+    val del = DelegationLog()
+    val srv = BrowserServer(node, Map.empty, 0, revocations = rev, delegations = del)
+    val port = srv.start()
+    try
+      val (tCode, trust) = get(port, "/api/trust")
+      assertEquals(tCode, 200)
+      assert(trust.contains("revokedCount"), trust)
+      assert(trust.contains("delegationCount"), trust)
+
+      val revokeBody = """{"grantId":"grant-demo-1"}"""
+      val revResp = client.send(
+        HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port/api/trust/revoke"))
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(revokeBody)).build(),
+        HttpResponse.BodyHandlers.ofString())
+      assertEquals(revResp.statusCode(), 200)
+      assert(revResp.body().contains("grant-demo-1"), revResp.body())
+      assert(rev.isRevoked("grant-demo-1"))
+
+      val dlgBody =
+        """{"grantor":"alice","grantee":"bob","action":"Cas.put","resourceKind":"cas","resourcePath":"*","depth":"1"}"""
+      val dlgResp = client.send(
+        HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port/api/trust/delegate"))
+          .header("Content-Type", "application/json")
+          .POST(HttpRequest.BodyPublishers.ofString(dlgBody)).build(),
+        HttpResponse.BodyHandlers.ofString())
+      assertEquals(dlgResp.statusCode(), 200, dlgResp.body())
+      assert(dlgResp.body().contains("alice"), dlgResp.body())
+      assertEquals(del.snapshot.length, 1)
+
+      val (rCode, revs) = get(port, "/api/trust/revocations")
+      assertEquals(rCode, 200)
+      assert(revs.contains("grant-demo-1"), revs)
+      val (dCode, dels) = get(port, "/api/trust/delegations")
+      assertEquals(dCode, 200)
+      assert(dels.contains("\"grantee\":\"bob\""), dels)
+
+      val (jsCode, js) = get(port, "/ui/app.js")
+      assertEquals(jsCode, 200)
+      assert(js.contains("loadTrust") || js.contains("trust/revocations"), js)
     finally srv.stop()

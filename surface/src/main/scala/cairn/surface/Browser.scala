@@ -2,8 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasAdminEffects, CasEffects, EffectContext}
-import cairn.ledger.Node
+import cairn.systemhandler.{CasAdminEffects, CasEffects, DelegationLog, EffectContext, Node, RevocationLog}
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets.UTF_8
@@ -20,6 +19,9 @@ import java.nio.file.Path
  *   GET  /api/artifacts/{digest}/view?lang=&surface=text|json|canon
  *   GET  /api/board[?digest=] — Fact–Intent–Hint graph over an IR module
  *   GET  /api/languages, /api/cas/stats
+ *   GET  /api/trust — revocation + delegation overview
+ *   GET  /api/trust/revocations, POST /api/trust/revoke
+ *   GET  /api/trust/delegations, POST /api/trust/delegate
  *   POST /api/parse  body JSON lang+text — validate editor buffer
  *   GET  / and /ui/... — static UI assets
  */
@@ -28,6 +30,8 @@ final class BrowserServer(
     languages: Map[String, ComposedLanguage],
     port: Int = 0,
     fsCtx: EffectContext = EffectContext.forFilesystem(),
+    revocations: RevocationLog = RevocationLog(),
+    delegations: DelegationLog = DelegationLog(),
 ):
   private var server: HttpServer | Null = null
   private val uiRoot = "cairn/ui"
@@ -189,6 +193,22 @@ final class BrowserServer(
                 "objects" -> Json.num(st.objects.toLong),
                 "bytes" -> Json.num(st.bytes),
                 "byKind" -> Json.obj(st.byKind.toList.sortBy(_._1).map((k, n) => k -> Json.num(n.toLong))*)))
+        case ("GET", "trust") =>
+          json(ex, 200, trustOverviewJson)
+        case ("GET", "trust/revocations") =>
+          json(ex, 200, revocationsJson)
+        case ("POST", "trust/revoke") =>
+          val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
+          trustRevoke(body) match
+            case Left(e)  => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("GET", "trust/delegations") =>
+          json(ex, 200, delegationsJson)
+        case ("POST", "trust/delegate") =>
+          val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
+          trustDelegate(body) match
+            case Left(e)  => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
         case ("POST", "parse") =>
           val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
           parseEditor(body) match
@@ -396,30 +416,7 @@ final class BrowserServer(
   private def parseEditor(raw: String): Either[String, String] =
     // minimal JSON field extract: "lang":"...","text":"..."
     def field(name: String): Either[String, String] =
-      val key = s"\"$name\""
-      val i = raw.indexOf(key)
-      if i < 0 then Left(s"missing field $name")
-      else
-        val colon = raw.indexOf(':', i + key.length)
-        val q1 = raw.indexOf('"', colon + 1)
-        if q1 < 0 then Left(s"bad field $name")
-        else
-          val b = StringBuilder()
-          var j = q1 + 1
-          var ok = true
-          while ok && j < raw.length do
-            raw.charAt(j) match
-              case '"'  => ok = false
-              case '\\' if j + 1 < raw.length =>
-                raw.charAt(j + 1) match
-                  case 'n' => b += '\n'; j += 2
-                  case 't' => b += '\t'; j += 2
-                  case 'r' => b += '\r'; j += 2
-                  case '"' => b += '"'; j += 2
-                  case '\\' => b += '\\'; j += 2
-                  case c => b += c; j += 2
-              case c => b += c; j += 1
-          Right(b.result())
+      jsonField(raw, name)
     for
       langName <- field("lang")
       text <- field("text")
@@ -431,6 +428,100 @@ final class BrowserServer(
       "lang" -> Json.str(langName),
       "cst" -> Json.ofCst(cst),
       "printed" -> Json.str(printed))
+
+  private def jsonField(raw: String, name: String): Either[String, String] =
+    val key = s"\"$name\""
+    val i = raw.indexOf(key)
+    if i < 0 then Left(s"missing field $name")
+    else
+      val colon = raw.indexOf(':', i + key.length)
+      val q1 = raw.indexOf('"', colon + 1)
+      if q1 < 0 then Left(s"bad field $name")
+      else
+        val b = StringBuilder()
+        var j = q1 + 1
+        var ok = true
+        while ok && j < raw.length do
+          raw.charAt(j) match
+            case '"'  => ok = false
+            case '\\' if j + 1 < raw.length =>
+              raw.charAt(j + 1) match
+                case 'n' => b += '\n'; j += 2
+                case 't' => b += '\t'; j += 2
+                case 'r' => b += '\r'; j += 2
+                case '"' => b += '"'; j += 2
+                case '\\' => b += '\\'; j += 2
+                case c => b += c; j += 2
+            case c => b += c; j += 1
+        Right(b.result())
+
+  private def jsonFieldOpt(raw: String, name: String): Option[String] =
+    jsonField(raw, name).toOption.filter(_.nonEmpty)
+
+  private def trustOverviewJson: String =
+    Json.obj(
+      "revokedCount" -> Json.num(revocations.snapshot.size.toLong),
+      "revocationDigests" -> Json.arr(revocations.digests.toList.sortBy(_.hex).map(d => Json.str(d.hex))),
+      "delegationCount" -> Json.num(delegations.snapshot.size.toLong),
+      "delegationDigests" -> Json.arr(delegations.digests.toList.sortBy(_.hex).map(d => Json.str(d.hex))),
+      "note" -> Json.str(
+        "Explorer surfaces over ReplayReplication / RevocationLog / DelegationLog — digest-merge, not BFT; no Studio."))
+
+  private def revocationsJson: String =
+    Json.obj(
+      "grants" -> Json.arr(revocations.snapshot.toList.sorted.map(Json.str)),
+      "digests" -> Json.arr(revocations.digests.toList.sortBy(_.hex).map(d => Json.str(d.hex))))
+
+  private def delegationsJson: String =
+    Json.obj(
+      "entries" -> Json.arr(delegations.snapshot.map { e =>
+        Json.obj(
+          "grantor" -> Json.str(e.grantor),
+          "grantee" -> Json.str(e.grantee),
+          "action" -> Json.str(e.action),
+          "resourceKind" -> Json.str(e.resourceKind),
+          "resourcePath" -> Json.str(e.resourcePath),
+          "depth" -> Json.num(e.depth.toLong),
+          "digest" -> e.digest.fold(Json.nul)(d => Json.str(d.hex)))
+      }))
+
+  private def trustRevoke(raw: String): Either[String, String] =
+    for
+      grantId <- jsonField(raw, "grantId")
+      dig <- revocations.publish(node.cas, node.ctx, List(grantId))
+    yield Json.obj(
+      "ok" -> Json.bool(true),
+      "grantId" -> Json.str(grantId),
+      "digest" -> Json.str(dig.hex),
+      "revokedCount" -> Json.num(revocations.snapshot.size.toLong))
+
+  private def trustDelegate(raw: String): Either[String, String] =
+    for
+      grantor <- jsonField(raw, "grantor")
+      grantee <- jsonField(raw, "grantee")
+      action <- jsonField(raw, "action")
+      _ <- Either.cond(grantor.nonEmpty && grantee.nonEmpty, (), "grantor/grantee required")
+      depth = jsonFieldOpt(raw, "depth").flatMap(_.toIntOption).getOrElse(1)
+      _ <- Either.cond(depth >= 1, (), "depth must be >= 1")
+      entry = DelegationLog.Entry(
+        grantor = grantor,
+        grantee = grantee,
+        action = action,
+        resourceKind = jsonFieldOpt(raw, "resourceKind").getOrElse("cas"),
+        resourcePath = jsonFieldOpt(raw, "resourcePath").getOrElse("*"),
+        depth = depth)
+      dig <- delegations.publish(node.cas, node.ctx, entry)
+    yield Json.obj(
+      "ok" -> Json.bool(true),
+      "digest" -> Json.str(dig.hex),
+      "entry" -> Json.obj(
+        "grantor" -> Json.str(entry.grantor),
+        "grantee" -> Json.str(entry.grantee),
+        "action" -> Json.str(entry.action),
+        "resourceKind" -> Json.str(entry.resourceKind),
+        "resourcePath" -> Json.str(entry.resourcePath),
+        "depth" -> Json.num(entry.depth.toLong),
+        "digest" -> Json.str(dig.hex)))
 
   /** Read-only Fact–Intent–Hint board graph from an IR module digest.
     * Looks up `digest` when given; otherwise uses the latest published IR

@@ -1,8 +1,8 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext
 import cairn.examples.stlc.Stlc
 
@@ -80,6 +80,19 @@ class WaveH1Suite extends munit.FunSuite:
     // meta.cairn is also runtime SoT (seed Meta.language stays digest-equal)
     val meta = packs.requireClosed("meta")
     assertEquals(meta.digest, Meta.language.digest)
+
+  test("bootstrap: query/policy .cairn packs match Scala seeds digest-for-digest"):
+    val q = packs.requireClosed("query")
+    assertEquals(q.digest, Query.language.digest)
+    assertEquals(q.grammar.top, Query.language.grammar.top)
+    val p = packs.requireClosed("policy")
+    assertEquals(p.digest, cairn.user.policy.PolicyLang.language.digest)
+    assertEquals(p.grammar.top, cairn.user.policy.PolicyLang.language.grammar.top)
+    // Round-trip a term under the disk-loaded grammar
+    val term = Parser.parse(q.grammar, "defs matching $x").fold(e => fail(e), identity)
+    RoundTrip.check(q.grammar, term).fold(e => fail(e), identity)
+    val pol = Parser.parse(p.grammar, "branch main open").fold(e => fail(e), identity)
+    RoundTrip.check(p.grammar, pol).fold(e => fail(e), identity)
 
   test("M42: a brand-new toy language as pure text — parse, eval, no Scala"):
     val toySrc = """

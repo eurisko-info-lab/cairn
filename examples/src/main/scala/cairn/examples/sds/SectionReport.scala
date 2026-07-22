@@ -40,12 +40,15 @@ object SectionReport:
     */
   def forOptSurface(report: Cst): Either[String, Cst] = report match
     case Cst.Node("report", List(name, cas, Cst.Node("list", sections))) =>
-      val secs = sections.map {
-        case Cst.Node("sectionBlock", List(num, title, Cst.Node("list", fields))) =>
-          Cst.Node("sectionBlock", List(num, title, listToOpt(fields)))
-        case other => return Left(s"bad sectionBlock: ${other.render}")
+      val secsE = sections.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, sec) =>
+        acc.flatMap { done =>
+          sec match
+            case Cst.Node("sectionBlock", List(num, title, Cst.Node("list", fields))) =>
+              Right(done :+ Cst.Node("sectionBlock", List(num, title, listToOpt(fields))))
+            case other => Left(s"bad sectionBlock: ${other.render}")
+        }
       }
-      Right(Cst.Node("report", List(name, cas, listToOpt(secs))))
+      secsE.map(secs => Cst.Node("report", List(name, cas, listToOpt(secs))))
     case other => Left(s"not a report CST: ${other.render}")
 
   /** @deprecated use [[forOptSurface]] — kept for call sites. */

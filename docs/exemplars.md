@@ -85,6 +85,14 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
   `corpusPhrase`; free-text `prodName` demonstrates restale.
+- **Corpus tutorial (capability-constrained):** `SdsCorpusTutorial` walks
+  corpus phrases → section-field restale → industrial shadow → CAS put
+  authorized only via a narrow `VerifiedCapability` grant bundle (empty
+  grant bundle denies). Run:
+
+```bash
+sbt "examples/runMain cairn.examples.Main sds-tutorial"
+```
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
 - Studio-persisted phrase corpus / authoring UI.

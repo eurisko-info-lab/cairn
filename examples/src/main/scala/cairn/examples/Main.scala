@@ -32,12 +32,15 @@ import java.nio.file.Path
       "search" -> search.language,
       "eu-clp" -> euClp,
       "sds-report" -> sdsReport,
-      "query" -> cairn.core.Query.language,
-      "policy" -> cairn.ledger.PolicyLang.language)
+      "query" -> packLoader.requireClosed("query"),
+      "policy" -> packLoader.requireClosed("policy"))
     val portModules = Map(
       "quicksort2" -> cairn.examples.quicksort.QuickSort2.module,
       "quicksortApp" -> cairn.examples.quicksort.QuickSortApp.module)
     args.toList match
+      case List("sds-tutorial") =>
+        val work = java.nio.file.Files.createTempDirectory("cairn-sds-corpus-tutorial")
+        println(cairn.examples.sds.SdsCorpusTutorial.run(work).render)
       case List("digests") =>
         for (name, lang) <- packs.toList.sortBy(_._1) do
           println(s"language $name ${lang.digest.hex}")
@@ -130,7 +133,8 @@ import java.nio.file.Path
           text
 
         // STLC/meta are on-disk SoT (like exemplars); Scala seeds stay for fixpoint tests only.
-        for name <- List("pki", "law", "sds", "search", "stlc") do
+        // Query/policy join the same path: Core-facing languages described in .cairn.
+        for name <- List("pki", "law", "sds", "search", "stlc", "query", "policy") do
           val (sem, surf) = writeExemplarPair(name)
           println(s"wrote languages/$name.cairn (${sem.length} bytes) + surfaces/default.cairn (${surf.length} bytes)")
         val metaText = writeExemplarLanguage("meta")

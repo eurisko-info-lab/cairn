@@ -1,8 +1,8 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext
 import cairn.examples.riemann.RiemannTutorial
 import java.nio.file.Files

@@ -191,7 +191,7 @@ object FragmentCodec:
     RewriteRule(c.field("name").asStr, Cst.fromCanon(c.field("pattern")), Cst.fromCanon(c.field("template")))
 
   /** Empty grammar stub kept in the map shape for schema stability; surface
-    * grammar lives in [[cairn.workbench.SurfacePack]] / [[GrammarSpec]] digests.
+    * grammar lives in [[SurfacePack]] / [[GrammarSpec]] digests.
     */
   private val emptyGrammarCanon: Canon = Canon.cmap(
     "keywords" -> Canon.cstrs(Nil),

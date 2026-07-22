@@ -39,8 +39,12 @@ narrowing, Bend Church numerals / LeanCore transparent unfold / Unison
 via `sectionNumberOk`/`translationStateTag` judgments, `sds-workflow` +
 `sds-certificate` packs (causal sequence + evidence kinds as checked
 artifacts), thin `SectionReport.printSurface`, and honest Scala
-orchestration residuals. Architecture: SDS language proper vs report surface
-packs stay separated (Phase 2/3). Full suite: **505 tests** (503 passed + 2 skipped; `tests` module; `sbt test`).
+orchestration residuals, plus a **quick evolution pass**: typed
+`PathPattern` across all effect families (Cas `Digest|Path`), explorer
+**Trust** tab (`RevocationLog` / `DelegationLog`), SDS
+`SdsCorpusTutorial` (capability-constrained editing), and Core-facing
+`query`/`policy` `.cairn` packs. Architecture: SDS language proper vs report surface
+packs stay separated (Phase 2/3). Full suite: **509 tests** (507 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -54,10 +58,10 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
 | 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `printSurface` = PackLoader + print; `toCst` host residual; PDF deferred |
 | 5 | Approve/sign/publication certs as linked CAS | **Done** | `certificateKindOk` + workflow-kinds module; BranchManifest digests |
-| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-interface` lang + `iface.cairn` decls SoT; Family/Action enums host bridge; vocab Fragment host seed |
+| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-interface` lang + `iface.cairn` decls SoT; Family/Action enums host bridge; vocab Fragment host seed; query/policy `.cairn` SoT |
 | 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
-| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; merge-only, **BFT deferred** |
-| 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + causal module; Scala runs effectful steps |
+| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant` + explorer Trust UI; merge-only, **BFT deferred** |
+| 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + causal module; `SdsCorpusTutorial` capability editing; Scala runs effectful steps |
 
 ## Architecture note — SDS vs report formats
 

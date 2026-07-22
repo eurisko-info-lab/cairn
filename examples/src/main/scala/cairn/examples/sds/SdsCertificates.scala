@@ -1,8 +1,7 @@
 package cairn.examples.sds
 
 import cairn.kernel.*
-import cairn.systemhandler.{Branches, Ed25519}
-import cairn.ledger.Keypair
+import cairn.systemhandler.{Branches, Ed25519, Keypair}
 
 /** Approval / signing / publication certificates as CAS `certificate`
   * artifacts fully linked from [[BranchManifest.certificates]].

@@ -1,7 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.ledger.Encryption
+import cairn.systemhandler.Encryption
 import cairn.core.*
 import cairn.core.Ports2.*
 import cairn.systemhandler.EffectContext
@@ -85,6 +85,19 @@ class ParitySuite extends munit.FunSuite:
     assert(r.tipSignatureHex.nonEmpty)
     assertEquals(r.certificateDigests.length, 3)
     assert(r.ledgerPublished)
+
+  test("parity: SDS corpus tutorial capability-constrained editing"):
+    import cairn.examples.sds.SdsCorpusTutorial
+    val work = java.nio.file.Files.createTempDirectory("cairn-sds-corpus")
+    val r = SdsCorpusTutorial.run(work)
+    assert(r.corpusPhraseOfficial)
+    assert(r.freeTextStaleAfterRewrite)
+    assert(r.sectionFieldStaleAfterRewrite)
+    assert(r.shadowApplied)
+    assert(r.capabilityPutOk)
+    assert(r.capabilityDeniedWithoutGrant)
+    assert(r.steps.exists(_.name == "corpus"))
+    assert(r.steps.exists(_.name == "cap-put"))
 
   test("parity: SDS composition sealing open/clear bands"):
     val base = SdsTutorial.acetoneBase

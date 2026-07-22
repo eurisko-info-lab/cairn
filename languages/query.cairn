@@ -1,0 +1,8 @@
+language query {
+  fragment query provides query {
+    sort Query tree;
+    ctor qMatch : Query(Pat);
+    ctor qTyped : Query(Pat);
+    ctor qKind : Query(Name);
+  }
+}

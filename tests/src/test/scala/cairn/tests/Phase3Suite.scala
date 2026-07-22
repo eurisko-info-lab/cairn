@@ -1,8 +1,7 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.compute.*
-import cairn.core.TreeEngine
+import cairn.core.{TreeEngine, NetEngine, Net, Agent, PortRef, RulePort}
 import cairn.examples.affinenet.AffineNet
 import cairn.examples.stlc.Stlc
 

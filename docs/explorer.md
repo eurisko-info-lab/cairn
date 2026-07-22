@@ -44,6 +44,7 @@ sbt "examples/runMain cairn.examples.Main ui /path/to/store/nodeA 8765"
 | Chain | Blocks → txs (publish / heads / identities / certs) |
 | CAS | Kind histogram; open any digest |
 | Board | Read-only Fact–Intent–Hint graph from a search IR module |
+| Trust | Capability revocation + delegation hops (`RevocationLog` / `DelegationLog`; CAS digest-merge — **not** BFT / Studio) |
 | Languages | Loaded packs; scratch editor with parse/print validate |
 
 ## Typed viewers / editors
@@ -66,6 +67,15 @@ sbt "examples/runMain cairn.examples.Main ui"   # Board tab
 
 ## API (JSON)
 
-`GET /api/health|overview|chain|blocks|board|languages|cas/stats`,
+`GET /api/health|overview|chain|blocks|board|languages|cas/stats|trust`,
+`GET /api/trust/revocations`, `POST /api/trust/revoke`,
+`GET /api/trust/delegations`, `POST /api/trust/delegate`,
 `GET /api/blocks/{height|digest}`, `GET /api/artifacts/{digest}[/view]`,
 `POST /api/parse`. Static UI at `/` and `/ui/…`.
+
+### Trust tab
+
+Revocation publishes CAS `capability-revocation` digests via `RevocationLog`;
+delegation hops publish `capability-delegation` digests via `DelegationLog`.
+Both follow the `ReplayReplication` want/have shape — merge, not consensus.
+Studio product UI remains deferred.

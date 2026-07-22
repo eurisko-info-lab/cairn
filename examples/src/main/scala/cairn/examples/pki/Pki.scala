@@ -3,7 +3,7 @@ package cairn.examples.pki
 import cairn.kernel.*
 import cairn.systeminterface.PackAccess
 import cairn.core.*
-import cairn.ledger.{Ed25519, Keypair}
+import cairn.systemhandler.{Ed25519, Keypair}
 
 /** PKI pack (S47, §5b): first link in `PKI → Law → SDS`.
   *

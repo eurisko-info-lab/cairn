@@ -82,10 +82,20 @@ What stays host-backed:
   `Effects.Family` / `Effects.Action` enums for interpreter routing
   (disk SoT is `effect-interface` + `effect-*/iface.cairn` + vocab packs;
   `EffectBootstrap` checks decl/shape fixpoint)
+- Core engines that *interpret* language data: `TreeEngine`, `Delta`, `Merge`,
+  `PolicyEval.prove`, `Query.run` (execution), grammar VM, ports, nets —
+  described-by vs executed-by: query/policy *vocabularies* are now `.cairn`
+  packs; the runners stay Scala
 
 STLC/meta `.cairn` files are runtime **source of truth** (loaded by
 `PackLoader`, same as exemplars); `emit-languages` format-preserves them
 against git HEAD.
+
+**Query / Policy (Core-facing lift):** `languages/query.cairn` +
+`languages/policy.cairn` with `surfaces/default.cairn` are runtime SoT
+(digest-equal to Scala seeds in `core.Query` / `user.policy.PolicyLang`).
+`emit-languages` format-preserves them. Residuals: `Query.run` matching
+engine and ledger policy *enforcement* remain host.
 
 Exemplar packs (PKI / Law / SDS / Search) are `.cairn` source of truth, loaded
 at runtime by `PackLoader`. Effect interfaces follow the same pattern via

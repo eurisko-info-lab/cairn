@@ -94,6 +94,11 @@ object Capabilities:
 /** M45: the query language — patterns + kind predicates over modules and the
   * CAS, itself a grammar-engine language (so ΔQuery exists via the closure).
   *
+  * Phase 2 split: semantic fragment is grammar-free; concrete syntax lives in
+  * [[surfaceFragment]] / `languages/query/surfaces/default.cairn`. Disk packs
+  * are runtime SoT via PackLoader; this Scala seed stays for digest-equality
+  * / fixpoint tests.
+  *
   * Surface:
   *   defs matching <pat>
   *   defs typed <pat>           (via derivation search when a checker cfg is given)
@@ -108,7 +113,12 @@ object Query:
     constructors = List(
       CtorDef("qMatch", "Query", List("Pat")),
       CtorDef("qTyped", "Query", List("Pat")),
-      CtorDef("qKind", "Query", List("Name"))),
+      CtorDef("qKind", "Query", List("Name"))))
+
+  val surfaceFragment: Fragment = Fragment(
+    name = "query",
+    provides = Nil,
+    requires = Nil,
     grammar = GrammarPart(
       keywords = List("defs", "matching", "typed", "artifacts", "kind"),
       puncts = List("(", ")", ",", "$"),
@@ -135,8 +145,14 @@ object Query:
         PrintRule("qpLeaf", List(PrintSeg.Field(0)))),
       top = Some("query")))
 
+  val fragments: List[Fragment] = List(fragment)
+  val surfaceFragments: List[Fragment] = List(surfaceFragment)
+  val defaultSurface: SurfacePack =
+    SurfacePack(PackCompose.DefaultSurface, "query", surfaceFragments)
+  def boundFragments: List[Fragment] = PackCompose.bindSurface(fragments, defaultSurface)
+
   lazy val language: ComposedLanguage =
-    Compose.compose("query", List(fragment)).fold(
+    Compose.compose("query", boundFragments).fold(
       e => throw RuntimeException(e.map(_.render).mkString("\n")), identity)
 
   def parse(src: String): Either[String, Cst] = Parser.parse(language.grammar, src)

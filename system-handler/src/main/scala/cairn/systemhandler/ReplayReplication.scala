@@ -110,3 +110,90 @@ final class RevocationLog:
           catch case e: Exception => Left(Option(e.getMessage).getOrElse(e.toString))
         case _ => Left("capability-revocation: missing tag")
     }
+
+/** Append-only capability-delegation log (thin explorer / sync surface).
+  * Each entry is a hop summary published as CAS `capability-delegation`
+  * certificates. Callers that hold real [[Authority.Delegation]] chains should
+  * validate them first; this log is the digest-merge / UI ledger — not BFT.
+  * Studio deferred.
+  */
+object DelegationLog:
+  final case class Entry(
+      grantor: String,
+      grantee: String,
+      action: String,
+      resourceKind: String,
+      resourcePath: String,
+      depth: Int,
+      digest: Option[Digest] = None,
+  )
+
+final class DelegationLog:
+  import DelegationLog.Entry
+
+  private val entries = scala.collection.mutable.ArrayBuffer.empty[Entry]
+  private val seen = scala.collection.mutable.HashSet.empty[Digest]
+
+  def digests: Set[Digest] = seen.toSet
+  def snapshot: List[Entry] = entries.toList
+
+  def record(entry: Entry): Unit = entries += entry
+
+  def fromDelegation(d: cairn.kernel.Authority.Delegation): Either[String, Entry] =
+    cairn.kernel.Authority.Delegation.validate(d).map { _ =>
+      Entry(
+        grantor = d.grantor.id,
+        grantee = d.grantee.id,
+        action = d.child.action.id,
+        resourceKind = d.child.resource.kind,
+        resourcePath = d.child.resource.path,
+        depth = d.child.delegationDepth)
+    }
+
+  def artifact(entry: Entry): Artifact =
+    Artifact(
+      ArtifactKind.Certificate,
+      Canon.CTag(
+        "capability-delegation",
+        Canon.cmap(
+          "grantor" -> Canon.CStr(entry.grantor),
+          "grantee" -> Canon.CStr(entry.grantee),
+          "action" -> Canon.CStr(entry.action),
+          "resourceKind" -> Canon.CStr(entry.resourceKind),
+          "resourcePath" -> Canon.CStr(entry.resourcePath),
+          "depth" -> Canon.CInt(entry.depth.toLong))))
+
+  /** Publish a hop summary (already validated or UI-authored). */
+  def publish(cas: Cas, ctx: EffectContext, entry: Entry): Either[String, Digest] =
+    CasEffects.put(cas, artifact(entry), ctx).left.map(_.toString).map { key =>
+      seen += key.valueHash
+      record(entry.copy(digest = Some(key.valueHash)))
+      key.valueHash
+    }
+
+  def publishDelegation(
+      cas: Cas,
+      ctx: EffectContext,
+      d: cairn.kernel.Authority.Delegation
+  ): Either[String, Digest] =
+    fromDelegation(d).flatMap(publish(cas, ctx, _))
+
+  def absorbFromCas(cas: Cas, digest: Digest, ctx: EffectContext): Either[String, Unit] =
+    CasEffects.get(cas, digest, ctx).left.map(_.toString).flatMap { a =>
+      a.body match
+        case Canon.CTag("capability-delegation", body) =>
+          try
+            val e = Entry(
+              grantor = body.field("grantor").asStr,
+              grantee = body.field("grantee").asStr,
+              action = body.field("action").asStr,
+              resourceKind = body.field("resourceKind").asStr,
+              resourcePath = body.field("resourcePath").asStr,
+              depth = body.field("depth").asInt.toInt,
+              digest = Some(digest))
+            record(e)
+            seen += digest
+            Right(())
+          catch case ex: Exception => Left(Option(ex.getMessage).getOrElse(ex.toString))
+        case _ => Left("capability-delegation: missing tag")
+    }

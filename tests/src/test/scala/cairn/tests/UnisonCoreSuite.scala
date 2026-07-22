@@ -1,9 +1,10 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext
+
 /** UnisonCore (§5b, §2c): a real term language — closed List/Option ADTs,
   * pattern matching, a minimal non-resumptive `Abort` ability — checked by
   * the same generic kernel Checker/Search as STLC/PKI/MiniTT, and stored by

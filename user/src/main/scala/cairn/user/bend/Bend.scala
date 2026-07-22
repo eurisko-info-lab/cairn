@@ -1,7 +1,6 @@
 package cairn.user.bend
 
 import cairn.kernel.*
-import cairn.core.Parser
 import cairn.core.*
 import cairn.user.icnet.IcNet
 

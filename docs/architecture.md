@@ -79,15 +79,19 @@ Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
 Snapshots publish as CAS `replay-snapshot` digests (`ReplayStore.publish` /
 `mergeFromCas`) for multi-node absorb — **merge, not distributed consensus**.
 Capability revocation digests sync via the same want/have shape
-(`ReplayReplication` / `RevocationLog`) — BFT deferred.
+(`ReplayReplication` / `RevocationLog`) — BFT deferred. Explorer **Trust**
+tab views/manages revocations and delegation hops (`DelegationLog` /
+CAS `capability-delegation`) — not Studio.
 
 ## Authority
 
 - **Live effect families (Meta-defined):** Filesystem, Workspace, Process,
   Clock, Random, Terminal, Lsp, ExternalBackend, Cas, LedgerTransport. Each
   has an `EffectMeta.EffectFamily` (Fragment + `InterfaceDecl` /
-  `requestActions` + digest-bound `ActionKey` / `ResourceSchema`). Disk SoT
-  via `EffectBootstrap`; completeness checked by `EffectMetaSuite`.
+  `requestActions` + digest-bound `ActionKey` / `ResourceSchema` with typed
+  `PathPattern`: `Path` / `Command` / `Host` / `Digest` / `Digest|Path` /
+  `*`). Disk SoT via `EffectBootstrap`; completeness checked by
+  `EffectMetaSuite`.
 - **Gating:** every live family’s `perform` is the sole public effect entry
   point; convenience methods are private (or documented ungated exceptions
   such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas trait

@@ -328,3 +328,24 @@ class EffectMetaSuite extends munit.FunSuite:
     val decl = EffectMeta.InterfaceDecl.fromItems(items).fold(e => fail(e), identity)
     assertEquals(decl.requestActions.get("resolve"), Some(None))
     assertEquals(decl.familyId, "Filesystem")
+
+  test("PathPattern: all families declare a known pattern; Cas is Digest|Path"):
+    import EffectMeta.PathPattern
+    assertEquals(PathPattern.known.map(_.encode).toSet,
+      Set("*", "Path", "Command", "Host", "Digest", "Digest|Path"))
+    assertEquals(EffectMeta.cas.resource.pathPattern, "Digest|Path")
+    assertEquals(EffectMeta.cas.resource.pattern, Right(PathPattern.DigestOrPath))
+    assertEquals(EffectMeta.filesystem.resource.pattern, Right(PathPattern.FsPath))
+    assertEquals(EffectMeta.clock.resource.pattern, Right(PathPattern.Unscoped))
+    // Concrete shape checks
+    val dig = Digest.ofBytes(Array(1, 2, 3)).hex
+    assert(EffectMeta.cas.resource.atChecked(dig).isRight)
+    assert(EffectMeta.cas.resource.atChecked("/tmp/cas").isRight)
+    assert(EffectMeta.cas.resource.atChecked("*").isRight)
+    assert(EffectMeta.filesystem.resource.atChecked("").isLeft)
+    assert(EffectMeta.InterfaceDecl.fromItems(List(
+      Cst.node("family", Cst.Leaf("Cas")),
+      Cst.node("kind", Cst.Leaf("cas")),
+      Cst.node("path", Cst.Leaf("Nope")),
+      Cst.node("action", Cst.Leaf("put")))).isLeft)
+

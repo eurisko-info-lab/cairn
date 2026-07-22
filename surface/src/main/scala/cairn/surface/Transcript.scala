@@ -1,12 +1,10 @@
 package cairn.surface
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem, Gossip, Keypair, Node, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
-import cairn.ledger.*
 import cairn.runtime.PackLoader
 import java.nio.file.Path
 
@@ -503,7 +501,7 @@ object Cli:
         yield r.render
       case List("why", hex) =>
         Digest.parse(hex).flatMap { d =>
-          cairn.ledger.Provenance.why(casDir, d, ledgerCtx).map { hops =>
+          Provenance.why(casDir, d, ledgerCtx).map { hops =>
             if hops.isEmpty then s"no provenance recorded for ${d.short}"
             else hops.map(h => s"${"  " * h.depth}${h.record.output.short} <- ${h.record.tool}(${h.record.inputs.map(_.short).mkString(", ")})").mkString("\n")
           }

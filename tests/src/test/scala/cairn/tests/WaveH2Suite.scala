@@ -2,13 +2,13 @@ package cairn.tests
 
 import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.surface.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systeminterface.Filesystem as Fs
 import cairn.examples.stlc.Stlc
 import cairn.examples.pki.PkiMax
-import cairn.ledger.Keypair
+import cairn.systemhandler.Keypair
 
 /** Wave H part 2 (M43–M49). */
 class WaveH2Suite extends munit.FunSuite:
@@ -45,7 +45,7 @@ class WaveH2Suite extends munit.FunSuite:
 
   test("M43: manifests for shipped languages, lint enforced"):
     for l <- List(Stlc.language, Pki.language, Sds.language,
-                  Query.language, cairn.ledger.PolicyLang.language) do
+                  Query.language, cairn.user.policy.PolicyLang.language) do
       val surf = packs.surfacesFor(l.name).map((n, s) => n -> s.digest)
       val m = Capabilities.build(l, Map.empty, surf).fold(e => fail(e), identity)
       assertEquals(m.artifact.kind, ArtifactKind.Capability)
@@ -395,7 +395,7 @@ class WaveH2Suite extends munit.FunSuite:
     assert(doc1.contains("Causes serious eye irritation"), doc1) // non-shadowed intact
     // ledger publish
     val alice = Keypair.dev("alice")
-    val node = cairn.ledger.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerCtx)
+    val node = cairn.systemhandler.Node(java.nio.file.Files.createTempDirectory("cairn-sds"), ledgerCtx)
     CasEffects.put(node.cas, m2.artifact, node.ctx).fold(e => fail(e.toString), identity)
     node.append(alice, Map("alice" -> alice.publicBytes), List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),

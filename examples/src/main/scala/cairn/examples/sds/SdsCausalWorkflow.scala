@@ -1,10 +1,9 @@
 package cairn.examples.sds
 
-import cairn.systemhandler.{AuthorityGate, Branches, DiskCas, Ed25519, EffectContext, Node}
+import cairn.systemhandler.{AuthorityGate, Branches, DiskCas, Ed25519, EffectContext, Node, Keypair}
 import cairn.kernel.*
 import cairn.kernel.Authority.*
 import cairn.core.*
-import cairn.ledger.Keypair
 import cairn.runtime.PackLoader
 import java.nio.file.{Files, Path}
 

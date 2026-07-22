@@ -1,8 +1,8 @@
 package cairn.tests
 
+import cairn.systemhandler.{Ed25519, Keypair, Node, Sync}
 import cairn.systemhandler.{CasEffects, EffectContext}
 import cairn.kernel.*
-import cairn.ledger.*
 import cairn.examples.stlc.Stlc
 
 /** Phase 5 acceptance (S35–S40): local PoA chain publishes the STLC pack; a

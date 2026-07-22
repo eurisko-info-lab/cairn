@@ -2,9 +2,8 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.core.{Parser, Module, Delta}
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem, Provenance}
 import cairn.systeminterface.Filesystem as Fs
-import cairn.ledger.Provenance
 import java.nio.file.Path
 
 /** Thin Search tutorial: seed origin+goal, ΔL-add Intent and Fact into CAS,

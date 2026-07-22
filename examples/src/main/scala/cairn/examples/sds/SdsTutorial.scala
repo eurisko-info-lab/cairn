@@ -1,9 +1,8 @@
 package cairn.examples.sds
 
-import cairn.systemhandler.{CasEffects, EffectContext, Node}
+import cairn.systemhandler.{CasEffects, EffectContext, Encryption, Keypair, Node}
 import cairn.kernel.*
 import cairn.core.*
-import cairn.ledger.{Encryption, Keypair}
 import cairn.runtime.PackLoader
 import cairn.examples.pki.DemoPki
 

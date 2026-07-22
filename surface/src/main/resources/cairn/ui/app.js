@@ -5,6 +5,7 @@ const state = {
   languages: [],
   cas: null,
   board: null,
+  trust: null,
   selection: null,
 };
 
@@ -46,6 +47,17 @@ async function loadBoard() {
     state.board = await api("board");
   } catch (e) {
     state.board = { error: e.message, nodes: [], edges: [] };
+  }
+}
+
+async function loadTrust() {
+  try {
+    const overview = await api("trust");
+    const revocations = await api("trust/revocations");
+    const delegations = await api("trust/delegations");
+    state.trust = { overview, revocations, delegations };
+  } catch (e) {
+    state.trust = { error: e.message };
   }
 }
 
@@ -128,6 +140,84 @@ sbt "examples/runMain cairn.examples.Main ui &lt;node-dir&gt; 8765"</pre>
     bindListClicks();
     return;
   }
+  if (state.route === "trust") {
+    const t = state.trust || {};
+    if (t.error) {
+      list.innerHTML = `<h2 style="margin-top:0">Trust</h2><p class="bad">${esc(t.error)}</p>`;
+      return;
+    }
+    const o = t.overview || {};
+    const grants = (t.revocations && t.revocations.grants) || [];
+    const entries = (t.delegations && t.delegations.entries) || [];
+    list.innerHTML = `
+      <h2 style="margin-top:0">Capability trust</h2>
+      <p class="muted">${esc(o.note || "Revocation + delegation over CAS digests (not BFT).")}</p>
+      <div class="card">
+        <h2>Revocations <span class="pill">${o.revokedCount ?? grants.length}</span></h2>
+        ${grants.map((g) => `<div class="list-item"><div class="title">${esc(g)}</div></div>`).join("")
+          || `<p class="muted">No revoked grant ids yet.</p>`}
+        <div class="toolbar" style="margin-top:0.75rem">
+          <input id="revokeId" type="text" placeholder="grant id" style="flex:1" />
+          <button class="btn primary" id="doRevoke">Revoke</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Delegations <span class="pill">${o.delegationCount ?? entries.length}</span></h2>
+        ${entries.map((e, i) => `
+          <button class="list-item ${state.selection?.type === "delegation" && state.selection.id === String(i) ? "active" : ""}"
+            data-kind="delegation" data-id="${i}">
+            <div class="title">${esc(e.grantor)} → ${esc(e.grantee)}</div>
+            <div class="meta">${esc(e.action)} · ${esc(e.resourceKind)}/${esc(e.resourcePath)} · depth ${e.depth}</div>
+          </button>`).join("") || `<p class="muted">No delegation hops recorded.</p>`}
+        <div class="toolbar" style="margin-top:0.75rem; flex-wrap:wrap; gap:0.35rem">
+          <input id="dlgGrantor" type="text" placeholder="grantor" style="width:6rem" />
+          <input id="dlgGrantee" type="text" placeholder="grantee" style="width:6rem" />
+          <input id="dlgAction" type="text" placeholder="action id" style="flex:1" value="Cas.put" />
+          <button class="btn primary" id="doDelegate">Record hop</button>
+        </div>
+      </div>`;
+    bindListClicks();
+    const revokeBtn = $("doRevoke");
+    if (revokeBtn) revokeBtn.onclick = async () => {
+      const grantId = $("revokeId").value.trim();
+      if (!grantId) return;
+      try {
+        await api("trust/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ grantId }),
+        });
+        state.trust = null;
+        await loadTrust();
+        render();
+      } catch (e) {
+        $("detail").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+      }
+    };
+    const dlgBtn = $("doDelegate");
+    if (dlgBtn) dlgBtn.onclick = async () => {
+      try {
+        await api("trust/delegate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            grantor: $("dlgGrantor").value.trim(),
+            grantee: $("dlgGrantee").value.trim(),
+            action: $("dlgAction").value.trim() || "Cas.put",
+            resourceKind: "cas",
+            resourcePath: "*",
+            depth: 1,
+          }),
+        });
+        state.trust = null;
+        await loadTrust();
+        render();
+      } catch (e) {
+        $("detail").innerHTML = `<p class="bad">${esc(e.message)}</p>`;
+      }
+    };
+    return;
+  }
   if (state.route === "languages") {
     list.innerHTML = `<h2 style="margin-top:0">Loaded languages</h2>` +
       (state.languages || []).map((l) => `
@@ -148,8 +238,38 @@ function bindListClicks() {
       if (kind === "block") openBlock(id);
       if (kind === "lang") openLanguage(id);
       if (kind === "board-node") openBoardNode(id);
+      if (kind === "delegation") openDelegation(id);
     });
   });
+}
+
+function openDelegation(idx) {
+  state.selection = { type: "delegation", id: String(idx) };
+  renderList();
+  const entries = (state.trust && state.trust.delegations && state.trust.delegations.entries) || [];
+  const e = entries[Number(idx)];
+  const detail = $("detail");
+  if (!e) {
+    detail.innerHTML = `<p class="bad">Unknown delegation</p>`;
+    return;
+  }
+  detail.innerHTML = `
+    <div class="card">
+      <h2>Delegation hop <span class="pill">capability</span></h2>
+      <div class="grid">
+        <div class="stat"><div class="k">Grantor</div><div class="v">${esc(e.grantor)}</div></div>
+        <div class="stat"><div class="k">Grantee</div><div class="v">${esc(e.grantee)}</div></div>
+        <div class="stat"><div class="k">Action</div><div class="v">${esc(e.action)}</div></div>
+        <div class="stat"><div class="k">Resource</div><div class="v">${esc(e.resourceKind)} / ${esc(e.resourcePath)}</div></div>
+        <div class="stat"><div class="k">Depth</div><div class="v">${e.depth}</div></div>
+        <div class="stat"><div class="k">Digest</div><div class="v">${esc(e.digest || "—")}</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Notes</h2>
+      <p class="muted">Backed by <code>DelegationLog</code> / CAS <code>capability-delegation</code>.
+      Kernel hop validation stays in <code>Authority.Delegation</code>; this view is the explorer ledger.</p>
+    </div>`;
 }
 
 function esc(s) {
@@ -389,6 +509,9 @@ async function render() {
   if (state.route === "board" && !state.board) {
     await loadBoard();
   }
+  if (state.route === "trust" && !state.trust) {
+    await loadTrust();
+  }
   renderList();
   if (state.route === "overview") {
     $("detail").innerHTML = `
@@ -399,9 +522,23 @@ async function render() {
       <div class="card">
         <h2>How to use</h2>
         <p class="muted">Chain walks PoA blocks and transactions. Board shows a read-only
-        Fact–Intent–Hint graph when a search module is in CAS. Languages drive text
+        Fact–Intent–Hint graph when a search module is in CAS. Trust lists capability
+        revocations and delegation hops (CAS digest-merge — not BFT). Languages drive text
         surfaces and the validate-only editor (no silent mutation — proposals must go
         through ΔL / kernel gates).</p>
+      </div>`;
+  } else if (state.route === "trust" && state.trust && !state.trust.error && !state.selection) {
+    const o = state.trust.overview || {};
+    $("detail").innerHTML = `
+      <div class="card">
+        <h2>Trust surface <span class="pill">explorer</span></h2>
+        <p class="muted">View and manage revocation / delegation digests backed by
+        <code>RevocationLog</code> and <code>DelegationLog</code> (ReplayReplication shape).
+        Studio product UI remains deferred.</p>
+        <div class="grid">
+          <div class="stat"><div class="k">Revoked</div><div class="v">${o.revokedCount ?? 0}</div></div>
+          <div class="stat"><div class="k">Delegations</div><div class="v">${o.delegationCount ?? 0}</div></div>
+        </div>
       </div>`;
   } else if (state.route === "board" && state.board && !state.board.error && !state.selection) {
     $("detail").innerHTML = `

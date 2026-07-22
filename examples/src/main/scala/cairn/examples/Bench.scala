@@ -1,7 +1,6 @@
 package cairn.examples
 
 import cairn.kernel.*
-import cairn.compute.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.examples.icnet.IcNet

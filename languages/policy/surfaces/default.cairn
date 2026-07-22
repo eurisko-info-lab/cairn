@@ -1,0 +1,14 @@
+surface default for policy {
+  fragment policy {
+    keyword branch;
+    keyword requires;
+    keyword method;
+    keyword from;
+    keyword open;
+    syntax policyTerm += polReq : tok "branch" name tok "requires" tok "method" name tok "from" name;
+    syntax policyTerm += polOpen : tok "branch" name tok "open";
+    print polReq : lit "branch" sp field 0 sp lit "requires method" sp field 1 sp lit "from" sp field 2;
+    print polOpen : lit "branch" sp field 0 sp lit "open";
+    top policyTerm;
+  }
+}

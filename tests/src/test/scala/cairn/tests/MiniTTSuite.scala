@@ -1,8 +1,8 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext
 /** MiniTT (§5b, §2c): minimal dependent type core, checked by the same
   * generic kernel Checker/Search as STLC/PKI. See MiniTT.scala's doc

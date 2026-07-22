@@ -22,17 +22,94 @@ package cairn.kernel
   */
 object EffectMeta:
 
-  /** Per-family resource language: kind + informal path grammar, bound to the
+  /** Typed path-shape vocabulary for effect-interface declarations.
+    *
+    * Encoded on disk as the `path "..."` string in `iface.cairn`. Handlers
+    * still authorize via [[Authority.Resource.matches]]; this enum is the
+    * schema that documents (and optionally validates) concrete path values
+    * so families do not lag on ad-hoc `"*"` / free strings.
+    */
+  enum PathPattern:
+    /** No per-request target (Clock / Random / Terminal / Lsp). */
+    case Unscoped
+    /** Filesystem- or workspace-style path (also LedgerTransport node roots). */
+    case FsPath
+    /** Process executable name (or `name+args` after Process narrowing). */
+    case Command
+    /** ExternalBackend host id (`scala-cli`, `cargo`, …). */
+    case Host
+    /** CAS content digest (hex). */
+    case Digest
+    /** CAS: digest for put/get/contains; store root path for admin. */
+    case DigestOrPath
+
+    def encode: String = this match
+      case Unscoped     => "*"
+      case FsPath       => "Path"
+      case Command      => "Command"
+      case Host         => "Host"
+      case Digest       => "Digest"
+      case DigestOrPath => "Digest|Path"
+
+    /** Whether `path` is a well-shaped concrete value *or* a policy wildcard
+      * (`*` / `prefix*`). Wildcard forms are always accepted so grant/policy
+      * attenuation stays orthogonal to concrete shape checks.
+      */
+    def accepts(path: String): Boolean =
+      if path == "*" || path.endsWith("*") then true
+      else this match
+        case Unscoped     => true
+        case FsPath       => path.nonEmpty
+        case Command      => path.nonEmpty
+        case Host         => path.nonEmpty
+        case Digest       => PathPattern.isHexDigest(path)
+        case DigestOrPath => PathPattern.isHexDigest(path) || path.nonEmpty
+
+  object PathPattern:
+    private val HexDigest = raw"(?i)[0-9a-f]{64}".r
+    def isHexDigest(s: String): Boolean = HexDigest.matches(s)
+
+    def parse(s: String): Either[String, PathPattern] = s match
+      case "*"           => Right(Unscoped)
+      case "Path"        => Right(FsPath)
+      case "Command"     => Right(Command)
+      case "Host"        => Right(Host)
+      case "Digest"      => Right(Digest)
+      case "Digest|Path" => Right(DigestOrPath)
+      case other         => Left(s"unknown resource path pattern '$other'")
+
+    def known: List[PathPattern] =
+      List(Unscoped, FsPath, Command, Host, Digest, DigestOrPath)
+
+  /** Per-family resource language: kind + typed [[PathPattern]], bound to the
     * effect-interface Fragment digest when constructed from an [[EffectFamily]].
-    * `pathPattern` documents how path values are shaped (`Path`, `Command`,
-    * `Host`, `*` for unscoped families); matching still uses
+    * `pathPattern` is the on-disk encoding (`Path`, `Command`, `Host`,
+    * `Digest`, `Digest|Path`, `*`); matching still uses
     * [[Authority.Resource.matches]] (exact / prefix-wildcard / `*`).
     */
   final case class ResourceSchema(
       kind: String,
       pathPattern: String,
       interfaceDigest: Option[Digest] = None):
-    def at(path: String): Authority.Resource = Authority.Resource(kind, path)
+    def pattern: Either[String, PathPattern] = PathPattern.parse(pathPattern)
+
+    /** Construct a resource; rejects concrete paths that violate [[pattern]]. */
+    def at(path: String): Authority.Resource =
+      pattern match
+        case Right(p) if !p.accepts(path) =>
+          throw IllegalArgumentException(
+            s"resource path '$path' does not match schema $kind/$pathPattern")
+        case Left(err) =>
+          throw IllegalArgumentException(s"resource schema $kind: $err")
+        case Right(_) =>
+          Authority.Resource(kind, path)
+
+    def atChecked(path: String): Either[String, Authority.Resource] =
+      pattern.flatMap { p =>
+        if p.accepts(path) then Right(Authority.Resource(kind, path))
+        else Left(s"resource path '$path' does not match schema $kind/$pathPattern")
+      }
+
     def any: Authority.Resource = Authority.Resource(kind, "*")
 
   /** Action / resource / gating declaration — the half of an effect interface
@@ -52,35 +129,37 @@ object EffectMeta:
   object InterfaceDecl:
     /** Rebuild a declaration from `effect-interface` Item terms (module bodies). */
     def fromItems(items: List[Cst]): Either[String, InterfaceDecl] =
-      var familyId: Option[String] = None
-      var kind: Option[String] = None
-      var path: Option[String] = None
-      val acts = List.newBuilder[String]
-      val gates = Map.newBuilder[String, Option[String]]
-      items.foreach {
-        case Cst.Node("family", List(Cst.Leaf(n))) =>
-          if familyId.isDefined then return Left("duplicate family item")
-          familyId = Some(n)
-        case Cst.Node("kind", List(Cst.Leaf(n))) =>
-          if kind.isDefined then return Left("duplicate kind item")
-          kind = Some(n)
-        case Cst.Node("path", List(Cst.Leaf(s))) =>
-          if path.isDefined then return Left("duplicate path item")
-          path = Some(s)
-        case Cst.Node("action", List(Cst.Leaf(n))) =>
-          acts += n
-        case Cst.Node("gate", List(Cst.Leaf(ctor), Cst.Leaf(act))) =>
-          gates += ctor -> Some(act)
-        case Cst.Node("ungated", List(Cst.Leaf(ctor))) =>
-          gates += ctor -> None
-        case other =>
-          return Left(s"not an effect-interface item: ${other.render}")
-      }
-      for
-        f <- familyId.toRight("missing family item")
-        k <- kind.toRight("missing kind item")
-        p <- path.toRight("missing path item")
-      yield InterfaceDecl(f, acts.result(), k, p, gates.result())
+      scala.util.boundary:
+        var familyId: Option[String] = None
+        var kind: Option[String] = None
+        var path: Option[String] = None
+        val acts = List.newBuilder[String]
+        val gates = Map.newBuilder[String, Option[String]]
+        items.foreach {
+          case Cst.Node("family", List(Cst.Leaf(n))) =>
+            if familyId.isDefined then scala.util.boundary.break(Left("duplicate family item"))
+            familyId = Some(n)
+          case Cst.Node("kind", List(Cst.Leaf(n))) =>
+            if kind.isDefined then scala.util.boundary.break(Left("duplicate kind item"))
+            kind = Some(n)
+          case Cst.Node("path", List(Cst.Leaf(s))) =>
+            if path.isDefined then scala.util.boundary.break(Left("duplicate path item"))
+            path = Some(s)
+          case Cst.Node("action", List(Cst.Leaf(n))) =>
+            acts += n
+          case Cst.Node("gate", List(Cst.Leaf(ctor), Cst.Leaf(act))) =>
+            gates += ctor -> Some(act)
+          case Cst.Node("ungated", List(Cst.Leaf(ctor))) =>
+            gates += ctor -> None
+          case other =>
+            scala.util.boundary.break(Left(s"not an effect-interface item: ${other.render}"))
+        }
+        for
+          f <- familyId.toRight("missing family item")
+          k <- kind.toRight("missing kind item")
+          p <- path.toRight("missing path item")
+          _ <- PathPattern.parse(p)
+        yield InterfaceDecl(f, acts.result(), k, p, gates.result())
 
     def fromModule(defs: List[(String, Cst)]): Either[String, InterfaceDecl] =
       fromItems(defs.map(_._2))
@@ -154,7 +233,7 @@ object EffectMeta:
       "Lsp", List("read", "write"), "lsp", "*",
       Map("readMessage" -> Some("read"), "writeMessage" -> Some("write"))),
     "effect-cas" -> InterfaceDecl(
-      "Cas", List("put", "get", "fsck", "gc", "stats"), "cas", "*",
+      "Cas", List("put", "get", "fsck", "gc", "stats"), "cas", "Digest|Path",
       Map(
         "put" -> Some("put"), "get" -> Some("get"), "contains" -> Some("get"),
         "fsck" -> Some("fsck"), "gc" -> Some("gc"), "stats" -> Some("stats"))),

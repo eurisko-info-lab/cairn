@@ -1,8 +1,8 @@
 package cairn.tests
 
 import cairn.kernel.*
-import cairn.workbench.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext
 /** LeanCore (§5b, §2c amendment, §8b): the formal-methods IR ladder's rung
   * past MiniTT — identity types (`Eq`/`refl`/`subst`) and a minimal

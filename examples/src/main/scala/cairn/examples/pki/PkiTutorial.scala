@@ -2,7 +2,7 @@ package cairn.examples.pki
 
 import cairn.systemhandler.{CasEffects, EffectContext, Node}
 import cairn.kernel.*
-import cairn.ledger.{Ed25519, Encryption, Keypair}
+import cairn.systemhandler.{Ed25519, Encryption, Keypair}
 import java.security.KeyPair
 
 /** Demo PKI hierarchy on par with GRANITE `authorities/DemoPki`: root →

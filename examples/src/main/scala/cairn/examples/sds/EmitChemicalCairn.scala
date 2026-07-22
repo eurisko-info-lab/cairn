@@ -1,6 +1,5 @@
 package cairn.examples.sds
 
-import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
 import cairn.systemhandler.EffectContext

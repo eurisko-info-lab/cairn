@@ -1,10 +1,8 @@
 package cairn.tests
 
-import cairn.systemhandler.EffectContext
-import cairn.systemhandler.CasEffects
+import cairn.systemhandler.{CasEffects, EffectContext, Keypair, Node}
 import cairn.kernel.*
 import cairn.core.*
-import cairn.ledger.*
 import cairn.examples.stlc.Stlc
 
 /** Phase 7 acceptance (S43–S44): agreement between kernel values and

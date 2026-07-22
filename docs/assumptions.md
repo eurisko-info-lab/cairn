@@ -92,12 +92,15 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
     source of truth** via `PackLoader` (same as exemplars); Scala
     `Stlc.fragments` / `Meta.fragment` remain the bootstrap seed (digest-
     equality / fixpoint tests). `emit-languages` format-preserves against git
-    HEAD. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds:
+    HEAD. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds
+    **and** Core-facing `query` / `policy`:
     semantic `languages/<name>.cairn` + `languages/<name>/surfaces/default.cairn`.
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
     unisoncore) split the same way. Meta itself stays fused (bootstrap fixpoint)
-    while describing the surface top.
+    while describing the surface top. Residuals: `Query.run` / policy
+    enforcement / TreeEngine / Delta stay Scala interpreters of `.cairn` data.
+    Effect `ResourceSchema` uses typed `PathPattern` (`Digest|Path` for Cas).
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental

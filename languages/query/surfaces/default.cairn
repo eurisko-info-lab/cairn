@@ -1,0 +1,29 @@
+surface default for query {
+  fragment query {
+    keyword defs;
+    keyword matching;
+    keyword typed;
+    keyword artifacts;
+    keyword kind;
+    punct "(";
+    punct ")";
+    punct ",";
+    punct "$";
+    identcont "-";
+    syntax query += qMatch : tok "defs" tok "matching" cat qpat;
+    syntax query += qTyped : tok "defs" tok "typed" cat qpat;
+    syntax query += qKind : tok "artifacts" tok "kind" anyident;
+    syntax qpat += qpMetaNode : tok "$" name tok "(" opt sepby1 cat qpat "," tok ")";
+    syntax qpat += qpMeta : tok "$" name;
+    syntax qpat += qpNode : name tok "(" opt sepby1 cat qpat "," tok ")";
+    syntax qpat += qpLeaf : name;
+    print qMatch : lit "defs matching" sp field 0;
+    print qTyped : lit "defs typed" sp field 0;
+    print qKind : lit "artifacts kind" sp field 0;
+    print qpMetaNode : lit "$" field 0 lit "(" field 1 lit ")";
+    print qpMeta : lit "$" field 0;
+    print qpNode : field 0 lit "(" field 1 lit ")";
+    print qpLeaf : field 0;
+    top query;
+  }
+}

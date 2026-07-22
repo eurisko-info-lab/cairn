@@ -132,7 +132,7 @@ class FuzzSuite extends munit.FunSuite:
     total += fuzz(Stlc.language.grammar, "type", 10_000, seed = 2L, depth = 5)
     total += fuzz(Delta.deltaOf(Stlc.language).toOption.get.grammar, "Δstlc.changeset", 10_000, seed = 3L, depth = 4)
     total += fuzz(Query.language.grammar, "query", 5_000, seed = 4L, depth = 4)
-    total += fuzz(cairn.ledger.PolicyLang.language.grammar, "policyTerm", 5_000, seed = 5L, depth = 3)
+    total += fuzz(cairn.user.policy.PolicyLang.language.grammar, "policyTerm", 5_000, seed = 5L, depth = 3)
     total += fuzz(JsonSurface.grammar, "json", 10_000, seed = 6L, depth = 4)
     assert(total >= 100_000, s"only $total terms generated")
 
@@ -161,7 +161,7 @@ class FuzzSuite extends munit.FunSuite:
     total += fuzzFixpoint(Riemann.LeanPort.grammar, "prop", 2_000, seed = 25L, depth = 4)
     total += fuzzFixpoint(Search.language.grammar, "searchObj", 2_000, seed = 26L, depth = 3)
     total += fuzzFixpoint(Query.language.grammar, "query", 2_000, seed = 27L, depth = 4)
-    total += fuzzFixpoint(cairn.ledger.PolicyLang.language.grammar, "policyTerm", 2_000, seed = 28L, depth = 3)
+    total += fuzzFixpoint(cairn.user.policy.PolicyLang.language.grammar, "policyTerm", 2_000, seed = 28L, depth = 3)
     assert(total >= 15_000, s"only $total terms generated")
 
   test("M50: fuzzed JSON also survives the value-level encode/decode"):

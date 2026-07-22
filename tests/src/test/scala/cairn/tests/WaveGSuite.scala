@@ -1,10 +1,9 @@
 package cairn.tests
 
-import cairn.systemhandler.{CasEffects, EffectContext}
+import cairn.systemhandler.{CasEffects, EffectContext, Ed25519, Gossip, HttpNode, HttpSync, Keypair, Node, Provenance}
 import cairn.kernel.*
 import cairn.core.Module
 import cairn.core.{Parser, RoundTrip}
-import cairn.ledger.*
 import cairn.examples.stlc.Stlc
 
 /** Wave G acceptance (M35–M40). */
@@ -104,9 +103,9 @@ class WaveGSuite extends munit.FunSuite:
   test("M37: policy language parses, round-trips, and has ΔPolicy"):
     val src = "branch main requires method proof-term from alice"
     // note: 'proof-term' has a dash — use the underscore form in the surface
-    val term = PolicyLang.parse("branch main requires method proof_term from alice").fold(e => fail(e), identity)
-    RoundTrip.check(PolicyLang.language.grammar, term).fold(e => fail(e), identity)
-    val dp = PolicyLang.deltaPolicy.fold(e => fail(e), identity)
+    val term = cairn.user.policy.PolicyLang.parse("branch main requires method proof_term from alice").fold(e => fail(e), identity)
+    RoundTrip.check(cairn.user.policy.PolicyLang.language.grammar, term).fold(e => fail(e), identity)
+    val dp = cairn.user.policy.PolicyLang.deltaPolicy.fold(e => fail(e), identity)
     assertEquals(dp.name, "Δpolicy")
     assert(cairn.core.Delta.deltaOf(dp).isRight) // Δ(ΔPolicy)
 
@@ -115,7 +114,7 @@ class WaveGSuite extends munit.FunSuite:
     casPut(node, Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     val certDigest = Digest.of(Canon.CStr("some-proof-cert"))
-    val policy = PolicyLang.parse("branch main requires method proof_term from alice").toOption.get
+    val policy = cairn.user.policy.PolicyLang.parse("branch main requires method proof_term from alice").toOption.get
     node.append(alice, bootAuth, List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),
       alice.signTx(Tx.PublishArtifact(key)),

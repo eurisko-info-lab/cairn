@@ -1,6 +1,6 @@
 f = family Cas ;
 k = kind cas ;
-p = path "*" ;
+p = path "Digest|Path" ;
 a1 = action put ;
 a2 = action get ;
 a3 = action fsck ;

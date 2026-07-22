@@ -1,8 +1,8 @@
 package cairn.examples.sds
 
+import cairn.systemhandler.{Encryption}
 import cairn.kernel.*
 import cairn.core.*
-import cairn.ledger.Encryption
 import java.security.{PrivateKey, PublicKey}
 
 /** Cryptographic confidentiality for SDS composition — on par with GRANITE

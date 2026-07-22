@@ -120,7 +120,7 @@ rights and resource vocabularies instead of hand-maintaining them independently.
   implemented elsewhere bypassing the `system-interface` contract entirely
   (HTTP: `system-handler.HttpNode`/`HttpSync`/`Distribution` and
   `surface.Browser` use raw JDK `com.sun.net.httpserver.HttpServer`
-  directly; crypto: `cairn.ledger.Ed25519`/`Encryption`, not
+  directly; crypto: `Ed25519`/`Encryption`, not
   `system-interface.Crypto`). The user chose removal over conversion or
   leaving them as-is. `system-interface/{Http,Network,Crypto}.scala` and
   their `Effects.Family`/`Action` entries are gone entirely. **Precise

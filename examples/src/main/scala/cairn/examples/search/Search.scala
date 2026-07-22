@@ -2,8 +2,7 @@ package cairn.examples.search
 
 import cairn.kernel.*
 import cairn.systeminterface.{Cas, PackAccess}
-import cairn.systemhandler.{CasEffects, EffectContext}
-import cairn.ledger.Provenance
+import cairn.systemhandler.{CasEffects, EffectContext, Provenance}
 import cairn.proof.{Certify, Certificate, Claim, TestCase, TestSuite}
 import cairn.core.{Search as DerivSearch, Module, Delta}
 

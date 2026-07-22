@@ -1,0 +1,7 @@
+language policy {
+  fragment policy provides policy {
+    sort Policy tree;
+    ctor polReq : Policy(Name, Name, Name);
+    ctor polOpen : Policy(Name);
+  }
+}
