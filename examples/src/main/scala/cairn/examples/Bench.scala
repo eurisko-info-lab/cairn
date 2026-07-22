@@ -52,3 +52,27 @@ import cairn.examples.icnet.IcNet
   time("sequential net reduction")(NetEngine.normalize(IcNet.language, net))
   val (_, stats) = time("parallel net reduction")(NetEngine.normalizeParallel(IcNet.language, net)).toOption.get
   println(s"  parallel sweeps: ${stats.sweeps}, pairs/sweep: ${stats.pairsPerSweep.mkString(",")}")
+
+  println("== genuine concurrent net reduction (real threads, not just fewer sweeps) ==")
+  // Honest benchmark, not a cherry-picked one: a net wide enough for
+  // parallelism to have SOMETHING to parallelize (200 fully independent
+  // dup-dup pairs, no wires between them at all — the case
+  // NetEngine.normalizeConcurrent's isolation check allows onto real threads)
+  // rather than the tiny 2-3-agent nets elsewhere in this file, where JVM
+  // thread/Future overhead would trivially swamp any win.
+  given ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+  val wideBuilder = NetBuilder()
+  for _ <- 1 to 200 do
+    val d1 = wideBuilder.agent("dup"); val d2 = wideBuilder.agent("dup")
+    val f1 = wideBuilder.agent("free"); val f2 = wideBuilder.agent("free"); val f3 = wideBuilder.agent("free")
+    wideBuilder.wire(PortRef(d1, 0), PortRef(d2, 0))
+    wideBuilder.wire(PortRef(d1, 1), PortRef(f1, 0))
+    wideBuilder.wire(PortRef(d2, 1), PortRef(f2, 0)); wideBuilder.wire(PortRef(d2, 2), PortRef(f3, 0))
+    wideBuilder.wire(PortRef(d1, 2), PortRef(wideBuilder.agent("free"), 0))
+  val wideNet = wideBuilder.net
+  time("sequential (200 independent pairs)")(NetEngine.normalize(IcNet.language, wideNet))
+  time("parallelStep sweeps (200 independent pairs)")(NetEngine.normalizeParallel(IcNet.language, wideNet))
+  val (_, _, threadedCount) =
+    time("genuine concurrent, real threads (200 independent pairs)")(
+      NetEngine.normalizeConcurrent(IcNet.language, wideNet)).toOption.get
+  println(s"  pairs actually dispatched to real threads (vs. sequential fallback): $threadedCount")

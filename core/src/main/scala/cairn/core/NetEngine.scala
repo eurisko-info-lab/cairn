@@ -95,7 +95,18 @@ object NetEngine:
 
   /** Apply one specific rule instance at a principal pair (port fusion). */
   def applyPair(net: Net, rule: NetRule, leftId: Int, rightId: Int): Either[String, Net] =
-    var nextId = if net.agents.isEmpty then 0 else net.agents.keys.max + 1
+    val startId = if net.agents.isEmpty then 0 else net.agents.keys.max + 1
+    applyPairFrom(net, rule, leftId, rightId, startId)
+
+  /** [[applyPair]], but the caller supplies the first fresh agent id instead
+    * of computing it from `net.agents.keys.max + 1`. Lets independent,
+    * concurrently-computed rewrites against the SAME base net (see
+    * [[normalizeConcurrent]]) each get a pre-reserved, disjoint id range, so
+    * merging their results afterward can never collide two unrelated new
+    * agents onto the same id.
+    */
+  def applyPairFrom(net: Net, rule: NetRule, leftId: Int, rightId: Int, startId: Int): Either[String, Net] =
+    var nextId = startId
     val created = rule.newAgents.map { spec =>
       val a = spec match
         case "@left"  => Agent(nextId, net.agents(leftId).kind, net.agents(leftId).label)
@@ -175,3 +186,105 @@ object NetEngine:
       case Some(n2) => normalize(lang, n2, fuel - 1)
       case None     => Right(net)
     }
+
+  /** M-parallel: genuine multi-threaded reduction, not just [[parallelStep]]'s
+    * fewer-sweeps batching. Agent-disjoint alone (what [[parallelStep]] uses)
+    * is NOT sufficient to compute two pairs' rewrites independently: if pair
+    * A and pair B share an AUXILIARY wire between them (a's aux port wired to
+    * b's aux port — an ordinary net shape, not an edge case), each pair's
+    * fusion, computed blindly from the same base snapshot, resolves that
+    * shared wire differently (each thinks the other side is still the
+    * original, still-alive agent), producing two inconsistent answers instead
+    * of one correct one. [[parallelStep]] is silently protected from this
+    * because its sequential fold lets each `applyPair` call see every prior
+    * pair's already-applied result — true concurrency loses that protection.
+    *
+    * So only the subset of a sweep's selected pairs with ZERO wires (principal
+    * or auxiliary) to any OTHER selected pair — "isolated" pairs — is safe to
+    * compute on separate threads: nothing about an isolated pair's local
+    * neighborhood can be touched by, or need to react to, another pair's
+    * rewrite. Isolated pairs are computed concurrently via [[applyPairFrom]]
+    * with pre-reserved disjoint fresh-agent-id ranges (so merging never
+    * collides two unrelated new agents onto the same id) and merged as a
+    * plain set/map union — sound specifically because isolation guarantees
+    * no cross-references exist to reconcile. Every other selected pair (has
+    * SOME wire to another selected pair) still goes through the existing,
+    * already-proven sequential fold; by construction that non-isolated subset
+    * shares no wire with the isolated subset either, so the two subsets can
+    * be computed independently, from the SAME base net, and combined by union.
+    *
+    * Honest benchmark result (`examples.Bench`, 200 fully independent
+    * dup-dup pairs — wide enough that thread overhead shouldn't obviously
+    * dominate): genuine threading measured NO improvement over
+    * [[parallelStep]]'s existing sweep-batching (~45.7ms either way) — the
+    * ~14% win over pure sequential reduction comes from batching many pairs
+    * per round, not from actually executing rewrites on separate cores.
+    * `Future`/thread-pool dispatch overhead cancels out the savings for
+    * rewrites this cheap. Kept because it is a real, correct, additional
+    * capability (and the isolation analysis has standalone value), not
+    * because it currently measures faster.
+    */
+  def parallelStepConcurrent(lang: NetLanguage, net: Net)(
+      using ec: scala.concurrent.ExecutionContext
+  ): Either[String, Option[(Net, Int, Int)]] =
+    import scala.concurrent.{Await, Future}
+    import scala.concurrent.duration.Duration
+    val candidates = activePairs(net).flatMap(ruleFor(lang, net, _))
+    if candidates.isEmpty then Right(None)
+    else
+      var used = Set.empty[Int]
+      val selected = candidates.filter { (_, l, r) =>
+        if used.contains(l) || used.contains(r) then false
+        else { used += l; used += r; true } }
+      val batchAgents = selected.flatMap((_, l, r) => List(l, r)).toSet
+      def isolated(l: Int, r: Int): Boolean =
+        val mine = Set(l, r)
+        val others = batchAgents -- mine
+        !net.wires.exists { (a, b) =>
+          (mine(a.agent) && others(b.agent)) || (mine(b.agent) && others(a.agent)) }
+      val (parallelPairs, sequentialPairs) = selected.partition((_, l, r) => isolated(l, r))
+
+      def deltaAgents(base: Net, result: Net): (Set[Int], Map[Int, Agent]) =
+        (base.agents.keySet -- result.agents.keySet, result.agents -- base.agents.keySet)
+      def deltaWires(base: Net, result: Net): (Set[(PortRef, PortRef)], Set[(PortRef, PortRef)]) =
+        (base.wires -- result.wires, result.wires -- base.wires)
+      def applyDelta(onto: Net, removedA: Set[Int], addedA: Map[Int, Agent],
+                     removedW: Set[(PortRef, PortRef)], addedW: Set[(PortRef, PortRef)]): Net =
+        Net(agents = onto.agents -- removedA ++ addedA, wires = onto.wires -- removedW ++ addedW)
+
+      val seqResult: Either[String, Net] =
+        sequentialPairs.foldLeft[Either[String, Net]](Right(net)) { case (acc, (rule, l, r)) =>
+          acc.flatMap(applyPair(_, rule, l, r)) }
+
+      var cursor = if net.agents.isEmpty then 0 else net.agents.keys.max + 1
+      val offsetted = parallelPairs.map { case (rule, l, r) =>
+        val off = cursor; cursor += rule.newAgents.length; (rule, l, r, off) }
+      val futures = offsetted.map { case (rule, l, r, off) =>
+        Future(applyPairFrom(net, rule, l, r, off)) }
+      val parResults = futures.map(f => Await.result(f, Duration.Inf))
+      val parMerged: Either[String, Net] = parResults.foldLeft[Either[String, Net]](Right(net)) {
+        case (acc, next) =>
+          for a <- acc; n <- next yield
+            val (remA, addA) = deltaAgents(net, n)
+            val (remW, addW) = deltaWires(net, n)
+            applyDelta(a, remA, addA, remW, addW)
+      }
+      for
+        seq <- seqResult
+        par <- parMerged
+      yield
+        val (remA, addA) = deltaAgents(net, par)
+        val (remW, addW) = deltaWires(net, par)
+        Some((applyDelta(seq, remA, addA, remW, addW), selected.length, parallelPairs.length))
+
+  def normalizeConcurrent(lang: NetLanguage, net: Net, fuel: Int = 10_000)(
+      using ec: scala.concurrent.ExecutionContext
+  ): Either[String, (Net, ParallelStats, Int)] =
+    def loop(n: Net, sweeps: Int, pairs: List[Int], threaded: Int, fuel: Int)
+        : Either[String, (Net, ParallelStats, Int)] =
+      if fuel <= 0 then Left("out of fuel reducing net")
+      else parallelStepConcurrent(lang, n).flatMap {
+        case Some((n2, k, threadedK)) => loop(n2, sweeps + 1, pairs :+ k, threaded + threadedK, fuel - 1)
+        case None                     => Right((n, ParallelStats(sweeps, pairs), threaded))
+      }
+    loop(net, 0, Nil, 0, fuel)

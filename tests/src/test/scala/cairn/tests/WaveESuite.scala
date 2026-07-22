@@ -143,6 +143,78 @@ class WaveESuite extends munit.FunSuite:
         val Right(shuffled) = normalizeRandom(rng, net): @unchecked
         assertEquals(IcNet.readback(shuffled, root), canonicalReadback, s"seed=$seed term=${term.render}")
 
+  // ---- genuine concurrent reduction (real threads, not just fewer sweeps) ----
+
+  test("normalizeConcurrent: agent-disjoint pairs sharing an aux wire are NOT run concurrently"):
+    // The hazard this guards against: two active (principal-principal) pairs
+    // that are agent-disjoint (so parallelStep's existing selection would
+    // batch them together) but share an AUXILIARY wire between them — a
+    // completely ordinary net shape, not a contrived edge case. Computing
+    // each independently from the same snapshot would resolve that shared
+    // wire two different, inconsistent ways. d1.aux2 <-> d3.aux1 below is
+    // exactly that: two separate dup-dup active pairs, cross-wired.
+    given scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+    val b = NetBuilder()
+    val d1 = b.agent("dup"); val d2 = b.agent("dup")
+    val d3 = b.agent("dup"); val d4 = b.agent("dup")
+    val frees = List.fill(6)(b.agent("free"))
+    b.wire(PortRef(d1, 0), PortRef(d2, 0)) // pair 1: active
+    b.wire(PortRef(d3, 0), PortRef(d4, 0)) // pair 2: active, agent-disjoint from pair 1
+    b.wire(PortRef(d1, 1), PortRef(frees(0), 0))
+    b.wire(PortRef(d1, 2), PortRef(d3, 1))          // cross-wire: d1.aux2 <-> d3.aux1
+    b.wire(PortRef(d2, 1), PortRef(frees(1), 0)); b.wire(PortRef(d2, 2), PortRef(frees(2), 0))
+    b.wire(PortRef(d3, 2), PortRef(frees(3), 0))
+    b.wire(PortRef(d4, 1), PortRef(frees(4), 0)); b.wire(PortRef(d4, 2), PortRef(frees(5), 0))
+    val net = b.net
+    assertEquals(NetEngine.wellFormed(ic, net), Right(()))
+    val Right(Some((_, total, threaded))) = NetEngine.parallelStepConcurrent(ic, net): @unchecked
+    assertEquals(total, 2, "both pairs are agent-disjoint, so both get selected")
+    assertEquals(threaded, 0, "but the aux cross-wire means NEITHER is safe for real concurrency")
+    val Right(expected) = NetEngine.normalize(ic, net): @unchecked
+    val Right((actual, _, _)) = NetEngine.normalizeConcurrent(ic, net): @unchecked
+    assertEquals(actual, expected)
+
+  test("normalizeConcurrent: truly independent pairs DO run on real threads, and agree with the interpretive engine"):
+    given scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+    // Same shape as above, minus the cross-wire: two dup-dup pairs with no
+    // wire at all between them — the case genuine concurrency is safe for.
+    val b = NetBuilder()
+    val d1 = b.agent("dup"); val d2 = b.agent("dup")
+    val d3 = b.agent("dup"); val d4 = b.agent("dup")
+    val frees = List.fill(6)(b.agent("free"))
+    b.wire(PortRef(d1, 0), PortRef(d2, 0))
+    b.wire(PortRef(d3, 0), PortRef(d4, 0))
+    b.wire(PortRef(d1, 1), PortRef(frees(0), 0)); b.wire(PortRef(d1, 2), PortRef(frees(1), 0))
+    b.wire(PortRef(d2, 1), PortRef(frees(2), 0)); b.wire(PortRef(d2, 2), PortRef(frees(3), 0))
+    b.wire(PortRef(d3, 1), PortRef(frees(4), 0)); b.wire(PortRef(d3, 2), PortRef(frees(5), 0))
+    val frees2 = List(b.agent("free"), b.agent("free"))
+    b.wire(PortRef(d4, 1), PortRef(frees2(0), 0)); b.wire(PortRef(d4, 2), PortRef(frees2(1), 0))
+    val net = b.net
+    assertEquals(NetEngine.wellFormed(ic, net), Right(()))
+    val Right(Some((_, total, threaded))) = NetEngine.parallelStepConcurrent(ic, net): @unchecked
+    assertEquals(total, 2)
+    assertEquals(threaded, 2, "no wire between the two pairs: both are safe for real concurrency")
+    val Right(expected) = NetEngine.normalize(ic, net): @unchecked
+    val Right((actual, _, threadedTotal)) = NetEngine.normalizeConcurrent(ic, net): @unchecked
+    assertEquals(actual, expected)
+    assert(threadedTotal > 0)
+
+  test("property: normalizeConcurrent agrees with the interpretive engine over the STLC-lowered corpus"):
+    given scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
+    val two = Stlc.lam1("f", Stlc.tBool,
+      Stlc.lam1("x", Stlc.tBool, Stlc.app1(Stlc.v("f"), Stlc.app1(Stlc.v("f"), Stlc.v("x")))))
+    val corpus = List(
+      Stlc.app1(Stlc.idBool, Stlc.tru),
+      Stlc.app1(Stlc.app1(Stlc.churchTrue, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(Stlc.churchFalse, Stlc.tru), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.fls),
+      Stlc.app1(Stlc.app1(two, Stlc.idBool), Stlc.tru))
+    for term <- corpus do
+      val Right((net, root)) = IcNet.lower(term): @unchecked
+      val Right(expected) = NetEngine.normalize(ic, net): @unchecked
+      val Right((actual, _, _)) = NetEngine.normalizeConcurrent(ic, net): @unchecked
+      assertEquals(IcNet.readback(actual, root), IcNet.readback(expected, root), term.render)
+
   // ---- compiled net dispatch (mirrors M28's CompiledTreeEngine, for nets) ----
 
   test("compiled net dispatch agrees with the interpretive NetEngine over the STLC-lowered corpus"):
