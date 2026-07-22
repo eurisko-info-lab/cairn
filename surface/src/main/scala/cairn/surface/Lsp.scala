@@ -134,7 +134,8 @@ final class LspServer(cfg: LspConfig):
           "hoverProvider" -> Cst.node("jtrue"),
           "completionProvider" -> J.obj(),
           "executeCommandProvider" -> J.obj("commands" -> J.arr(
-            List("cairn.addDef", "cairn.replaceDef", "cairn.removeDef", "cairn.editDefAt").map(J.str)))))))
+            List("cairn.addDef", "cairn.replaceDef", "cairn.removeDef", "cairn.editDefAt",
+              "cairn.editDefAtStructured").map(J.str)))))))
       case "textDocument/didOpen" =>
         val td = J.fields(p.getOrElse("textDocument", J.obj()))
         val uri = td.get("uri").flatMap(J.asStr).getOrElse("")
@@ -226,6 +227,17 @@ final class LspServer(cfg: LspConfig):
           names.filter(n => prefix.isEmpty || n.startsWith(prefix)).distinct.sorted
         List(response(id, J.arr(
           items.getOrElse(Nil).map(n => J.obj("label" -> J.str(n), "kind" -> J.num(3))))))
+      // Schema introspection for a projectional client: for a given sort,
+      // every valid constructor and its positional child sorts — derived
+      // straight from the composed language's own Fragment data
+      // (ComposedLanguage.constructors), zero per-language code. This is what
+      // lets a generic "pick a constructor for this empty slot" UI work for
+      // any registered language, the same way the parser/printer already do.
+      case "cairn/schema" =>
+        val sort = p.get("sort").flatMap(J.asStr).getOrElse("")
+        val ctors = cfg.language.constructors.values.filter(_.sort == sort).toList.sortBy(_.name)
+        List(response(id, J.arr(ctors.map(c =>
+          J.obj("name" -> J.str(c.name), "argSorts" -> J.arr(c.argSorts.map(J.str)))))))
       case "workspace/executeCommand" =>
         val command = p.get("command").flatMap(J.asStr).getOrElse("")
         val args = J.items(p.getOrElse("arguments", J.arr(Nil)))
@@ -272,6 +284,25 @@ final class LspServer(cfg: LspConfig):
               pathArg <- args.lift(2).toRight("cairn.editDefAt: missing path")
               termText <- args.lift(3).flatMap(J.asStr).toRight("cairn.editDefAt: missing term")
               term <- Parser.parse(cfg.language.grammar, termText)
+              path = J.items(pathArg).flatMap(J.asNum).map(_.toString)
+              pathCst = if path.isEmpty then Cst.node("none")
+                        else Cst.node("some", Cst.Node("list", path.map(Cst.Leaf(_))))
+              edit <- applyChangeCommand(uri, Cst.node(Delta.tag(cfg.language, "edit"), Cst.Leaf(name), pathCst, term))
+            yield edit
+          // Projectional variant of cairn.editDefAt: the 4th argument is a
+          // STRUCTURED term — a JSON value already shaped like JsonSurface's
+          // Cst encoding ({"leaf": "x"} / {"node": "lam", "kids": [...]}) —
+          // submitted directly, never round-tripped through the grammar
+          // parser. The client manipulates structure, not surface syntax;
+          // everything downstream (Delta.apply, format-preserving splice) is
+          // identical to the text-parsed path. See [[cairn.core.JsonSurface]].
+          case "cairn.editDefAtStructured" =>
+            for
+              uri <- args.lift(0).flatMap(J.asStr).toRight("cairn.editDefAtStructured: missing uri")
+              name <- args.lift(1).flatMap(J.asStr).toRight("cairn.editDefAtStructured: missing name")
+              pathArg <- args.lift(2).toRight("cairn.editDefAtStructured: missing path")
+              termArg <- args.lift(3).toRight("cairn.editDefAtStructured: missing structured term")
+              term <- cairn.core.JsonSurface.fromJsonCst(termArg)
               path = J.items(pathArg).flatMap(J.asNum).map(_.toString)
               pathCst = if path.isEmpty then Cst.node("none")
                         else Cst.node("some", Cst.Node("list", path.map(Cst.Leaf(_))))

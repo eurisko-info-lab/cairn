@@ -222,6 +222,32 @@ class WaveH2Suite extends munit.FunSuite:
     assert(out.contains("c comment"), out)
     assert(out.contains("inline"), out)
 
+  test("workspace/executeCommand cairn.editDefAtStructured: same edit, submitted as structure not text"):
+    val server = LspServer(lspCfg)
+    val uri = "file:///editstruct.stlc"
+    val text = "-- c comment\nc = (f x) ; -- inline\n"
+    openDoc(server, uri, text)
+    // {"node": "var", "kids": [{"leaf": "y"}]} — JsonSurface's own encoding of
+    // the Cst `var(y)` (what Parser.parse(..., "y") would produce), submitted
+    // directly instead of the text "y" going through the grammar parser.
+    val structuredY = J.obj("node" -> J.str("var"), "kids" -> J.arr(List(J.obj("leaf" -> J.str("y")))))
+    val resp = execCommand(server, 16, "cairn.editDefAtStructured",
+      List(J.str(uri), J.str("c"), J.arr(List(J.num(1))), structuredY))
+    val out = J.print(resp)
+    assert(out.contains("(f y)"), out)
+    assert(out.contains("c comment"), out)
+    assert(out.contains("inline"), out)
+
+  test("cairn/schema: enumerates a sort's constructors and child sorts, derived from the composed language"):
+    val server = LspServer(lspCfg)
+    val resp = server.handle(J.obj(
+      "jsonrpc" -> J.str("2.0"), "id" -> J.num(17), "method" -> J.str("cairn/schema"),
+      "params" -> J.obj("sort" -> J.str("Term")))).head
+    val out = J.print(resp)
+    assert(out.contains("\"name\": \"var\"") && out.contains("\"argSorts\": [\"Name\"]"), out)
+    assert(out.contains("\"name\": \"app\"") && out.contains("\"argSorts\": [\"Term\", \"Term\"]"), out)
+    assert(out.contains("\"name\": \"lam\"") && out.contains("\"argSorts\": [\"Name\", \"Type\", \"Term\"]"), out)
+
   test("workspace/executeCommand: unknown command and missing args fail cleanly"):
     val server = LspServer(lspCfg)
     val uri = "file:///err.stlc"

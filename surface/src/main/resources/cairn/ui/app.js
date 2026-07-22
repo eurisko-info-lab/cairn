@@ -480,6 +480,12 @@ async function openLanguage(name) {
     <div class="card">
       <h2>Scratch editor</h2>
       <p class="muted">Type a term in <b>${esc(name)}</b>; Validate uses the live grammar (propose only).</p>
+      <div class="toolbar" style="margin-bottom:0.5rem">
+        <input id="schemaSort" placeholder="sort (e.g. ${esc(lang.top || "Term")})" value="${esc(lang.top || "")}" style="width:10rem">
+        <button class="btn" id="loadSchema">Constructors for sort</button>
+        <select id="schemaCtors" style="display:none"></select>
+        <button class="btn" id="insertCtor" style="display:none">Insert placeholder</button>
+      </div>
       <textarea id="editor" spellcheck="false"></textarea>
       <div class="toolbar" style="margin-top:0.75rem">
         <button class="btn primary" id="validateEdit">Validate</button>
@@ -495,6 +501,40 @@ async function openLanguage(name) {
     } catch (e) {
       $("editStatus").innerHTML = `<span class="bad">${esc(e.message)}</span>`;
     }
+  };
+  // Projectional-editing proof-of-concept: schema is derived entirely from
+  // the composed language's own Fragment data (GET /api/schema/<lang>/<sort>,
+  // same source the LSP's cairn/schema request reads) — no per-language UI
+  // code. "Insert placeholder" writes structure (constructor name + typed
+  // argument slots), not hand-typed surface syntax.
+  $("loadSchema").onclick = async () => {
+    const sort = $("schemaSort").value.trim();
+    if (!sort) return;
+    try {
+      const ctors = await api(`schema/${encodeURIComponent(name)}/${encodeURIComponent(sort)}`);
+      const sel = $("schemaCtors");
+      sel.innerHTML = ctors.map((c) =>
+        `<option value='${esc(JSON.stringify(c))}'>${esc(c.name)}(${esc(c.argSorts.join(", "))})</option>`).join("");
+      sel.style.display = ctors.length ? "inline-block" : "none";
+      $("insertCtor").style.display = ctors.length ? "inline-block" : "none";
+      $("editStatus").innerHTML = ctors.length
+        ? `<span class="ok">${ctors.length} constructor(s) for ${esc(sort)}</span>`
+        : `<span class="muted">no constructors for sort ${esc(sort)}</span>`;
+    } catch (e) {
+      $("editStatus").innerHTML = `<span class="bad">${esc(e.message)}</span>`;
+    }
+  };
+  $("insertCtor").onclick = () => {
+    const sel = $("schemaCtors");
+    if (!sel.value) return;
+    const c = JSON.parse(sel.value);
+    const placeholder = c.argSorts.length
+      ? `${c.name}(${c.argSorts.map((s) => `<${s}>`).join(", ")})`
+      : c.name;
+    const ta = $("editor");
+    const pos = ta.selectionStart ?? ta.value.length;
+    ta.value = ta.value.slice(0, pos) + placeholder + ta.value.slice(pos);
+    ta.focus();
   };
 }
 

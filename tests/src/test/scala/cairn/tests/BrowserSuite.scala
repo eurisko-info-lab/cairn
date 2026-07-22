@@ -73,6 +73,23 @@ class BrowserSuite extends munit.FunSuite:
       assert(js.contains("Cairn Explorer") || js.contains("loadOverview"), js)
     finally srv.stop()
 
+  test("GET /api/schema/<lang>/<sort>: constructors + child sorts, derived from the composed language"):
+    val root = Files.createTempDirectory("cairn-schema")
+    val node = Node(root, EffectContext.forLedger())
+    val langs = Map("stlc" -> cairn.examples.stlc.Stlc.language)
+    val srv = BrowserServer(node, langs, 0)
+    val port = srv.start()
+    try
+      val (code, body) = get(port, "/api/schema/stlc/Term")
+      assertEquals(code, 200)
+      assert(body.contains("\"name\":\"var\"") && body.contains("\"argSorts\":[\"Name\"]"), body)
+      assert(body.contains("\"name\":\"app\"") && body.contains("\"argSorts\":[\"Term\",\"Term\"]"), body)
+      assert(body.contains("\"name\":\"lam\"") && body.contains("\"argSorts\":[\"Name\",\"Type\",\"Term\"]"), body)
+      val (missCode, missBody) = get(port, "/api/schema/nope/Term")
+      assertEquals(missCode, 404)
+      assert(missBody.contains("unknown language"), missBody)
+    finally srv.stop()
+
   test("POST /api/parse validates editor buffer against a language"):
     val root = Files.createTempDirectory("cairn-ui-parse")
     val node = Node(root, EffectContext.forLedger())

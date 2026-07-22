@@ -181,6 +181,21 @@ final class BrowserServer(
               "top" -> Json.str(l.grammar.top),
               "ctors" -> Json.arr(l.constructors.keys.toList.sorted.map(Json.str)))
           }))
+        case ("GET", p) if p.startsWith("schema/") =>
+          // Projectional-editing proof-of-concept: for <lang>/<sort>, every
+          // valid constructor + positional child sorts, derived directly from
+          // the composed language's own Fragment data (no per-language code) —
+          // same schema the LSP's cairn/schema request exposes.
+          p.stripPrefix("schema/").split("/", 2) match
+            case Array(lang, sort) =>
+              languages.get(lang) match
+                case None => err(ex, 404, s"unknown language '$lang'")
+                case Some(l) =>
+                  val ctors = l.constructors.values.filter(_.sort == sort).toList.sortBy(_.name)
+                  json(ex, 200, Json.arr(ctors.map(c => Json.obj(
+                    "name" -> Json.str(c.name),
+                    "argSorts" -> Json.arr(c.argSorts.map(Json.str))))))
+            case _ => err(ex, 404, "expected /api/schema/<lang>/<sort>")
         case ("GET", "board") =>
           boardJson(params.get("digest")) match
             case Left(e)  => err(ex, 404, e)
