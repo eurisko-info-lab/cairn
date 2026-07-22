@@ -26,11 +26,12 @@ class AuthoritySuite extends munit.FunSuite:
   private val readReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
   private val appendReq = EffectRequest(alice, ledgerAppend, Resource("ledger", "/tmp/node"))
 
-  test("Phase 4 audit mode never blocks and records would-permit"):
+  test("Phase 4 audit mode records via audit(); check cannot mint AuthorizedRequest"):
     val gate = AuthorityGate()
     gate.install(List(PolicyEval.allowAll("allow-read", alice, fsRead)))
-    val auth = gate.check(readReq)
-    assert(auth.isRight)
+    assert(gate.check(readReq).isLeft, "audit mode must not mint AuthorizedRequest")
+    val audited = gate.audit(readReq)
+    assertEquals(audited.request, readReq)
     val ev = gate.drainEvents()
     assert(ev.exists {
       case AuthorityEvent.Audited(d, would) => d.decision == Decision.Allow && would
@@ -39,8 +40,8 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("Phase 4 audit records would-deny when no policy matches"):
     val gate = AuthorityGate()
-    val auth = gate.check(readReq)
-    assert(auth.isRight) // audit never blocks
+    assert(gate.check(readReq).isLeft)
+    val _ = gate.audit(readReq)
     val ev = gate.drainEvents()
     assert(ev.exists {
       case AuthorityEvent.Audited(_, would) => !would
@@ -763,3 +764,52 @@ class AuthoritySuite extends munit.FunSuite:
     val denied = cairn.systemhandler.LedgerTransport.run(
       node, alice, req, EffectContext.forPackLoader())
     assert(denied.isLeft, denied.toString)
+
+  test("revoked capability cannot authorize (RevocationView on capability path)"):
+    import cairn.systemhandler.{RevocationLog, RevocationView, RuntimeEffectRegistry}
+    val policies = List(EffectPolicy(
+      "tmp", alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"), Decision.Allow))
+    val broadReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
+    val proof = PolicyEval.prove(broadReq, policies, nowMillis = 0).toOption.get
+    val cap = Authority.VerifiedCapability.fromProof(proof, policies).toOption.get
+    val id = cap.capabilityId
+    val log = RevocationLog()
+    log.revoke(id)
+    val view = RevocationView.of(log)
+    val ctx = EffectContext(
+      alice,
+      AuthorityGate.enforcing(Nil, view),
+      capabilities = List(cap),
+      clock = () => 0L,
+      revocation = view)
+    val denied = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
+    assert(denied.isLeft, denied.toString)
+    assert(denied.swap.toOption.exists(_.contains("revoked")), denied.toString)
+    // Without revocation, same capability authorizes
+    val okCtx = EffectContext(
+      alice, AuthorityGate.enforcing(Nil), capabilities = List(cap), clock = () => 0L)
+    assert(okCtx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a")).isRight)
+
+  test("disk RuntimeEffectRegistry drives authorize vocabulary"):
+    import cairn.runtime.{EffectBootstrap, PackLoader}
+    import cairn.systemhandler.RuntimeEffectRegistry
+    val packs = PackLoader(EffectContext.forPackLoader())
+    val loaded = EffectBootstrap.load(packs).fold(e => fail(e), identity)
+    val reg = loaded.registry
+    assert(reg.recognizes(reg.require(Effects.Family.Filesystem).actionKey("read")))
+    val ctx = EffectContext.forFilesystem("/tmp*", registry = reg)
+    val key = reg.require(Effects.Family.Filesystem).actionKey("read")
+    val res = reg.require(Effects.Family.Filesystem).resource.at("/tmp/z")
+    assert(ctx.authorize(key, res).isRight, ctx.authorize(key, res).toString)
+    // Same capability classes as seeds (digests may bind to disk pins)
+    assertEquals(
+      reg.allActionKeys.map(k => (k.family, k.name)),
+      RuntimeEffectRegistry.seeds.allActionKeys.map(k => (k.family, k.name)))
+
+  test("EffectContext.recordAudit yields AuditedEffect; authorize refuses Audit mode"):
+    val gate = AuthorityGate() // Audit mode
+    gate.install(List(PolicyEval.allowAll("a", alice, fsRead)))
+    val ctx = EffectContext(alice, gate)
+    val audited = ctx.recordAudit(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
+    assertEquals(audited.action, fsRead)
+    assert(ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a")).isLeft)

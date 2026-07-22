@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Terminal as Term
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.io.{BufferedReader, InputStreamReader}
 
 /** Stdio terminal handler (Phase 3). [[perform]] accepts only a pre-authorized
@@ -9,7 +9,8 @@ import java.io.{BufferedReader, InputStreamReader}
   * Keys from [[EffectMeta.terminal]].
   */
 object Terminal:
-  private val iface = EffectMeta.terminal
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.Terminal)
   private lazy val in = new BufferedReader(new InputStreamReader(System.in))
 
   private def write(text: String): Unit = Console.print(text)
@@ -18,21 +19,22 @@ object Terminal:
   private def readLine(): Option[String] =
     Option(in.readLine())
 
-  def intent(req: Term.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(req: Term.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
     val ctor = req match
       case Term.Request.ReadLine     => "readLine"
       case Term.Request.Write(_)     => "write"
       case Term.Request.WriteLine(_) => "writeLine"
-    (iface.keyFor(ctor).get, iface.resource.any)
+    (iface(registry).keyFor(ctor).get, iface(registry).resource.any)
 
   def run(req: Term.Request, ctx: EffectContext): Either[Term.Error, Term.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(Term.Error.Io(s"denied: $err"))
-      case Right(auth) => perform(req, auth)
+      case Right(auth) => perform(req, auth, ctx.registry)
 
-  def perform(req: Term.Request, auth: AuthorizedEffect): Either[Term.Error, Term.Response] =
-    val (action, resource) = intent(req)
+  def perform(req: Term.Request, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): Either[Term.Error, Term.Response] =
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then Left(Term.Error.Io("authorized effect does not cover request"))
     else
       try req match

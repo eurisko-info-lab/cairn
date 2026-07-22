@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.{ExternalBackend as EB, Filesystem as Fs, Process as Proc}
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 
 /** Host-toolchain discovery and invocation (Phase 3). [[perform]] accepts
@@ -10,7 +10,8 @@ import java.nio.file.{Files, Path}
   * Keys from [[EffectMeta.externalBackend]].
   */
 object ExternalBackend:
-  private val iface = EffectMeta.externalBackend
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.ExternalBackend)
 
   private def findOnPath(name: String): Option[Path] =
     sys.env.getOrElse("PATH", "").split(":")
@@ -33,22 +34,23 @@ object ExternalBackend:
           .map(r => EB.Response.ProcessResult(r.exitCode, r.combined))
           .left.map(e => EB.Error.Io(e.toString))
 
-  def intent(req: EB.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(req: EB.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
     val (ctor, resourcePath) = req match
       case EB.Request.Find(host)      => ("find", host.toString)
       case EB.Request.Run(host, _, _) => ("run", host.toString)
-    (iface.keyFor(ctor).get, iface.resource.at(resourcePath))
+    (iface(registry).keyFor(ctor).get, iface(registry).resource.at(resourcePath))
 
   def run(req: EB.Request, ctx: EffectContext, processCtx: EffectContext)
       : Either[EB.Error, EB.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(EB.Error.Io(s"denied: $err"))
-      case Right(auth) => perform(req, auth, processCtx)
+      case Right(auth) => perform(req, auth, processCtx, ctx.registry)
 
-  def perform(req: EB.Request, auth: AuthorizedEffect, processCtx: EffectContext)
+  def perform(req: EB.Request, auth: AuthorizedEffect, processCtx: EffectContext, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds)
       : Either[EB.Error, EB.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then Left(EB.Error.Io("authorized effect does not cover request"))
     else req match
       case EB.Request.Find(host) =>

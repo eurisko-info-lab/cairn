@@ -53,16 +53,21 @@ Key prohibition: `user ↛ system-handler`.
 - **Ports:** Rosetta projections are obligations, not Kernel-checked host
   proofs — see [rosetta.md](rosetta.md).
 
-## EffectContext and AuthorizedEffect
+## EffectContext, AuthorizedEffect, and AuditedEffect
 
 Composition roots own authorization:
 
 1. Construct an `EffectContext` (`forPackLoader()`, `forLedger()`,
-   `forFilesystem()`, `bootstrapped()`, or `local(gate)`).
+   `forFilesystem()`, `bootstrapped()`, or `local(gate)`), optionally with a
+   disk-loaded `RuntimeEffectRegistry` from `EffectBootstrap.Loaded.registry`
+   and a `RevocationView`.
 2. `ctx.authorize(req)` → opaque `AuthorizedEffect` (Kernel
-   `AuthorizedRequest`).
+   `AuthorizedRequest`) — **Enforce only**. Handlers resolve ActionKeys via
+   `ctx.registry`.
 3. Handlers `perform(req, auth: AuthorizedEffect)` only — no raw request+gate
    path. Thin `run(req, ctx)` adapters authorize then perform.
+4. Audit mode uses `ctx.recordAudit` / `AuthorityGate.audit` → `AuditedEffect`
+   (`AuditedRequest`). Audit **cannot** mint `AuthorizedEffect`.
 
 There is no ambient `PackAccess.get`/`install`, no `AuthorityGate.default` or
 `forFamily` registry. Language packs are classes taking `PackAccess`
@@ -71,7 +76,8 @@ gates / contexts from composition roots (`examples.Main`, tests).
 
 `EffectContext.capabilities` holds Kernel-minted `VerifiedCapability` values
 only (`VerifiedCapability.fromProof`). A covering verified grant is Kernel-checked
-without broad policy re-evaluation; empty capabilities fall back to Core
+with mandatory `RevocationView` consultation (stable `CapabilityGrant.capabilityId`)
+before mint; empty capabilities fall back to Core
 `prove` → Kernel `checkProof`. Raw `CapabilityGrant` construction remains for
 proof / delegation building — it cannot enter `withCapabilities`.
 Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
@@ -79,8 +85,8 @@ Nonce / `requestId` replay uses an issuer-scoped `ReplayStore` on the gate
 Snapshots publish as CAS `replay-snapshot` digests (`ReplayStore.publish` /
 `mergeFromCas`) for multi-node absorb — **merge, not distributed consensus**.
 Capability revocation digests sync via the same want/have shape
-(`ReplayReplication` / `RevocationLog`) — production BFT deferred (`BftQuorum`
-sim only). Explorer **Trust**
+(`ReplayReplication` / `RevocationLog`) and feed the live authorize path via
+`RevocationView`. Explorer **Trust**
 tab views/manages revocations and delegation hops (`DelegationLog` /
 CAS `capability-delegation`) — not Studio.
 
@@ -150,22 +156,25 @@ branch state
 | ----- | ------ | ---- |
 | `SemanticRepository` | `core` | Pure orchestration; proposes `Tip`, mints `ValidatedTip` |
 | `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Engines; opaque `ValidatedChangeSet` via apply/check |
+| `PatchGraph` | `core` | Explicit causal patch DAG (parent edges + LCA); thin vs full Pijul |
 | `BranchManifest` | `kernel` | Accepted branch state + causal digests |
-| `Branches` | `system-handler` | Effectful refs; accepts only `ValidatedTip` |
+| `Branches` | `system-handler` | Effectful refs; `commitTip` = ΔL path; `importModule` = bootstrap/import only |
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 
 `ValidatedChangeSet` is opaque: minted by `Delta.apply` / `ValidatedChangeSet.check`
 (replay). `decodeClaim` does not mint. `ValidatedTip` requires
 `apply(language, base, change) = tip`; `Branches.commitTip` accepts only
-`ValidatedTip`. Loaded histories are replay-checked before merge.
+`ValidatedTip`. **`importModule` (formerly `commitModule`) is bootstrap/import
+acceptance** — plants a module tip without a ValidatedChangeSet; it is not the
+ordinary ΔL path. Loaded histories are replay-checked before merge.
 
 `BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
 `changeHistory`, `conflictState` (CAS digests). Refs `.change` / `.changes`
 sidecars remain write-through caches; `loadChangeHistory` / `loadChange`
-prefer manifest digests. `mergeBranches` finds a causal LCA by shared
-module-result digests (not only identical linear change prefixes), then merges
-divergent suffixes.
+prefer manifest digests. `mergeBranches` prefers `PatchGraph` DAG LCA when
+change-set digests form an explicit parent graph, falling back to shared
+module-result digests, then merges divergent suffixes.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
 `Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via

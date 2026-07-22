@@ -90,7 +90,11 @@ Architectural invariants. Treat violations as design bugs.
 
 Self-description (Phase 7) is the staged realization of this invariant; host engines may seed bootstrap once, then migrate definitions into fragments (§7).
 
-**Implementation note:** Cairn currently ships a *fused* meta surface (`workbench.Meta`) that already includes the grammar vocabulary; a strict two-file meta/grammar split (`grammar.cairn`) is deferred. See [docs/bootstrap.md](docs/bootstrap.md) §7 and [docs/assumptions.md](docs/assumptions.md) §11.
+**Implementation note:** Cairn currently ships a *fused* meta surface (loaded via
+`runtime.PackLoader` / Meta activation in handlers) that already includes the
+grammar vocabulary; a strict two-file meta/grammar split (`grammar.cairn`) is
+deferred. See [docs/bootstrap.md](docs/bootstrap.md) §7 and
+[docs/assumptions.md](docs/assumptions.md) §11.
 
 ### Recursive universality (forced)
 
@@ -108,7 +112,7 @@ The platform must **force** this closure, not merely allow it. See vocabulary **
 - XLS, PDF, images, and similar binaries are alternative serializations or projections.
 - A “foreign format” is another **surface/encoding inside** the language system — import/export, projection, or grammar surface — not an escape hatch outside it.
 
-Canonical bytes (§4, §7) and Rosetta ports (§4 / L4) are instances of this model, not exceptions.
+Canonical bytes (§4, §7) and Rosetta ports (§4) are instances of this model, not exceptions.
 
 ### Uniform language-associated capability model
 
@@ -146,7 +150,7 @@ versioning" rather than what it actually forces.
 dual identity, branches and selections, `ΔL` and its recursive closure
 (`Δ(ΔL)`, …), change dependencies and commutation, semantic merge, conflict
 artifacts, migrations, provenance, and ledger-backed publication are **native
-platform substrate** (L0/L1/L5) — they exist once, generically, and every
+platform substrate** — they exist once, generically, and every
 language gets them by construction (§2b's "uniform capability model" is the
 proof: `Delta.deltaOf` derives `ΔL` for *any* `ComposedLanguage`, no per-
 language reimplementation). No language — including the domain packs in §5b —
@@ -166,7 +170,8 @@ branches, and provenance from the substrate — it never needs to model "a
 repository" itself. Concretely, this is why the Unison pack does not
 reimplement Unison's codebase manager (content-addressed defs, name aliases,
 patch-as-edit): those properties are just what any Cairn language gets for
-free from L0/L1, and the pack's job is to demonstrate that, not rebuild it.
+free from the Kernel/Core repository substrate, and the pack's job is to
+demonstrate that, not rebuild it.
 
 The corrected stack:
 
@@ -179,16 +184,16 @@ The corrected stack:
 │ Unison Core · MiniTT · LeanCore · STLC        │
 │ AffineNet/IcNet                               │
 ├──────────────────────────────────────────────┤
-│ Language workbench (L1)                       │
+│ Language workbench (Core + Runtime)           │
 │ grammar · judgments · proofs · interpreters   │
 │ lowerings · surfaces · ΔL generation          │
 ├──────────────────────────────────────────────┤
-│ Native semantic repository (L0/L1/L5)         │
-│ CAS · changes · dependencies · commutation    │
+│ Native semantic repository (Kernel/Core/SH)   │
+│ CAS · changes · PatchGraph · commutation      │
 │ branches · conflicts · migrations · history   │
 ├──────────────────────────────────────────────┤
-│ Certification and distribution (L5)           │
-│ kernel gates · provenance · policies · ledger │
+│ Certification and distribution                │
+│ kernel gates · provenance · policies · PoA    │
 └──────────────────────────────────────────────┘
                ↕
      external optimized implementations / bridges
@@ -227,39 +232,42 @@ universe polymorphism; no real Lean 4 syntax).
 
 ---
 
-## 3. Architecture layers
+## 3. Architecture modules (live)
 
-Enforce an import DAG. Lower layers must not depend on upper layers. Domain examples must not leak into the kernel.
+Enforce an import DAG. Lower layers must not depend on upper layers. Domain
+examples must not leak into the kernel. **L0–L6 ownership labels are historical**
+(PLAN.md era); the live boundary is Kernel / Core / System / User / Runtime.
 
 ```text
-L0  Kernel          — digests, canonical forms, artifact types, LanguageDef,
-                      fragment composition laws, change validation, certificates,
-                      ledger transition relation (pure, no I/O)
+kernel           — digests, canonical forms, artifact types, fragment laws,
+                   change validation, certificates, authority models
+                   (AuthorizedRequest ≠ AuditedRequest), pure ledger transition
 
-L1  Workbench       — fragment IR, pushout composition, bidirectional grammar
-                      interpreter, elaborator, ΔL generation, local CAS + branches
+core             — grammar engine, Meta elaboration, ΔL / PatchGraph, search &
+                   tactics, tree + net engines, Rosetta projection, policy eval
+                   (pure — no I/O)
 
-L2  Proof & search  — formula languages, tactic/goal engine (optional), proof-term
-                      kernel (natural deduction or equivalent), independent check
-                      driver; proof-free claims allowed in MVP
+system-interface — effect contracts (CAS, FS, process, …)
 
-L3  Computation     — reduction drivers; optional Δ-net / interaction-net backend;
-                      VM definitions as artifacts; threaded/bytecode optional later
+system-handler   — privileged I/O: DiskCas / Branches, handlers, PoA node,
+                   AuthorityGate, EffectContext, RuntimeEffectRegistry,
+                   RevocationView
 
-L4  Rosetta ports   — project certified artifacts to Lean / Abella-style / Haskell /
-                      Scala / Rust scaffolds + obligations/tests
+user             — language packs / policies / workflows; never imports handlers
 
-L5  Ledger & node   — single-node PoA ledger, signatures, publication, gossip/BFT
-                      deferred; sharing protocol uses hashes + CAS fetch
+runtime          — PackLoader, EffectBootstrap, WorkflowRunner (composition root)
 
-L6  Surfaces        — CLI, transcript DSL, language server / HTTP API, optional UI
+proof / compute / rosetta / surface / examples / tests
+                 — aggregation & façades above the DAG (not CAS/Meta owners)
 ```
 
-**Import rule:** `Kernel ← Workbench ← {Proof, Computation} ← Rosetta ← Ledger ← Surfaces`.
+**Import rule:** `kernel ← core ← {system-interface} ← system-handler`;
+`user ↛ system-handler`; `runtime` ties user + handlers.
 
-**Bootstrap note:** L0/L1 must eventually host the primordial meta-language + grammar-language
-pair (§2b). Other languages and tooling are defined or mechanically derived from them; domain
-packs stay in `examples/` (§5b).
+**Bootstrap note:** Kernel/Core/Runtime host the primordial meta-language +
+grammar-language pair (§2b). Other languages and tooling are defined or
+mechanically derived from them; domain packs stay in `examples/` / `languages/`
+(§5b).
 
 ---
 
@@ -268,7 +276,7 @@ packs stay in `examples/` (§5b).
 Distilled from the family of prior prompts; treat violations as bugs.
 
 1. **Languages are data.** Object languages, checkers, and examples are fragments/artifacts — not privileged host-language builtins baked into the kernel.
-2. **Generic grammar interpreter only.** Parse/print take a grammar artifact as a parameter. No per-object-language hand parsers in L0–L1.
+2. **Generic grammar interpreter only.** Parse/print take a grammar artifact as a parameter. No per-object-language hand parsers in Kernel/Core.
 3. **Composition by interface.** Fragments declare `provides` / `requires` / `excludes`. Composition is pushout/amalgamation; order of import does not matter when interfaces agree.
 4. **Bidirectionality is a law.** Grammar productions define parse and print together; tests include round-trips on every shipped example language.
 5. **Dual identity.** Content hashes + stable typed keys / branch-relative refs.
@@ -277,7 +285,7 @@ Distilled from the family of prior prompts; treat violations as bugs.
 8. **Recursive ΔL for edits.** Every language `L` — including meta-language, grammar-language, and any `ΔL` — has a free changes language. Mutations are terms in that language, not opaque file overwrites. See §2b.
 9. **Ledger is publication, not runtime DB.** Local CAS is the working store; the ledger records publication, trust, and heads.
 10. **Rosetta is projection, not replacement.** Do not invent “Haskell++ compilers”; generate ordinary host projects plus obligations/tests. This governs Rosetta *ports* specifically — it does not bar Cairn from hosting its own kernel-checked object language in an external system's lineage (§2c amendment: "executable reference vs. optimized backend"), the way `AffineNet`/`IcNet` already do for HVM's net semantics and MiniTT does for a slice of Lean's.
-11. **Domain packages stay out of kernel.** SDS, PKI, Bend, Unison-inspired packs, physics, heuristics, etc. live under `examples/` (§5b) — never in L0–L2.
+11. **Domain packages stay out of kernel.** SDS, PKI, Bend, Unison-inspired packs, physics, heuristics, etc. live under `examples/` / `languages/` (§5b) — never in Kernel/Core.
 12. **Deterministic canonicalization.** Same semantic artifact ⇒ same bytes ⇒ same digest (documented normalization rules). Surfaces and foreign formats are encodings inside the language system (§2b) — still subject to canonicalization where artifacts are stored.
 13. **Tests before features.** Each phase lands with an acceptance suite; do not skip phases.
 14. **Primordial bootstrap.** Start from a meta-language and a grammar-language (defined using the meta-language); define every other language from those; derive or language-define tooling. See §2b.
@@ -311,11 +319,11 @@ These are **first-class case studies** Cairn should eventually support as langua
 | **PKI** | Domain pack (early, after STLC+ledger); proves language-agnostic kernel | GRANITE’s **first** application pack: certificate-`Registry` object language with ΔPKI (`IssueCertificate` / `RevokeCertificate`), `ChainValidationJudgment` over real Ed25519 chains, ledger trust-anchor publish. SDS depends on PKI for encryption certs — not the reverse. **See:** `~/GRANITE/docs/pki.md`; impl `~/GRANITE/examples/pki/` (`languages/Pki.scala`, `PkiChanges.scala`, `ChainValidation.scala`). |
 | **SDS** | Flagship *domain* pack (after PKI); non-programmer object language + ΔL + studio | **Safety Data Sheet** authoring (chemical regulatory SDS — not “software design something”). An SDS is **not** a flat document: compiled view of typed objects (`Substance`, `Mixture`, `Product`, shadows, multilingual phrases). Acetone tutorial spine; `LanguagePack` with ΔSDS. **See:** flagship prose `~/GRANITE/PROMPT.md` §11–14; studio `~/GRANITE/docs/sds-studio.md`; impl `~/GRANITE/examples/sds/` (`languages/Sds.scala`, `SdsChanges.scala`, `tutorial/SdsTutorial.scala`, `chemicals/Chemicals.scala`). |
 | **Bend** | Computation-surface target (after AffineNet / QDIC-shaped nets) | In GRANITE, **Bend** is a deferred **surface profile** (with Kind/HVM) over QDIC — **no** `examples/bend` pack. Spec-only naming + deferral lists. **See (spec only):** `~/GRANITE/examples/computation/PROMPT.md` (Bend/Kind/HVM profiles; SS13/SS16/SS24). Implemented net spine to learn from first: same dir’s languages + `~/GRANITE/examples/computation/`. |
-| **Unison Core** | General-purpose hosted language (§2c), peer to STLC/MiniTT — not a domain pack | Amended <this revision>: no longer "inspirational only" — a genuinely new, Cairn-native language (ADTs, pattern matching, a minimal ability/effect system), still **not** a Unison fork/reimplementation, built on Cairn's own substrate rather than modeling Unison's codebase manager (that machinery is just what §2c's substrate already gives any language for free — CAS, alpha-invariant identity, patch-as-ΔL — which the earlier M48 "ideas pack" phase (`examples/unison/`) proved out before this pack existed; `examples/unison/Unison.scala`'s `Store` is itself backed by `workbench.Cas`, not a hand-rolled map, for the same reason). **See:** modeling-as-fragments precedent `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`); impl `languages/unisoncore.cairn`, `examples/unison/`. |
+| **Unison Core** | General-purpose hosted language (§2c), peer to STLC/MiniTT — not a domain pack | Amended <this revision>: no longer "inspirational only" — a genuinely new, Cairn-native language (ADTs, pattern matching, a minimal ability/effect system), still **not** a Unison fork/reimplementation, built on Cairn's own substrate rather than modeling Unison's codebase manager (that machinery is just what §2c's substrate already gives any language for free — CAS, alpha-invariant identity, patch-as-ΔL — which the earlier M48 "ideas pack" phase (`examples/unison/`) proved out before this pack existed; `examples/unison/Unison.scala`'s `Store` is itself backed by `system-handler` CAS, not a hand-rolled map, for the same reason). **See:** modeling-as-fragments precedent `~/Downloads/granit-rust/PROMPT.md` §20; Lean IR formalization `~/UnisonAbella/` (`README.md`); impl `languages/unisoncore.cairn`, `examples/unison/`. |
 | **MiniTT** | General-purpose hosted language (§2c), the "Formal-methods IR ladder" rung (§8b) climbed honestly | A minimal, closed dependent type core (a 2-level, non-cumulative universe hierarchy, Π types, one hardcoded `Nat` inductive with its recursor) checked by the SAME generic kernel `Checker`/`Search` as STLC/PKI's judgments — not a Lean reimplementation, not full CIC (§8 anti-goal), not claiming Lean-surface *or* Lean-kernel compatibility. **See:** `languages/minitt.cairn`, `examples/minitt/`. |
 | **LeanCore** | General-purpose hosted language (§2c), the next "Formal-methods IR ladder" rung (§8b) — §2c's "executable reference vs. optimized backend" amendment's Lean-kernel fragment | Amended <this revision>: everything MiniTT has, plus identity types (`Eq`/`refl`/`subst` — transport, not full path-induction `J`, a deliberately simpler typing rule) and a minimal environment of checked declarations (opaque once checked, no delta-unfolding — closer to `axiom`/`theorem` than `def`). Still not user-declarable inductives, not universe polymorphism, not real Lean 4 syntax — Lean *itself* remains a Rosetta *projection* target for the full native implementation (§4.10) alongside this. **See:** `languages/leancore.cairn`, `examples/leancore/`. |
 
-**Dependency hint (from GRANITE):** `PKI → Law → SDS` — Law pack at `~/GRANITE/examples/law/`; Bend on the **computation** spine (`~/GRANITE/examples/computation/`), not SDS. Unison Core, MiniTT, and LeanCore sit at the "general-purpose hosted language" layer (§2c) — peers to STLC, not domain ADTs — and all three inherit L0/L1/L5's repository substrate rather than modeling any part of it themselves.
+**Dependency hint (from GRANITE):** `PKI → Law → SDS` — Law pack at `~/GRANITE/examples/law/`; Bend on the **computation** spine (`~/GRANITE/examples/computation/`), not SDS. Unison Core, MiniTT, and LeanCore sit at the "general-purpose hosted language" layer (§2c) — peers to STLC, not domain ADTs — and all three inherit the Kernel/Core/System-handler repository substrate rather than modeling any part of it themselves.
 
 Wire into later phases: after Phase 5, minimal **PKI**; then thin **SDS**; **Bend** only once net lowering is real; **Unison Core**, **MiniTT**, and **LeanCore** as real language packs once the substrate (§2c) and judgment/reduction engines they all build on (`Checker`/`Search`/`TreeEngine`) are proven by STLC/PKI.
 
@@ -325,8 +333,8 @@ Wire into later phases: after Phase 5, minimal **PKI**; then thin **SDS**; **Ben
 
 ### Phase 0 — Skeleton (week-scale)
 
-- Repo layout matching layers L0–L6 (even if some crates/modules are stubs).
-- Choose **one** host implementation language for the engines (prefer **Rust** or **Scala 3**; document the choice and stick to it for L0–L3). Rosetta *targets* remain multi-host.
+- Repo layout matching Kernel/Core/System/User/Runtime (even if some modules are thin).
+- Choose **one** host implementation language for the engines (prefer **Rust** or **Scala 3**; document the choice and stick to it for Kernel/Core). Rosetta *targets* remain multi-host.
 - CAS on local disk; digest + typed key model; CLI: `cairn hash`, `cairn put`, `cairn get`.
 - Empty `LanguageDef` / `Fragment` IR with serialization to canonical bytes.
 - Acceptance: round-trip store/load; golden digests for fixtures.
@@ -413,7 +421,7 @@ Do **not** build:
 - A monolithic new general-purpose programming language meant to replace Scala/Rust/Haskell for app development.
 - Hand-written parsers per object language in the kernel.
 - Talend-style “model → generated code becomes source of truth” MDA.
-- Baking domain examples (chemistry SDS, particle physics, org ACL demos) into L0–L2.
+- Baking domain examples (chemistry SDS, particle physics, org ACL demos) into Kernel/Core.
 - Requiring full CIC / cubical type theory / self-hosting proof of consistency on day one.
 - Replacing Lean/Coq/Abella; Cairn *projects* to them.
 - Silent textual merge as the only merge story once semantic footprints exist.
@@ -446,7 +454,7 @@ Cairn is successful when all of the following hold:
 5. **Δ-net optional path:** AffineNet (or equivalent) reduces correctly under graph-mode rules.
 6. **Polyglot projection:** One semantic artifact emits ≥2 Rosetta ports that build/test in their hosts.
 7. **Ledger publication:** A single-node PoA ledger publishes a branch head; a second local consumer verifies and materializes artifacts by hash.
-8. **Layering:** Dependency graph of the codebase matches L0–L6; examples do not import into the kernel.
+8. **Layering:** Dependency graph matches Kernel/Core/System/User/Runtime; examples do not import into the kernel.
 9. **Reproducibility:** A clean machine can run `transcripts/mvp.cairn` (name flexible) end-to-end from the README.
 10. **Exemplars path:** At least **PKI** or **SDS** exists as a real language pack with ΔL + judgment tests; **Bend** and **Unison** are either thin real slices or documented deferred targets with no fake stubs (§5b).
 11. **Universal closure path:** Meta-language + grammar-language bootstrap is designed (and at least stubbed by Phase 7 self-description); ΔL applies recursively where languages exist; at least one non-text surface/encoding is modeled as a projection or import/export of a language (§2b).
@@ -465,24 +473,27 @@ cairn/
     ledger.md
     rosetta.md
     exemplars.md            # SDS / PKI / Bend / Unison notes
-  kernel/                   # L0
-  workbench/                # L1
-  proof/                    # L2
-  compute/                  # L3 (tree + net)
-  rosetta/                  # L4
-  ledger/                   # L5
-  surface/                  # L6 CLI + transcript
+  kernel/                   # semantic TCB
+  core/                     # pure proposals (grammar, ΔL, nets, …)
+  system-interface/         # effect contracts
+  system-handler/           # privileged I/O + CAS/branches/PoA
+  user/                     # language packs (no handler imports)
+  runtime/                  # PackLoader / EffectBootstrap / WorkflowRunner
+  proof/                    # certification helpers
+  compute/                  # thin Core net façade
+  rosetta/                  # scaffold emit façade
+  surface/                  # CLI + transcript + LSP + explorer
   examples/
     stlc/
     claims/
     affine-net/
     rosetta-quicksort/
-    pki/                    # §5b exemplar (after ledger)
-    sds/                    # §5b exemplar (after pki)
+    pki/                    # §5b exemplar
+    sds/                    # §5b exemplar
     bend/                   # §5b only when net lowering exists
-    unison/                 # §5b/§2c real pack: Unison Core + CAS substrate demo
-    minitt/                 # §5b/§2c real pack: minimal dependent core
-    leancore/               # §5b/§2c amendment real pack: Lean-kernel fragment
+    unison/                 # §5b/§2c real pack
+    minitt/                 # §5b/§2c real pack
+    leancore/               # §5b/§2c amendment real pack
   transcripts/
   tests/
 ```

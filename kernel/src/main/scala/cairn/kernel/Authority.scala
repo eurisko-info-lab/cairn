@@ -118,6 +118,9 @@ object Authority:
       /** Canonical form of the parent grant when this was delegated/attenuated. */
       parentCanon: Option[Canon] = None,
       delegatedBy: Option[Subject] = None):
+    /** Stable id for revocation checks (digest of [[canon]]). */
+    def capabilityId: String = Digest.of(canon).hex
+
     def covers(req: EffectRequest, nowMillis: Long): Boolean =
       subject.id == req.subject.id &&
       action == req.action &&
@@ -290,11 +293,26 @@ object Authority:
     "witnessParent" -> AttenuationWitness.parent(d.witness).canon,
     "witnessChild" -> AttenuationWitness.child(d.witness).canon)
 
-  /** Kernel-controlled authorization token — not publicly constructible. */
+  /** Enforce-minted authorization token — not publicly constructible.
+    * Distinct from [[AuditedRequest]]: audit recording must not yield this type.
+    */
   opaque type AuthorizedRequest = EffectRequest
   object AuthorizedRequest:
     private[kernel] def mint(req: EffectRequest): AuthorizedRequest = req
     extension (a: AuthorizedRequest)
+      def request: EffectRequest = a
+      def action: Effects.ActionKey = a.action
+      def resource: Resource = a.resource
+      def subject: Subject = a.subject
+
+  /** Audit-mode recording token — not consumable by privileged handlers.
+    * Cannot be widened to [[AuthorizedRequest]]; use Enforce [[checkProof]] /
+    * [[checkCapability]] for executable authorization.
+    */
+  opaque type AuditedRequest = EffectRequest
+  object AuditedRequest:
+    private[kernel] def mint(req: EffectRequest): AuditedRequest = req
+    extension (a: AuditedRequest)
       def request: EffectRequest = a
       def action: Effects.ActionKey = a.action
       def resource: Resource = a.resource
@@ -327,14 +345,17 @@ object Authority:
 
     extension (c: VerifiedCapability)
       def grant: CapabilityGrant = c
+      def capabilityId: String = c.capabilityId
       def covers(req: EffectRequest, nowMillis: Long): Boolean = c.covers(req, nowMillis)
       def subject: Subject = c.subject
       def action: Effects.ActionKey = c.action
       def resource: Resource = c.resource
 
-  /** Audit-mode pass-through — records intent without enforcement. Prefer
-    * [[validate]] under Enforce mode. */
-  def auditPass(req: EffectRequest): AuthorizedRequest = AuthorizedRequest.mint(req)
+  /** Audit-mode pass-through — records intent without enforcement.
+    * Returns [[AuditedRequest]], **not** [[AuthorizedRequest]]. Prefer
+    * [[validate]] / [[checkProof]] under Enforce mode for executable auth.
+    */
+  def auditPass(req: EffectRequest): AuditedRequest = AuditedRequest.mint(req)
 
   enum AuthorityEvent:
     case Audited(derivation: AuthorizationDerivation, wouldPermit: Boolean)
@@ -418,13 +439,17 @@ object Authority:
           else Right(())
       yield AuthorizedRequest.mint(req)
 
-  /** Capability-first accept: covering grant already in hand — no policy re-eval. */
+  /** Capability-first accept: covering grant already in hand — no policy re-eval.
+    * [[isRevoked]] must be consulted before mint (stable [[CapabilityGrant.capabilityId]]).
+    */
   def checkCapability(
       req: EffectRequest,
       grant: CapabilityGrant,
-      nowMillis: Long
+      nowMillis: Long,
+      isRevoked: String => Boolean = _ => false
   ): Either[String, AuthorizedRequest] =
-    if !grant.covers(req, nowMillis) then Left("capability does not cover request")
+    if isRevoked(grant.capabilityId) then Left(s"grant revoked: ${grant.capabilityId}")
+    else if !grant.covers(req, nowMillis) then Left("capability does not cover request")
     else if grant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")
     else Right(AuthorizedRequest.mint(req))
 

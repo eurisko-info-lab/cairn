@@ -535,7 +535,7 @@ object Cli:
                 for
                   cA <- parse("{ replace a = false ; add fromA = true ; }")
                   cB <- parse("{ replace b = true ; add fromB = false ; }")
-                  _ = branches.commitModule("demo-base", m0)
+                  _ = branches.importModule("demo-base", m0)
                   tipA <- SemanticRepository.tipAfter(lang, m0, cA)
                   tipB <- SemanticRepository.tipAfter(lang, m0, cB)
                   _ = branches.commitTip("demo-a", tipA)

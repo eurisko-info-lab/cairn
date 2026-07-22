@@ -883,8 +883,17 @@ class ExemplarPackSuite extends munit.FunSuite:
       val key = loaded.actionKey(fam, pinned.actions.head).fold(e => fail(e), identity)
       assert(key.interfaceDigest.isDefined, name)
       assertEquals(key.family, fam.toString)
-    // Host cold-start seeds still complete (handlers use them).
+    // Host cold-start seeds still complete; live auth uses Loaded.registry.
     EffectMeta.families.values.foreach(f => assertEquals(EffectMeta.completeness(f), Nil, f.fragment.name))
+    val reg = loaded.registry
+    // Capability *classes* match seeds; digests bind to disk fragment pins
+    // (may differ from host seed fragment digests when names differ).
+    assertEquals(
+      reg.allActionKeys.map(k => (k.family, k.name)),
+      EffectMeta.allActionKeys.map(k => (k.family, k.name)))
+    val fsCtx = EffectContext.forFilesystem("/tmp*", registry = reg)
+    val readKey = reg.require(Effects.Family.Filesystem).actionKey("read")
+    assert(fsCtx.authorize(readKey, reg.require(Effects.Family.Filesystem).resource.at("/tmp/x")).isRight)
 
   test("ReplayReplication: want/have + revocation absorb + checkGrant (merge, not BFT)"):
     import cairn.systemhandler.{MemCas, ReplayReplication, ReplayStore, RevocationLog}

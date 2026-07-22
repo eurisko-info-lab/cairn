@@ -157,7 +157,9 @@ object Provenance:
     */
   def index(root: java.nio.file.Path, ctx: EffectContext): Either[String, Map[String, Record]] =
     val abs = root.toAbsolutePath.normalize.toString
-    ctx.authorize(EffectMeta.cas.actionKey("stats"), EffectMeta.cas.resource.at(abs)) match
+    ctx.authorize(
+      ctx.registry.require(Effects.Family.Cas).actionKey("stats"),
+      ctx.registry.require(Effects.Family.Cas).resource.at(abs)) match
       case Left(err) => Left(s"denied: $err")
       case Right(_) =>
         Right(

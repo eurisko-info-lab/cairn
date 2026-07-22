@@ -4,11 +4,12 @@ import cairn.kernel.Authority
 import cairn.kernel.Authority.{AuthorizedRequest, EffectRequest, Resource}
 import cairn.kernel.Effects
 
-/** Handler-facing proof that an [[EffectRequest]] was authorized.
+/** Handler-facing proof that an [[EffectRequest]] was **enforce**-authorized.
   *
   * Minted only by [[EffectContext.authorize]] (via [[AuthorityGate.check]] →
-  * Kernel [[AuthorizedRequest]]). Handlers accept this token and must not
-  * hold a gate or invent a subject. Not publicly constructible.
+  * Kernel [[AuthorizedRequest]] under Enforce mode). Handlers accept this
+  * token and must not hold a gate or invent a subject. Not publicly
+  * constructible. Distinct from [[AuditedEffect]] — audit mode cannot mint this.
   */
 final class AuthorizedEffect private[systemhandler] (val authorized: AuthorizedRequest):
   def request: EffectRequest = authorized.request

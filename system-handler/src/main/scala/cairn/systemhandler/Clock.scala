@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Clock as Clk
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -10,28 +10,30 @@ import java.time.format.DateTimeFormatter
   * Action/resource keys come from [[EffectMeta.clock]].
   */
 object Clock:
-  private val iface = EffectMeta.clock
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.Clock)
   private val slugFmt = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
   private def nowMillis(): Long = System.currentTimeMillis()
 
   private def timestampSlug(): String = LocalDateTime.now().format(slugFmt)
 
-  def intent(req: Clk.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(req: Clk.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
     val ctor = req match
       case Clk.Request.Now           => "now"
       case Clk.Request.TimestampSlug => "timestampSlug"
     // "*" is honestly correct: wall-clock time isn't scoped to a target.
-    (iface.keyFor(ctor).get, iface.resource.any)
+    (iface(registry).keyFor(ctor).get, iface(registry).resource.any)
 
   def run(req: Clk.Request, ctx: EffectContext): Either[Clk.Error, Clk.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(Clk.Error.Unavailable(s"denied: $err"))
-      case Right(auth) => perform(req, auth)
+      case Right(auth) => perform(req, auth, ctx.registry)
 
-  def perform(req: Clk.Request, auth: AuthorizedEffect): Either[Clk.Error, Clk.Response] =
-    val (action, resource) = intent(req)
+  def perform(req: Clk.Request, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): Either[Clk.Error, Clk.Response] =
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then
       Left(Clk.Error.Unavailable("authorized effect does not cover request"))
     else

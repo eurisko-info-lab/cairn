@@ -57,7 +57,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; add fromA = true ; }")
     val cB = parseChange("{ replace b = true ; add fromB = false ; }")
-    branches.commitModule("base", m0)
+    branches.importModule("base", m0)
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
     branches.commitTip("feat-a", tipA)
@@ -281,7 +281,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
       val names = (0 until (if trial < 24 then 4 else 5)).map(i => s"v${trial}_$i").toList
       val baseDefs = names.map(n => n -> (if rng.nextBoolean() then Stlc.tru else Stlc.fls))
       val base = Module(baseDefs)
-      branches.commitModule("root", base)
+      branches.importModule("root", base)
       val pair = names.take(2)
       val cA = parseChange(s"{ replace ${pair(0)} = false ; }")
       val cB = parseChange(s"{ replace ${pair(1)} = true ; }")

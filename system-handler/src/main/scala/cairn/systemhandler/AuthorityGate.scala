@@ -3,14 +3,15 @@ package cairn.systemhandler
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.kernel.Authority.*
-import cairn.kernel.EffectMeta
 
 /** Authority gate (Phases 4–5, priority #2/#5/#6). Composition roots authorize via
   * [[EffectContext.authorize]] (which calls [[check]]); handlers accept only
   * [[AuthorizedEffect]] and must not call [[check]]/[[checked]] themselves.
   *
   * Enforce path: Core [[PolicyEval.prove]] → Kernel [[Authority.checkProof]] →
-  * mint [[AuthorizedRequest]]. Audit path records [[PolicyEval.propose]] without blocking.
+  * mint [[AuthorizedRequest]]. Audit path records via [[audit]] /
+  * [[Authority.auditPass]] → [[AuditedRequest]] — **never** mints
+  * [[AuthorizedRequest]].
   *
   * An instantiable class — matching the `Node`/`Cas`/`DiskCas`/`Branches`
   * pattern already used elsewhere in `system-handler` — so authority state
@@ -27,11 +28,15 @@ import cairn.kernel.EffectMeta
   * Replay: successful Enforce authorizations consume grant [[CapabilityGrant.nonce]]
   * and [[EffectRequest.requestId]] via a shared issuer-scoped [[ReplayStore]]
   * (default in-memory; composition roots may inject a durable filesystem store).
+  *
+  * Revocation: [[checkCapability]] always consults the injected
+  * [[RevocationView]] before minting.
   */
 final class AuthorityGate(
     @volatile private var mode: AuthorityGate.Mode = AuthorityGate.Mode.Audit,
     @volatile private var policies: List[EffectPolicy] = Nil,
-    private val replay: ReplayStore = ReplayStore.memory()):
+    private val replay: ReplayStore = ReplayStore.memory(),
+    private val revocation: RevocationView = RevocationView.empty):
   private val events = scala.collection.mutable.ListBuffer[AuthorityEvent]()
 
   def setMode(m: AuthorityGate.Mode): Unit = mode = m
@@ -44,15 +49,24 @@ final class AuthorityGate(
   /** Underlying replay store (may be shared across gates). */
   def replayStore: ReplayStore = replay
 
+  /** Revocation view consulted on capability authorize. */
+  def revocationView: RevocationView = revocation
+
   /** Flattened snapshot of consumed nonces / request ids (tests). */
   def replayState: (Set[String], Set[String]) =
     val s = replay.snapshot
     (s.flatNonces, s.flatRequestIds)
 
-  /** Check authorization. In Audit mode always returns the request wrapped as
-    * authorized (after recording whether it *would* be permitted). In Enforce
-    * mode: Core [[PolicyEval.prove]] → Kernel [[Authority.checkProof]] → mint;
-    * nonces / request ids are consumed so replays are denied.
+  /** Record audit intent — returns [[AuditedRequest]], never Authorized. */
+  def audit(req: EffectRequest, nowMillis: Long = System.currentTimeMillis())
+      : AuditedRequest =
+    val derivation = PolicyEval.propose(req, policies)
+    val would = derivation.decision == Decision.Allow &&
+      derivation.grant.exists(_.covers(req, nowMillis))
+    synchronized { events += AuthorityEvent.Audited(derivation, would) }
+    Authority.auditPass(req)
+
+  /** Enforce-only authorization. Audit mode cannot mint [[AuthorizedRequest]].
     */
   def check(req: EffectRequest, nowMillis: Long = System.currentTimeMillis())
       : Either[String, AuthorizedRequest] =
@@ -62,8 +76,7 @@ final class AuthorityGate(
         val would = derivation.decision == Decision.Allow &&
           derivation.grant.exists(_.covers(req, nowMillis))
         synchronized { events += AuthorityEvent.Audited(derivation, would) }
-        // audit never blocks
-        Right(Authority.auditPass(req))
+        Left("audit mode cannot mint AuthorizedRequest; use audit() for recording")
       case AuthorityGate.Mode.Enforce =>
         PolicyEval.prove(req, policies, nowMillis) match
           case Left(err) =>
@@ -87,7 +100,10 @@ final class AuthorityGate(
                       Right(auth)
                 }
 
-  /** Capability-first path: validate a covering grant without policy prove. */
+  /** Capability-first path: validate a covering grant without policy prove.
+    * Always consults [[revocation]] before mint (Enforce). Audit mode records
+    * and refuses to mint AuthorizedRequest.
+    */
   def checkCapability(
       req: EffectRequest,
       grant: CapabilityGrant,
@@ -95,16 +111,16 @@ final class AuthorityGate(
   ): Either[String, AuthorizedRequest] =
     mode match
       case AuthorityGate.Mode.Audit =>
-        val would = grant.covers(req, nowMillis)
+        val would = grant.covers(req, nowMillis) && !revocation.isRevoked(grant.capabilityId)
         val derivation = AuthorizationDerivation(
           req, policies,
           if would then Decision.Allow else Decision.Deny,
           if would then Some(grant) else None,
           "capability")
         synchronized { events += AuthorityEvent.Audited(derivation, would) }
-        Right(Authority.auditPass(req))
+        Left("audit mode cannot mint AuthorizedRequest; use audit() for recording")
       case AuthorityGate.Mode.Enforce =>
-        Authority.checkCapability(req, grant, nowMillis) match
+        Authority.checkCapability(req, grant, nowMillis, revocation.isRevoked) match
           case Left(err) =>
             val derivation = AuthorizationDerivation(req, policies, Decision.Deny, None, err)
             synchronized { events += AuthorityEvent.Rejected(derivation) }
@@ -155,30 +171,51 @@ object AuthorityGate:
   enum Mode:
     case Audit, Enforce
 
-  private def bootstrapPolicies: List[EffectPolicy] =
-    EffectMeta.allActionKeys.toList.map(k =>
+  private def bootstrapPolicies(registry: RuntimeEffectRegistry): List[EffectPolicy] =
+    registry.allActionKeys.toList.map(k =>
       EffectPolicy(s"bootstrap-allow-${k.id}", "*", k, Resource("*", "*"), Decision.Allow))
 
   /** Test / non-pack-loader wiring helper: `Mode.Enforce` with one allow
-    * policy per known [[cairn.kernel.Effects.ActionKey]] (pack-derived), any
-    * subject (`"*"`), any resource. Still used for ledger/process/LSP and
+    * policy per known [[Effects.ActionKey]] from [[registry]] (default seeds),
+    * any subject (`"*"`), any resource. Still used for ledger/process/LSP and
     * suites that do not exercise path-scoped denial. PackLoader production
     * uses [[EffectContext.forPackLoader]].
     *
     * Each call returns a **fresh** gate — never a shared singleton.
     */
-  def bootstrapped(): AuthorityGate =
-    enforcing(bootstrapPolicies)
+  def bootstrapped(
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
+      revocation: RevocationView = RevocationView.empty,
+  ): AuthorityGate =
+    enforcing(bootstrapPolicies(registry), ReplayStore.memory(), revocation)
 
   /** Fresh Enforce gate with the given policies (private in-memory replay). */
   def enforcing(policies: List[EffectPolicy]): AuthorityGate =
-    enforcing(policies, ReplayStore.memory())
+    enforcing(policies, ReplayStore.memory(), RevocationView.empty)
+
+  /** Fresh Enforce gate with policies + revocation view. */
+  def enforcing(policies: List[EffectPolicy], revocation: RevocationView): AuthorityGate =
+    enforcing(policies, ReplayStore.memory(), revocation)
 
   /** Fresh Enforce gate sharing an issuer-scoped [[ReplayStore]]. */
   def enforcing(policies: List[EffectPolicy], replay: ReplayStore): AuthorityGate =
-    val gate = new AuthorityGate(Mode.Enforce, policies, replay)
-    gate
+    enforcing(policies, replay, RevocationView.empty)
+
+  /** Fresh Enforce gate with shared replay + revocation. */
+  def enforcing(
+      policies: List[EffectPolicy],
+      replay: ReplayStore,
+      revocation: RevocationView,
+  ): AuthorityGate =
+    new AuthorityGate(Mode.Enforce, policies, replay, revocation)
 
   /** Fresh Enforce allow-all gate over a shared replay store. */
+  def bootstrapped(
+      replay: ReplayStore,
+      registry: RuntimeEffectRegistry,
+      revocation: RevocationView,
+  ): AuthorityGate =
+    enforcing(bootstrapPolicies(registry), replay, revocation)
+
   def bootstrapped(replay: ReplayStore): AuthorityGate =
-    enforcing(bootstrapPolicies, replay)
+    bootstrapped(replay, RuntimeEffectRegistry.seeds, RevocationView.empty)

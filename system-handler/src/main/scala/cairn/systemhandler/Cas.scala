@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
-import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, SemanticRepository}
+import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.{Files, Path}
@@ -68,7 +68,8 @@ final class DiskCas(root: Path) extends Cas:
   * Admin ops (fsck/gc/stats) live on [[CasAdminEffects]] (path-rooted).
   */
 object CasEffects:
-  private val iface = EffectMeta.cas
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.Cas)
 
   private def ctorName(req: Cas.Request): String = req match
     case Cas.Request.Put(_)       => "put"
@@ -86,8 +87,9 @@ object CasEffects:
     case Cas.Request.Gc(root, _)  => root
     case Cas.Request.Stats(root)  => root
 
-  def intent(req: Cas.Request): (Effects.ActionKey, Authority.Resource) =
-    (iface.keyFor(ctorName(req)).get, iface.resource.at(resourcePath(req)))
+  def intent(req: Cas.Request, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
+    val i = iface(registry)
+    (i.keyFor(ctorName(req)).get, i.resource.at(resourcePath(req)))
 
   /** Store-backed requests only (`put` / `get` / `contains`). Admin requests
     * must go through [[CasAdminEffects]]. */
@@ -96,13 +98,13 @@ object CasEffects:
       case _: Cas.Request.Fsck | _: Cas.Request.Gc | _: Cas.Request.Stats =>
         Left(Cas.Error.Io(s"admin request ${ctorName(req)} requires CasAdminEffects"))
       case _ =>
-        val (action, resource) = intent(req)
+        val (action, resource) = intent(req, ctx.registry)
         ctx.authorize(action, resource) match
           case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
-          case Right(auth) => perform(store, req, auth)
+          case Right(auth) => perform(store, req, auth, ctx.registry)
 
-  def perform(store: Cas, req: Cas.Request, auth: AuthorizedEffect): Either[Cas.Error, Cas.Response] =
-    val (action, resource) = intent(req)
+  def perform(store: Cas, req: Cas.Request, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then Left(Cas.Error.Io("authorized effect does not cover request"))
     else
       try req match
@@ -142,10 +144,11 @@ object CasEffects:
   /** Authorize put at the content digest, then store raw bytes (Sync path). */
   def putBytes(store: Cas, bs: Array[Byte], ctx: EffectContext): Either[Cas.Error, Digest] =
     val d = Digest.ofBytes(bs)
-    ctx.authorize(iface.actionKey("put"), iface.resource.at(d.hex)) match
+    val i = iface(ctx.registry)
+    ctx.authorize(i.actionKey("put"), i.resource.at(d.hex)) match
       case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
       case Right(auth) =>
-        if !auth.covers(iface.actionKey("put"), iface.resource.at(d.hex)) then
+        if !auth.covers(i.actionKey("put"), i.resource.at(d.hex)) then
           Left(Cas.Error.Io("authorized effect does not cover request"))
         else
           try Right(store.putBytes(bs))
@@ -153,10 +156,11 @@ object CasEffects:
 
   /** Authorize get at `digest`, then read raw bytes (Sync path). */
   def getBytes(store: Cas, digest: Digest, ctx: EffectContext): Either[Cas.Error, Array[Byte]] =
-    ctx.authorize(iface.actionKey("get"), iface.resource.at(digest.hex)) match
+    val i = iface(ctx.registry)
+    ctx.authorize(i.actionKey("get"), i.resource.at(digest.hex)) match
       case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
       case Right(auth) =>
-        if !auth.covers(iface.actionKey("get"), iface.resource.at(digest.hex)) then
+        if !auth.covers(i.actionKey("get"), i.resource.at(digest.hex)) then
           Left(Cas.Error.Io("authorized effect does not cover request"))
         else store.getBytes(digest).left.map(_ => Cas.Error.Missing(digest))
 
@@ -577,6 +581,40 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       case (v, i) if bByResult.contains(v.result) => (i, bByResult(v.result))
     }.getOrElse((-1, -1))
 
+  /** Prefer [[PatchGraph]] DAG LCA when change-set digests form an explicit
+    * parent graph; fall back to module-result [[causalLca]].
+    */
+  private def patchAwareLca(
+      a: List[Delta.ValidatedChangeSet],
+      b: List[Delta.ValidatedChangeSet],
+  ): (Int, Int) =
+    val fallback = causalLca(a, b)
+    if a.isEmpty || b.isEmpty then fallback
+    else
+      val entriesA = a.map(v => (v.artifact.digest, v.base, v.result))
+      val entriesB = b.map(v => (v.artifact.digest, v.base, v.result))
+      val merged =
+        PatchGraph.Graph.linear(entriesA).flatMap { g0 =>
+          entriesB.zipWithIndex.foldLeft[Either[String, PatchGraph.Graph]](Right(g0)) {
+            case (Left(e), _) => Left(e)
+            case (Right(g), ((id, base, result), i)) =>
+              if g.contains(id) then Right(g)
+              else
+                val parent = if i == 0 then None else Some(entriesB(i - 1)._1)
+                val parents = parent.toList.filter(g.contains)
+                g.add(PatchGraph.Node(id, parents, base, result))
+          }
+        }
+      merged match
+        case Left(_) => fallback
+        case Right(g) =>
+          g.lca(a.last.artifact.digest, b.last.artifact.digest) match
+            case None => fallback
+            case Some(lcaId) =>
+              val iA = a.indexWhere(_.artifact.digest == lcaId)
+              val iB = b.indexWhere(_.artifact.digest == lcaId)
+              if iA >= 0 && iB >= 0 then (iA, iB) else fallback
+
   def load(branch: String): BranchManifest =
     val p = refPath(branch)
     if !refsExists(p) then BranchManifest(branch, None, Nil)
@@ -634,9 +672,18 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       }
     }
 
-  /** Seed or advance a branch to a module tip; returns the new manifest. */
-  def commitModule(branch: String, module: Module): BranchManifest =
+  /** Bootstrap / import acceptance: plant a module tip **without** a
+    * [[Delta.ValidatedChangeSet]]. Ordinary semantic advancement must use
+    * [[commitTip]] (ValidatedTip / ΔL only). This is not a silent bypass of
+    * ΔL discipline — call sites that seed demo/base modules should prefer
+    * [[importModule]] by name.
+    */
+  def importModule(branch: String, module: Module): BranchManifest =
     advance(branch, putArt(module.artifact))
+
+  /** @deprecated Use [[importModule]] for bootstrap/import seeds; [[commitTip]] for ΔL. */
+  def commitModule(branch: String, module: Module): BranchManifest =
+    importModule(branch, module)
 
   /** Persist a [[SemanticRepository.ValidatedTip]] via journaled transactional
     * accept (CAS → journal → refs → clear).
@@ -751,9 +798,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         ).map(Right(_))
     }
 
-  /** Everyday merge: causal LCA by shared module-result digests, then merge
-    * divergent suffixes. Loaded change-sets are replay-checked.
-    * Ledger publish remains opt-in via `publish` (default: local accept only).
+  /** Everyday merge: causal LCA via [[PatchGraph]] when histories form a DAG,
+    * falling back to shared module-result digests. Loaded change-sets are
+    * replay-checked. Ledger publish remains opt-in via `publish`.
     */
   def mergeBranches(
       language: ComposedLanguage,
@@ -766,7 +813,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     for
       histA <- loadChangeHistory(ours, language)
       histB <- loadChangeHistory(theirs, language)
-      (idxA, idxB) = causalLca(histA, histB)
+      (idxA, idxB) = patchAwareLca(histA, histB)
       // Prefer identical linear prefix when it reaches the same LCA tip.
       linear = commonAncestorPrefix(histA, histB)
       (iA, iB) =

@@ -48,12 +48,24 @@ maintained `Effects.Action` enum (ActionKeys from packDecls /
 `EffectBootstrap`); generalized dirty-subtree `dirtyOps` (structural `==` +
 LCS deletes); `sds-report` **pdf** surface + `PdfMinimal` bytes; research
 `BftQuorum` sim (not production). Architecture: SDS language proper vs report surface
-packs stay separated (Phase 2/3). Full suite: **517 tests** (515 passed + 2 skipped; `tests` module; `sbt test`).
+packs stay separated (Phase 2/3). Full suite: **525 tests** (523 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
 
-## Revised priority scorecard (2026-07-22)
+## Revised priority scorecard (2026-07-22, architecture-gap pass)
+
+| # | Priority | Status | Evidence |
+|---|---|---|---|
+| 1 | Disk-loaded effect registry in live execution | **Done** | `EffectBootstrap.Loaded.registry` → `RuntimeEffectRegistry` on `EffectContext`; handlers resolve via `ctx.registry`; ExemplarPackSuite + AuthoritySuite |
+| 2 | Mandatory revocation in capability authorize | **Done** | `RevocationView` on gate/context; `CapabilityGrant.capabilityId`; `checkCapability` / `authorize` consult before mint |
+| 3 | AuditedEffect ≠ AuthorizedEffect | **Done** | Kernel `AuditedRequest` / `AuthorizedRequest`; Audit cannot mint Authorized; ModuleBoundarySuite |
+| 4 | Bootstrap/import vs ΔL branch advancement | **Done** | `Branches.importModule` (+ deprecated `commitModule` alias); `commitTip` = ordinary ΔL path |
+| 5 | Explicit causal patch graph | **Advanced** | `core.PatchGraph` DAG + LCA; `mergeBranches` prefers graph LCA; residual vs full Pijul theory |
+| 6 | Generic language workflow runner | **Done** | `WorkflowRunner` drives full SDS causal chain (author→…→publish); Scala handlers only |
+| 7 | README / CAIRN-PROMPT live architecture | **Done** | Kernel/Core/System/User/Runtime; no phantom workbench/ledger; L0–L6 ownership retired |
+
+## Prior scorecard (SDS / trust — still accurate)
 
 | # | Priority | Status | Evidence |
 |---|---|---|---|
@@ -62,10 +74,10 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
 | 4 | Report projection surfaces (JSON/XML/CSV/PDF) | **Done** | `printSurface` + `pdf` surface; `PdfMinimal` bytes; `toCst` host residual |
 | 5 | Approve/sign/publication certs as linked CAS | **Done** | `certificateKindOk` + workflow-kinds module; BranchManifest digests |
-| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `iface.cairn` decls SoT; **no Action enum**; Family thin routing bridge; Fragment/`packDecls` cold-start seeds |
-| 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
-| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; **`BftQuorum` research sim** (not production / no peer discovery) |
-| 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + causal module; `SdsCorpusTutorial` capability editing; Scala runs effectful steps |
+| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `iface.cairn` decls SoT; **no Action enum**; live registry from disk; Family thin routing + Fragment/`packDecls` cold-start seeds |
+| 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials + PatchGraph |
+| 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + live `RevocationView` on authorize; **`BftQuorum` research sim** (not production) |
+| 9 | Workflow rules as Cairn pack | **Advanced** | `sds-workflow` + `WorkflowRunner` effectful driver; Studio deferred |
 
 ## Architecture note — SDS vs report formats
 
@@ -251,10 +263,14 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS; CAS `replay-snapshot` publish/merge) |
 | BranchManifest | Causal digests + `changeHistory` + `certificates`; sidecars write-through caches; causal-LCA merge; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
 | Agreement | Certificate carries `envelopeDigest` + `nativeEvidence`; Lean `natRec` ι + live stdout digests |
-| Effect interfaces | `ActionKey` digest-bound; CAS-pinned; `effect-interface` + `iface.cairn` SoT; `EffectBootstrap`; Family/Action host bridge |
-| Replay sync | Digest-merge absorb only — **not** consensus / BFT (`ReplayReplication` + `checkGrant`) |
+| Effect interfaces | `ActionKey` digest-bound; CAS-pinned; `effect-interface` + `iface.cairn` SoT; `EffectBootstrap` → `RuntimeEffectRegistry` on live `EffectContext` |
+| Replay sync | Digest-merge absorb only — **not** consensus / BFT (`ReplayReplication` + live `RevocationView`) |
 | Journaled accept | Local CAS → journal → refs — **≠** distributed atomic txn |
 | Report surfaces | `sds-report` text+JSON+XML+CSV+pdf (**not** SDS); `PdfMinimal` bytes |
+| Auth types | `AuthorizedEffect` (Enforce) ≠ `AuditedEffect` (audit recording) |
+| Branch advance | `importModule` = bootstrap/import; `commitTip` = ΔL / ValidatedTip |
+| Patch history | `PatchGraph` DAG LCA in merge; residual vs full Pijul |
+| SDS workflow | `WorkflowRunner` + `sds-workflow` pack; Studio deferred |
 
 ### Remaining honest gaps
 
@@ -283,15 +299,19 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 - Effect-interface declarations load from `languages/effect-*/iface.cairn`
   (`effect-interface` language) via `EffectBootstrap`; vocabulary from
   `languages/effect-*.cairn`. **No hand-maintained Action enum** — ActionKeys
-  register from pack decls / pins. Residual: `Effects.Family` thin JVM routing
-  tag (ids ↔ packDecls) + cold-start Fragment / `packDecls` seeds.
+  register from pack decls / pins. Live authorize path injects
+  `RuntimeEffectRegistry` from disk `Loaded`. Residual: `Effects.Family` thin
+  JVM routing tag (ids ↔ packDecls) + cold-start Fragment / `packDecls` seeds
+  (verified equal to disk at bootstrap).
 - Dirty-subtree: structural re-association + delete alignment landed; **inserts**
   without an original span still parent-reprint.
-- **Scala orchestration residual (SDS use-cases):** effectful causal steps
-  (`Branches` / Ed25519 / ledger), `EuClp.conform` / `Sds.validate` outline
-  walks (ascending/unique structural), `SectionReport.toCst` projection CST
-  build, and certificate *minting* remain host. Disk SoT for workflow
-  sequence (`sds-workflow`), certificate kinds (`sds-certificate`), EU-CLP
-  judgments, chemical instances, and report *encodings* (`sds-report`
-  surfaces) load via PackLoader/CAS without recompiling Scala.
+- **Scala orchestration residual (SDS use-cases):** effectful step *bodies*
+  (Branches / Ed25519 / ledger) remain host handlers under `WorkflowRunner`;
+  `EuClp.conform` / `Sds.validate` outline walks, `SectionReport.toCst`, and
+  certificate *minting* remain host. Disk SoT for workflow sequence
+  (`sds-workflow`), certificate kinds (`sds-certificate`), EU-CLP judgments,
+  chemical instances, and report *encodings* (`sds-report` surfaces) load via
+  PackLoader/CAS without recompiling Scala.
+- **PatchGraph residual:** explicit parent DAG + LCA wired into merge; not full
+  Pijul commutation/inverse/conflict algebra (still ChangeAlgebra / Merge).
 - GRANITE SDS depth / Lean proof bodies — see above.

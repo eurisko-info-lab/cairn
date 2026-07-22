@@ -8,12 +8,14 @@ import cairn.systeminterface.LedgerTransport as LT
   * Chain-file write goes through [[Filesystem]] on the node context.
   */
 object LedgerTransport:
-  private val iface = EffectMeta.ledgerTransport
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.LedgerTransport)
 
-  def intent(node: Node, req: LT.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(node: Node, req: LT.Request, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
+    val i = iface(registry)
     req match
       case LT.Request.Append(_, _, _) =>
-        (iface.actionKey("append"), iface.resource.at(node.root.toString))
+        (i.actionKey("append"), i.resource.at(node.root.toString))
 
   def run(
       node: Node,
@@ -25,18 +27,19 @@ object LedgerTransport:
       case LT.Request.Append(name, _, _) if name != authority.name =>
         Left(LT.Error.Denied(s"authority keypair '${authority.name}' does not match request '$name'"))
       case _ =>
-        val (action, resource) = intent(node, req)
+        val (action, resource) = intent(node, req, ctx.registry)
         ctx.withSubject(Authority.Subject(authority.name)).authorize(action, resource) match
           case Left(err)   => Left(LT.Error.Denied(err))
-          case Right(auth) => perform(node, authority, req, auth)
+          case Right(auth) => perform(node, authority, req, auth, ctx.registry)
 
   def perform(
       node: Node,
       authority: Keypair,
       req: LT.Request,
       auth: AuthorizedEffect,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
   ): Either[LT.Error, LT.Response] =
-    val (action, resource) = intent(node, req)
+    val (action, resource) = intent(node, req, registry)
     if !auth.covers(action, resource) then Left(LT.Error.Denied("authorized effect does not cover request"))
     else req match
       case LT.Request.Append(_, authorities, txs) =>

@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Lsp as LspIface
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.io.{InputStream, OutputStream}
 
 /** LSP Content-Length framing transport (Phase 3 lsp family). Message
@@ -15,7 +15,8 @@ import java.io.{InputStream, OutputStream}
   * Keys from [[EffectMeta.lsp]].
   */
 object LspTransport:
-  private val iface = EffectMeta.lsp
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.Lsp)
 
   def readMessage(in: InputStream): Option[String] =
     var length = -1
@@ -42,22 +43,23 @@ object LspTransport:
     out.write(bytes)
     out.flush()
 
-  def intent(req: LspIface.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(req: LspIface.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
     val ctor = req match
       case LspIface.Request.ReadMessage     => "readMessage"
       case LspIface.Request.WriteMessage(_) => "writeMessage"
-    (iface.keyFor(ctor).get, iface.resource.any)
+    (iface(registry).keyFor(ctor).get, iface(registry).resource.any)
 
   def run(req: LspIface.Request, in: InputStream, out: OutputStream, ctx: EffectContext)
       : Either[LspIface.Error, LspIface.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(LspIface.Error.Framing(s"denied: $err"))
-      case Right(auth) => perform(req, in, out, auth)
+      case Right(auth) => perform(req, in, out, auth, ctx.registry)
 
-  def perform(req: LspIface.Request, in: InputStream, out: OutputStream, auth: AuthorizedEffect)
+  def perform(req: LspIface.Request, in: InputStream, out: OutputStream, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds)
       : Either[LspIface.Error, LspIface.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then
       Left(LspIface.Error.Framing("authorized effect does not cover request"))
     else

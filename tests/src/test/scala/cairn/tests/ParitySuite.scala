@@ -85,6 +85,7 @@ class ParitySuite extends munit.FunSuite:
     assert(r.tipSignatureHex.nonEmpty)
     assertEquals(r.certificateDigests.length, 3)
     assert(r.ledgerPublished)
+    assertEquals(r.runnerCompleted, r.workflowSteps)
 
   test("parity: SDS corpus tutorial capability-constrained editing"):
     import cairn.examples.sds.SdsCorpusTutorial

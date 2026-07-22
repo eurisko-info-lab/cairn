@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.{Filesystem as Fs, Workspace as Ws}
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
@@ -11,7 +11,8 @@ import scala.jdk.CollectionConverters.*
   * [[EffectMeta.workspace]].
   */
 object Workspace:
-  private val iface = EffectMeta.workspace
+  private def iface(reg: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds) =
+    reg.require(Effects.Family.Workspace)
 
   private def languageDirs: List[Path] =
     List("languages", "../languages", "../../languages").map(Path.of(_))
@@ -63,23 +64,24 @@ object Workspace:
     case Ws.Request.ListSurfaceCairnFiles(_)   => "listSurfaceCairnFiles"
     case Ws.Request.ReadText(_)                => "readText"
 
-  def intent(req: Ws.Request): (Effects.ActionKey, Authority.Resource) =
+  def intent(req: Ws.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): (Effects.ActionKey, Authority.Resource) =
     val path = req match
       case Ws.Request.LanguageDirs                   => "languages"
       case Ws.Request.ListCairnFiles(dir)            => resourcePath(dir.value)
       case Ws.Request.ListSubdirs(dir)               => resourcePath(dir.value)
       case Ws.Request.ListSurfaceCairnFiles(langDir) => resourcePath(langDir.value)
       case Ws.Request.ReadText(path)                 => resourcePath(path.value)
-    (iface.keyFor(ctorName(req)).get, iface.resource.at(path))
+    (iface(registry).keyFor(ctorName(req)).get, iface(registry).resource.at(path))
 
   def run(req: Ws.Request, ctx: EffectContext): Either[Ws.Error, Ws.Response] =
-    val (action, resource) = intent(req)
+    val (action, resource) = intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(Ws.Error.Io(s"denied: $err"))
-      case Right(auth) => perform(req, auth)
+      case Right(auth) => perform(req, auth, ctx.registry)
 
-  def perform(req: Ws.Request, auth: AuthorizedEffect): Either[Ws.Error, Ws.Response] =
-    val (action, resource) = intent(req)
+  def perform(req: Ws.Request, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): Either[Ws.Error, Ws.Response] =
+    val (action, resource) = intent(req, registry)
     if !auth.covers(action, resource) then Left(Ws.Error.Io("authorized effect does not cover request"))
     else
       try req match

@@ -90,18 +90,16 @@ object CasAdmin:
   * [[AuthorizedEffect]] → perform spine as [[CasEffects]].
   */
 object CasAdminEffects:
-  private val iface = EffectMeta.cas
-
   private def rootPath(root: Path): String = root.toAbsolutePath.toString
 
   def run(req: Cas.Request, ctx: EffectContext): Either[Cas.Error, Cas.Response] =
-    val (action, resource) = CasEffects.intent(req)
+    val (action, resource) = CasEffects.intent(req, ctx.registry)
     ctx.authorize(action, resource) match
       case Left(err)   => Left(Cas.Error.Io(s"denied: $err"))
-      case Right(auth) => perform(req, auth)
+      case Right(auth) => perform(req, auth, ctx.registry)
 
-  def perform(req: Cas.Request, auth: AuthorizedEffect): Either[Cas.Error, Cas.Response] =
-    val (action, resource) = CasEffects.intent(req)
+  def perform(req: Cas.Request, auth: AuthorizedEffect, registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds): Either[Cas.Error, Cas.Response] =
+    val (action, resource) = CasEffects.intent(req, registry)
     if !auth.covers(action, resource) then Left(Cas.Error.Io("authorized effect does not cover request"))
     else
       try req match
@@ -142,7 +140,8 @@ object CasAdminEffects:
     */
   def artifacts(root: Path, ctx: EffectContext): Either[Cas.Error, List[Artifact]] =
     val abs = rootPath(root)
-    ctx.authorize(iface.actionKey("stats"), iface.resource.at(abs)) match
+    val i = CasEffects.intent(Cas.Request.Stats(abs), ctx.registry)
+    ctx.authorize(i._1, i._2) match
       case Left(err) => Left(Cas.Error.Io(s"denied: $err"))
       case Right(_) =>
         Right(

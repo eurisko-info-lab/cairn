@@ -85,15 +85,31 @@ class ModuleBoundarySuite extends munit.FunSuite:
 
   test("handlers do not call gate.check/checked — authorize then AuthorizedEffect.perform"):
     val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
-    // EffectContext.authorize is the sole mint path (calls gate.check).
-    // Handlers must not call the gate themselves.
-    val allow = Set("AuthorityGate.scala", "EffectContext.scala", "AuthorizedEffect.scala")
+    // EffectContext.authorize is the sole mint path for AuthorizedEffect (calls gate.check).
+    // Handlers must not call the gate themselves. AuditedEffect is a separate type.
+    val allow = Set(
+      "AuthorityGate.scala", "EffectContext.scala",
+      "AuthorizedEffect.scala", "AuditedEffect.scala")
     val hits =
       for
         file <- scalaFilesUnder(handlerRoot)
         if !allow.contains(file.getFileName.toString)
         (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
         if line.contains("gate.check") // also matches gate.checked
+        if !line.trim.startsWith("//") && !line.trim.startsWith("*")
+      yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("auditPass / AuditedEffect are distinct from AuthorizedEffect at the type level"):
+    // Mechanical: handlers accept AuthorizedEffect only — never AuditedEffect.
+    val handlerRoot = Path.of("system-handler/src/main/scala/cairn/systemhandler")
+    val hits =
+      for
+        file <- scalaFilesUnder(handlerRoot)
+        name = file.getFileName.toString
+        if !Set("AuditedEffect.scala", "EffectContext.scala", "AuthorityGate.scala").contains(name)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        if line.contains("AuditedEffect") && line.contains("perform")
         if !line.trim.startsWith("//") && !line.trim.startsWith("*")
       yield s"${file}:${i + 1}: ${line.trim}"
     assert(hits.isEmpty, hits.mkString("\n"))

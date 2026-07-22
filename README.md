@@ -13,40 +13,42 @@ fetch it — so meaning, not merely text, is what moves between machines.
 Phase 0 / §11.2. Rosetta *targets* remain multi-host (Scala + Lean 4 ports shipped).
 Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 
-## Layout (post-migration)
+## Layout (live architecture)
 
-Trust and effect boundaries are the live module story (current detail in
+Trust and effect boundaries are the live module story (detail in
 [docs/architecture.md](docs/architecture.md); migration archaeology in
 [docs/migration-history.md](docs/migration-history.md)):
 
 | Module | Role | Contents |
 |---|---|---|
-| `kernel/` | Semantic TCB | Canonical bytes, digests, artifacts, fragment IR + composition laws, grammar vocabulary, derivation checker, authority models, Meta validation, pure ledger transition |
-| `core/` | Pure proposals | Grammar engine, Meta elaboration, ΔL / change algebra, search & tactics, tree + interaction-net engines, Rosetta projection engine, policy evaluation — no I/O |
-| `system-interface/` | Effect contracts | CAS trait, filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas, PackAccess |
-| `system-handler/` | Privileged I/O | MemCas / DiskCas / Branches, filesystem & process handlers, PoA node, crypto, distribution, AuthorityGate, Meta activation |
+| `kernel/` | Semantic TCB | Canonical bytes, digests, artifacts, fragment IR + composition laws, grammar vocabulary, derivation checker, authority models (`AuthorizedRequest` / `AuditedRequest`), Meta validation, pure ledger transition |
+| `core/` | Pure proposals | Grammar engine, Meta elaboration, ΔL / change algebra, `PatchGraph`, search & tactics, tree + interaction-net engines, Rosetta projection engine, policy evaluation — no I/O |
+| `system-interface/` | Effect contracts | CAS trait, filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas |
+| `system-handler/` | Privileged I/O | MemCas / DiskCas / Branches, filesystem & process handlers, PoA node, crypto, distribution, `AuthorityGate`, `EffectContext`, `RuntimeEffectRegistry`, `RevocationView` |
 | `user/` | Extensible data | Language packs, policies, workflows (STLC, Law, SDS, MiniTT, LeanCore, UnisonCore, AffineNet, …); may name effects, never imports handlers |
-| `runtime/` | Composition root | PackLoader — ties User + Handlers together |
+| `runtime/` | Composition root | PackLoader, `EffectBootstrap`, `WorkflowRunner` — ties User + Handlers together |
 
 Key prohibition: `user ↛ system-handler`.
 
-### Compatibility façades
+### Aggregation modules (not ownership layers)
 
-Older PLAN.md layers L0–L6 survive as thin shims / surface I/O — **not** owners of
-CAS, grammar, ΔL, or Meta:
+These sit above the Kernel/Core/System/User/Runtime DAG. They are **not**
+L0–L6 owners of CAS / grammar / ΔL / Meta (that story is retired):
 
 | Module | What it actually is |
 |---|---|
-| `workbench/` | Re-exports `runtime.PackLoader` |
-| `compute/` | Re-exports `core` net engine / builder |
 | `proof/` | Certification / property helpers on top of Core + Kernel |
+| `compute/` | Thin re-export of Core net engine / builder (aggregated separately for historical callers) |
 | `rosetta/` | Scaffold emit façade (projection engine lives in `core`) |
-| `ledger/` | Re-exports handler crypto/node/distribution + `user` PolicyLang |
 | `surface/` | CLI, transcript DSL, LSP, Web explorer |
 | `examples/` | Host-glue demos (PKI, SDS sealing, Search, Riemann, …); never imported by Kernel/Core |
 | `tests/` | Acceptance suites |
 
-sbt enforces the DAG (façades sit above the real graph):
+There is **no** `workbench/` or `ledger/` sbt project in the live graph — CAS,
+branches, and PoA live under `system-handler` / `kernel`; Meta activation and
+pack loading live under `runtime`.
+
+sbt enforces the DAG (`build.sbt`):
 
 ```text
 kernel
@@ -56,14 +58,12 @@ system-handler      → kernel, core, system-interface
 user                → kernel, core, system-interface
 runtime             → user, system-handler, core, kernel, system-interface
 
-workbench           → runtime (+ kernel, core, system-handler)
-proof               → workbench, core, kernel
-compute             → workbench, core
+proof               → core, kernel
+compute             → core
 rosetta             → proof, compute, core, system-handler
-ledger              → rosetta, system-interface, system-handler, user
-surface             → ledger, runtime, system-handler
+surface             → proof, runtime, system-handler
 examples            → surface, user, runtime
-tests               → examples, runtime, user
+tests               → examples, rosetta, runtime, user
 ```
 
 ## Quick start

@@ -13,8 +13,9 @@ import cairn.systeminterface.Cas
   *      nonce / requestId sets — merge, not agreement).
   *   3. Revocation is an append-only CAS `capability-revocation` artifact listing
   *      revoked grant ids; [[RevocationLog.absorbFromCas]] unions digests into a
-  *      local set. Gates consult [[RevocationLog.isRevoked]] before accepting a
-  *      capability proof ([[ReplayReplication.checkGrant]]).
+  *      local set. [[AuthorityGate.checkCapability]] / [[EffectContext.authorize]]
+  *      consult [[RevocationView]] (e.g. [[RevocationView.of]] a log) before
+  *      minting AuthorizedEffect from capabilities.
   *
   * Deferred: BFT quorum, ordered broadcast, cross-issuer conflict resolution.
   * Studio UI is unrelated — this is CAS digest exchange only.

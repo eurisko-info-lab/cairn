@@ -2,7 +2,7 @@ package cairn.runtime
 
 import cairn.kernel.*
 import cairn.core.{ModuleSurface, Parser}
-import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systemhandler.{EffectContext, Filesystem, RuntimeEffectRegistry}
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
 
@@ -26,6 +26,10 @@ object EffectBootstrap:
       pinned.get(family) match
         case None => Left(s"family $family not loaded")
         case Some(p) => Effects.ActionKey.fromPinned(p, name)
+
+    /** Live registry for [[EffectContext]] / handlers (disk-loaded vocabulary). */
+    def registry: RuntimeEffectRegistry =
+      RuntimeEffectRegistry(families, pinned)
 
   def ifacePath(pack: String): Path =
     Path.of("languages", pack, "iface.cairn")

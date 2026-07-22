@@ -1,18 +1,19 @@
 package cairn.systemhandler
 
 import cairn.systeminterface.Filesystem as Fs
-import cairn.kernel.{Authority, EffectMeta, Effects}
+import cairn.kernel.{Authority, Effects}
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 /** Local filesystem handler (Phase 3). [[perform]] accepts only a
   * pre-authorized [[AuthorizedEffect]]; composition roots authorize via
   * [[EffectContext.authorize]] then perform, or use [[run]] as a thin adapter.
-  * Every other method here is private. Action/resource keys come from
-  * `kernel.EffectMeta.filesystem` (read/write/mkdirs; `Resolve` ungated).
+  * Every other method here is private. Action/resource keys come from the
+  * context [[RuntimeEffectRegistry]] (disk-loaded EffectBootstrap vocabulary).
   */
 object Filesystem:
-  private val iface = EffectMeta.filesystem
+  private def iface(reg: RuntimeEffectRegistry) =
+    reg.require(Effects.Family.Filesystem)
 
   private def toNio(p: Fs.Path): Path = Path.of(p.value)
   private def fromNio(p: Path): Fs.Path = Fs.Path(p.toString)
@@ -73,20 +74,28 @@ object Filesystem:
     case Fs.Request.Resolve(_, _)              => "*"
 
   /** Derived action + resource, or `None` when ungated (`Resolve`). */
-  def intent(req: Fs.Request): Option[(Effects.ActionKey, Authority.Resource)] =
-    iface.keyFor(ctorName(req)).map(k => (k, iface.resource.at(resourcePath(req))))
+  def intent(
+      req: Fs.Request,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
+  ): Option[(Effects.ActionKey, Authority.Resource)] =
+    val i = iface(registry)
+    i.keyFor(ctorName(req)).map(k => (k, i.resource.at(resourcePath(req))))
 
   /** Thin adapter: authorize then [[perform]]. */
   def run(req: Fs.Request, ctx: EffectContext): Either[Fs.Error, Fs.Response] =
-    intent(req) match
+    intent(req, ctx.registry) match
       case None => performRaw(req)
       case Some((action, resource)) =>
         ctx.authorize(action, resource) match
           case Left(err)  => Left(Fs.Error.Io(s"denied: $err"))
-          case Right(auth) => perform(req, auth)
+          case Right(auth) => perform(req, auth, ctx.registry)
 
-  def perform(req: Fs.Request, auth: AuthorizedEffect): Either[Fs.Error, Fs.Response] =
-    intent(req) match
+  def perform(
+      req: Fs.Request,
+      auth: AuthorizedEffect,
+      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
+  ): Either[Fs.Error, Fs.Response] =
+    intent(req, registry) match
       case None => performRaw(req)
       case Some((action, resource)) =>
         if auth.covers(action, resource) then performRaw(req)
