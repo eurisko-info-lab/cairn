@@ -20,18 +20,24 @@ object Authority:
   final case class Subject(id: String)
 
   /** Resource scope for an effect. Prefer constructing via
-    * [[EffectMeta.ResourceSchema.at]] so `kind` comes from the interface.
+    * [[EffectMeta.ResourceSchema.at]] so `kind` comes from the interface and
+    * the path is [[EffectMeta.PathCanon]]onical before authorize.
     */
   final case class Resource(kind: String, path: String):
     /** Whether this concrete resource is allowed by `pattern`.
+      * Both sides are identity-normalized ([[EffectMeta.PathCanon.identity]])
+      * so `/tmp/../tmp/a` and `/tmp/a` cannot evade a `/tmp*` policy (and
+      * mismatched spellings of the same resource cannot miss a Deny).
       * Exact path, full `*`, or explicit prefix pattern ending in `*` — never
       * accidental prefix of a non-wildcard path (`/tmp/a` must not match `/tmp/abc`).
       */
     def matches(pattern: Resource): Boolean =
-      (pattern.kind == "*" || pattern.kind == kind) &&
-      (pattern.path == "*" ||
-        pattern.path == path ||
-        (pattern.path.endsWith("*") && path.startsWith(pattern.path.dropRight(1))))
+      val self = EffectMeta.PathCanon.identity(kind, path)
+      val pat = EffectMeta.PathCanon.identity(pattern.kind, pattern.path)
+      (pat.kind == "*" || pat.kind == self.kind) &&
+      (pat.path == "*" ||
+        pat.path == self.path ||
+        (pat.path.endsWith("*") && self.path.startsWith(pat.path.dropRight(1))))
 
     /** True when `this` is at least as narrow as `broader` (non-widening). */
     def isAttenuationOf(broader: Resource): Boolean =
@@ -322,8 +328,8 @@ object Authority:
     *
     * Hosts may still construct [[CapabilityGrant]] values when building Core
     * proofs / delegation chains, but [[VerifiedCapability]] is only minted
-    * after [[checkProof]] / [[checkCapability]] — so
-    * `withCapabilities` cannot accept arbitrary forged grants.
+    * after [[checkProof]] — so `withCapabilities` / [[checkCapability]] cannot
+    * accept arbitrary forged grants.
     *
     * Replay tokens are consumed on an issuer-scoped
     * [[cairn.systemhandler.ReplayStore]] held by the gate (shared / durable
@@ -439,15 +445,19 @@ object Authority:
           else Right(())
       yield AuthorizedRequest.mint(req)
 
-  /** Capability-first accept: covering grant already in hand — no policy re-eval.
+  /** Capability-first accept: covering [[VerifiedCapability]] already in hand —
+    * no policy re-eval. Raw [[CapabilityGrant]] values are not accepted (that
+    * would re-open forgery via `Resource("*","*")` without [[checkProof]]).
     * [[isRevoked]] must be consulted before mint (stable [[CapabilityGrant.capabilityId]]).
     */
   def checkCapability(
       req: EffectRequest,
-      grant: CapabilityGrant,
+      capability: VerifiedCapability,
       nowMillis: Long,
       isRevoked: String => Boolean = _ => false
   ): Either[String, AuthorizedRequest] =
+    // Inside Authority, VerifiedCapability erases to CapabilityGrant.
+    val grant: CapabilityGrant = capability
     if isRevoked(grant.capabilityId) then Left(s"grant revoked: ${grant.capabilityId}")
     else if !grant.covers(req, nowMillis) then Left("capability does not cover request")
     else if grant.expiresAtEpochMillis.exists(_ < nowMillis) then Left("grant expired")

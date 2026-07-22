@@ -6,11 +6,16 @@ package cairn.runtime
   * Scala supplies effect handlers keyed by step name. The runner sequences
   * steps and fails closed on the first error — it does not invent SDS
   * vocabulary or report surfaces.
+  *
+  * [[Report]] is **untrusted host telemetry**: completing a workflow does not
+  * mint authority, tip validity, or certificates. Privileged accept paths
+  * (commitTip / attachCertificate / ledger) must not gate on a forged Report.
   */
 object WorkflowRunner:
 
   final case class Step(name: String, phase: String)
 
+  /** Host sequencing receipt — not a Kernel-checked artifact. */
   final case class Report(
       completed: List[String],
       results: Map[String, String] = Map.empty,

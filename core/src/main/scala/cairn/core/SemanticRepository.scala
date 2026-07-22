@@ -38,7 +38,7 @@ object SemanticRepository:
     private[SemanticRepository] final case class Repr(
         base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet)
 
-    private[core] def mint(
+    private[SemanticRepository] def mint(
         base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet
     ): ValidatedTip =
       Repr(base, tip, change, vcs)

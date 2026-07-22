@@ -813,3 +813,76 @@ class AuthoritySuite extends munit.FunSuite:
     val audited = ctx.recordAudit(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
     assertEquals(audited.action, fsRead)
     assert(ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a")).isLeft)
+
+  test("capability forgery: raw CapabilityGrant cannot authorize via checkCapability"):
+    // Compile-time: checkCapability takes VerifiedCapability only.
+    // Runtime: a forged wide grant that merely covers is not mintable; fromProof required.
+    val forged = CapabilityGrant(alice, fsRead, Resource("*", "*"))
+    val req = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp/secret"))
+    assert(forged.covers(req, 0), "covers alone would have been the bypass")
+    val policies = List(PolicyEval.allowAll("a", alice, fsRead))
+    val proof = PolicyEval.prove(readReq, policies, 0).toOption.get
+    val cap = Authority.VerifiedCapability.fromProof(proof, policies).toOption.get
+    val gate = AuthorityGate.enforcing(Nil)
+    assert(gate.checkCapability(req, cap, 0).isLeft, "verified read@/tmp/a must not cover /tmp/secret")
+    assert(gate.checkCapability(readReq, cap, 0).isRight)
+
+  test("PathCanon: /tmp/../tmp/a and /tmp/./a share identity with /tmp/a policy"):
+    val policy = EffectPolicy(
+      "tmp", alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"), Decision.Allow)
+    val aliases = List("/tmp/a", "/tmp/./a", "/tmp/../tmp/a", "/tmp//a")
+    aliases.foreach { p =>
+      val res = EffectMeta.filesystem.resource.at(p)
+      assertEquals(res.path, "/tmp/a", clues(p, res))
+      val req = EffectRequest(alice, fsRead, res)
+      assert(policy.matches(req), clues(p))
+      assert(Authority.checkProof(
+        PolicyEval.prove(req, List(policy), 0).toOption.get, List(policy)).isRight, clues(p))
+    }
+    // Relative path without .. stays relative (workspace-style logical ids)
+    assertEquals(EffectMeta.workspace.resource.at("languages/x").path, "languages/x")
+    // Digest case-fold
+    val hex = "A" * 64
+    val dig = EffectMeta.cas.resource.at(hex)
+    assertEquals(dig.path, "a" * 64)
+
+  test("CertificateAttach rejects tip-mismatched / unstructured forgery"):
+    val tip = Digest.of(Canon.CStr("branch-tip"))
+    val other = Digest.of(Canon.CStr("other-tip"))
+    val ok = Artifact(ArtifactKind.Certificate, Canon.cmap(
+      "kind" -> Canon.CStr("sds-approval"),
+      "issuer" -> Canon.CStr("alice"),
+      "tip" -> Canon.CStr(tip.hex)))
+    assert(cairn.kernel.CertificateAttach.check(ok, Some(tip)).isRight)
+    assert(cairn.kernel.CertificateAttach.check(ok, Some(other)).isLeft)
+    val bare = Artifact(ArtifactKind.Certificate, Canon.CStr("nope"))
+    assert(cairn.kernel.CertificateAttach.check(bare, None).isLeft)
+    val wrongKind = Artifact(ArtifactKind.Claim, Canon.cmap(
+      "kind" -> Canon.CStr("sds-approval"),
+      "issuer" -> Canon.CStr("alice"),
+      "tip" -> Canon.CStr(tip.hex)))
+    assert(cairn.kernel.CertificateAttach.check(wrongKind, Some(tip)).isLeft)
+
+  test("Branches.attachCertificate rejects forged tip; WorkflowRunner.Report is not a gate"):
+    val cas = MemCas()
+    val refs = Files.createTempDirectory("cairn-cert-forge")
+    val branches = Branches(cas, refs, EffectContext.forBranches())
+    val mod = cairn.core.Module(List("x" -> Cst.Leaf("1")))
+    branches.importModule("main", mod)
+    val forged = Artifact(ArtifactKind.Certificate, Canon.cmap(
+      "kind" -> Canon.CStr("sds-approval"),
+      "issuer" -> Canon.CStr("mallory"),
+      "tip" -> Canon.CStr(Digest.of(Canon.CStr("not-head")).hex)))
+    assert(branches.attachCertificate("main", forged).isLeft)
+    val honest = Artifact(ArtifactKind.Certificate, Canon.cmap(
+      "kind" -> Canon.CStr("sds-approval"),
+      "issuer" -> Canon.CStr("alice"),
+      "tip" -> Canon.CStr(mod.digest.hex)))
+    assert(branches.attachCertificate("main", honest).isRight)
+    // Forged workflow Report must not unlock attach / commit
+    val fakeReport = cairn.runtime.WorkflowRunner.Report(
+      completed = List("author", "shadow", "publish"),
+      results = Map("publish" -> "ok"))
+    assertEquals(fakeReport.completed.length, 3)
+    assert(branches.attachCertificate("main", forged).isLeft,
+      "Report telemetry must not authorize a tip-mismatched certificate")

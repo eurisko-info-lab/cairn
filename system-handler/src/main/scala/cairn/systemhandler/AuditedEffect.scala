@@ -17,5 +17,6 @@ final class AuditedEffect private[systemhandler] (val audited: AuditedRequest):
   def subject: Authority.Subject = audited.subject
 
 object AuditedEffect:
+  /** Package-private mint; ModuleBoundarySuite bans call sites outside EffectContext. */
   private[systemhandler] def mint(a: AuditedRequest): AuditedEffect =
     AuditedEffect(a)

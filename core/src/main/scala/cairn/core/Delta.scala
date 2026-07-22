@@ -107,7 +107,7 @@ object Delta:
     private[Delta] final case class Repr(
         language: Digest, base: Digest, change: Cst, result: Digest)
 
-    private[core] def mint(
+    private[Delta] def mint(
         language: Digest, base: Digest, change: Cst, result: Digest
     ): ValidatedChangeSet =
       Repr(language, base, change, result)

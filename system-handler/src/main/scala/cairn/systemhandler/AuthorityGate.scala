@@ -100,17 +100,19 @@ final class AuthorityGate(
                       Right(auth)
                 }
 
-  /** Capability-first path: validate a covering grant without policy prove.
-    * Always consults [[revocation]] before mint (Enforce). Audit mode records
-    * and refuses to mint AuthorizedRequest.
+  /** Capability-first path: validate a covering [[VerifiedCapability]] without
+    * policy prove. Raw [[CapabilityGrant]] is rejected at the type level —
+    * only Kernel-minted verified caps authorize. Always consults [[revocation]]
+    * before mint (Enforce). Audit mode records and refuses to mint AuthorizedRequest.
     */
   def checkCapability(
       req: EffectRequest,
-      grant: CapabilityGrant,
+      capability: VerifiedCapability,
       nowMillis: Long = System.currentTimeMillis()
   ): Either[String, AuthorizedRequest] =
     mode match
       case AuthorityGate.Mode.Audit =>
+        val grant = capability.grant
         val would = grant.covers(req, nowMillis) && !revocation.isRevoked(grant.capabilityId)
         val derivation = AuthorizationDerivation(
           req, policies,
@@ -120,12 +122,13 @@ final class AuthorityGate(
         synchronized { events += AuthorityEvent.Audited(derivation, would) }
         Left("audit mode cannot mint AuthorizedRequest; use audit() for recording")
       case AuthorityGate.Mode.Enforce =>
-        Authority.checkCapability(req, grant, nowMillis, revocation.isRevoked) match
+        Authority.checkCapability(req, capability, nowMillis, revocation.isRevoked) match
           case Left(err) =>
             val derivation = AuthorizationDerivation(req, policies, Decision.Deny, None, err)
             synchronized { events += AuthorityEvent.Rejected(derivation) }
             Left(err)
           case Right(auth) =>
+            val grant = capability.grant
             val derivation = AuthorizationDerivation(
               req, policies, Decision.Allow, Some(grant), "capability")
             synchronized {

@@ -82,11 +82,97 @@ object EffectMeta:
     def known: List[PathPattern] =
       List(Unscoped, FsPath, Command, Host, Digest, DigestOrPath)
 
+  /** Pure lexical path identity — no symlink I/O (Kernel purity).
+    *
+    * Used by [[ResourceSchema.at]] / [[Authority.Resource.matches]] so two
+    * spellings of the same resource cannot evade policy. Symlink *follow*
+    * (toRealPath) remains a system-handler concern before `at` when needed.
+    */
+  object PathCanon:
+    /** Canonicalize `path` under `pattern`. Wildcards (`*` / `prefix*`) keep
+      * their wildcard form; concrete FsPath must be absolute.
+      */
+    def canonicalize(pattern: PathPattern, path: String): Either[String, String] =
+      if path == "*" then Right("*")
+      else pattern match
+        case PathPattern.Unscoped => Right(path)
+        case PathPattern.Command =>
+          Right(basename(path.replace('\\', '/')))
+        case PathPattern.Host =>
+          if path.nonEmpty then Right(path) else Left("Host path must be non-empty")
+        case PathPattern.Digest =>
+          if PathPattern.isHexDigest(path) then Right(path.toLowerCase)
+          else Left(s"Digest path must be 64 hex chars, got '$path'")
+        case PathPattern.FsPath =>
+          if path.endsWith("*") && path != "*" then
+            lexicalFs(path.dropRight(1)).map(_ + "*")
+          else lexicalFs(path)
+        case PathPattern.DigestOrPath =>
+          if PathPattern.isHexDigest(path) then Right(path.toLowerCase)
+          else if path.endsWith("*") && path != "*" then
+            lexicalFs(path.dropRight(1)).map(_ + "*")
+          else lexicalFs(path)
+
+    /** Best-effort identity for [[Authority.Resource.matches]] when the
+      * PathPattern is unknown: fold digests to lowercase; fold FS paths
+      * lexically; leave command / host strings alone.
+      */
+    def identity(kind: String, path: String): Authority.Resource =
+      val canonPath =
+        if path == "*" then "*"
+        else if PathPattern.isHexDigest(path) then path.toLowerCase
+        else if path.endsWith("*") && path.length > 1 then
+          lexicalFs(path.dropRight(1)).map(_ + "*").getOrElse(path)
+        else if path.startsWith("/") || path.contains("/.") || path.contains("..") ||
+            path.contains('\\') || path.contains("//") then
+          lexicalFs(path).getOrElse(path)
+        else path
+      Authority.Resource(kind, canonPath)
+
+    /** Lexical FS normalize: `/` separators, collapse `.` / `//`, reject `..`
+      * that escapes. Absolute paths stay absolute; relative logical ids
+      * (`languages/…`) stay relative. No symlink resolution.
+      */
+    def lexicalFs(path: String): Either[String, String] =
+      val norm = path.replace('\\', '/')
+      if norm.startsWith("/") then lexicalAbsolute(norm)
+      else lexicalRelative(norm)
+
+    /** Lexical absolute normalize. */
+    def lexicalAbsolute(path: String): Either[String, String] =
+      val norm = path.replace('\\', '/')
+      if !norm.startsWith("/") then
+        Left(s"FsPath must be absolute (got '$path')")
+      else resolveSegments(norm.split("/", -1).toList, path).map(parts =>
+        "/" + parts.mkString("/"))
+
+    private def lexicalRelative(path: String): Either[String, String] =
+      val norm = path.replace('\\', '/')
+      if norm.isEmpty then Left("FsPath must be non-empty")
+      else resolveSegments(norm.split("/", -1).toList, path).map(_.mkString("/")).flatMap { r =>
+        if r.isEmpty then Left(s"FsPath empty after normalize: '$path'") else Right(r)
+      }
+
+    private def resolveSegments(segments: List[String], original: String): Either[String, List[String]] =
+      segments.foldLeft[Either[String, List[String]]](Right(Nil)) {
+        case (Left(e), _) => Left(e)
+        case (Right(acc), "" | ".") => Right(acc)
+        case (Right(Nil), "..") => Left(s"FsPath escapes root: '$original'")
+        case (Right(_ :: rest), "..") => Right(rest)
+        case (Right(acc), seg) => Right(acc :+ seg)
+      }
+
+    private def basename(path: String): String =
+      val trimmed = path.stripSuffix("/")
+      val i = trimmed.lastIndexOf('/')
+      if i < 0 then trimmed else trimmed.substring(i + 1)
+
   /** Per-family resource language: kind + typed [[PathPattern]], bound to the
     * effect-interface Fragment digest when constructed from an [[EffectFamily]].
     * `pathPattern` is the on-disk encoding (`Path`, `Command`, `Host`,
     * `Digest`, `Digest|Path`, `*`); matching still uses
-    * [[Authority.Resource.matches]] (exact / prefix-wildcard / `*`).
+    * [[Authority.Resource.matches]] (exact / prefix-wildcard / `*`) after
+    * [[PathCanon]]icalization.
     */
   final case class ResourceSchema(
       kind: String,
@@ -94,21 +180,20 @@ object EffectMeta:
       interfaceDigest: Option[Digest] = None):
     def pattern: Either[String, PathPattern] = PathPattern.parse(pathPattern)
 
-    /** Construct a resource; rejects concrete paths that violate [[pattern]]. */
+    /** Construct a resource; rejects concrete paths that violate [[pattern]]
+      * and stores the [[PathCanon]]ical form.
+      */
     def at(path: String): Authority.Resource =
-      pattern match
-        case Right(p) if !p.accepts(path) =>
-          throw IllegalArgumentException(
-            s"resource path '$path' does not match schema $kind/$pathPattern")
-        case Left(err) =>
-          throw IllegalArgumentException(s"resource schema $kind: $err")
-        case Right(_) =>
-          Authority.Resource(kind, path)
+      atChecked(path).fold(
+        e => throw IllegalArgumentException(e),
+        identity)
 
     def atChecked(path: String): Either[String, Authority.Resource] =
       pattern.flatMap { p =>
-        if p.accepts(path) then Right(Authority.Resource(kind, path))
-        else Left(s"resource path '$path' does not match schema $kind/$pathPattern")
+        PathCanon.canonicalize(p, path).flatMap { c =>
+          if p.accepts(c) then Right(Authority.Resource(kind, c))
+          else Left(s"resource path '$path' (canonical '$c') does not match schema $kind/$pathPattern")
+        }
       }
 
     def any: Authority.Resource = Authority.Resource(kind, "*")

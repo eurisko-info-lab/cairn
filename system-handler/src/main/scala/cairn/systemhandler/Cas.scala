@@ -357,33 +357,36 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       historyAppend: Boolean = true,
       extraPuts: List[Artifact] = Nil,
   ): Either[String, BranchManifest] =
-    val extraKeys = extraPuts.map(putArt)
-    val vcsKey = putArt(vcs.artifact)
-    val modKey = putArt(module.artifact)
-    val provDig =
-      Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
-        .fold(e => throw RuntimeException(casErr(e)), identity)
-    val extras = extraKeys.map(_.valueHash) :+ provDig
-    var journal = AcceptJournal(
-      branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras)
-    writeJournal(journal)
-    val manifest = applyRefs(journal)
-    journal = journal.copy(phase = "refs")
-    writeJournal(journal)
-    publish match
-      case None =>
-        clearJournal(branch)
-        clearConflict(branch)
-        Right(manifest)
-      case Some(p) =>
-        journal = journal.copy(phase = "publish")
-        writeJournal(journal)
-        publishHead(branch, p.node, p.authority, p.authorities) match
-          case Left(err) => Left(err)
-          case Right(_) =>
-            clearJournal(branch)
-            clearConflict(branch)
-            Right(manifest)
+    if module.digest != vcs.result then
+      Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
+    else
+      val extraKeys = extraPuts.map(putArt)
+      val vcsKey = putArt(vcs.artifact)
+      val modKey = putArt(module.artifact)
+      val provDig =
+        Provenance.record(cas, module.digest, provenanceParents ++ List(vcsKey.valueHash), provenanceTool, ctx)
+          .fold(e => throw RuntimeException(casErr(e)), identity)
+      val extras = extraKeys.map(_.valueHash) :+ provDig
+      var journal = AcceptJournal(
+        branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras)
+      writeJournal(journal)
+      val manifest = applyRefs(journal)
+      journal = journal.copy(phase = "refs")
+      writeJournal(journal)
+      publish match
+        case None =>
+          clearJournal(branch)
+          clearConflict(branch)
+          Right(manifest)
+        case Some(p) =>
+          journal = journal.copy(phase = "publish")
+          writeJournal(journal)
+          publishHead(branch, p.node, p.authority, p.authorities) match
+            case Left(err) => Left(err)
+            case Right(_) =>
+              clearJournal(branch)
+              clearConflict(branch)
+              Right(manifest)
 
   /** Roll forward interrupted accepts (refs and/or ledger publish).
     * Phase=`cas` with missing journal blobs abandons the journal (orphans are
@@ -886,13 +889,16 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   /** Put a certificate artifact and append its digest to the branch manifest
     * `certificates` list (linked CAS reference from branch state).
+    *
+    * Kernel [[CertificateAttach.check]] is mandatory: kind/issuer/tip structure,
+    * and tip must match the current branch head when a head exists. Free-form
+    * or tip-mismatched certificates cannot become privileged branch state.
     */
   def attachCertificate(branch: String, cert: Artifact): Either[String, (BranchManifest, Digest)] =
-    if cert.kind != ArtifactKind.Certificate then
-      Left(s"attachCertificate expects certificate kind, got ${cert.kind.name}")
-    else
+    val cur = load(branch)
+    val expectedTip = cur.head.map(_.valueHash)
+    CertificateAttach.check(cert, expectedTip).flatMap { _ =>
       val dig = putArt(cert).valueHash
-      val cur = load(branch)
       if cur.certificates.contains(dig) then Right((cur, dig))
       else
         val next = cur.copy(certificates = cur.certificates :+ dig)
@@ -900,3 +906,4 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         refsMkdirs()
         refsWrite(refPath(branch), key.valueHash.hex)
         Right((next, dig))
+    }

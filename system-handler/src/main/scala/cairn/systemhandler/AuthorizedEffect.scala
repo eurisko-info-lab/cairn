@@ -24,5 +24,6 @@ final class AuthorizedEffect private[systemhandler] (val authorized: AuthorizedR
     this.action == action && this.resource == resource
 
 object AuthorizedEffect:
+  /** Package-private mint; ModuleBoundarySuite bans call sites outside EffectContext. */
   private[systemhandler] def mint(a: AuthorizedRequest): AuthorizedEffect =
     AuthorizedEffect(a)
