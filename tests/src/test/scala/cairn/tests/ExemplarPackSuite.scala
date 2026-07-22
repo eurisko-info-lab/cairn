@@ -818,17 +818,19 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(full.ok, full.errors.mkString("; "))
     assertEquals(full.sectionNumbers, (1 to 16).toList)
 
-  test("effect fragments load; all families FromFragment pin without host AST"):
+  test("effect bootstrap: interface lang + all packs; ActionKey.fromPinned; host seed fixpoint"):
+    val loaded = cairn.runtime.EffectBootstrap.load(packs).fold(e => fail(e), identity)
+    assertEquals(loaded.families.size, Effects.Family.values.length)
+    assertEquals(loaded.pinned.size, Effects.Family.values.length)
+    // Opaque keys from disk pins; Family thin bridge from packs.
     for name <- EffectMeta.fragmentPackNames do
-      val lang = packs.requireClosed(name)
-      val frag = lang.fragments.find(_.name == name).getOrElse(fail(s"no fragment in $name"))
-      val ef = EffectMeta.fromFragmentPack(name, frag).fold(e => fail(s"$name: $e"), identity)
-      assertEquals(EffectMeta.completeness(ef), Nil, name)
-      val pinned = EffectMeta.PinnedInterface.fromArtifact(EffectMeta.interfaceArtifact(ef))
-        .fold(e => fail(e), identity)
-      assert(Effects.ActionKey.fromPinned(pinned, ef.actions.head).isRight, name)
-    // Family enum + action-map args remain host-seeded (opaque routing).
-    assert(Effects.Family.values.length == EffectMeta.families.size)
+      val fam = Effects.Family.forPack(name).getOrElse(fail(s"no Family.forPack($name)"))
+      val pinned = loaded.pinned(fam)
+      val key = loaded.actionKey(fam, pinned.actions.head).fold(e => fail(e), identity)
+      assert(key.interfaceDigest.isDefined, name)
+      assertEquals(key.family, fam.toString)
+    // Host cold-start seeds still complete (handlers use them).
+    EffectMeta.families.values.foreach(f => assertEquals(EffectMeta.completeness(f), Nil, f.fragment.name))
 
   test("ReplayReplication: want/have + revocation absorb + checkGrant (merge, not BFT)"):
     import cairn.systemhandler.{MemCas, ReplayReplication, ReplayStore, RevocationLog}

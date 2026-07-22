@@ -30,12 +30,13 @@ SDS, **not** SDS vocabulary), **branch-linked certificates**,
 **effect-clock + effect-random** fragment load, **causal-LCA property tests**
 (48 trials), and **ReplayReplication** (+ `checkGrant`), plus a **follow-on
 engineering pass**: multilingual SDS depth (FR+DE, corpus `fieldLocaleRef`,
-lang-aware report), all ten effect-interface `.cairn` packs, grant-bundle
-threading in SDS causal, STLC/meta runtime SoT, format-preserving
+lang-aware report), all ten effect-interface `.cairn` packs +
+`effect-interface` language / `iface.cairn` decls / `EffectBootstrap`,
+grant-bundle threading in SDS causal, STLC/meta runtime SoT, format-preserving
 remove/rename docs + dirty-subtree `putReassociated`, process command
 narrowing, Bend Church numerals / LeanCore transparent unfold / Unison
 `call` graph. Architecture: SDS language proper vs report surface packs stay
-separated (Phase 2/3). Full suite: **502 tests** (500 passed + 2 skipped; `tests` module; `sbt test`).
+separated (Phase 2/3). Full suite: **504 tests** (502 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -49,7 +50,7 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
 | 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `sds-report` surfaces only — **not** SDS language; PDF deferred |
 | 5 | Approve/sign/publication certs as linked CAS | **Done** | `BranchManifest.certificates` + `SdsCertificates.attachWorkflow` |
-| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | all ten `effect-*` `.cairn`; Family enum + action maps host-seeded |
+| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-interface` lang + `iface.cairn` decls SoT; Family/Action enums host bridge; vocab Fragment host seed |
 | 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
 | 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; merge-only, **BFT deferred** |
 
@@ -66,7 +67,7 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 |---|---|
 | Replay sync | CAS `replay-snapshot` **merge** (union absorb) — **not** consensus / BFT |
 | Journaled recovery | Local accept journal — **≠** distributed atomic txn |
-| Effect interfaces | CAS-pinned; all ten families load `.cairn` vocab; Family enum + action maps host-seeded |
+| Effect interfaces | CAS-pinned; `effect-interface` + `iface.cairn` decls SoT; Family/Action enums + vocab Fragment host seed |
 | Report formats | `sds-report` text + JSON + XML + CSV; **PDF deferred**; Studio deferred |
 
 ## Post-parity priority scorecard (2026-07-22)
@@ -235,7 +236,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | Capabilities | `EffectContext.withCapabilities` takes `VerifiedCapability` (fromProof only); issuer-scoped `ReplayStore` (memory / durable FS; CAS `replay-snapshot` publish/merge) |
 | BranchManifest | Causal digests + `changeHistory` + `certificates`; sidecars write-through caches; causal-LCA merge; journaled accept; `reclaimOrphanBlobs` + conflict `.conflict` root |
 | Agreement | Certificate carries `envelopeDigest` + `nativeEvidence`; Lean `natRec` ι + live stdout digests |
-| Effect interfaces | `ActionKey` digest-bound; CAS-pinned `effect-interface`; host Meta + clock/random fragment load |
+| Effect interfaces | `ActionKey` digest-bound; CAS-pinned; `effect-interface` + `iface.cairn` SoT; `EffectBootstrap`; Family/Action host bridge |
 | Replay sync | Digest-merge absorb only — **not** consensus / BFT (`ReplayReplication` + `checkGrant`) |
 | Journaled accept | Local CAS → journal → refs — **≠** distributed atomic txn |
 | Report surfaces | `sds-report` text+JSON+XML+CSV (**not** SDS language); PDF deferred |
@@ -262,6 +263,9 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
   separate packs — absorbed as platform capability, not forked catalogs.
 - Crash may leave unreferenced CAS blobs until `reclaimOrphanBlobs`;
   multi-node replay is digest-merge only (not consensus / BFT).
-- Effect-interface action maps / Family enum remain host-seeded despite CAS
-  pins and clock+random fragment language loads.
+- Effect-interface declarations load from `languages/effect-*/iface.cairn`
+  (`effect-interface` language) via `EffectBootstrap`; vocabulary from
+  `languages/effect-*.cairn`. Residual host bridges: `Effects.Family` /
+  `Effects.Action` enums (interpreter routing) + cold-start Fragment /
+  `packDecls` seeds (verified against disk).
 - GRANITE SDS depth / Lean proof bodies / BFT — see above.

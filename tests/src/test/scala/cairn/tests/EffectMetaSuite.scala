@@ -303,3 +303,28 @@ class EffectMetaSuite extends munit.FunSuite:
     assertEquals(
       Effects.ActionKey.fromPinned(hostPin, "now").toOption.get,
       EffectMeta.clock.actionKey("now"))
+
+  test("InterfaceDecl packDecls cover all packs; Family.forPack thin bridge"):
+    assertEquals(EffectMeta.packDecls.keySet, EffectMeta.fragmentPackNames.toSet)
+    assertEquals(EffectMeta.packFamily.keySet, EffectMeta.fragmentPackNames.toSet)
+    for name <- EffectMeta.fragmentPackNames do
+      val d = EffectMeta.packDecls(name)
+      assertEquals(Effects.Family.fromId(d.familyId), Effects.Family.forPack(name))
+      assertEquals(EffectMeta.InterfaceDecl.fromFamily(EffectMeta.families(Effects.Family.forPack(name).get)), d)
+
+  test("InterfaceDecl.fromItems round-trips filesystem gating (incl. ungated resolve)"):
+    val items = List(
+      Cst.node("family", Cst.Leaf("Filesystem")),
+      Cst.node("kind", Cst.Leaf("filesystem")),
+      Cst.node("path", Cst.Leaf("Path")),
+      Cst.node("action", Cst.Leaf("read")),
+      Cst.node("action", Cst.Leaf("write")),
+      Cst.node("action", Cst.Leaf("mkdirs")),
+      Cst.node("gate", Cst.Leaf("read"), Cst.Leaf("read")),
+      Cst.node("gate", Cst.Leaf("write"), Cst.Leaf("write")),
+      Cst.node("gate", Cst.Leaf("mkdirs"), Cst.Leaf("mkdirs")),
+      Cst.node("ungated", Cst.Leaf("resolve")))
+    // Minimal items — full map is on disk; this checks ungated decoding.
+    val decl = EffectMeta.InterfaceDecl.fromItems(items).fold(e => fail(e), identity)
+    assertEquals(decl.requestActions.get("resolve"), Some(None))
+    assertEquals(decl.familyId, "Filesystem")

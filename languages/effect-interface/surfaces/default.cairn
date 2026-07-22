@@ -1,0 +1,19 @@
+surface default for effect-interface {
+  fragment effect-interface {
+    keyword family;
+    keyword kind;
+    keyword path;
+    keyword action;
+    keyword gate;
+    keyword ungated;
+    punct "(";
+    punct ")";
+    syntax Item += family : tok "family" anyident;
+    syntax Item += kind : tok "kind" anyident;
+    syntax Item += path : tok "path" str;
+    syntax Item += action : tok "action" anyident;
+    syntax Item += gate : tok "gate" anyident anyident;
+    syntax Item += ungated : tok "ungated" anyident;
+    top Item;
+  }
+}

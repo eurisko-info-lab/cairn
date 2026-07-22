@@ -1,0 +1,7 @@
+f = family Clock ;
+k = kind clock ;
+p = path "*" ;
+a1 = action now ;
+a2 = action timestampSlug ;
+g1 = gate now now ;
+g2 = gate timestampSlug timestampSlug ;

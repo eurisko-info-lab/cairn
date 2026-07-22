@@ -78,10 +78,15 @@ What stays host-backed:
 
 - the initial Scala seed (`Meta.fragment`, STLC fragment constructors) for
   bootstrap fixpoint / digest-equality tests
+- effect cold-start: `EffectMeta` Fragment ASTs + `packDecls`, and
+  `Effects.Family` / `Effects.Action` enums for interpreter routing
+  (disk SoT is `effect-interface` + `effect-*/iface.cairn` + vocab packs;
+  `EffectBootstrap` checks decl/shape fixpoint)
 
 STLC/meta `.cairn` files are runtime **source of truth** (loaded by
 `PackLoader`, same as exemplars); `emit-languages` format-preserves them
 against git HEAD.
 
 Exemplar packs (PKI / Law / SDS / Search) are `.cairn` source of truth, loaded
-at runtime by `PackLoader`.
+at runtime by `PackLoader`. Effect interfaces follow the same pattern via
+`EffectBootstrap` (vocabulary + declaration modules).

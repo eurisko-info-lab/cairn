@@ -1,0 +1,11 @@
+language effect-interface {
+  fragment effect-interface provides effectInterface {
+    sort Item tree;
+    ctor family : Item(Name);
+    ctor kind : Item(Name);
+    ctor path : Item(Str);
+    ctor action : Item(Name);
+    ctor gate : Item(Name, Name);
+    ctor ungated : Item(Name);
+  }
+}

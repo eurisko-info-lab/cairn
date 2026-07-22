@@ -1,0 +1,5 @@
+f = family Random ;
+k = kind random ;
+p = path "*" ;
+a1 = action bytes ;
+g1 = gate bytes bytes ;

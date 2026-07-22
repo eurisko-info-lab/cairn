@@ -85,9 +85,9 @@ Capability revocation digests sync via the same want/have shape
 
 - **Live effect families (Meta-defined):** Filesystem, Workspace, Process,
   Clock, Random, Terminal, Lsp, ExternalBackend, Cas, LedgerTransport. Each
-  has an `EffectMeta.EffectFamily` (Fragment + `requestActions` + digest-bound
-  `ActionKey` / `ResourceSchema`). Completeness is checked by
-  `EffectMetaSuite`.
+  has an `EffectMeta.EffectFamily` (Fragment + `InterfaceDecl` /
+  `requestActions` + digest-bound `ActionKey` / `ResourceSchema`). Disk SoT
+  via `EffectBootstrap`; completeness checked by `EffectMetaSuite`.
 - **Gating:** every live family’s `perform` is the sole public effect entry
   point; convenience methods are private (or documented ungated exceptions
   such as pure `Filesystem.Resolve` and LSP test-fixture framing). Cas trait
@@ -213,9 +213,13 @@ LeanCore `#check` envelope.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
-  `ActionKey.fromPinned`). All ten families have `languages/effect-*.cairn`
-  vocabulary + `*FromFragment`; residual host seed is `Effects.Family` enum
-  + action-map / `requestActions` args (opaque interpreter routing).
+  `ActionKey.fromPinned`). Bootstrap path: primordial Meta → load
+  `languages/effect-interface.cairn` → load each `effect-*` vocabulary +
+  `iface.cairn` declaration module (`EffectBootstrap`) → derive actions /
+  resources / pins. Residual host bridges: `Effects.Family` /
+  `Effects.Action` enums (opaque interpreter routing) and cold-start
+  Fragment + `packDecls` seeds (fixpoint-checked against disk shapes /
+  decls).
 - **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
   (issuer-scoped absorb). Revocation via `ReplayReplication` / `checkGrant`.
   Not multi-node consensus / BFT.

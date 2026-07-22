@@ -1,0 +1,5 @@
+f = family Process ;
+k = kind process ;
+p = path "Command" ;
+a1 = action run ;
+g1 = gate run run ;

@@ -7,12 +7,18 @@ package cairn.kernel
   *
   * Rights are many-to-one: several `Request`-sorted constructors can share
   * one action key (e.g. Filesystem's dozen request shapes → read/write/mkdirs).
-  * `requestActions` maps constructor name → declared action name (or `None`
-  * for ungated requests such as `Filesystem.resolve`).
+  * [[InterfaceDecl.requestActions]] maps constructor name → declared action
+  * name (or `None` for ungated requests such as `Filesystem.resolve`).
   *
-  * [[Effects.Action]] remains a closed host bridge; [[completeness]] checks
-  * derived keys against it. Policies and EffectRequest construction use
-  * [[ActionKey]] / [[ResourceSchema.at]].
+  * Declaration SoT lives on disk as languages/effect-<family>/iface.cairn modules
+  * of the `effect-interface` language; vocabulary SoT is
+  * languages/effect-<family>.cairn. Host [[packDecls]] + embedded Fragments are
+  * cold-start seeds verified by runtime EffectBootstrap.
+  *
+  * [[Effects.Action]] / [[Effects.Family]] remain closed host bridges for
+  * interpreter routing; [[completeness]] checks derived keys against Action.
+  * Policies and EffectRequest construction use [[ActionKey]] /
+  * [[ResourceSchema.at]].
   */
 object EffectMeta:
 
@@ -28,6 +34,60 @@ object EffectMeta:
       interfaceDigest: Option[Digest] = None):
     def at(path: String): Authority.Resource = Authority.Resource(kind, path)
     def any: Authority.Resource = Authority.Resource(kind, "*")
+
+  /** Action / resource / gating declaration — the half of an effect interface
+    * that is not the Request/Response/Error vocabulary Fragment.
+    * Disk SoT: `effect-interface` module items (`family`/`kind`/`path`/
+    * `action`/`gate`/`ungated`).
+    */
+  final case class InterfaceDecl(
+      familyId: String,
+      actions: List[String],
+      resourceKind: String,
+      resourcePathPattern: String,
+      requestActions: Map[String, Option[String]]):
+    def family: Either[String, Effects.Family] =
+      Effects.Family.fromId(familyId).toRight(s"unknown effect family '$familyId'")
+
+  object InterfaceDecl:
+    /** Rebuild a declaration from `effect-interface` Item terms (module bodies). */
+    def fromItems(items: List[Cst]): Either[String, InterfaceDecl] =
+      var familyId: Option[String] = None
+      var kind: Option[String] = None
+      var path: Option[String] = None
+      val acts = List.newBuilder[String]
+      val gates = Map.newBuilder[String, Option[String]]
+      items.foreach {
+        case Cst.Node("family", List(Cst.Leaf(n))) =>
+          if familyId.isDefined then return Left("duplicate family item")
+          familyId = Some(n)
+        case Cst.Node("kind", List(Cst.Leaf(n))) =>
+          if kind.isDefined then return Left("duplicate kind item")
+          kind = Some(n)
+        case Cst.Node("path", List(Cst.Leaf(s))) =>
+          if path.isDefined then return Left("duplicate path item")
+          path = Some(s)
+        case Cst.Node("action", List(Cst.Leaf(n))) =>
+          acts += n
+        case Cst.Node("gate", List(Cst.Leaf(ctor), Cst.Leaf(act))) =>
+          gates += ctor -> Some(act)
+        case Cst.Node("ungated", List(Cst.Leaf(ctor))) =>
+          gates += ctor -> None
+        case other =>
+          return Left(s"not an effect-interface item: ${other.render}")
+      }
+      for
+        f <- familyId.toRight("missing family item")
+        k <- kind.toRight("missing kind item")
+        p <- path.toRight("missing path item")
+      yield InterfaceDecl(f, acts.result(), k, p, gates.result())
+
+    def fromModule(defs: List[(String, Cst)]): Either[String, InterfaceDecl] =
+      fromItems(defs.map(_._2))
+
+    def fromFamily(ef: EffectFamily): InterfaceDecl =
+      InterfaceDecl(
+        ef.family.toString, ef.actions, ef.resourceKind, ef.resourcePathPattern, ef.requestActions)
 
   /** Fragment + declared actions + resource schema + request→action grouping.
     * Action keys and resources are derived from these declarations and bound
@@ -56,6 +116,65 @@ object EffectMeta:
     def keyFor(ctor: String): Option[Effects.ActionKey] =
       requestActions.get(ctor).flatten.map(actionKey)
 
+    def decl: InterfaceDecl = InterfaceDecl.fromFamily(this)
+
+  /** Pack name → cold-start declaration seed (mirrors languages/effect-<family>/iface.cairn). */
+  val packDecls: Map[String, InterfaceDecl] = Map(
+    "effect-clock" -> InterfaceDecl(
+      "Clock", List("now", "timestampSlug"), "clock", "*",
+      Map("now" -> Some("now"), "timestampSlug" -> Some("timestampSlug"))),
+    "effect-random" -> InterfaceDecl(
+      "Random", List("bytes"), "random", "*",
+      Map("bytes" -> Some("bytes"))),
+    "effect-process" -> InterfaceDecl(
+      "Process", List("run"), "process", "Command",
+      Map("run" -> Some("run"))),
+    "effect-externalBackend" -> InterfaceDecl(
+      "ExternalBackend", List("find", "run"), "externalBackend", "Host",
+      Map("find" -> Some("find"), "run" -> Some("run"))),
+    "effect-terminal" -> InterfaceDecl(
+      "Terminal", List("read", "write"), "terminal", "*",
+      Map("readLine" -> Some("read"), "write" -> Some("write"), "writeLine" -> Some("write"))),
+    "effect-workspace" -> InterfaceDecl(
+      "Workspace", List("read"), "workspace", "Path",
+      Map(
+        "languageDirs" -> Some("read"), "listCairnFiles" -> Some("read"),
+        "listSubdirs" -> Some("read"), "listSurfaceCairnFiles" -> Some("read"),
+        "readText" -> Some("read"))),
+    "effect-filesystem" -> InterfaceDecl(
+      "Filesystem", List("read", "write", "mkdirs"), "filesystem", "Path",
+      Map(
+        "read" -> Some("read"), "readBytes" -> Some("read"), "exists" -> Some("read"),
+        "isDirectory" -> Some("read"), "isRegularFile" -> Some("read"),
+        "isExecutable" -> Some("read"), "list" -> Some("read"),
+        "write" -> Some("write"), "writeBytes" -> Some("write"), "delete" -> Some("write"),
+        "mkdirs" -> Some("mkdirs"), "createTempDirectory" -> Some("mkdirs"),
+        "resolve" -> None)),
+    "effect-lsp" -> InterfaceDecl(
+      "Lsp", List("read", "write"), "lsp", "*",
+      Map("readMessage" -> Some("read"), "writeMessage" -> Some("write"))),
+    "effect-cas" -> InterfaceDecl(
+      "Cas", List("put", "get", "fsck", "gc", "stats"), "cas", "*",
+      Map(
+        "put" -> Some("put"), "get" -> Some("get"), "contains" -> Some("get"),
+        "fsck" -> Some("fsck"), "gc" -> Some("gc"), "stats" -> Some("stats"))),
+    "effect-ledgerTransport" -> InterfaceDecl(
+      "LedgerTransport", List("append"), "ledger", "Path",
+      Map("append" -> Some("append"))))
+
+  /** Pack names under `languages/` for fragment-loaded effect interfaces. */
+  val fragmentPackNames: List[String] = List(
+    "effect-clock", "effect-random", "effect-process", "effect-externalBackend",
+    "effect-terminal", "effect-workspace", "effect-filesystem", "effect-lsp",
+    "effect-cas", "effect-ledgerTransport")
+
+  /** Thin Family bridge: pack name → host Family enum (interpreter routing). */
+  val packFamily: Map[String, Effects.Family] =
+    packDecls.flatMap { (pack, d) => d.family.toOption.map(pack -> _) }
+
+  private def seedFamily(pack: String, fragment: Fragment): EffectFamily =
+    fromFragmentPack(pack, fragment).fold(e => throw IllegalStateException(e), identity)
+
   private val randomFragment: Fragment = Fragment(
     name = "effect.random",
     provides = List("effect.random"),
@@ -69,13 +188,7 @@ object EffectMeta:
       CtorDef("bytesValue", "Response", List("Bytes")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val random: EffectFamily = EffectFamily(
-    randomFragment,
-    Effects.Family.Random,
-    actions = List("bytes"),
-    resourceKind = "random",
-    resourcePathPattern = "*",
-    requestActions = Map("bytes" -> Some("bytes")))
+  val random: EffectFamily = seedFamily("effect-random", randomFragment)
 
   private val clockFragment: Fragment = Fragment(
     name = "effect.clock",
@@ -92,15 +205,7 @@ object EffectMeta:
       CtorDef("slug", "Response", List("Str")),
       CtorDef("unavailable", "Error", List("Str"))))
 
-  val clock: EffectFamily = EffectFamily(
-    clockFragment,
-    Effects.Family.Clock,
-    actions = List("now", "timestampSlug"),
-    resourceKind = "clock",
-    resourcePathPattern = "*",
-    requestActions = Map(
-      "now" -> Some("now"),
-      "timestampSlug" -> Some("timestampSlug")))
+  val clock: EffectFamily = seedFamily("effect-clock", clockFragment)
 
   private val processFragment: Fragment = Fragment(
     name = "effect.process",
@@ -116,13 +221,7 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val process: EffectFamily = EffectFamily(
-    processFragment,
-    Effects.Family.Process,
-    actions = List("run"),
-    resourceKind = "process",
-    resourcePathPattern = "Command",
-    requestActions = Map("run" -> Some("run")))
+  val process: EffectFamily = seedFamily("effect-process", processFragment)
 
   private val externalBackendFragment: Fragment = Fragment(
     name = "effect.externalBackend",
@@ -140,15 +239,7 @@ object EffectMeta:
       CtorDef("processResult", "Response", List("Int", "Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val externalBackend: EffectFamily = EffectFamily(
-    externalBackendFragment,
-    Effects.Family.ExternalBackend,
-    actions = List("find", "run"),
-    resourceKind = "externalBackend",
-    resourcePathPattern = "Host",
-    requestActions = Map(
-      "find" -> Some("find"),
-      "run" -> Some("run")))
+  val externalBackend: EffectFamily = seedFamily("effect-externalBackend", externalBackendFragment)
 
   private val terminalFragment: Fragment = Fragment(
     name = "effect.terminal",
@@ -168,16 +259,7 @@ object EffectMeta:
       CtorDef("closed", "Error", Nil),
       CtorDef("io", "Error", List("Str"))))
 
-  val terminal: EffectFamily = EffectFamily(
-    terminalFragment,
-    Effects.Family.Terminal,
-    actions = List("read", "write"),
-    resourceKind = "terminal",
-    resourcePathPattern = "*",
-    requestActions = Map(
-      "readLine" -> Some("read"),
-      "write" -> Some("write"),
-      "writeLine" -> Some("write")))
+  val terminal: EffectFamily = seedFamily("effect-terminal", terminalFragment)
 
   private val workspaceFragment: Fragment = Fragment(
     name = "effect.workspace",
@@ -197,18 +279,7 @@ object EffectMeta:
       CtorDef("text", "Response", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val workspace: EffectFamily = EffectFamily(
-    workspaceFragment,
-    Effects.Family.Workspace,
-    actions = List("read"),
-    resourceKind = "workspace",
-    resourcePathPattern = "Path",
-    requestActions = Map(
-      "languageDirs" -> Some("read"),
-      "listCairnFiles" -> Some("read"),
-      "listSubdirs" -> Some("read"),
-      "listSurfaceCairnFiles" -> Some("read"),
-      "readText" -> Some("read")))
+  val workspace: EffectFamily = seedFamily("effect-workspace", workspaceFragment)
 
   private val filesystemFragment: Fragment = Fragment(
     name = "effect.filesystem",
@@ -241,26 +312,7 @@ object EffectMeta:
       CtorDef("notFound", "Error", List("Path")),
       CtorDef("io", "Error", List("Str"))))
 
-  val filesystem: EffectFamily = EffectFamily(
-    filesystemFragment,
-    Effects.Family.Filesystem,
-    actions = List("read", "write", "mkdirs"),
-    resourceKind = "filesystem",
-    resourcePathPattern = "Path",
-    requestActions = Map(
-      "read" -> Some("read"),
-      "readBytes" -> Some("read"),
-      "exists" -> Some("read"),
-      "isDirectory" -> Some("read"),
-      "isRegularFile" -> Some("read"),
-      "isExecutable" -> Some("read"),
-      "list" -> Some("read"),
-      "write" -> Some("write"),
-      "writeBytes" -> Some("write"),
-      "delete" -> Some("write"),
-      "mkdirs" -> Some("mkdirs"),
-      "createTempDirectory" -> Some("mkdirs"),
-      "resolve" -> None))
+  val filesystem: EffectFamily = seedFamily("effect-filesystem", filesystemFragment)
 
   private val lspFragment: Fragment = Fragment(
     name = "effect.lsp",
@@ -279,15 +331,7 @@ object EffectMeta:
       CtorDef("framing", "Error", List("Str")),
       CtorDef("closed", "Error", Nil)))
 
-  val lsp: EffectFamily = EffectFamily(
-    lspFragment,
-    Effects.Family.Lsp,
-    actions = List("read", "write"),
-    resourceKind = "lsp",
-    resourcePathPattern = "*",
-    requestActions = Map(
-      "readMessage" -> Some("read"),
-      "writeMessage" -> Some("write")))
+  val lsp: EffectFamily = seedFamily("effect-lsp", lspFragment)
 
   /** CAS put/get/contains + admin (fsck/gc/stats) — Meta-defined interface. */
   private val casFragment: Fragment = Fragment(
@@ -314,19 +358,7 @@ object EffectMeta:
       CtorDef("missing", "Error", List("Digest")),
       CtorDef("io", "Error", List("Str"))))
 
-  val cas: EffectFamily = EffectFamily(
-    casFragment,
-    Effects.Family.Cas,
-    actions = List("put", "get", "fsck", "gc", "stats"),
-    resourceKind = "cas",
-    resourcePathPattern = "*",
-    requestActions = Map(
-      "put" -> Some("put"),
-      "get" -> Some("get"),
-      "contains" -> Some("get"),
-      "fsck" -> Some("fsck"),
-      "gc" -> Some("gc"),
-      "stats" -> Some("stats")))
+  val cas: EffectFamily = seedFamily("effect-cas", casFragment)
 
   /** Ledger transport append — Meta-defined over Node.append. */
   private val ledgerTransportFragment: Fragment = Fragment(
@@ -343,13 +375,7 @@ object EffectMeta:
       CtorDef("denied", "Error", List("Str")),
       CtorDef("io", "Error", List("Str"))))
 
-  val ledgerTransport: EffectFamily = EffectFamily(
-    ledgerTransportFragment,
-    Effects.Family.LedgerTransport,
-    actions = List("append"),
-    resourceKind = "ledger",
-    resourcePathPattern = "Path",
-    requestActions = Map("append" -> Some("append")))
+  val ledgerTransport: EffectFamily = seedFamily("effect-ledgerTransport", ledgerTransportFragment)
 
   val families: Map[Effects.Family, EffectFamily] = Map(
     Effects.Family.Random -> random,
@@ -462,11 +488,8 @@ object EffectMeta:
   def pinHost(family: EffectFamily): PinnedInterface =
     PinnedInterface.fromHost(family)
 
-  /** Thin bootstrap reduction: rebuild an [[EffectFamily]] from a Fragment
-    * loaded out-of-band (e.g. `languages/effect-clock.cairn`) instead of the
-    * host-embedded AST. Action names / `requestActions` / Family enum remain
-    * host-seeded — residual honest gap vs fully language-described effect
-    * interfaces.
+  /** Rebuild an [[EffectFamily]] from a vocabulary Fragment + [[InterfaceDecl]].
+    * Declarations come from disk (`iface.cairn`) or cold-start [[packDecls]].
     */
   def familyFromFragment(
       fragment: Fragment,
@@ -481,110 +504,46 @@ object EffectMeta:
     val errs = completeness(ef)
     if errs.nonEmpty then Left(errs.mkString("; ")) else Right(ef)
 
-  def clockFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment,
-      Effects.Family.Clock,
-      actions = List("now", "timestampSlug"),
-      resourceKind = "clock",
-      resourcePathPattern = "*",
-      requestActions = Map(
-        "now" -> Some("now"),
-        "timestampSlug" -> Some("timestampSlug")))
+  def familyFrom(fragment: Fragment, decl: InterfaceDecl): Either[String, EffectFamily] =
+    decl.family.flatMap(f =>
+      familyFromFragment(
+        fragment, f, decl.actions, decl.resourceKind, decl.resourcePathPattern, decl.requestActions))
 
-  def randomFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment,
-      Effects.Family.Random,
-      actions = List("bytes"),
-      resourceKind = "random",
-      resourcePathPattern = "*",
-      requestActions = Map("bytes" -> Some("bytes")))
-
-  def processFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Process,
-      actions = List("run"), resourceKind = "process", resourcePathPattern = "Command",
-      requestActions = Map("run" -> Some("run")))
-
-  def externalBackendFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.ExternalBackend,
-      actions = List("find", "run"), resourceKind = "externalBackend", resourcePathPattern = "Host",
-      requestActions = Map("find" -> Some("find"), "run" -> Some("run")))
-
-  def terminalFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Terminal,
-      actions = List("read", "write"), resourceKind = "terminal", resourcePathPattern = "*",
-      requestActions = Map(
-        "readLine" -> Some("read"), "write" -> Some("write"), "writeLine" -> Some("write")))
-
-  def workspaceFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Workspace,
-      actions = List("read"), resourceKind = "workspace", resourcePathPattern = "Path",
-      requestActions = Map(
-        "languageDirs" -> Some("read"), "listCairnFiles" -> Some("read"),
-        "listSubdirs" -> Some("read"), "listSurfaceCairnFiles" -> Some("read"),
-        "readText" -> Some("read")))
-
-  def filesystemFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Filesystem,
-      actions = List("read", "write", "mkdirs"), resourceKind = "filesystem",
-      resourcePathPattern = "Path",
-      requestActions = Map(
-        "read" -> Some("read"), "readBytes" -> Some("read"), "exists" -> Some("read"),
-        "isDirectory" -> Some("read"), "isRegularFile" -> Some("read"),
-        "isExecutable" -> Some("read"), "list" -> Some("read"),
-        "write" -> Some("write"), "writeBytes" -> Some("write"), "delete" -> Some("write"),
-        "mkdirs" -> Some("mkdirs"), "createTempDirectory" -> Some("mkdirs"),
-        "resolve" -> None))
-
-  def lspFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Lsp,
-      actions = List("read", "write"), resourceKind = "lsp", resourcePathPattern = "*",
-      requestActions = Map("readMessage" -> Some("read"), "writeMessage" -> Some("write")))
-
-  def casFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.Cas,
-      actions = List("put", "get", "fsck", "gc", "stats"), resourceKind = "cas",
-      resourcePathPattern = "*",
-      requestActions = Map(
-        "put" -> Some("put"), "get" -> Some("get"), "contains" -> Some("get"),
-        "fsck" -> Some("fsck"), "gc" -> Some("gc"), "stats" -> Some("stats")))
-
-  def ledgerTransportFromFragment(fragment: Fragment): Either[String, EffectFamily] =
-    familyFromFragment(
-      fragment, Effects.Family.LedgerTransport,
-      actions = List("append"), resourceKind = "ledger", resourcePathPattern = "Path",
-      requestActions = Map("append" -> Some("append")))
-
-  /** Pack names under `languages/` for fragment-loaded effect interfaces.
-    * [[Effects.Family]] enum + action-map args to [[familyFromFragment]] remain
-    * host-seeded (opaque interpreter routing / digest-bound keys).
-    */
-  val fragmentPackNames: List[String] = List(
-    "effect-clock", "effect-random", "effect-process", "effect-externalBackend",
-    "effect-terminal", "effect-workspace", "effect-filesystem", "effect-lsp",
-    "effect-cas", "effect-ledgerTransport")
+  def fromFragmentPack(name: String, fragment: Fragment, decl: InterfaceDecl): Either[String, EffectFamily] =
+    familyFrom(fragment, decl).flatMap { ef =>
+      packFamily.get(name) match
+        case Some(expected) if ef.family != expected =>
+          Left(s"pack '$name' declares family ${ef.family}, expected $expected")
+        case None if !packDecls.contains(name) =>
+          Left(s"unknown effect pack '$name'")
+        case _ => Right(ef)
+    }
 
   def fromFragmentPack(name: String, fragment: Fragment): Either[String, EffectFamily] =
-    name match
-      case "effect-clock" => clockFromFragment(fragment)
-      case "effect-random" => randomFromFragment(fragment)
-      case "effect-process" => processFromFragment(fragment)
-      case "effect-externalBackend" => externalBackendFromFragment(fragment)
-      case "effect-terminal" => terminalFromFragment(fragment)
-      case "effect-workspace" => workspaceFromFragment(fragment)
-      case "effect-filesystem" => filesystemFromFragment(fragment)
-      case "effect-lsp" => lspFromFragment(fragment)
-      case "effect-cas" => casFromFragment(fragment)
-      case "effect-ledgerTransport" => ledgerTransportFromFragment(fragment)
-      case other => Left(s"unknown effect pack '$other'")
+    packDecls.get(name) match
+      case None => Left(s"unknown effect pack '$name'")
+      case Some(d) => fromFragmentPack(name, fragment, d)
+
+  def clockFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-clock", fragment)
+  def randomFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-random", fragment)
+  def processFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-process", fragment)
+  def externalBackendFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-externalBackend", fragment)
+  def terminalFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-terminal", fragment)
+  def workspaceFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-workspace", fragment)
+  def filesystemFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-filesystem", fragment)
+  def lspFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-lsp", fragment)
+  def casFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-cas", fragment)
+  def ledgerTransportFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    fromFragmentPack("effect-ledgerTransport", fragment)
 
   private def encodeFamily(ef: EffectFamily): Canon =
     val reqActs = ef.requestActions.toList.sortBy(_._1).map { (ctor, act) =>
@@ -603,7 +562,7 @@ object EffectMeta:
   private def decodeFamily(body: Canon): Either[String, EffectFamily] =
     try
       val famName = body.field("family").asStr
-      Effects.Family.values.find(_.toString == famName) match
+      Effects.Family.fromId(famName) match
         case None => Left(s"unknown effect family '$famName'")
         case Some(f) =>
           val reqActs = body.field("requestActions").asList.map { c =>

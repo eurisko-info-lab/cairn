@@ -1,0 +1,9 @@
+f = family Workspace ;
+k = kind workspace ;
+p = path "Path" ;
+a1 = action read ;
+g1 = gate languageDirs read ;
+g2 = gate listCairnFiles read ;
+g3 = gate listSubdirs read ;
+g4 = gate listSurfaceCairnFiles read ;
+g5 = gate readText read ;

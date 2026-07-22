@@ -53,10 +53,13 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    — digest **merge**, not consensus. Capability revocation uses the same
    want/have shape (`ReplayReplication` / `RevocationLog`); BFT deferred.
    Effect interfaces pin as CAS `effect-interface` artifacts
-   (`PinnedInterface` / `ActionKey.fromPinned`); all ten families load
-   vocabulary from `languages/effect-*.cairn` via `*FromFragment`. Residual:
-   `Effects.Family` enum + action-map / `requestActions` args remain
-   host-seeded (opaque interpreter routing). `EffectContext.capabilities`
+   (`PinnedInterface` / `ActionKey.fromPinned`). Runtime SoT:
+   `languages/effect-interface.cairn` plus per-family vocabulary
+   (`languages/effect-*.cairn`) and declaration modules
+   (`languages/effect-*/iface.cairn`), loaded by `EffectBootstrap`.
+   Residual host bridges: `Effects.Family` / `Effects.Action` enums
+   (interpreter routing) and cold-start Fragment / `packDecls` seeds
+   (verified against disk). `EffectContext.capabilities`
    threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
    atomic transaction. SDS *uses* report projection pack `sds-report`

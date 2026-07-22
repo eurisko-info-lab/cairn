@@ -88,8 +88,9 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
 - Studio-persisted phrase corpus / authoring UI.
 - PDF report surface (heavy; deferred).
-- Effect-interface `Family` enum + action-map args remain host-seeded
-  (all ten families load vocabulary from `languages/effect-*.cairn`).
+- Effect-interface: `effect-interface` language + `iface.cairn` decls are
+  runtime SoT (`EffectBootstrap`); `Family`/`Action` enums + Fragment/
+  `packDecls` cold-start seeds remain host bridges (verified against disk).
 - BFT replication (replay sync is digest-merge only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
   lang-scoped shadows still absent (shadows are lang-blind).

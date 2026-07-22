@@ -1,0 +1,7 @@
+f = family Lsp ;
+k = kind lsp ;
+p = path "*" ;
+a1 = action read ;
+a2 = action write ;
+g1 = gate readMessage read ;
+g2 = gate writeMessage write ;

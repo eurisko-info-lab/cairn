@@ -1,0 +1,8 @@
+f = family Terminal ;
+k = kind terminal ;
+p = path "*" ;
+a1 = action read ;
+a2 = action write ;
+g1 = gate readLine read ;
+g2 = gate write write ;
+g3 = gate writeLine write ;

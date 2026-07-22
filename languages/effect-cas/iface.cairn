@@ -1,0 +1,14 @@
+f = family Cas ;
+k = kind cas ;
+p = path "*" ;
+a1 = action put ;
+a2 = action get ;
+a3 = action fsck ;
+a4 = action gc ;
+a5 = action stats ;
+g1 = gate put put ;
+g2 = gate get get ;
+g3 = gate contains get ;
+g4 = gate fsck fsck ;
+g5 = gate gc gc ;
+g6 = gate stats stats ;

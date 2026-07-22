@@ -8,9 +8,21 @@ package cairn.kernel
   * Fragment digest so keys are not freely constructible strings.
   */
 object Effects:
+  /** Host routing tag for effect interpreters. Registered from loaded
+    * `effect-*` packs via [[EffectMeta.packFamily]]; not the declaration SoT
+    * (that is [[EffectMeta.InterfaceDecl]] / `iface.cairn`).
+    */
   enum Family:
     case Filesystem, Cas, Workspace, Process, Clock, Random,
          LedgerTransport, Terminal, Lsp, ExternalBackend
+
+  object Family:
+    def fromId(id: String): Option[Family] =
+      values.find(_.toString == id)
+
+    /** Thin bridge: pack name under `languages/` → host Family. */
+    def forPack(pack: String): Option[Family] =
+      EffectMeta.packFamily.get(pack)
 
   /** Typed action key — family id + capability-class name, optionally bound
     * to the effect-interface Fragment digest.
