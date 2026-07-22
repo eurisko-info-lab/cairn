@@ -190,3 +190,55 @@ class UnisonCoreSuite extends munit.FunSuite:
     assertEquals(
       UnisonCore.normalize(UnisonCore.unfoldCalls(cb2.store.get)(caller)).fold(e => fail(e), identity),
       UnisonCore.unit)
+
+  test("reverse dependency index: dependents(target) finds callers without a scan of your own"):
+    val idTy = UnisonCore.arrow(UnisonCore.tyUnit, UnisonCore.tyUnit)
+    val idUnit = UnisonCore.lam("x", UnisonCore.tyUnit, UnisonCore.v("x"))
+    val cb0 = Unison.Codebase.empty.defineTyped("identity", idUnit, idTy)
+    val idDigest = cb0.digestOf("identity").get
+    val caller = UnisonCore.app(UnisonCore.call(idDigest), UnisonCore.unit)
+    val cb1 = cb0.defineTyped("useIdentity", caller, UnisonCore.tyUnit)
+    // Unrelated definition: not a caller, must not show up as a dependent.
+    val cb2 = cb1.defineTyped("standalone", UnisonCore.unit, UnisonCore.tyUnit)
+    assertEquals(cb2.dependents(idDigest), Set("useIdentity"))
+    assertEquals(cb2.dependentsOf("identity"), Set("useIdentity"))
+    assertEquals(cb2.dependents(cb2.digestOf("standalone").get), Set.empty)
+    // Renaming the callee alias must not change who its dependents are.
+    val (cb3, _) = Unison.applyPatch(cb2, "{ rename identity to id footprint []; }").fold(e => fail(e), identity)
+    assertEquals(cb3.dependents(idDigest), Set("useIdentity"))
+
+  test("edit-propagation cascade: a callee's changed signature is detected through the whole transitive graph"):
+    val idTy = UnisonCore.arrow(UnisonCore.tyUnit, UnisonCore.tyUnit)
+    val idUnit = UnisonCore.lam("x", UnisonCore.tyUnit, UnisonCore.v("x"))
+    val cb0 = Unison.Codebase.empty.defineTyped("identity", idUnit, idTy)
+    val idDigest = cb0.digestOf("identity").get
+    // A direct value-level re-export (the pattern proven to work with
+    // $call-type above — application-headed calls hit a Search.infer
+    // limitation unrelated to this cascade, see the hash-linked-call test).
+    val cb1 = cb0.defineTyped("useIdentity", UnisonCore.call(idDigest), idTy)
+    val useIdentityDigest = cb1.digestOf("useIdentity").get
+    // Two hops away from `identity`: wrapper calls useIdentity, not identity directly.
+    val cb2 = cb1.defineTyped("wrapper", UnisonCore.call(useIdentityDigest), idTy)
+    val cb3 = cb2.defineTyped("standalone", UnisonCore.unit, UnisonCore.tyUnit)
+
+    assertEquals(cb3.transitiveDependents(idDigest), Set("useIdentity", "wrapper"))
+
+    // Before any edit, the whole chain still checks out.
+    val healthy = cb3.recheckAfterEdit(idDigest)
+    assertEquals(healthy.keySet, Set("useIdentity", "wrapper"))
+    assert(healthy.values.forall(_.isRight), healthy.toString)
+
+    // Corrupt identity's recorded type in place (same digest — a signature
+    // edit, not a redefinition) and recheck the whole transitive graph in one
+    // call, not just the direct caller: `useIdentity`'s own $call-type check
+    // against `identity` now genuinely fails. `wrapper`'s *direct* contract is
+    // with `useIdentity`'s recorded type, which the edit never touched, so it
+    // still shallow-checks — an honest boundary of per-digest detection, not
+    // full recursive re-verification — but `transitiveDependents` still put
+    // `wrapper` in front of you instead of leaving that scan to do yourself,
+    // and the unrelated `standalone` def never appears either way.
+    val corrupted = cb3.copy(store = cb3.store.copy(types = cb3.store.types + (idDigest -> UnisonCore.tyList(UnisonCore.tyUnit))))
+    val broken = corrupted.recheckAfterEdit(idDigest)
+    assertEquals(broken.keySet, Set("useIdentity", "wrapper"))
+    assert(broken("useIdentity").isLeft, broken.toString)
+    assert(broken("wrapper").isRight, broken.toString)

@@ -51,21 +51,35 @@ object HttpSync:
     case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
     case cairn.systeminterface.Cas.Error.Io(m)      => m
 
-  /** Fetch `d` when absent. Authorized `contains` / `putBytes` failures abort
-    * — never treat denial as "missing" via `Either.forall`.
+  /** Fetch and materialize ONE artifact by digest alone — first-class
+    * share-by-hash. Unlike [[pull]] (which always walks a whole ledger
+    * chain), this needs no chain, branch, or publish state at all: any
+    * digest the remote's `/blob/` endpoint can serve is fetchable directly,
+    * the same way a Unison user shares a single definition by hash. A no-op
+    * if already local; never trusts the remote — verifies the served bytes
+    * actually hash to `d` before accepting them.
+    */
+  def fetchByHash(baseUrl: String, to: Node, d: Digest): Either[String, Digest] =
+    CasEffects.contains(to.cas, d, to.ctx).left.map(casErr).flatMap {
+      case true => Right(d)
+      case false =>
+        get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
+          CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
+            if actual == d then Right(actual)
+            else Left(s"remote served wrong bytes for ${d.short}")
+          }
+        }
+    }
+
+  /** Fetch `d` when absent, as part of a [[pull]] walk. Authorized `contains`
+    * failures abort — never treat denial as "missing" via `Either.forall`.
     */
   private def fetchIfMissing(
       baseUrl: String, to: Node, d: Digest, fetched: Int
   ): Either[String, Int] =
     CasEffects.contains(to.cas, d, to.ctx).left.map(casErr).flatMap {
-      case true => Right(fetched)
-      case false =>
-        get(baseUrl, s"/blob/${d.hex}").flatMap { bs =>
-          CasEffects.putBytes(to.cas, bs, to.ctx).left.map(casErr).flatMap { actual =>
-            if actual == d then Right(fetched + 1)
-            else Left(s"remote served wrong bytes for ${d.short}")
-          }
-        }
+      case true  => Right(fetched)
+      case false => fetchByHash(baseUrl, to, d).map(_ => fetched + 1)
     }
 
   def pull(baseUrl: String, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, PullReport] =

@@ -157,6 +157,26 @@ class WaveGSuite extends munit.FunSuite:
       assertEquals(r2.fetchedBlobs, 0)
     finally http.stop()
 
+  test("M38: fetchByHash shares a single definition by digest — no chain, branch, or publish needed"):
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-a"), EffectContext.forLedger())
+    // Deliberately never appended to a's chain and never published: this
+    // artifact only exists in a's local CAS, unreachable via /chain or pull.
+    val term = Stlc.tru
+    val art = Artifact(ArtifactKind.Term, Cst.toCanon(term))
+    casPut(a, art)
+    val http = HttpNode(a, bootAuth)
+    val port = http.start()
+    try
+      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-b"), EffectContext.forLedger())
+      assertEquals(CasEffects.contains(b.cas, art.digest, b.ctx), Right(false))
+      val fetched = HttpSync.fetchByHash(s"http://localhost:$port", b, art.digest).fold(e => fail(e), identity)
+      assertEquals(fetched, art.digest)
+      assertEquals(CasEffects.contains(b.cas, art.digest, b.ctx), Right(true))
+      assertEquals(CasEffects.get(b.cas, art.digest, b.ctx).map(a => Cst.fromCanon(a.body)), Right(term))
+      // Idempotent: already-local digest is a no-op, not a re-fetch error.
+      assertEquals(HttpSync.fetchByHash(s"http://localhost:$port", b, art.digest), Right(art.digest))
+    finally http.stop()
+
   // ---- M39: gossip + fork choice ----
 
   test("M39: three nodes converge; fork surfaces as an explicit reorg event"):

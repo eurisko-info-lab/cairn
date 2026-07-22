@@ -94,6 +94,54 @@ final class Unison(core: UnisonCore):
     def dependencies(name: String): Set[Digest] =
       resolve(name).map(core.callTargets).getOrElse(Set.empty)
 
+    /** Reverse of [[dependencies]]: names whose call graph references `target`
+      * directly ("what calls this," not just "what does this call"). Derived
+      * by scanning [[names]] rather than a separately maintained index — there
+      * is nothing to invalidate, since renames never change any digest this
+      * depends on.
+      */
+    def dependents(target: Digest): Set[String] =
+      names.defs.map(_._1).filter(n => dependencies(n).contains(target)).toSet
+
+    /** [[dependents]] keyed by name instead of digest. */
+    def dependentsOf(name: String): Set[String] =
+      digestOf(name).map(dependents).getOrElse(Set.empty)
+
+    /** Everything that calls `target`, directly or transitively through
+      * another dependent. */
+    def transitiveDependents(target: Digest): Set[String] =
+      def go(frontier: Set[Digest], acc: Set[String]): Set[String] =
+        val found = frontier.flatMap(dependents) -- acc
+        if found.isEmpty then acc
+        else go(found.flatMap(digestOf), acc ++ found)
+      go(Set(target), Set.empty)
+
+    /** Edit-propagation cascade: after `changed`'s recorded type is edited in
+      * place (same digest, a corrected [[Store.typeOf]] entry — "callee
+      * signature changed"), recheck every transitive dependent's OWN top-level
+      * `hasType` goal against the codebase's CURRENT typeOf, via
+      * [[transitiveDependents]] instead of leaving that scan to the caller.
+      *
+      * Each name's verdict is a genuinely independent, shallow $call-type
+      * check against its *direct* dependency's recorded type — not a
+      * recursive re-verification of its whole transitive closure. So a name
+      * two hops from `changed` reports its own real, current answer: it only
+      * flips to `Left` once ITS direct dependency's recorded type itself
+      * changes (e.g. because a human already patched it in response to this
+      * cascade). That is the honest shape of hash-linked detection: bodies
+      * are never auto-rewritten, so fixing a break is a deliberate edit, and
+      * this cascade's job is finding everyone who might need one — not
+      * pretending the whole graph is invalid until they do.
+      */
+    def recheckAfterEdit(changed: Digest): Map[String, Either[String, Unit]] =
+      transitiveDependents(changed).flatMap { name =>
+        for
+          d <- digestOf(name)
+          term <- resolve(name)
+          ty <- store.typeOf(d)
+        yield name -> core.check(core.ctxNil, term, ty, store.typeOf).map(_ => ())
+      }.toMap
+
   object Codebase:
     def empty: Codebase = Codebase(Store.empty, Module(Nil))
 
