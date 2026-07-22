@@ -88,6 +88,20 @@ final class LspServer(cfg: LspConfig):
       "end" -> J.obj("line" -> J.num(lines), "character" -> J.num(0))),
       "newText" -> J.str(newText))
 
+  /** Identifier characters immediately BEFORE the cursor — unlike [[wordAt]]
+    * (which finds the word surrounding a position, for hover/rename), a
+    * completion request's cursor sits at the end of a still-being-typed
+    * prefix, with nothing meaningful after it yet.
+    */
+  private def prefixAt(text: String, line: Long, character: Long): String =
+    text.linesIterator.drop(line.toInt).nextOption.fold("") { l =>
+      def isW(c: Char) = c.isLetterOrDigit || c == '_'
+      val i = math.min(character.toInt, l.length)
+      var s = i
+      while s > 0 && isW(l(s - 1)) do s -= 1
+      l.substring(s, i)
+    }
+
   private def wordAt(text: String, line: Long, character: Long): Option[String] =
     text.linesIterator.drop(line.toInt).nextOption.flatMap { l =>
       val i = character.toInt
@@ -118,6 +132,7 @@ final class LspServer(cfg: LspConfig):
           "documentFormattingProvider" -> Cst.node("jtrue"),
           "renameProvider" -> Cst.node("jtrue"),
           "hoverProvider" -> Cst.node("jtrue"),
+          "completionProvider" -> J.obj(),
           "executeCommandProvider" -> J.obj("commands" -> J.arr(
             List("cairn.addDef", "cairn.replaceDef", "cairn.removeDef", "cairn.editDefAt").map(J.str)))))))
       case "textDocument/didOpen" =>
@@ -193,6 +208,24 @@ final class LspServer(cfg: LspConfig):
         yield s"$word : $ty"
         List(response(id, hover.fold(Cst.node("jnull"))(h =>
           J.obj("contents" -> J.str(h)))))
+      case "textDocument/completion" =>
+        val uri = docUri
+        val text = docs.getOrElse(uri, "")
+        val pos = J.fields(p.getOrElse("position", J.obj()))
+        // Derived, not hand-maintained: completion items are just this
+        // document's own definition names (any registered language, same as
+        // every other LSP feature here) — no per-language completion table.
+        val names = Parser.parse(moduleGrammar, text).toOption
+          .flatMap(ModuleSurface.toModule(_).toOption)
+          .fold(List.empty[String])(_.defs.map(_._1))
+        val items = for
+          line <- pos.get("line").flatMap(J.asNum)
+          char <- pos.get("character").flatMap(J.asNum)
+        yield
+          val prefix = prefixAt(text, line, char)
+          names.filter(n => prefix.isEmpty || n.startsWith(prefix)).distinct.sorted
+        List(response(id, J.arr(
+          items.getOrElse(Nil).map(n => J.obj("label" -> J.str(n), "kind" -> J.num(3))))))
       case "workspace/executeCommand" =>
         val command = p.get("command").flatMap(J.asStr).getOrElse("")
         val args = J.items(p.getOrElse("arguments", J.arr(Nil)))

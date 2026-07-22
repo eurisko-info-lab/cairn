@@ -241,6 +241,32 @@ class WaveH2Suite extends munit.FunSuite:
         "position" -> J.obj("line" -> J.num(0), "character" -> J.num(1)))))
     assert(J.print(resp.head).contains("id : Bool -> Bool"), J.print(resp.head))
 
+  test("M44: completion lists this document's own def names, filtered by the typed prefix"):
+    val server = LspServer(lspCfg)
+    val text = "id = fun x : Bool . x ;\nident2 = fun x : Bool . x ;\nother = true ;\n"
+    openDoc(server, "file:///m.stlc", text)
+    def complete(line: Long, character: Long): String =
+      J.print(server.handle(J.obj(
+        "jsonrpc" -> J.str("2.0"), "id" -> J.num(5), "method" -> J.str("textDocument/completion"),
+        "params" -> J.obj(
+          "textDocument" -> J.obj("uri" -> J.str("file:///m.stlc")),
+          "position" -> J.obj("line" -> J.num(line), "character" -> J.num(character))))).head)
+    // Typed "id" so far (line 1, right after "ident2"'s "id" prefix at col 2):
+    val idPrefix = complete(1, 2)
+    assert(idPrefix.contains("\"id\""), idPrefix)
+    assert(idPrefix.contains("\"ident2\""), idPrefix)
+    assert(!idPrefix.contains("\"other\""), idPrefix)
+    // Empty prefix (col 0) lists every def name.
+    val all = complete(1, 0)
+    assert(all.contains("\"id\"") && all.contains("\"ident2\"") && all.contains("\"other\""), all)
+
+  test("M44: initialize advertises completionProvider"):
+    val server = LspServer(lspCfg)
+    val resp = server.handle(J.obj(
+      "jsonrpc" -> J.str("2.0"), "id" -> J.num(0), "method" -> J.str("initialize"),
+      "params" -> J.obj()))
+    assert(J.print(resp.head).contains("completionProvider"), J.print(resp.head))
+
   test("M44: framed transport round-trips one initialize"):
     val request = """{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}"""
     val exitNote = """{"jsonrpc": "2.0", "method": "exit"}"""
