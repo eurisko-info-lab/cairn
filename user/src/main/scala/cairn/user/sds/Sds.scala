@@ -19,7 +19,10 @@ import cairn.core.*
   * `cairn.examples.sds.SectionNumbering`. Chemicals fixtures and host report
   * projection (`Chemicals` / `SectionReport`) can project into / from
   * language `euSection` + `outline` terms. Section-field text resolves with
-  * the same multilingual fallback as phrases (exact lang → `en` → any).
+  * the same multilingual fallback as phrases (exact lang → `en` → any), then
+  * `sectionFieldShadow` industrial overrides (parallel to phrase `shadow`).
+  * Section-field staleness lives in `cairn.examples.sds.SectionFieldStaleness`
+  * (reuses `PhraseStaleness.restale`).
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -56,6 +59,14 @@ final class Sds(packs: PackAccess):
       case Cst.Node("shadow", List(Cst.Leaf(prod), Cst.Leaf(phrase), _)) =>
         if !defined(prod) then errs += s"shadow '$name' references unknown product '$prod'"
         if !defined(phrase) then errs += s"shadow '$name' references unknown phrase '$phrase'"
+      case Cst.Node("sectionFieldShadow", List(Cst.Leaf(sec), Cst.Leaf(key), _)) =>
+        if key.isEmpty then errs += s"sectionFieldShadow '$name': empty field key"
+        m.get(sec) match
+          case Some(Cst.Node("euSection", _)) => ()
+          case Some(_) =>
+            errs += s"sectionFieldShadow '$name' references '$sec' which is not an euSection"
+          case None =>
+            errs += s"sectionFieldShadow '$name' references unknown section '$sec'"
       case Cst.Node("basis", List(Cst.Leaf(target), Cst.Leaf(section))) =>
         if !defined(target) then errs += s"basis '$name' references unknown product '$target'"
         if section.isEmpty then errs += s"basis '$name' missing Law section number"
@@ -110,9 +121,10 @@ final class Sds(packs: PackAccess):
     Delta.apply(language, m, change).flatMap { out =>
       validate(out._1).map(_ => out) }
 
-  /** Phrase / product names a shadow change-set overrides. Domain-aware
-    * footprint for GRANITE-style shadow rebase (base edit of an overridden
-    * phrase/product is a semantic conflict, even when ΔL names differ).
+  /** Phrase / product / euSection names a shadow change-set overrides.
+    * Domain-aware footprint for GRANITE-style shadow rebase (base edit of an
+    * overridden phrase/product/section is a semantic conflict, even when ΔL
+    * names differ). Includes both phrase `shadow` and `sectionFieldShadow`.
     */
   def shadowOverrideTargets(change: Cst): Set[String] =
     def items(c: Cst): List[Cst] = c match
@@ -123,6 +135,8 @@ final class Sds(packs: PackAccess):
       case Cst.Node(_, List(_, term)) => term match
         case Cst.Node("shadow", List(Cst.Leaf(prod), Cst.Leaf(phrase), _)) =>
           List(prod, phrase)
+        case Cst.Node("sectionFieldShadow", List(Cst.Leaf(sec), _, _)) =>
+          List(sec)
         case _ => Nil
       case _ => Nil
     }.toSet
@@ -204,10 +218,17 @@ final class Sds(packs: PackAccess):
           .orElse(all.headOption.map(_._2))
       case _ => None
 
-  /** Lookup [[sectionFieldText]] by module binding (section ref). */
+  /** Lookup [[sectionFieldText]] by module binding (section ref), applying
+    * any `sectionFieldShadow` industrial override for that (section, key).
+    */
   def sectionFieldText(m: Module, sectionRef: String, fieldKey: String, lang: String)
       : Option[String] =
-    m.get(sectionRef).flatMap(sectionFieldText(_, fieldKey, lang))
+    val overridden = m.defs.collectFirst {
+      case (_, Cst.Node("sectionFieldShadow", List(Cst.Leaf(s), Cst.Leaf(k), Cst.Leaf(text))))
+          if s == sectionRef && k == fieldKey =>
+        text
+    }
+    overridden.orElse(m.get(sectionRef).flatMap(sectionFieldText(_, fieldKey, lang)))
 
   /** Compile a product's document: phrases in the requested language (with
     * fallback), shadow overrides applied — a view over typed objects.

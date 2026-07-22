@@ -69,6 +69,7 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(sds.constructors.contains("euSection"), "SDS EU-CLP section bodies")
     assert(sds.constructors.contains("outline"), "SDS section outlines")
     assert(sds.constructors.contains("sectionField"), "SDS section fields")
+    assert(sds.constructors.contains("sectionFieldShadow"), "SDS section-field shadows")
     assert(sds.fragments.exists(_.provides.contains("sds")))
     assert(sds.fragments.exists(_.provides.contains("law")))
     assert(sds.fragments.exists(_.provides.contains("cert")))
@@ -393,3 +394,59 @@ class ExemplarPackSuite extends munit.FunSuite:
         |) ; }""".stripMargin)
       .fold(e => fail(e), identity)
     assert(Sds.applySds(base, dup).swap.exists(_.contains("duplicate field")))
+
+  test("SDS section-field staleness: FR goes stale when EN source hash changes"):
+    import cairn.examples.sds.SectionFieldStaleness
+    import cairn.examples.sds.PhraseStaleness
+    val g = Sds.language.grammar
+    val sec = Parser.parse(g,
+      """eu section 2 fields (
+        |  signalWord lang en : "Danger" ,
+        |  signalWord lang fr : "Danger"
+        |)""".stripMargin)
+      .fold(e => fail(e), identity)
+    val m = Module(List("s2" -> sec))
+    val projected = SectionFieldStaleness.project(m, "s2", "signalWord")
+    assertEquals(projected("fr").state, PhraseStaleness.State.HumanReviewed)
+    assertEquals(
+      SectionFieldStaleness.staleLangsAfterEnChange(m, "s2", "signalWord", "Warning"),
+      Set("fr"))
+    val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Danger"))
+    assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
+
+  test("SDS section-field shadow: overrides text; rebase conflicts on section edit"):
+    import cairn.examples.sds.Chemicals
+    val base = Chemicals.Acetone.thinModule
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val shadowCs = Parser.parse(dl.grammar,
+      """{ add indSignal = field shadow s2 overrides signalWord with "Warning - industrial" ; }""")
+      .fold(e => fail(e), identity)
+    val Right((mShadow, _)) = Sds.applySds(base, shadowCs): @unchecked
+    assertEquals(
+      Sds.sectionFieldText(mShadow, "s2", "signalWord", "en"),
+      Some("Warning - industrial"))
+    assertEquals(
+      Sds.sectionFieldText(mShadow, "s2", "signalWord", "fr"),
+      Some("Warning - industrial"))
+    // non-shadowed field still resolves from euSection
+    assert(Sds.sectionFieldText(mShadow, "s2", "hazardPhrases", "en").exists(_.nonEmpty))
+    val badRef = Parser.parse(dl.grammar,
+      """{ add bad = field shadow phantom overrides signalWord with "x" ; }""")
+      .fold(e => fail(e), identity)
+    assert(Sds.applySds(base, badRef).swap.exists(_.contains("unknown section 'phantom'")))
+    // rebase: base replaces shadowed section → semantic conflict
+    val baseEdit = Parser.parse(dl.grammar,
+      """{ replace s2 = eu section 2 fields ( signalWord lang en : "Caution" ) ; }""")
+      .fold(e => fail(e), identity)
+    assert(Sds.rebaseShadow(base, baseEdit, shadowCs).isLeft)
+    // disjoint: base edits a non-shadowed section → merge ok
+    val disjoint = Parser.parse(dl.grammar,
+      """{ replace s1 = eu section 1 fields ( productName lang en : "Acetone (lab)" ) ; }""")
+      .fold(e => fail(e), identity)
+    val Right((merged, _)) = Sds.rebaseShadow(base, disjoint, shadowCs): @unchecked
+    assertEquals(
+      Sds.sectionFieldText(merged, "s2", "signalWord", "en"),
+      Some("Warning - industrial"))
+    RoundTrip.check(Sds.language.grammar,
+      merged.get("indSignal").getOrElse(fail("missing indSignal")))
+      .fold(e => fail(e), identity)

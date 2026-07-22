@@ -12,6 +12,7 @@ surface default for sds {
     keyword uses;
     keyword phrases;
     keyword shadow;
+    keyword field;
     keyword overrides;
     keyword with;
     keyword basis;
@@ -30,6 +31,7 @@ surface default for sds {
     syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
     syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
+    syntax sdsObj += sectionFieldShadow : tok "field" tok "shadow" name tok "overrides" name tok "with" str;
     syntax sdsObj += basis : tok "basis" name tok "section" str;
     syntax sdsObj += euSection : tok "eu" tok "section" num tok "fields" tok "(" sepby1 cat sectionField "," tok ")";
     syntax sdsObj += outline : tok "outline" str str tok "sections" tok "(" opt sepby1 name "," tok ")";
