@@ -35,7 +35,13 @@ object Process:
   def intent(req: Proc.Request): (Effects.ActionKey, Authority.Resource) =
     req match
       case Proc.Request.Run(command, _, _) =>
-        (iface.actionKey("run"), iface.resource.at(command.headOption.getOrElse("*")))
+        // Authorize by executable basename so allow-lists name `scala-cli`
+        // rather than absolute PATH resolutions.
+        val head = command.headOption.getOrElse("*")
+        val base =
+          try Path.of(head).getFileName.toString
+          catch case _: Exception => head
+        (iface.actionKey("run"), iface.resource.at(base))
 
   def run(req: Proc.Request, ctx: EffectContext): Either[Proc.Error, Proc.Result] =
     val (action, resource) = intent(req)

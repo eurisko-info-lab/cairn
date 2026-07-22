@@ -1,0 +1,36 @@
+surface default for effect-cas {
+  fragment effect-cas {
+    keyword put;
+    keyword get;
+    keyword contains;
+    keyword fsck;
+    keyword gc;
+    keyword stats;
+    keyword typedKey;
+    keyword artifact;
+    keyword bool;
+    keyword fsckReport;
+    keyword gcReport;
+    keyword statsReport;
+    keyword missing;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += put : tok "put" tok "(" name tok ")";
+    syntax Request += get : tok "get" tok "(" name tok ")";
+    syntax Request += contains : tok "contains" tok "(" name tok ")";
+    syntax Request += fsck : tok "fsck" tok "(" name tok ")";
+    syntax Request += gc : tok "gc" tok "(" name tok "," name tok ")";
+    syntax Request += stats : tok "stats" tok "(" name tok ")";
+    syntax Response += typedKey : tok "typedKey" tok "(" name tok ")";
+    syntax Response += artifact : tok "artifact" tok "(" name tok ")";
+    syntax Response += bool : tok "bool" tok "(" name tok ")";
+    syntax Response += fsckReport : tok "fsckReport" tok "(" name tok ")";
+    syntax Response += gcReport : tok "gcReport" tok "(" name tok ")";
+    syntax Response += statsReport : tok "statsReport" tok "(" name tok ")";
+    syntax Error += missing : tok "missing" tok "(" name tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

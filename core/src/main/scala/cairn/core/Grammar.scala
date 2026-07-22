@@ -423,10 +423,10 @@ object Concrete:
             else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
           source.substring(0, startOff) + printed + source.substring(endOff) }
 
-  /** Alias for [[splice]] — the asymmetric lens `put: A × S → S` for a single
+  /*  * Alias for [[splice]] — the asymmetric lens `put: A × S → S` for a single
     * spanned subtree. Leading/trailing trivia and sibling text outside the
-    * span are preserved byte-for-byte. General dirty-subtree re-association
-    * (re-wrapping a parent whose children were each edited) is still absent.
+    * span are preserved byte-for-byte. For multi-child dirty trees that keep
+    * unchanged child identities, see [[putReassociated]].
     */
   def put(g: GrammarSpec, source: String, out: ParseOut, target: Cst, replacement: Cst): Either[String, String] =
     splice(g, source, out, target, replacement)
@@ -463,6 +463,28 @@ object Concrete:
         }
       }
     }
+
+  /** Thin dirty-subtree re-association: walk `dirty` against `original` and
+    * collect leaf-most `(originalSpanTarget, replacement)` pairs where the
+    * trees diverge. Unchanged children that share [[AnyRef]] identity with the
+    * original parse keep their bytes (via [[putMany]]); dirty regions print
+    * canonically. Does **not** invent spans for freshly allocated subtrees that
+    * have no original counterpart — those must be printed as a whole dirty
+    * parent. General nested "parent whose every child was independently rebuilt"
+    * without identity preservation remains unsupported.
+    */
+  def dirtyEdits(original: Cst, dirty: Cst): List[(Cst, Cst)] =
+    if original eq dirty then Nil
+    else (original, dirty) match
+      case (Cst.Node(t1, cs1), Cst.Node(t2, cs2)) if t1 == t2 && cs1.length == cs2.length =>
+        val child = cs1.zip(cs2).flatMap { case (o, d) => dirtyEdits(o, d) }
+        if child.nonEmpty then child else List(original -> dirty)
+      case _ => List(original -> dirty)
+
+  def putReassociated(
+      g: GrammarSpec, source: String, out: ParseOut, original: Cst, dirty: Cst
+  ): Either[String, String] =
+    putMany(g, source, out, dirtyEdits(original, dirty))
 
 /** One generic printer (S11) interpreting the print table. */
 object Printer:
@@ -553,9 +575,10 @@ object Printer:
   * **Lens `put` (present, smallest useful slice):** [[put]] / [[Concrete.put]]
   * / [[Concrete.splice]] edit one spanned subtree and preserve every byte
   * outside that span (leading/trailing trivia, siblings). Module-level ΔL
-  * uses the same primitive via [[Delta.applyPreservingFormat]]. Still absent:
-  * general dirty-subtree re-association, and format-preserving `remove` /
-  * `rename` (rename needs leaf-name spans the parser does not yet record).
+  * uses the same primitive via [[Delta.applyPreservingFormat]] (including
+  * format-preserving `remove` / `rename`). Thin dirty-subtree re-association
+  * for identity-preserved children is [[putReassociated]]; general nested
+  * rebuilds without identity preservation remain unsupported.
   */
 object RoundTrip:
   /** Law 1: retraction (see object doc) — `parse(print(t)) == t`. */
@@ -589,3 +612,11 @@ object RoundTrip:
   /** [[Concrete.putMany]] — several `put`s against one parse, in one pass. */
   def putMany(g: GrammarSpec, source: String, out: ParseOut, edits: List[(Cst, Cst)]): Either[String, String] =
     Concrete.putMany(g, source, out, edits)
+
+  /** [[Concrete.putReassociated]] — dirty-subtree thin slice over identity-
+    * preserved children (see [[Concrete.dirtyEdits]]).
+    */
+  def putReassociated(
+      g: GrammarSpec, source: String, out: ParseOut, original: Cst, dirty: Cst
+  ): Either[String, String] =
+    Concrete.putReassociated(g, source, out, original, dirty)

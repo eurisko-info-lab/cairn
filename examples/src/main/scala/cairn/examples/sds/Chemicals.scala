@@ -23,7 +23,9 @@ object Chemicals:
   final case class SectionBody(
       number: Int,
       fields: Map[String, String],
-      locales: Map[String, Map[String, String]] = Map.empty
+      locales: Map[String, Map[String, String]] = Map.empty,
+      /** Non-EN overlays as `fieldLocaleRef` / `sectionFieldRef` into corpus phrases. */
+      localeRefs: Map[String, Map[String, String]] = Map.empty,
   ):
     def title: String =
       SectionNumbering.byNumber.getOrElse(number, s"INVALID-$number")
@@ -40,14 +42,28 @@ object Chemicals:
           Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(v))
         }
       }
-      Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", en ++ loc))
+      val refs = localeRefs.toList.flatMap { case (lang, kv) =>
+        kv.toList.map { case (k, ref) =>
+          Cst.node("sectionFieldRef", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))
+        }
+      }
+      Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", en ++ loc ++ refs))
 
-    private def localeField(overlays: Map[String, Map[String, String]]): Cst =
-      val rows = overlays.toList.flatMap { case (lang, kv) =>
+    private def localeField(
+        overlays: Map[String, Map[String, String]],
+        refs: Map[String, Map[String, String]],
+    ): Cst =
+      val free = overlays.toList.flatMap { case (lang, kv) =>
         kv.toList.map { case (k, v) =>
           Cst.node("fieldLocale", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(v))
         }
       }
+      val refRows = refs.toList.flatMap { case (lang, kv) =>
+        kv.toList.map { case (k, ref) =>
+          Cst.node("fieldLocaleRef", Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))
+        }
+      }
+      val rows = free ++ refRows
       if rows.isEmpty then Cst.Node("none", Nil)
       else Cst.Node("some", List(Cst.Node("list", rows)))
 
@@ -66,7 +82,7 @@ object Chemicals:
           Cst.Leaf(req("usesAdvisedAgainst")),
           Cst.Leaf(req("supplierName")),
           Cst.Leaf(req("emergencyPhone")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 2 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"hazards section missing EN key '$k'"))
@@ -77,7 +93,7 @@ object Chemicals:
           Cst.Leaf(req("hazardPhrases")),
           Cst.Leaf(req("signalWord")),
           Cst.Leaf(req("pictograms")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 3 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"composition section missing EN key '$k'"))
@@ -87,7 +103,7 @@ object Chemicals:
           Cst.Leaf(req("cas")),
           Cst.Leaf(req("ec")),
           Cst.Leaf(req("concentration")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 4 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"first-aid section missing EN key '$k'"))
@@ -98,7 +114,7 @@ object Chemicals:
           Cst.Leaf(req("skinContact")),
           Cst.Leaf(req("eyeContact")),
           Cst.Leaf(req("ingestion")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 5 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"firefighting section missing EN key '$k'"))
@@ -108,7 +124,7 @@ object Chemicals:
           Cst.Leaf(req("unsuitableExtinguishingMedia")),
           Cst.Leaf(req("specialHazards")),
           Cst.Leaf(req("firefighterProtection")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 6 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"accidental-release section missing EN key '$k'"))
@@ -117,7 +133,7 @@ object Chemicals:
           Cst.Leaf(req("personalPrecautions")),
           Cst.Leaf(req("environmentalPrecautions")),
           Cst.Leaf(req("cleanupMethods")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 7 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"handling/storage section missing EN key '$k'"))
@@ -126,7 +142,7 @@ object Chemicals:
           Cst.Leaf(req("handling")),
           Cst.Leaf(req("storage")),
           Cst.Leaf(req("storageIncompatibilities")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 8 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"exposure-controls section missing EN key '$k'"))
@@ -137,7 +153,7 @@ object Chemicals:
           Cst.Leaf(req("eyeProtection")),
           Cst.Leaf(req("skinProtection")),
           Cst.Leaf(req("respiratoryProtection")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 9 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"physical/chemical section missing EN key '$k'"))
@@ -152,7 +168,7 @@ object Chemicals:
           Cst.Leaf(req("density")),
           Cst.Leaf(req("solubility")),
           Cst.Leaf(req("explosiveLimits")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 10 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"stability/reactivity section missing EN key '$k'"))
@@ -162,7 +178,7 @@ object Chemicals:
           Cst.Leaf(req("conditionsToAvoid")),
           Cst.Leaf(req("incompatibleMaterials")),
           Cst.Leaf(req("hazardousDecomposition")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 11 =>
         def req(k: String): String =
           val host = if k == "ld50Oral" then fields.get("ld50Oral").orElse(fields.get("LD50Oral"))
@@ -177,7 +193,7 @@ object Chemicals:
           Cst.Leaf(req("irritation")),
           Cst.Leaf(req("inhalationEffects")),
           Cst.Leaf(req("carcinogenicity")),
-          localeField(remapped))
+          localeField(remapped, localeRefs))
       case 12 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"ecological section missing EN key '$k'"))
@@ -187,7 +203,7 @@ object Chemicals:
           Cst.Leaf(req("persistence")),
           Cst.Leaf(req("bioaccumulation")),
           Cst.Leaf(req("mobility")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 13 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"disposal section missing EN key '$k'"))
@@ -195,7 +211,7 @@ object Chemicals:
           "disposalSection",
           Cst.Leaf(req("disposalMethods")),
           Cst.Leaf(req("wasteClassification")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 14 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"transport section missing EN key '$k'"))
@@ -205,7 +221,7 @@ object Chemicals:
           Cst.Leaf(req("properShippingName")),
           Cst.Leaf(req("transportHazardClass")),
           Cst.Leaf(req("packingGroup")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 15 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"regulatory section missing EN key '$k'"))
@@ -214,7 +230,7 @@ object Chemicals:
           Cst.Leaf(req("regulatoryInfo")),
           Cst.Leaf(req("reachStatus")),
           Cst.Leaf(req("usInventory")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case 16 =>
         def req(k: String): String =
           fields.getOrElse(k, sys.error(s"other-information section missing EN key '$k'"))
@@ -222,14 +238,16 @@ object Chemicals:
           "otherInformationSection",
           Cst.Leaf(req("revisionDate")),
           Cst.Leaf(req("otherInformation")),
-          localeField(locales))
+          localeField(locales, localeRefs))
       case _ => toTerm
 
   /** A chemical document as a (possibly sparse) map of section bodies. */
   final case class ChemicalDoc(
       name: String,
       cas: String,
-      sections: Map[Int, SectionBody]
+      sections: Map[Int, SectionBody],
+      /** Module-level corpus phrases: (defName, phraseName, lang, text). */
+      corpus: List[(String, String, String, String)] = Nil,
   ):
     def outline: List[SectionNumbering.OutlineEntry] =
       sections.keys.toList.sorted.map(n => sections(n).outlineEntry)
@@ -241,6 +259,11 @@ object Chemicals:
 
     /** Stable def name for section `n` inside [[toModule]]. */
     def sectionRef(n: Int): String = s"s$n"
+
+    private def corpusDefs: List[(String, Cst)] =
+      corpus.map { case (defName, phraseName, lang, text) =>
+        defName -> Cst.node("corpusPhrase", Cst.Leaf(phraseName), Cst.Leaf(lang), Cst.Leaf(text))
+      }
 
     /** Project into SDS language terms: one `euSection` per populated number
       * plus a named `outline` binding section refs in ascending order.
@@ -259,7 +282,7 @@ object Chemicals:
         Cst.Leaf(name),
         Cst.Leaf(cas),
         sectionsField)
-      Module(secDefs :+ (outlineName -> outlineTerm)).sorted
+      Module(corpusDefs ++ secDefs :+ (outlineName -> outlineTerm)).sorted
 
     /** Like [[toModule]] but all populated 1–16 sections use typed ctors. */
     def toTypedModule(outlineName: String = "docOutline"): Module =
@@ -275,7 +298,7 @@ object Chemicals:
         Cst.Leaf(name),
         Cst.Leaf(cas),
         sectionsField)
-      Module(secDefs :+ (outlineName -> outlineTerm)).sorted
+      Module(corpusDefs ++ secDefs :+ (outlineName -> outlineTerm)).sorted
 
   /** Acetone: fuller EU-CLP outline (all 16 sections). Content is
     * demonstration / literature-shaped placeholder — not a regulatory filing.
@@ -378,9 +401,11 @@ object Chemicals:
     def asModule: Module =
       ChemicalSource.acetone(sdsLanguage).fold(e => throw RuntimeException(e), identity)
 
-    /** Thin FR overlays for identification / hazards / other information —
-      * demonstration translations, not a regulatory filing. Untranslated EN
-      * keys still resolve via `sectionFieldText` fallback.
+    /** Deeper FR overlays across identification / hazards / composition /
+      * physical / toxicological / transport / other — demonstration
+      * translations, not a regulatory filing. Untranslated EN keys still
+      * resolve via `sectionFieldText` fallback. Standardized GHS signal-word
+      * uses [[ghsCorpus]] + `fieldLocaleRef` (see [[thin]]).
       */
     val thinFr: Map[Int, Map[String, String]] = Map(
       1 -> Map(
@@ -388,31 +413,56 @@ object Chemicals:
         "synonyms" -> "propan-2-one ; 2-propanone",
         "recommendedUse" ->
           "Réactif de laboratoire ; solvant pour revêtements, adhésifs et nettoyage.",
+        "usesAdvisedAgainst" ->
+          "Utilisation alimentaire, médicamenteuse, pesticide ou biocide.",
         "supplierName" ->
-          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)"),
+          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)",
+        "emergencyPhone" -> "+32 000 000 000 (numéro de démonstration)"),
       2 -> Map(
         "classificationSummary" ->
           "Liquide inflammable catégorie 2 ; lésions oculaires graves/irritation oculaire catégorie 2 ; STOT SE catégorie 3 (SNC) — règlement (CE) n° 1272/2008",
+        "hazardsNotOtherwiseClassified" ->
+          "Une exposition répétée peut provoquer dessèchement ou gerçures de la peau.",
         "hazardPhrases" -> "H225 ; H319 ; H336",
-        "signalWord" -> "Danger",
         "pictograms" -> "GHS02 ; GHS07"),
+      3 -> Map(
+        "componentName" -> "Acétone",
+        "concentration" -> ">= 99,5 %"),
+      9 -> Map(
+        "appearance" -> "Liquide incolore.",
+        "odor" -> "Caractéristique, légèrement sucré (type menthe)."),
+      11 -> Map(
+        "irritation" ->
+          "Provoque une sévère irritation des yeux. Un contact cutané prolongé peut provoquer un dessèchement."),
+      14 -> Map(
+        "properShippingName" -> "ACÉTONE"),
       16 -> Map(
         "otherInformation" ->
           "Données de démonstration / exemple pour le corpus chimiques SDS Cairn — pas un conseil réglementaire ou de sécurité pour un usage réel."))
 
-    /** Thin subset with FR overlays: typed 1/2/3/9/11/14/16 (+ locale on 1/2/16).
-      * Focused multilingual / restale / typed-section tests.
+    /** Shared GHS corpus phrases referenced by thin typed sections.
+      * Primary (EN) def name matches the phrase Name so `fieldLocaleRef`
+      * validate's `defined(ref)` hits (same pattern as SdsTutorial `h225`).
       */
+    val ghsCorpus: List[(String, String, String, String)] = List(
+      ("ghsDanger", "ghsDanger", "en", "Danger"),
+      ("ghsDangerFr", "ghsDanger", "fr", "Danger"),
+      ("ghsDangerDe", "ghsDanger", "de", "Gefahr"))
+
+    /** Thin subset with FR free-text + corpus-ref signalWord (typed 1/2/3/9/11/14/16). */
     val thin: ChemicalDoc = ChemicalDoc(
       name = "Acetone",
       cas = "67-64-1",
+      corpus = ghsCorpus,
       sections = Map(
         1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
-        2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
-        3 -> pure.sections(3),
-        9 -> pure.sections(9),
-        11 -> pure.sections(11),
-        14 -> pure.sections(14),
+        2 -> pure.sections(2).copy(
+          locales = Map("fr" -> thinFr(2)),
+          localeRefs = Map("fr" -> Map("signalWord" -> "ghsDanger"))),
+        3 -> pure.sections(3).copy(locales = Map("fr" -> thinFr(3))),
+        9 -> pure.sections(9).copy(locales = Map("fr" -> thinFr(9))),
+        11 -> pure.sections(11).copy(locales = Map("fr" -> thinFr(11))),
+        14 -> pure.sections(14).copy(locales = Map("fr" -> thinFr(14))),
         16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
     def thinModule: Module =
@@ -519,40 +569,69 @@ object Chemicals:
     def asModule: Module =
       ChemicalSource.ethanol(sdsLanguage).fold(e => throw RuntimeException(e), identity)
 
-    /** Thin FR overlays for identification / hazards / other information —
-      * demonstration translations, not a regulatory filing.
-      */
+    /** Deeper FR overlays (mirrors acetone multilingual slice). */
     val thinFr: Map[Int, Map[String, String]] = Map(
       1 -> Map(
         "productName" -> "Éthanol",
         "synonyms" -> "alcool éthylique ; éthanol absolu",
         "recommendedUse" ->
           "Réactif de laboratoire ; solvant ; matière première pour formulations désinfectantes.",
+        "usesAdvisedAgainst" ->
+          "Utilisation alimentaire, médicamenteuse ou biocide sans autorisation complémentaire.",
         "supplierName" ->
-          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)"),
+          "Cairn Chemicals Demo Ltd. (fictionnel, à des fins de démonstration uniquement)",
+        "emergencyPhone" -> "+32 000 000 000 (numéro de démonstration)"),
       2 -> Map(
         "classificationSummary" ->
           "Liquide inflammable catégorie 2 ; lésions oculaires graves/irritation oculaire catégorie 2 — règlement (CE) n° 1272/2008",
+        "hazardsNotOtherwiseClassified" ->
+          "Liquide et vapeurs extrêmement inflammables ; les vapeurs peuvent former des mélanges explosifs avec l'air.",
         "hazardPhrases" -> "H225 ; H319",
-        "signalWord" -> "Danger",
         "pictograms" -> "GHS02 ; GHS07"),
+      3 -> Map(
+        "componentName" -> "Éthanol",
+        "concentration" -> ">= 99,5 %"),
+      9 -> Map(
+        "appearance" -> "Liquide incolore.",
+        "odor" -> "Caractéristique, alcoolique."),
+      11 -> Map(
+        "irritation" ->
+          "Provoque une sévère irritation des yeux. Un contact cutané prolongé peut provoquer un dessèchement."),
+      14 -> Map(
+        "properShippingName" -> "ÉTHANOL (ALCOOL ÉTHYLIQUE) ou ÉTHANOL EN SOLUTION"),
       16 -> Map(
         "otherInformation" ->
           "Données de démonstration / exemple pour le corpus chimiques SDS Cairn (éthanol secondaire) — pas un conseil réglementaire ou de sécurité pour un usage réel."))
 
-    /** Thin subset (identification + hazards + other information) with FR
-      * section-field siblings for focused multilingual / restale tests.
-      */
+    /** Optional DE overlays (second non-FR language) on identification + hazards. */
+    val thinDe: Map[Int, Map[String, String]] = Map(
+      1 -> Map(
+        "productName" -> "Ethanol",
+        "synonyms" -> "Ethylalkohol ; absolutes Ethanol"),
+      2 -> Map(
+        "hazardPhrases" -> "H225 ; H319",
+        "pictograms" -> "GHS02 ; GHS07"))
+
+    val ghsCorpus: List[(String, String, String, String)] = Acetone.ghsCorpus
+
+    /** Thin subset with FR + DE free-text and corpus-ref signalWord. */
     val thin: ChemicalDoc = ChemicalDoc(
       name = "Ethanol",
       cas = "64-17-5",
+      corpus = ghsCorpus,
       sections = Map(
-        1 -> pure.sections(1).copy(locales = Map("fr" -> thinFr(1))),
-        2 -> pure.sections(2).copy(locales = Map("fr" -> thinFr(2))),
-        3 -> pure.sections(3),
-        9 -> pure.sections(9),
-        11 -> pure.sections(11),
-        14 -> pure.sections(14),
+        1 -> pure.sections(1).copy(locales = Map(
+          "fr" -> thinFr(1),
+          "de" -> thinDe(1))),
+        2 -> pure.sections(2).copy(
+          locales = Map("fr" -> thinFr(2), "de" -> thinDe(2)),
+          localeRefs = Map(
+            "fr" -> Map("signalWord" -> "ghsDanger"),
+            "de" -> Map("signalWord" -> "ghsDanger"))),
+        3 -> pure.sections(3).copy(locales = Map("fr" -> thinFr(3))),
+        9 -> pure.sections(9).copy(locales = Map("fr" -> thinFr(9))),
+        11 -> pure.sections(11).copy(locales = Map("fr" -> thinFr(11))),
+        14 -> pure.sections(14).copy(locales = Map("fr" -> thinFr(14))),
         16 -> pure.sections(16).copy(locales = Map("fr" -> thinFr(16)))))
 
     def thinModule: Module =

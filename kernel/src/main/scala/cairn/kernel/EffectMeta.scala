@@ -501,6 +501,91 @@ object EffectMeta:
       resourcePathPattern = "*",
       requestActions = Map("bytes" -> Some("bytes")))
 
+  def processFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Process,
+      actions = List("run"), resourceKind = "process", resourcePathPattern = "Command",
+      requestActions = Map("run" -> Some("run")))
+
+  def externalBackendFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.ExternalBackend,
+      actions = List("find", "run"), resourceKind = "externalBackend", resourcePathPattern = "Host",
+      requestActions = Map("find" -> Some("find"), "run" -> Some("run")))
+
+  def terminalFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Terminal,
+      actions = List("read", "write"), resourceKind = "terminal", resourcePathPattern = "*",
+      requestActions = Map(
+        "readLine" -> Some("read"), "write" -> Some("write"), "writeLine" -> Some("write")))
+
+  def workspaceFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Workspace,
+      actions = List("read"), resourceKind = "workspace", resourcePathPattern = "Path",
+      requestActions = Map(
+        "languageDirs" -> Some("read"), "listCairnFiles" -> Some("read"),
+        "listSubdirs" -> Some("read"), "listSurfaceCairnFiles" -> Some("read"),
+        "readText" -> Some("read")))
+
+  def filesystemFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Filesystem,
+      actions = List("read", "write", "mkdirs"), resourceKind = "filesystem",
+      resourcePathPattern = "Path",
+      requestActions = Map(
+        "read" -> Some("read"), "readBytes" -> Some("read"), "exists" -> Some("read"),
+        "isDirectory" -> Some("read"), "isRegularFile" -> Some("read"),
+        "isExecutable" -> Some("read"), "list" -> Some("read"),
+        "write" -> Some("write"), "writeBytes" -> Some("write"), "delete" -> Some("write"),
+        "mkdirs" -> Some("mkdirs"), "createTempDirectory" -> Some("mkdirs"),
+        "resolve" -> None))
+
+  def lspFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Lsp,
+      actions = List("read", "write"), resourceKind = "lsp", resourcePathPattern = "*",
+      requestActions = Map("readMessage" -> Some("read"), "writeMessage" -> Some("write")))
+
+  def casFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.Cas,
+      actions = List("put", "get", "fsck", "gc", "stats"), resourceKind = "cas",
+      resourcePathPattern = "*",
+      requestActions = Map(
+        "put" -> Some("put"), "get" -> Some("get"), "contains" -> Some("get"),
+        "fsck" -> Some("fsck"), "gc" -> Some("gc"), "stats" -> Some("stats")))
+
+  def ledgerTransportFromFragment(fragment: Fragment): Either[String, EffectFamily] =
+    familyFromFragment(
+      fragment, Effects.Family.LedgerTransport,
+      actions = List("append"), resourceKind = "ledger", resourcePathPattern = "Path",
+      requestActions = Map("append" -> Some("append")))
+
+  /** Pack names under `languages/` for fragment-loaded effect interfaces.
+    * [[Effects.Family]] enum + action-map args to [[familyFromFragment]] remain
+    * host-seeded (opaque interpreter routing / digest-bound keys).
+    */
+  val fragmentPackNames: List[String] = List(
+    "effect-clock", "effect-random", "effect-process", "effect-externalBackend",
+    "effect-terminal", "effect-workspace", "effect-filesystem", "effect-lsp",
+    "effect-cas", "effect-ledgerTransport")
+
+  def fromFragmentPack(name: String, fragment: Fragment): Either[String, EffectFamily] =
+    name match
+      case "effect-clock" => clockFromFragment(fragment)
+      case "effect-random" => randomFromFragment(fragment)
+      case "effect-process" => processFromFragment(fragment)
+      case "effect-externalBackend" => externalBackendFromFragment(fragment)
+      case "effect-terminal" => terminalFromFragment(fragment)
+      case "effect-workspace" => workspaceFromFragment(fragment)
+      case "effect-filesystem" => filesystemFromFragment(fragment)
+      case "effect-lsp" => lspFromFragment(fragment)
+      case "effect-cas" => casFromFragment(fragment)
+      case "effect-ledgerTransport" => ledgerTransportFromFragment(fragment)
+      case other => Left(s"unknown effect pack '$other'")
+
   private def encodeFamily(ef: EffectFamily): Canon =
     val reqActs = ef.requestActions.toList.sortBy(_._1).map { (ctor, act) =>
       Canon.cmap(

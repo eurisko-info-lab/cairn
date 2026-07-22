@@ -13,7 +13,11 @@ import cairn.user.icnet.IcNet
   * Surface:
   *   def name = expr
   *   expr  ::= atom atom ...            (application by juxtaposition, M6 Run)
-  *   atom  ::= @x ( expr ) | ( expr ) | tru | fls | name
+  *   atom  ::= @x ( expr ) | ( expr ) | tru | fls | numeral | name
+  *
+  * Numerals are **Church encodings** over existing `lam`/`app` nets — not
+  * native HVM `NUM`/`OPR`. Recursion is reachable via an explicit Y/fix
+  * combinator in source (self-application), not a primitive `let rec`.
   */
 object Bend:
   val grammar: GrammarSpec = GrammarSpec(
@@ -32,6 +36,7 @@ object Bend:
         ConstructorSpec("bgroup", List(Elem.Tok("("), Elem.Cat("expr"), Elem.Tok(")"))),
         ConstructorSpec("btru", List(Elem.Tok("tru"))),
         ConstructorSpec("bfls", List(Elem.Tok("fls"))),
+        ConstructorSpec("bnum", List(Elem.NumLeaf)),
         ConstructorSpec("bvar", List(Elem.NameLeaf))))),
     precCategories = Nil,
     printRules = List(
@@ -46,6 +51,7 @@ object Bend:
       PrintRule("bgroup", List(PrintSeg.Lit("("), PrintSeg.Field(0), PrintSeg.Lit(")"))),
       PrintRule("btru", List(PrintSeg.Lit("tru"))),
       PrintRule("bfls", List(PrintSeg.Lit("fls"))),
+      PrintRule("bnum", List(PrintSeg.Field(0))),
       PrintRule("bvar", List(PrintSeg.Field(0)))),
     top = "file")
 
@@ -63,6 +69,17 @@ object Bend:
     case Cst.Node("bgroup", List(inner)) => elaborate(inner)
     case Cst.Node("btru", _) => Right(Cst.node("true"))
     case Cst.Node("bfls", _) => Right(Cst.node("false"))
+    case Cst.Node("bnum", List(Cst.Leaf(n))) =>
+      n.toIntOption match
+        case None => Left(s"not a bend numeral: $n")
+        case Some(k) if k < 0 => Left(s"negative bend numeral: $n")
+        case Some(k) =>
+          val s = "s"; val z = "z"
+          val body = (1 to k).foldLeft[Cst](Cst.node("var", Cst.Leaf(z))) { (acc, _) =>
+            Cst.node("app", Cst.node("var", Cst.Leaf(s)), acc)
+          }
+          Right(Cst.node("lam", Cst.Leaf(s), Cst.node("tyBool"),
+            Cst.node("lam", Cst.Leaf(z), Cst.node("tyBool"), body)))
     case Cst.Node("bvar", List(Cst.Leaf(x))) => Right(Cst.node("var", Cst.Leaf(x)))
     case other => Left(s"not a bend expr: ${other.render}")
 

@@ -13,6 +13,7 @@ surface default for unisoncore {
     keyword with;
     keyword handle;
     keyword abort;
+    keyword call;
     punct "(";
     punct ")";
     punct ":";
@@ -43,6 +44,7 @@ surface default for unisoncore {
     syntax term += matchOption : tok "match" cat term tok "{" tok "None" tok "->" cat term tok ";" tok "Some" tok "(" name tok ")" tok "->" cat term tok "}";
     syntax term += abort : tok "abort";
     syntax term += handle : tok "handle" cat term tok "with" cat term;
+    syntax term += call : tok "call" tok "(" str tok ")";
     print var : field 0;
     print app : lit "(" field 0 sp field 1 lit ")";
     print lam : lit "fun" sp field 0 sp lit ":" sp field 1 sp lit "." sp field 2;
@@ -55,6 +57,7 @@ surface default for unisoncore {
     print matchOption : lit "match" sp field 0 sp lit "{" sp lit "None" sp lit "->" sp field 1 lit ";" sp lit "Some(" field 2 lit ")" sp lit "->" sp field 3 sp lit "}";
     print abort : lit "abort";
     print handle : lit "handle" sp field 0 sp lit "with" sp field 1;
+    print call : lit "call(" strfield 0 lit ")";
     top term;
   }
 }

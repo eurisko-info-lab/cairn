@@ -106,7 +106,11 @@ Capability revocation digests sync via the same want/have shape
   load-language, emit-languages, Browser UI filesystem fallback, Riemann/Search
   tutorial artifact I/O).
   `bootstrapped()` remains available for rare allow-all fixtures; composition
-  roots and suites use narrow gates.
+  roots and suites use narrow gates. `forProcess` defaults to
+  `scala-cli`/`cargo`/`runghc`/`lake`/`git` (not `*`).
+- **Capabilities:** composition-root factories accept optional
+  `VerifiedCapability` grant bundles; non-empty lists take the capability-first
+  authorize path (SDS causal workflow + AuthoritySuite).
 - **Resource matching:** exact path, full `*`, or explicit `prefix*` — never
   accidental prefix of a non-wildcard path.
 - **Meta conditions:** known `meta:*` keys validate value shape fail-closed
@@ -209,9 +213,9 @@ LeanCore `#check` envelope.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
-  `ActionKey.fromPinned`). Host-embedded Meta fragments remain the bootstrap
-  vocabulary; thin reduction via `languages/effect-clock.cairn` +
-  `languages/effect-random.cairn` (`clockFromFragment` / `randomFromFragment`).
+  `ActionKey.fromPinned`). All ten families have `languages/effect-*.cairn`
+  vocabulary + `*FromFragment`; residual host seed is `Effects.Family` enum
+  + action-map / `requestActions` args (opaque interpreter routing).
 - **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
   (issuer-scoped absorb). Revocation via `ReplayReplication` / `checkGrant`.
   Not multi-node consensus / BFT.

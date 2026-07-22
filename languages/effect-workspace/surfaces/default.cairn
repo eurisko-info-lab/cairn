@@ -1,0 +1,24 @@
+surface default for effect-workspace {
+  fragment effect-workspace {
+    keyword languageDirs;
+    keyword listCairnFiles;
+    keyword listSubdirs;
+    keyword listSurfaceCairnFiles;
+    keyword readText;
+    keyword paths;
+    keyword text;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += languageDirs : tok "languageDirs" tok "(" tok ")";
+    syntax Request += listCairnFiles : tok "listCairnFiles" tok "(" name tok ")";
+    syntax Request += listSubdirs : tok "listSubdirs" tok "(" name tok ")";
+    syntax Request += listSurfaceCairnFiles : tok "listSurfaceCairnFiles" tok "(" name tok ")";
+    syntax Request += readText : tok "readText" tok "(" name tok ")";
+    syntax Response += paths : tok "paths" tok "(" name tok ")";
+    syntax Response += text : tok "text" tok "(" str tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

@@ -114,7 +114,7 @@ final class LeanCore(packs: PackAccess):
   // visible to earlier-declared names via the same ctxCons chain hasType
   // already walks (§2c amendment: "environment declarations", "theorem
   // checking") ----
-  final case class Decl(name: String, ty: Cst, value: Cst)
+  final case class Decl(name: String, ty: Cst, value: Cst, transparent: Boolean = false)
 
   final case class Environment(decls: List[Decl]):
     /** The context every declaration (and any term checked "in" this
@@ -125,12 +125,26 @@ final class LeanCore(packs: PackAccess):
 
     def get(name: String): Option[Decl] = decls.findLast(_.name == name)
 
-    /** Check `value : ty` against the CURRENT environment's context, then
-      * append it — a checked declaration, opaque to later ones (no delta-
-      * unfolding; §2c amendment's honest limitation vs. Lean's `def`).
+    /** Host-side delta-unfold: substitute every transparent decl's name for
+      * its value (declaration order). Opaque (theorem-style) decls are
+      * untouched — same discipline as [[resolveSubst]], not a kernel delta rule.
       */
-    def extend(name: String, ty: Cst, value: Cst): Either[String, Environment] =
-      check(toCtx, value, ty).map(_ => Environment(decls :+ Decl(name, ty, value)))
+    def unfold(t: Cst): Cst =
+      decls.foldLeft(t) { case (acc, d) =>
+        if d.transparent then Binding.subst(spec, varCtor)(acc, d.name, d.value) else acc
+      }
+
+    /** Check `value : ty` against the CURRENT environment's context, then
+      * append it. Default opaque (closer to Lean `theorem`); pass
+      * `transparent = true` for def-style delta-unfold via [[unfold]].
+      */
+    def extend(
+        name: String, ty: Cst, value: Cst, transparent: Boolean = false
+    ): Either[String, Environment] =
+      check(toCtx, value, ty).map(_ => Environment(decls :+ Decl(name, ty, value, transparent)))
 
   object Environment:
     val empty: Environment = Environment(Nil)
+
+  def checkUnfolding(env: Environment, term: Cst, ty: Cst): Either[String, Derivation] =
+    check(env.toCtx, env.unfold(term), ty)

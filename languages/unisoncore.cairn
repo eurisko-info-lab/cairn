@@ -18,6 +18,7 @@ language unisoncore {
     ctor matchOption : Term(Term, Term, Name, Term) binds 2 in 3;
     ctor abort : Term;
     ctor handle : Term(Term, Term);
+    ctor call : Term(Hash);
     varctor var;
     rule beta : app(lam($x, $T, $b), $v) => $subst($b, $x, $v);
     rule match-list-nil : matchList(nil(), $nb, $h, $t, $cb) => $nb;
@@ -44,6 +45,7 @@ language unisoncore {
       rule t-match-option : hasType($ctx, $scrut, tyOption($T)), hasType($ctx, $nb, $R), hasType(ctxCons($x, $T, $ctx), $sb, $R) |- hasType($ctx, matchOption($scrut, $nb, $x, $sb), $R);
       rule t-abort :  |- hasType($ctx, abort(), $T);
       rule t-handle : hasType($ctx, $body, $T), hasType($ctx, $h, $T) |- hasType($ctx, handle($body, $h), $T);
+      rule t-call :  |- hasType($ctx, call($h), $T) where $call-type($h, $T);
     }
   }
 }

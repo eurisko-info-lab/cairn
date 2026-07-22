@@ -129,6 +129,19 @@ class LeanCoreSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     assert(LeanCore.check(env.toCtx, LeanCore.v("zero-refl"), LeanCore.eqTy(LeanCore.natTy, LeanCore.zero, LeanCore.zero)).isRight)
 
+  test("transparent def unfolds through host delta; opaque theorem does not"):
+    val env = LeanCore.Environment.empty
+      .extend("two", LeanCore.natTy, LeanCore.succ(LeanCore.succ(LeanCore.zero)), transparent = true)
+      .fold(e => fail(e), identity)
+    val unfolded = env.unfold(LeanCore.v("two"))
+    assertEquals(unfolded, LeanCore.succ(LeanCore.succ(LeanCore.zero)))
+    assert(LeanCore.checkUnfolding(env, LeanCore.v("two"), LeanCore.natTy).isRight)
+    val opaque = LeanCore.Environment.empty
+      .extend("zero-refl", LeanCore.eqTy(LeanCore.natTy, LeanCore.zero, LeanCore.zero), LeanCore.refl(LeanCore.zero))
+      .fold(e => fail(e), identity)
+    assertEquals(opaque.unfold(LeanCore.v("zero-refl")), LeanCore.v("zero-refl"))
+    // Still not full path-induction J — subst remains the transport form.
+
   // ---- kernel actually gates, not just search (established idiom) ----
 
   test("Checker.check rejects a forged derivation directly, independent of search"):

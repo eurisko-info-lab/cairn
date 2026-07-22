@@ -1,0 +1,22 @@
+surface default for effect-lsp {
+  fragment effect-lsp {
+    keyword readMessage;
+    keyword writeMessage;
+    keyword message;
+    keyword sessionEnded;
+    keyword ok;
+    keyword framing;
+    keyword closed;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += readMessage : tok "readMessage" tok "(" tok ")";
+    syntax Request += writeMessage : tok "writeMessage" tok "(" str tok ")";
+    syntax Response += message : tok "message" tok "(" str tok ")";
+    syntax Response += sessionEnded : tok "sessionEnded" tok "(" tok ")";
+    syntax Response += ok : tok "ok" tok "(" tok ")";
+    syntax Error += framing : tok "framing" tok "(" str tok ")";
+    syntax Error += closed : tok "closed" tok "(" tok ")";
+    top Request;
+  }
+}

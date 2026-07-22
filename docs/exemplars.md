@@ -86,11 +86,13 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Broader multilingual coverage beyond thin FR overlays.
 - Studio-persisted phrase corpus / authoring UI.
 - PDF report surface (heavy; deferred).
-- Effect-interface action maps still host-seeded (clock+random fragment load).
+- Effect-interface `Family` enum + action-map args remain host-seeded
+  (all ten families load vocabulary from `languages/effect-*.cairn`).
 - BFT replication (replay sync is digest-merge only).
+- Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
+  lang-scoped shadows still absent (shadows are lang-blind).
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)
 
@@ -98,7 +100,8 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 interaction combinators. GRANITE itself defers Bend as a pack (spec-only);
 Cairn ships a real thin surface because nets are real.
 
-Remaining: numbers/recursion primitives; HVM strict/lazy modes.
+Remaining: HVM strict/lazy modes; native NUM/OPR (Church numerals +
+honest self-ref boundary land in WaveESuite).
 
 **Agreement envelope** (not full HVM compatibility): AffineNet/IcNet claim the
 classical IC rule table + corpus NFs vs recorded goldens; `HvmSurface` exports
@@ -147,7 +150,9 @@ contradicted §2c's own stack diagram and has been corrected.
 - Not Unison-surface-compatible (prefix `(f a)` application, not `f a`
   juxtaposition) — a Cairn-native calculus in Unison's lineage, not a port.
 
-Remaining: hash-linked call graphs; type-preserving edit propagation;
+Remaining: automated refactor sessions across dependents; user-declarable
+ADTs/abilities. Thin call graph via `call($h)` + host `$call-type` is in;
+type-preserving edit propagation is **detection** (recheck), not auto-patch.
 user-declarable ADTs/abilities.
 
 ## MiniTT — the formal-methods IR ladder's dependent-types rung (§8b)
@@ -219,8 +224,9 @@ judgment rules added.
 - Not in scope: user-declarable inductive types, universe polymorphism,
   real Lean 4 surface syntax or import/export.
 
-Remaining: full path-induction `J`; delta-unfolding `def`s; universe
-polymorphism; user-declarable inductives; a real Lean import/export surface.
+Remaining: full path-induction `J`; universe polymorphism; user-declarable
+inductives; a real Lean import/export surface. Host-side transparent `def`
+delta-unfold (`Environment.unfold`) lands; opaque theorems stay unfolded-not.
 
 **Agreement envelope** (not Lean-kernel compatibility): closed LeanCore fragment
 (`Eq`/`refl`/`subst` + `natRec` ι) vs native Lean `#check` when `lean` is on

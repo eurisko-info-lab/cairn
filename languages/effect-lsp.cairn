@@ -1,0 +1,14 @@
+language effect-lsp {
+  fragment effect-lsp provides effectLsp {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor readMessage : Request;
+    ctor writeMessage : Request(Str);
+    ctor message : Response(Str);
+    ctor sessionEnded : Response;
+    ctor ok : Response;
+    ctor framing : Error(Str);
+    ctor closed : Error;
+  }
+}

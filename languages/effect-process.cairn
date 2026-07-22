@@ -1,0 +1,11 @@
+language effect-process {
+  fragment effect-process provides effectProcess {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor run : Request(Command, Path, Bool);
+    ctor result : Response(Int, Str, Str);
+    ctor notFound : Error(Str);
+    ctor io : Error(Str);
+  }
+}

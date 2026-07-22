@@ -87,44 +87,88 @@ object EffectContext:
 
   /** PackLoader composition root: local subject + Enforce gate restricted to
     * [[PolicyEval.packLoaderWorkspace]] (workspace `read` under `languages*` only).
+    * Optional [[capabilities]] grant bundle takes precedence in [[authorize]].
     */
-  def forPackLoader(audit: Audit = Audit.Local): EffectContext =
+  def forPackLoader(
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
     val subject = Subject("local")
-    EffectContext(subject, AuthorityGate.enforcing(PolicyEval.packLoaderWorkspace(subject)), Nil, audit)
+    EffectContext(
+      subject,
+      AuthorityGate.enforcing(PolicyEval.packLoaderWorkspace(subject)),
+      capabilities,
+      audit)
 
   /** Ledger composition root: append under any ledger root (subject `*` so
     * signing authorities authorize), local CAS put/get, and chain-file FS
     * (read/write/mkdirs) for the node store.
     */
-  def forLedger(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.ledgerWithCas(), audit)
+  def forLedger(
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(PolicyEval.ledgerWithCas(), audit, capabilities)
 
-  /** Process composition root: run any command (deployment may narrow further). */
-  def forProcess(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.processRunner(Subject("local")), audit)
+  /** Process composition root. Default command allow-list matches live
+    * transcript / port runners (`scala-cli`, `cargo`, `runghc`, `lake`, `git`).
+    * Pass `commands = List("*")` only for explicit allow-all fixtures.
+    */
+  def forProcess(
+      audit: Audit = Audit.Local,
+      commands: List[String] = List("scala-cli", "cargo", "runghc", "lake", "git"),
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(PolicyEval.processRunner(Subject("local"), commands), audit, capabilities)
 
   /** LSP composition root: session read/write. */
-  def forLsp(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.lspSession(Subject("local")), audit)
+  def forLsp(
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(PolicyEval.lspSession(Subject("local")), audit, capabilities)
 
-  /** External-backend composition root: find/run any host. */
-  def forBackend(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.externalBackend(Subject("local")), audit)
+  /** External-backend composition root: find/run listed hosts. */
+  def forBackend(
+      audit: Audit = Audit.Local,
+      hosts: List[String] = List("scala-cli", "cargo", "runghc", "lake"),
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(PolicyEval.externalBackend(Subject("local"), hosts), audit, capabilities)
 
   /** CAS composition root: put/get/stats plus admin fsck/gc. */
-  def forCas(audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.casStore(Subject("local")) ++ PolicyEval.casAdmin(Subject("local")), audit)
+  def forCas(
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(
+      PolicyEval.casStore(Subject("local")) ++ PolicyEval.casAdmin(Subject("local")),
+      audit,
+      capabilities)
 
   /** Branches composition root: CAS store + refs-directory filesystem. */
-  def forBranches(refsPathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =
+  def forBranches(
+      refsPathPattern: String = "*",
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
     localCtx(
       PolicyEval.branchesStore(Subject("local"), refsPathPattern) ++
         PolicyEval.casAdmin(Subject("local")),
-      audit)
+      audit,
+      capabilities)
 
   /** Filesystem composition root: read/write/mkdirs under a path pattern. */
-  def forFilesystem(pathPattern: String = "*", audit: Audit = Audit.Local): EffectContext =
-    localCtx(PolicyEval.filesystemStore(Subject("local"), pathPattern), audit)
+  def forFilesystem(
+      pathPattern: String = "*",
+      audit: Audit = Audit.Local,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    localCtx(PolicyEval.filesystemStore(Subject("local"), pathPattern), audit, capabilities)
 
-  private def localCtx(policies: List[Authority.EffectPolicy], audit: Audit): EffectContext =
-    EffectContext(Subject("local"), AuthorityGate.enforcing(policies), Nil, audit)
+  private def localCtx(
+      policies: List[Authority.EffectPolicy],
+      audit: Audit,
+      capabilities: List[VerifiedCapability] = Nil,
+  ): EffectContext =
+    EffectContext(Subject("local"), AuthorityGate.enforcing(policies), capabilities, audit)

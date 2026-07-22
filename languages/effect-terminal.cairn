@@ -1,0 +1,15 @@
+language effect-terminal {
+  fragment effect-terminal provides effectTerminal {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor readLine : Request;
+    ctor write : Request(Str);
+    ctor writeLine : Request(Str);
+    ctor line : Response(Str);
+    ctor eof : Response;
+    ctor ok : Response;
+    ctor closed : Error;
+    ctor io : Error(Str);
+  }
+}

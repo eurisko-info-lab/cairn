@@ -48,30 +48,40 @@ object SectionReport:
   /** @deprecated use [[forOptSurface]] — kept for call sites. */
   def forJsonSurface(report: Cst): Either[String, Cst] = forOptSurface(report)
 
-  private def enFieldLines(sec: Cst): List[Cst] = sec match
+  private def fieldLines(sec: Cst, lang: String): List[Cst] = sec match
     case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-      fields.collect {
+      val preferred = fields.collect {
+        case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(v))) if l == lang =>
+          k -> v
+      }.toMap
+      val en = fields.collect {
         case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf("en"), Cst.Leaf(v))) =>
-          Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
+          k -> v
+      }.toMap
+      (en.keySet ++ preferred.keySet).toList.sorted.map { k =>
+        val v = preferred.getOrElse(k, en(k))
+        Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
       }
     case Cst.Node(tag, _) if sds.typedSectionTags.contains(tag) =>
       val keys = sds.typedSectionKeys.getOrElse(tag, Nil)
-      keys.flatMap(k => sds.sectionFieldText(sec, k, "en").map { v =>
+      keys.flatMap(k => sds.sectionFieldText(sec, k, lang).map { v =>
         Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
       })
     case _ => Nil
 
-  private def sectionBlockFromBody(sec: Cst): Option[Cst] =
+  private def sectionBlockFromBody(sec: Cst, lang: String = "en"): Option[Cst] =
     sds.sectionNumber(sec).map { n =>
       val title = SectionNumbering.byNumber.getOrElse(n, s"section-$n")
       Cst.node(
         "sectionBlock",
         Cst.Leaf(n.toString),
         Cst.Leaf(title),
-        Cst.Node("list", enFieldLines(sec)))
+        Cst.Node("list", fieldLines(sec, lang)))
     }
 
-  /** Build the report CST from a chemical doc (no validation). */
+  /** Build the report CST from a chemical doc (no validation). Host maps are
+    * EN-primary; use [[toCst]](module, …, lang) for locale-aware projection.
+    */
   def toCst(doc: Chemicals.ChemicalDoc): Cst =
     val sections = doc.populatedNumbers.map { n =>
       val body = doc.sections(n)
@@ -90,8 +100,10 @@ object SectionReport:
       Cst.Leaf(doc.cas),
       Cst.Node("list", sections))
 
-  /** Project an SDS language module with `outline` + section body defs. */
-  def toCst(module: Module, outlineName: String): Either[String, Cst] =
+  /** Project an SDS language module with `outline` + section body defs.
+    * [[lang]] selects locale via [[Sds.sectionFieldText]] (corpus refs + shadows).
+    */
+  def toCst(module: Module, outlineName: String, lang: String = "en"): Either[String, Cst] =
     module.get(outlineName) match
       case Some(Cst.Node("outline", List(Cst.Leaf(name), Cst.Leaf(cas), sectionsField))) =>
         val refs = sectionsField match
@@ -100,7 +112,29 @@ object SectionReport:
           case Cst.Node("list", rs) => rs.collect { case Cst.Leaf(r) => r }
           case other => return Left(s"bad outline sections: ${other.render}")
         val blocks = refs.flatMap { ref =>
-          module.get(ref).flatMap(sectionBlockFromBody)
+          module.get(ref).flatMap { sec =>
+            sds.sectionNumber(sec).map { n =>
+              val title = SectionNumbering.byNumber.getOrElse(n, s"section-$n")
+              val keys = sec match
+                case Cst.Node(tag, _) if sds.typedSectionTags.contains(tag) =>
+                  sds.typedSectionKeys.getOrElse(tag, Nil)
+                case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
+                  fields.collect {
+                    case Cst.Node("sectionField" | "sectionFieldRef", List(Cst.Leaf(k), _, _)) => k
+                  }.distinct
+                case _ => Nil
+              val lines = keys.flatMap { k =>
+                sds.sectionFieldText(module, ref, k, lang).map { v =>
+                  Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
+                }
+              }
+              Cst.node(
+                "sectionBlock",
+                Cst.Leaf(n.toString),
+                Cst.Leaf(title),
+                Cst.Node("list", lines))
+            }
+          }
         }
         Right(Cst.node("report", Cst.Leaf(name), Cst.Leaf(cas), Cst.Node("list", blocks)))
       case Some(other) => Left(s"'$outlineName' is not an outline: ${other.render}")
@@ -116,9 +150,9 @@ object SectionReport:
       _ <- RoundTrip.check(grammar, cst)
     yield text
 
-  def render(module: Module, outlineName: String): Either[String, String] =
+  def render(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
-      cst <- toCst(module, outlineName)
+      cst <- toCst(module, outlineName, lang)
       text <- Printer.print(grammar, cst)
       _ <- RoundTrip.check(grammar, cst)
     yield text
@@ -133,9 +167,9 @@ object SectionReport:
       _ <- RoundTrip.check(jsonGrammar, cst)
     yield text
 
-  def renderJson(module: Module, outlineName: String): Either[String, String] =
+  def renderJson(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
-      base <- toCst(module, outlineName)
+      base <- toCst(module, outlineName, lang)
       cst <- forOptSurface(base)
       text <- Printer.print(jsonGrammar, cst)
       _ <- RoundTrip.check(jsonGrammar, cst)
@@ -151,9 +185,9 @@ object SectionReport:
       _ <- RoundTrip.check(xmlGrammar, cst)
     yield text
 
-  def renderXml(module: Module, outlineName: String): Either[String, String] =
+  def renderXml(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
-      cst <- toCst(module, outlineName)
+      cst <- toCst(module, outlineName, lang)
       text <- Printer.print(xmlGrammar, cst)
       _ <- RoundTrip.check(xmlGrammar, cst)
     yield text
@@ -168,9 +202,9 @@ object SectionReport:
       _ <- RoundTrip.check(csvGrammar, cst)
     yield text
 
-  def renderCsv(module: Module, outlineName: String): Either[String, String] =
+  def renderCsv(module: Module, outlineName: String, lang: String = "en"): Either[String, String] =
     for
-      cst <- toCst(module, outlineName)
+      cst <- toCst(module, outlineName, lang)
       text <- Printer.print(csvGrammar, cst)
       _ <- RoundTrip.check(csvGrammar, cst)
     yield text

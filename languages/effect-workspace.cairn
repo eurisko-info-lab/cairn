@@ -1,0 +1,15 @@
+language effect-workspace {
+  fragment effect-workspace provides effectWorkspace {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor languageDirs : Request;
+    ctor listCairnFiles : Request(Path);
+    ctor listSubdirs : Request(Path);
+    ctor listSurfaceCairnFiles : Request(Path);
+    ctor readText : Request(Path);
+    ctor paths : Response(Paths);
+    ctor text : Response(Str);
+    ctor io : Error(Str);
+  }
+}

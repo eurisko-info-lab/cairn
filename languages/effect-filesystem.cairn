@@ -1,0 +1,28 @@
+language effect-filesystem {
+  fragment effect-filesystem provides effectFilesystem {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor read : Request(Path);
+    ctor readBytes : Request(Path);
+    ctor write : Request(Path, Str);
+    ctor writeBytes : Request(Path, Bytes);
+    ctor mkdirs : Request(Path);
+    ctor exists : Request(Path);
+    ctor isDirectory : Request(Path);
+    ctor isRegularFile : Request(Path);
+    ctor isExecutable : Request(Path);
+    ctor list : Request(Path);
+    ctor delete : Request(Path);
+    ctor createTempDirectory : Request(Str);
+    ctor resolve : Request(Path, Path);
+    ctor text : Response(Str);
+    ctor bytes : Response(Bytes);
+    ctor ok : Response;
+    ctor bool : Response(Bool);
+    ctor entries : Response(Paths);
+    ctor pathValue : Response(Path);
+    ctor notFound : Error(Path);
+    ctor io : Error(Str);
+  }
+}

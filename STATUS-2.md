@@ -28,9 +28,14 @@ conflict → approve → sign → publish), **typed SDS sections 1–16**,
 projection pack** `sds-report` (`default`/`json`/`xml`/`csv` — *used by*
 SDS, **not** SDS vocabulary), **branch-linked certificates**,
 **effect-clock + effect-random** fragment load, **causal-LCA property tests**
-(48 trials), and **ReplayReplication** (+ `checkGrant`). Architecture:
-SDS language proper vs report surface packs stay separated (Phase 2/3).
-Full suite: **497 tests** (495 passed + 2 skipped; `tests` module; `sbt test`).
+(48 trials), and **ReplayReplication** (+ `checkGrant`), plus a **follow-on
+engineering pass**: multilingual SDS depth (FR+DE, corpus `fieldLocaleRef`,
+lang-aware report), all ten effect-interface `.cairn` packs, grant-bundle
+threading in SDS causal, STLC/meta runtime SoT, format-preserving
+remove/rename docs + dirty-subtree `putReassociated`, process command
+narrowing, Bend Church numerals / LeanCore transparent unfold / Unison
+`call` graph. Architecture: SDS language proper vs report surface packs stay
+separated (Phase 2/3). Full suite: **502 tests** (500 passed + 2 skipped; `tests` module; `sbt test`).
 
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
@@ -44,7 +49,7 @@ including a 100 000-term fuzz corpus with zero round-trip failures,
 | 3 | Phrase + section-field staleness as ΔSDS | **Done** | both `deriveEnRewrite` paths + tests |
 | 4 | Report projection surfaces (JSON/XML/CSV) | **Advanced** | `sds-report` surfaces only — **not** SDS language; PDF deferred |
 | 5 | Approve/sign/publication certs as linked CAS | **Done** | `BranchManifest.certificates` + `SdsCertificates.attachWorkflow` |
-| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | `effect-clock` + `effect-random` `.cairn`; action maps still host-seeded |
+| 6 | Reduce host bootstrap for effect interfaces | **Advanced** | all ten `effect-*` `.cairn`; Family enum + action maps host-seeded |
 | 7 | Property tests causal-LCA merge DAGs | **Done** | 48 seeded diamond/fork trials |
 | 8 | Replication protocol (replay + revocation) | **Advanced** | `ReplayReplication` + `checkGrant`; merge-only, **BFT deferred** |
 
@@ -61,7 +66,7 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 |---|---|
 | Replay sync | CAS `replay-snapshot` **merge** (union absorb) — **not** consensus / BFT |
 | Journaled recovery | Local accept journal — **≠** distributed atomic txn |
-| Effect interfaces | CAS-pinned; families still largely **host-seeded** (clock+random fragment load) |
+| Effect interfaces | CAS-pinned; all ten families load `.cairn` vocab; Family enum + action maps host-seeded |
 | Report formats | `sds-report` text + JSON + XML + CSV; **PDF deferred**; Studio deferred |
 
 ## Post-parity priority scorecard (2026-07-22)
@@ -72,10 +77,10 @@ Same Phase 2/3 split: language proper (semantic SDS) vs surfaces (encodings).
 | 2 | Versioned regulatory-profile languages (EU REACH/CLP) | **Done** | `eu-clp` + annex-II v1 + title/version judgments |
 | 3 | Typed section-specific structures | **Done** | typed sections 1–16 |
 | 4 | Section-numbering / phrase-staleness as judgments or ΔL | **Done** | `sectionNumberOk`; phrase + section-field derived ΔSDS |
-| 5 | Multilingual section fields: corpus refs + overrides | **Partial** | `sectionFieldRef` + shadows; thin FR overlays |
+| 5 | Multilingual section fields: corpus refs + overrides | **Advanced** | deep FR + ethanol DE; corpus `fieldLocaleRef`; shadow; FR report |
 | 6 | Report formats as surface packs | **Advanced** | `sds-report` default+json+xml+csv; **not** SDS; PDF deferred |
 | 7 | Branch manifests alone reach semantic history | **Done** | `changeHistory` + `certificates`; sidecars caches |
-| 8 | VerifiedCapability / issuer evidence at trust boundaries | **Advanced** | VerifiedCapability + linked approval/sign/publication certs |
+| 8 | VerifiedCapability / issuer evidence at trust boundaries | **Advanced** | grant-bundle on EffectContext; SDS causal capability-first put |
 | 9 | Widen Lean/HVM only via explicit corpus claims | **Done (process)** | No new claim this pass |
 | 10 | Complete SDS workflow through causal repo | **Advanced** | `SdsCausalWorkflow` + ParitySuite; **Studio deferred** |
 
@@ -126,9 +131,9 @@ parallel net reduction       0.34 ms   (3 sweeps, pairs 1,2,3)
 ## Honest deviations from PLAN-2 ACs
 
 - **M7**: byte-identical round-trip holds for whole unedited files + span-precise
-  splicing / `RoundTrip.put` (format-preserving single-subtree edit). There is
-  still no general dirty-subtree re-association; format-preserving ΔL
-  `remove`/`rename` remain unsupported.
+  splicing / `RoundTrip.put` / format-preserving ΔL `remove`/`rename`, plus thin
+  dirty-subtree `putReassociated` (identity-preserved children). General
+  dirty-subtree re-association without identity preservation remains absent.
 - **M10**: incremental reparse retains prefix memo entries; suffix entries are
   discarded (index shift), so "O(affected)" is prefix-anchored.
 - **M17**: semantic merge operates on module change histories; `Branches` refs

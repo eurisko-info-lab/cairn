@@ -154,3 +154,21 @@ class WaveESuite extends munit.FunSuite:
   test("M29: bend errors are honest"):
     assert(Bend.run("def main = ghost").swap.exists(_.contains("unbound variable 'ghost'")))
     assert(Bend.run("def notmain = tru").swap.exists(_.contains("no `def main`")))
+
+  test("M29+: Bend Church numeral 0/2 via isZero; self-ref still unbound"):
+    // Numerals are Church encodings over existing lam/app nets — not HVM NUM.
+    val isZero0 =
+      """
+        |def isZero = @n ( n (@_ (fls)) tru )
+        |def main = isZero 0
+        |""".stripMargin
+    assertEquals(Bend.run(isZero0), Right(Cst.node("true")))
+    val isZero2 =
+      """
+        |def isZero = @n ( n (@_ (fls)) tru )
+        |def main = isZero 2
+        |""".stripMargin
+    assertEquals(Bend.run(isZero2), Right(Cst.node("false")))
+    // Honest boundary: self-referencing def is not a primitive let-rec —
+    // inlining skips self-subst, so `loop` stays unbound.
+    assert(Bend.run("def loop = loop\ndef main = loop").isLeft)

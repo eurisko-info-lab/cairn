@@ -1,0 +1,21 @@
+language effect-cas {
+  fragment effect-cas provides effectCas {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor put : Request(Artifact);
+    ctor get : Request(Digest);
+    ctor contains : Request(Digest);
+    ctor fsck : Request(Path);
+    ctor gc : Request(Path, Digests);
+    ctor stats : Request(Path);
+    ctor typedKey : Response(TypedKey);
+    ctor artifact : Response(Artifact);
+    ctor bool : Response(Bool);
+    ctor fsckReport : Response(FsckReport);
+    ctor gcReport : Response(GcReport);
+    ctor statsReport : Response(Stats);
+    ctor missing : Error(Digest);
+    ctor io : Error(Str);
+  }
+}

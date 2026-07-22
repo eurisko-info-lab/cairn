@@ -23,24 +23,37 @@ import cairn.systemhandler.{CasEffects, EffectContext, MemCas}
   * already use, §2c: no language reimplements its own storage) — `digests` is
   * just a local index of which of THIS store's alpha-normalized terms have
   * been added, not a second copy of the term bytes.
+  *
+  * Hash-linked [[UnisonCore.call]] edges form a thin call graph: renames never
+  * touch caller digests; type-preserving edit propagation is **detection**
+  * (recheck after callee signature change), not auto-patch.
   */
 final class Unison(core: UnisonCore):
   private val spec = core.language.binderSpec
   private val varCtor = core.language.varCtor.getOrElse("var")
 
-  final case class Store(cas: Cas, digests: Set[Digest], ctx: EffectContext):
+  final case class Store(
+      cas: Cas,
+      digests: Set[Digest],
+      types: Map[Digest, Cst],
+      ctx: EffectContext,
+  ):
     def add(term: Cst): (Digest, Store) =
       val normalized = Alpha.normalize(spec, varCtor)(term)
       val d = CasEffects.put(cas, Artifact(ArtifactKind.Term, Cst.toCanon(normalized)), ctx)
         .fold(e => throw RuntimeException(e.toString), _.valueHash)
-      (d, Store(cas, digests + d, ctx))
+      (d, Store(cas, digests + d, types, ctx))
+    def addTyped(term: Cst, ty: Cst): (Digest, Store) =
+      val (d, s2) = add(term)
+      (d, s2.copy(types = s2.types + (d -> ty)))
     def get(d: Digest): Option[Cst] =
       if !digests.contains(d) then None
       else CasEffects.get(cas, d, ctx).toOption.map(a => Cst.fromCanon(a.body))
+    def typeOf(d: Digest): Option[Cst] = types.get(d)
     def size: Int = digests.size
 
   object Store:
-    def empty: Store = Store(MemCas(), Set.empty, EffectContext.forCas())
+    def empty: Store = Store(MemCas(), Set.empty, Map.empty, EffectContext.forCas())
 
   /** The names language: name -> ref <digest>. Its ΔL is the patch language. */
   val namesFragment: Fragment = Fragment(
@@ -68,12 +81,18 @@ final class Unison(core: UnisonCore):
     def define(name: String, term: Cst): Codebase =
       val (d, s2) = store.add(term)
       Codebase(s2, Module(names.defs :+ (name -> refTerm(d))).sorted)
+    def defineTyped(name: String, term: Cst, ty: Cst): Codebase =
+      val (d, s2) = store.addTyped(term, ty)
+      Codebase(s2, Module(names.defs :+ (name -> refTerm(d))).sorted)
     def resolve(name: String): Option[Cst] =
       names.get(name).flatMap {
         case Cst.Node("ref", List(Cst.Leaf(hex))) => store.get(Digest(hex))
         case _ => None }
     def digestOf(name: String): Option[Digest] =
       names.get(name).collect { case Cst.Node("ref", List(Cst.Leaf(hex))) => Digest(hex) }
+    /** Hash-linked callees referenced by `call($h)` in the named term. */
+    def dependencies(name: String): Set[Digest] =
+      resolve(name).map(core.callTargets).getOrElse(Set.empty)
 
   object Codebase:
     def empty: Codebase = Codebase(Store.empty, Module(Nil))

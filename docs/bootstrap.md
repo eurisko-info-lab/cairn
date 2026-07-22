@@ -76,9 +76,12 @@ A separate `grammar.cairn` split remains deferred.
 
 What stays host-backed:
 
-- the initial Scala seed (`Meta.fragment`, STLC fragment constructors)
-- STLC/meta `.cairn` files as checked-in **canonical mirrors** emitted from Scala
-  via `cairn emit-languages` (not yet the runtime source of truth)
+- the initial Scala seed (`Meta.fragment`, STLC fragment constructors) for
+  bootstrap fixpoint / digest-equality tests
+
+STLC/meta `.cairn` files are runtime **source of truth** (loaded by
+`PackLoader`, same as exemplars); `emit-languages` format-preserves them
+against git HEAD.
 
 Exemplar packs (PKI / Law / SDS / Search) are `.cairn` source of truth, loaded
 at runtime by `PackLoader`.

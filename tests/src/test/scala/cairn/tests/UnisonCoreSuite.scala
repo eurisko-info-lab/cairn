@@ -167,3 +167,25 @@ class UnisonCoreSuite extends munit.FunSuite:
     val (cb2, _) = Unison.applyPatch(cb, "{ rename identity to id footprint []; }").fold(e => fail(e), identity)
     assertEquals(cb2.resolve("id"), Some(canonical))
     assertEquals(cb2.store, cb.store)
+
+  test("hash-linked call: rename callee alias; caller digest + deps unchanged"):
+    val idTy = UnisonCore.arrow(UnisonCore.tyUnit, UnisonCore.tyUnit)
+    val idUnit = UnisonCore.lam("x", UnisonCore.tyUnit, UnisonCore.v("x"))
+    val cb0 = Unison.Codebase.empty.defineTyped("identity", idUnit, idTy)
+    val idDigest = cb0.digestOf("identity").get
+    // $call-type needs a ground type — check the call alone (not under app metavars).
+    val chk = UnisonCore.check(UnisonCore.ctxNil, UnisonCore.call(idDigest), idTy, cb0.store.typeOf)
+    assert(chk.isRight, chk.toString)
+    assert(UnisonCore.check(UnisonCore.ctxNil, UnisonCore.call(idDigest), UnisonCore.tyUnit, cb0.store.typeOf).isLeft)
+    val caller = UnisonCore.app(UnisonCore.call(idDigest), UnisonCore.unit)
+    val unfolded = UnisonCore.unfoldCalls(cb0.store.get)(caller)
+    assert(UnisonCore.check(UnisonCore.ctxNil, unfolded, UnisonCore.tyUnit).isRight)
+    val cb1 = cb0.defineTyped("useIdentity", caller, UnisonCore.tyUnit)
+    val callerDigestBefore = cb1.digestOf("useIdentity").get
+    assertEquals(cb1.dependencies("useIdentity"), Set(idDigest))
+    val (cb2, _) = Unison.applyPatch(cb1, "{ rename identity to id footprint []; }").fold(e => fail(e), identity)
+    assertEquals(cb2.digestOf("useIdentity"), Some(callerDigestBefore))
+    assertEquals(cb2.dependencies("useIdentity"), Set(idDigest))
+    assertEquals(
+      UnisonCore.normalize(UnisonCore.unfoldCalls(cb2.store.get)(caller)).fold(e => fail(e), identity),
+      UnisonCore.unit)

@@ -1,0 +1,16 @@
+surface default for effect-ledgerTransport {
+  fragment effect-ledgerTransport {
+    keyword append;
+    keyword block;
+    keyword denied;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += append : tok "append" tok "(" name tok "," name tok ")";
+    syntax Response += block : tok "block" tok "(" name tok ")";
+    syntax Error += denied : tok "denied" tok "(" str tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

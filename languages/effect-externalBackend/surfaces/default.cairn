@@ -1,0 +1,20 @@
+surface default for effect-externalBackend {
+  fragment effect-externalBackend {
+    keyword find;
+    keyword run;
+    keyword found;
+    keyword missing;
+    keyword processResult;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += find : tok "find" tok "(" name tok ")";
+    syntax Request += run : tok "run" tok "(" name tok "," name tok "," name tok ")";
+    syntax Response += found : tok "found" tok "(" name tok ")";
+    syntax Response += missing : tok "missing" tok "(" name tok ")";
+    syntax Response += processResult : tok "processResult" tok "(" num tok "," str tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

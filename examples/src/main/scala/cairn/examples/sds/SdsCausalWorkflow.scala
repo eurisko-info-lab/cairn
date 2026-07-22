@@ -1,6 +1,6 @@
 package cairn.examples.sds
 
-import cairn.systemhandler.{Branches, DiskCas, Ed25519, EffectContext, Node}
+import cairn.systemhandler.{AuthorityGate, Branches, DiskCas, Ed25519, EffectContext, Node}
 import cairn.kernel.*
 import cairn.kernel.Authority.*
 import cairn.core.*
@@ -26,6 +26,8 @@ object SdsCausalWorkflow:
       approvedDigest: Digest,
       historyFromManifestAlone: Int,
       verifiedCapabilityOk: Boolean,
+      /** CAS put authorized via non-empty grant bundle (capability-first path). */
+      capabilityAuthorizedPut: Boolean,
       tipSignatureHex: String,
       certificateDigests: List[Digest],
       ledgerPublished: Boolean,
@@ -91,10 +93,21 @@ object SdsCausalWorkflow:
     val policies = List(EffectPolicy(
       "sds-publish", subject, putKey, Resource("*", "*"), Decision.Allow))
     val req = EffectRequest(subject, putKey, EffectMeta.cas.resource.at(tipDigest.hex))
-    val verifiedCapabilityOk =
-      PolicyEval.prove(req, policies, nowMillis = 0).flatMap { proof =>
-        Authority.VerifiedCapability.fromProof(proof, policies)
-      }.isRight
+    val verifiedCap = PolicyEval.prove(req, policies, nowMillis = 0).flatMap { proof =>
+      Authority.VerifiedCapability.fromProof(proof, policies)
+    }
+    val verifiedCapabilityOk = verifiedCap.isRight
+    // Thread the mint into a real EffectContext — capability-first authorize
+    // (empty gate policies; grant bundle alone must cover the CAS put).
+    val capabilityAuthorizedPut = verifiedCap match
+      case Right(cap) =>
+        val capCtx = EffectContext(
+          subject,
+          AuthorityGate.enforcing(Nil),
+          capabilities = List(cap),
+          clock = () => 0L)
+        capCtx.authorize(putKey, EffectMeta.cas.resource.at(tipDigest.hex)).isRight
+      case Left(_) => false
 
     // History reachable from manifest alone (sidecars deleted)
     branches.commitTip("sds-hist", industrialTip)
@@ -108,7 +121,8 @@ object SdsCausalWorkflow:
     val historyFromManifestAlone =
       branches.loadChangeHistory("sds-hist", lang).fold(e => throw RuntimeException(e), _.length)
 
-    // 7. Publish approved head to ledger
+    // 7. Publish approved head to ledger (capability bundle on branches ctx unused
+    // for ledger append — ledger still uses forLedger policy path)
     val node = Node(work.resolve("ledger"), EffectContext.forLedger())
     val auth = Map(alice.name -> alice.publicBytes)
     node.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity(alice.name, alice.publicBytes))))
@@ -125,6 +139,7 @@ object SdsCausalWorkflow:
       approvedDigest = tipDigest,
       historyFromManifestAlone = historyFromManifestAlone,
       verifiedCapabilityOk = verifiedCapabilityOk,
+      capabilityAuthorizedPut = capabilityAuthorizedPut,
       tipSignatureHex = tipSigHex,
       certificateDigests = certificateDigests,
       ledgerPublished = ledgerPublished)

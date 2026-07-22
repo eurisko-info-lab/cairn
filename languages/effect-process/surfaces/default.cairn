@@ -1,0 +1,16 @@
+surface default for effect-process {
+  fragment effect-process {
+    keyword run;
+    keyword result;
+    keyword notFound;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += run : tok "run" tok "(" name tok "," name tok "," name tok ")";
+    syntax Response += result : tok "result" tok "(" num tok "," str tok "," str tok ")";
+    syntax Error += notFound : tok "notFound" tok "(" str tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

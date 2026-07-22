@@ -1,0 +1,11 @@
+language effect-ledgerTransport {
+  fragment effect-ledgerTransport provides effectLedgerTransport {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor append : Request(Authority, Txs);
+    ctor block : Response(Block);
+    ctor denied : Error(Str);
+    ctor io : Error(Str);
+  }
+}

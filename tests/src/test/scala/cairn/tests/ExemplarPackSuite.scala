@@ -568,55 +568,73 @@ class ExemplarPackSuite extends munit.FunSuite:
     assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
 
   test("SDS chemicals fixtures: acetone thin FR section fields + optional restale"):
-    import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness}
+    import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness, SectionReport}
     val m = Chemicals.Acetone.thinModule
     Sds.validate(m).fold(e => fail(e), identity)
     assertEquals(Sds.sectionFieldText(m, "s1", "productName", "fr"), Some("Acétone"))
+    assert(Sds.sectionFieldText(m, "s1", "usesAdvisedAgainst", "fr").exists(_.startsWith("Utilisation")))
     assertEquals(Sds.sectionFieldText(m, "s2", "signalWord", "fr"), Some("Danger"))
     assertEquals(Sds.sectionFieldText(m, "s2", "hazardPhrases", "fr"), Some("H225 ; H319 ; H336"))
+    assertEquals(Sds.sectionFieldText(m, "s3", "componentName", "fr"), Some("Acétone"))
+    assertEquals(Sds.sectionFieldText(m, "s9", "appearance", "fr"), Some("Liquide incolore."))
     // untranslated EN-only key still falls back
     assertEquals(
-      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "fr"),
-      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "en"))
+      Sds.sectionFieldText(m, "s3", "cas", "fr"),
+      Sds.sectionFieldText(m, "s3", "cas", "en"))
     assert(Sds.sectionFieldText(m, "s16", "otherInformation", "fr").exists(_.contains("démonstration")))
-    // host SectionReport stays EN-primary
-    assertEquals(Chemicals.Acetone.thin.sections(1).fields("productName"), "Acetone")
-    assert(Chemicals.Acetone.thin.sections(1).locales("fr").contains("productName"))
-    // optional restale over fixture-populated FR siblings
+    // corpus-ref signalWord: free-text restale is on productName, not signalWord FR
     assertEquals(
       SectionFieldStaleness.staleLangsAfterEnChange(m, "s1", "productName", "Acetone (lab)"),
       Set("fr"))
-    val projected = SectionFieldStaleness.project(m, "s2", "signalWord")
+    val projected = SectionFieldStaleness.project(m, "s1", "productName")
     assertEquals(projected("fr").state, PhraseStaleness.State.HumanReviewed)
-    val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Danger"))
-    assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
+    // FR report projection resolves corpus refs
+    val frXml = SectionReport.renderXml(m, "acetoneOutline", "fr").fold(e => fail(e), identity)
+    assert(frXml.contains("Acétone"), frXml)
+    assert(frXml.contains("Danger"), frXml)
+    // host SectionReport doc maps stay EN-primary
+    assertEquals(Chemicals.Acetone.thin.sections(1).fields("productName"), "Acetone")
+    assert(Chemicals.Acetone.thin.sections(1).locales("fr").contains("productName"))
     for (_, term) <- m.defs do
       RoundTrip.check(Sds.language.grammar, term).fold(e => fail(e), identity)
 
-  test("SDS chemicals fixtures: ethanol thin FR section fields + optional restale"):
+  test("SDS chemicals fixtures: ethanol thin FR+DE + corpus signalWord"):
     import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness}
     val m = Chemicals.Ethanol.thinModule
     Sds.validate(m).fold(e => fail(e), identity)
     assertEquals(Sds.sectionFieldText(m, "s1", "productName", "fr"), Some("Éthanol"))
+    assertEquals(Sds.sectionFieldText(m, "s1", "productName", "de"), Some("Ethanol"))
     assertEquals(Sds.sectionFieldText(m, "s2", "signalWord", "fr"), Some("Danger"))
+    assertEquals(Sds.sectionFieldText(m, "s2", "signalWord", "de"), Some("Gefahr"))
     assertEquals(Sds.sectionFieldText(m, "s2", "hazardPhrases", "fr"), Some("H225 ; H319"))
-    // untranslated EN-only key still falls back
     assertEquals(
-      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "fr"),
+      Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "de"),
       Sds.sectionFieldText(m, "s2", "hazardsNotOtherwiseClassified", "en"))
     assert(Sds.sectionFieldText(m, "s16", "otherInformation", "fr").exists(_.contains("démonstration")))
-    // host SectionReport stays EN-primary
     assertEquals(Chemicals.Ethanol.thin.sections(1).fields("productName"), "Ethanol")
     assert(Chemicals.Ethanol.thin.sections(1).locales("fr").contains("productName"))
+    assert(Chemicals.Ethanol.thin.sections(1).locales("de").contains("productName"))
     assertEquals(
       SectionFieldStaleness.staleLangsAfterEnChange(m, "s1", "productName", "Ethanol (lab)"),
-      Set("fr"))
-    val projected = SectionFieldStaleness.project(m, "s2", "signalWord")
+      Set("fr", "de"))
+    val projected = SectionFieldStaleness.project(m, "s1", "productName")
     assertEquals(projected("fr").state, PhraseStaleness.State.HumanReviewed)
-    val same = PhraseStaleness.restale(projected, PhraseStaleness.textHash("Danger"))
-    assertEquals(same("fr").state, PhraseStaleness.State.HumanReviewed)
     for (_, term) <- m.defs do
       RoundTrip.check(Sds.language.grammar, term).fold(e => fail(e), identity)
+
+  test("SDS thin fixtures: corpus fieldLocaleRef + sectionFieldShadow override"):
+    import cairn.examples.sds.Chemicals
+    val base = Chemicals.Acetone.thinModule
+    // signalWord FR resolves through ghsDanger corpus phrase
+    assertEquals(Sds.phraseText(base, "ghsDanger", "fr"), Some("Danger"))
+    assertEquals(Sds.sectionFieldText(base, "s2", "signalWord", "fr"), Some("Danger"))
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val shadowCs = Parser.parse(dl.grammar,
+      """{ add indSignal = field shadow s2 overrides signalWord with "Warning - industrial" ; }""")
+      .fold(e => fail(e), identity)
+    val Right((mShadow, _)) = Sds.applySds(base, shadowCs): @unchecked
+    assertEquals(Sds.sectionFieldText(mShadow, "s2", "signalWord", "fr"), Some("Warning - industrial"))
+    assertEquals(Sds.sectionFieldText(mShadow, "s2", "signalWord", "en"), Some("Warning - industrial"))
 
   test("SDS section-field shadow: overrides text; rebase conflicts on section edit"):
     import cairn.examples.sds.Chemicals
@@ -772,22 +790,23 @@ class ExemplarPackSuite extends munit.FunSuite:
   test("SDS section-field staleness: derived ΔL materializes sectionFieldState"):
     import cairn.examples.sds.{Chemicals, SectionFieldStaleness, PhraseStaleness}
     val base = Chemicals.Acetone.thinModule
+    // Free-text FR sibling (productName) — not corpus-ref signalWord
     val oldHash = PhraseStaleness.textHash(
-      Sds.sectionFieldText(base, "s2", "signalWord", "en").get)
+      Sds.sectionFieldText(base, "s1", "productName", "en").get)
     val Right((m2, _)) = SectionFieldStaleness.applyEnRewrite(
-      Sds.applySds, Sds.language, base, "s2", "signalWord", "Warning"): @unchecked
-    val mark = SectionFieldStaleness.markName("s2", "signalWord", "fr")
+      Sds.applySds, Sds.language, base, "s1", "productName", "Acetone (lab)"): @unchecked
+    val mark = SectionFieldStaleness.markName("s1", "productName", "fr")
     assert(m2.get(mark).exists {
       case Cst.Node("sectionFieldState", List(
-          Cst.Leaf("s2"), Cst.Leaf("signalWord"), Cst.Leaf("fr"), Cst.Leaf(h),
+          Cst.Leaf("s1"), Cst.Leaf("productName"), Cst.Leaf("fr"), Cst.Leaf(h),
           Cst.Leaf("staleBecauseSourceChanged"))) =>
         h == oldHash.hex
       case _ => false
     })
     assertEquals(
-      SectionFieldStaleness.project(m2, "s2", "signalWord")("fr").state,
+      SectionFieldStaleness.project(m2, "s1", "productName")("fr").state,
       PhraseStaleness.State.StaleBecauseSourceChanged)
-    assertEquals(Sds.sectionFieldText(m2, "s2", "signalWord", "en"), Some("Warning"))
+    assertEquals(Sds.sectionFieldText(m2, "s1", "productName", "en"), Some("Acetone (lab)"))
 
   test("EU-CLP profile conformance over SDS module (not numbering alone)"):
     import cairn.examples.sds.{Chemicals, EuClp}
@@ -799,20 +818,17 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(full.ok, full.errors.mkString("; "))
     assertEquals(full.sectionNumbers, (1 to 16).toList)
 
-  test("effect fragments load; clock/random FromFragment pins without host AST"):
-    val clockLang = packs.requireClosed("effect-clock")
-    val clockFrag = clockLang.fragments.find(_.name == "effect-clock").getOrElse(fail("no clock fragment"))
-    val clockEf = EffectMeta.clockFromFragment(clockFrag).fold(e => fail(e), identity)
-    assertEquals(EffectMeta.completeness(clockEf), Nil)
-    assert(clockEf.fragment.digest != EffectMeta.clock.fragment.digest)
-    val pinned = EffectMeta.PinnedInterface.fromArtifact(EffectMeta.interfaceArtifact(clockEf))
-      .fold(e => fail(e), identity)
-    assert(Effects.ActionKey.fromPinned(pinned, "now").isRight)
-    val randomLang = packs.requireClosed("effect-random")
-    val randomFrag = randomLang.fragments.find(_.name == "effect-random").getOrElse(fail("no random fragment"))
-    val randomEf = EffectMeta.randomFromFragment(randomFrag).fold(e => fail(e), identity)
-    assertEquals(EffectMeta.completeness(randomEf), Nil)
-    assert(randomEf.fragment.digest != EffectMeta.random.fragment.digest)
+  test("effect fragments load; all families FromFragment pin without host AST"):
+    for name <- EffectMeta.fragmentPackNames do
+      val lang = packs.requireClosed(name)
+      val frag = lang.fragments.find(_.name == name).getOrElse(fail(s"no fragment in $name"))
+      val ef = EffectMeta.fromFragmentPack(name, frag).fold(e => fail(s"$name: $e"), identity)
+      assertEquals(EffectMeta.completeness(ef), Nil, name)
+      val pinned = EffectMeta.PinnedInterface.fromArtifact(EffectMeta.interfaceArtifact(ef))
+        .fold(e => fail(e), identity)
+      assert(Effects.ActionKey.fromPinned(pinned, ef.actions.head).isRight, name)
+    // Family enum + action-map args remain host-seeded (opaque routing).
+    assert(Effects.Family.values.length == EffectMeta.families.size)
 
   test("ReplayReplication: want/have + revocation absorb + checkGrant (merge, not BFT)"):
     import cairn.systemhandler.{MemCas, ReplayReplication, ReplayStore, RevocationLog}

@@ -1,0 +1,13 @@
+language effect-externalBackend {
+  fragment effect-externalBackend provides effectExternalBackend {
+    sort Request tree;
+    sort Response tree;
+    sort Error tree;
+    ctor find : Request(Host);
+    ctor run : Request(Host, Args, Path);
+    ctor found : Response(Path);
+    ctor missing : Response(Host);
+    ctor processResult : Response(Int, Str);
+    ctor io : Error(Str);
+  }
+}

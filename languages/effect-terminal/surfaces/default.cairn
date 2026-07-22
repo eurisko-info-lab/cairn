@@ -1,0 +1,24 @@
+surface default for effect-terminal {
+  fragment effect-terminal {
+    keyword readLine;
+    keyword write;
+    keyword writeLine;
+    keyword line;
+    keyword eof;
+    keyword ok;
+    keyword closed;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += readLine : tok "readLine" tok "(" tok ")";
+    syntax Request += write : tok "write" tok "(" str tok ")";
+    syntax Request += writeLine : tok "writeLine" tok "(" str tok ")";
+    syntax Response += line : tok "line" tok "(" str tok ")";
+    syntax Response += eof : tok "eof" tok "(" tok ")";
+    syntax Response += ok : tok "ok" tok "(" tok ")";
+    syntax Error += closed : tok "closed" tok "(" tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

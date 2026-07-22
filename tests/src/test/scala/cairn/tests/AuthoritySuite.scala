@@ -472,6 +472,11 @@ class AuthoritySuite extends munit.FunSuite:
     assert(ok.isRight, ok.toString)
     val miss = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/var/a"))
     assert(miss.isLeft)
+    // Composition-root factory accepts a grant bundle; capability-first denies write
+    assert(ctx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/a")).isLeft)
+    val rooted = EffectContext.forFilesystem("/tmp*", capabilities = List(cap))
+      .copy(subject = alice, clock = () => 0L)
+    assert(rooted.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/b")).isRight)
     // empty capabilities fall back to policy path
     val policyCtx = EffectContext(alice, AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead))))
     assert(policyCtx.authorize(readReq).isRight)
@@ -603,6 +608,9 @@ class AuthoritySuite extends munit.FunSuite:
     assert(proc.authorize(
       EffectMeta.process.actionKey("run"),
       EffectMeta.process.resource.at("scala-cli")).isRight)
+    assert(proc.authorize(
+      EffectMeta.process.actionKey("run"),
+      EffectMeta.process.resource.at("/bin/sh")).isLeft, "narrow process denylist")
     assert(proc.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
     val led = EffectContext.forLedger()
     val authSubj = led.withSubject(Subject("alice"))

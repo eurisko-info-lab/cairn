@@ -74,6 +74,7 @@ class ParitySuite extends munit.FunSuite:
     assert(r.conflictOverlap.contains("h225"), r.conflictOverlap.toString)
     assertEquals(r.historyFromManifestAlone, 2)
     assert(r.verifiedCapabilityOk)
+    assert(r.capabilityAuthorizedPut, "grant-bundle must authorize CAS put without policies")
     assert(r.tipSignatureHex.nonEmpty)
     assertEquals(r.certificateDigests.length, 3)
     assert(r.ledgerPublished)

@@ -77,6 +77,9 @@ class WaveH1Suite extends munit.FunSuite:
     val lang = packs.requireClosed("stlc")
     assertEquals(lang.digest, Stlc.language.digest)
     assertEquals(lang.grammar, Stlc.language.grammar)
+    // meta.cairn is also runtime SoT (seed Meta.language stays digest-equal)
+    val meta = packs.requireClosed("meta")
+    assertEquals(meta.digest, Meta.language.digest)
 
   test("M42: a brand-new toy language as pure text — parse, eval, no Scala"):
     val toySrc = """

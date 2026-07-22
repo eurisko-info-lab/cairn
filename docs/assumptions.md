@@ -19,9 +19,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
 5. **Whitespace policy**: the tree-level law `parse(print(t)) == t` plus
    byte-exact concrete printing for UNEDITED files and span-precise splicing /
    `RoundTrip.put` / `Concrete.put` (M7) for format-preserving subtree edits.
-   General dirty-subtree re-association is not implemented; `put`/`splice` only
-   replace one recorded span. Format-preserving ΔL `remove`/`rename` are still
-   absent (rename needs leaf-name spans). Default print rules are derived from
+   General dirty-subtree re-association for freshly rebuilt trees without
+   identity preservation is not implemented; `put`/`splice`/`putMany` edit
+   recorded spans, and thin `putReassociated` reuses identity-preserved
+   children. Format-preserving ΔL `remove`/`rename` are supported. Default
+   print rules are derived from
    syntax productions (`PrintDerive`); an explicit `print` line is an override.
    RoundTrip still gates trust — derivation is not trusted alone.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
@@ -51,9 +53,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
    — digest **merge**, not consensus. Capability revocation uses the same
    want/have shape (`ReplayReplication` / `RevocationLog`); BFT deferred.
    Effect interfaces pin as CAS `effect-interface` artifacts
-   (`PinnedInterface` / `ActionKey.fromPinned`); families remain largely
-   host-seeded (thin: `languages/effect-clock.cairn` + `effect-random.cairn`
-   via `clockFromFragment` / `randomFromFragment`).
+   (`PinnedInterface` / `ActionKey.fromPinned`); all ten families load
+   vocabulary from `languages/effect-*.cairn` via `*FromFragment`. Residual:
+   `Effects.Family` enum + action-map / `requestActions` args remain
+   host-seeded (opaque interpreter routing). `EffectContext.capabilities`
+   threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
    atomic transaction. SDS *uses* report projection pack `sds-report`
    (text + JSON + XML + CSV surfaces under `languages/sds-report/surfaces/`);
@@ -77,11 +81,11 @@ maximalization (PLAN-2.md) has since discharged; see STATUS-2.md.
 11. ~~Meta-language staging~~ — discharged by M41/M42: the fused meta surface
     covers grammar productions, print rules, infix tables, rewrite rules, and
     judgments; `languages/meta.cairn` passes the self-description fixpoint
-    (Meta can describe/reconstruct itself). The initial seed and STLC/meta
-    source-of-truth migration remain host-backed: STLC/meta `.cairn` are
-    checked-in canonical mirrors from Scala via `emit-languages`. Exemplar
-    packs (PKI/Law/SDS/Search) are `.cairn` source of truth and load at
-    runtime. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds:
+    (Meta can describe/reconstruct itself). **STLC/meta `.cairn` are runtime
+    source of truth** via `PackLoader` (same as exemplars); Scala
+    `Stlc.fragments` / `Meta.fragment` remain the bootstrap seed (digest-
+    equality / fixpoint tests). `emit-languages` format-preserves against git
+    HEAD. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds:
     semantic `languages/<name>.cairn` + `languages/<name>/surfaces/default.cairn`.
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/

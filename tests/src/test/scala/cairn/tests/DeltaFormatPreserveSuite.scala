@@ -10,8 +10,9 @@ import cairn.examples.stlc.Stlc
   * byte outside the span. Without `put`, a whole-tree [[Printer.print]] after
   * the same structural edit drops comments/spacing — the contrast test below
   * fails if `put` regresses to canonical reprint. Module-level ΔL uses the same
-  * primitive via [[Delta.applyPreservingFormat]] (`replace`/`edit`/`add`;
-  * `remove`/`rename` explicitly unsupported — see Delta.scala).
+  * primitive via [[Delta.applyPreservingFormat]] (`replace`/`edit`/`add`/
+  * `remove`/`rename`). [[RoundTrip.putReassociated]] covers the thin dirty-
+  * subtree slice (identity-preserved children).
   */
 class DeltaFormatPreserveSuite extends munit.FunSuite:
   private val dl = Delta.deltaOf(Stlc.language).fold(e => fail(e.map(_.render).mkString), identity)
@@ -164,3 +165,25 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
     val change = parseChange("{ rename a to b footprint [ ] ; }")
     val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
     assert(result.isLeft, result.toString)
+
+  test("dirty-subtree re-association: two sibling edits preserve outer trivia"):
+    val g = Stlc.language.grammar
+    val src = "-- keep me\nif true then x else  y -- and me\n"
+    val out = Parser.parseFull(g, src).fold(e => fail(e), identity)
+    val (cond, thenB, elseB) = out.cst match
+      case Cst.Node("if", List(c, t, e)) => (c, t, e)
+      case other => fail(s"unexpected: ${other.render}")
+    // Rebuild if with identity-preserved condition; both branches dirty.
+    val dirty = Cst.node("if", cond, Stlc.fls, Stlc.tru)
+    val viaReassoc = RoundTrip.putReassociated(g, src, out, out.cst, dirty)
+      .fold(e => fail(e), identity)
+    assert(viaReassoc.contains("-- keep me"), viaReassoc)
+    assert(viaReassoc.contains("-- and me"), viaReassoc)
+    assert(viaReassoc.contains("then false"), viaReassoc)
+    assert(viaReassoc.contains("else true") || viaReassoc.contains("else  true"), viaReassoc)
+    // Whole-tree print loses trivia — proves putReassociated is load-bearing.
+    val viaPrint = Printer.print(g, dirty).fold(e => fail(e), identity)
+    assert(!viaPrint.contains("-- keep me"), viaPrint)
+    // Without identity preservation, dirtyEdits would target the whole if —
+    // condition span would also be reprinted (still correct, but coarser).
+    assertEquals(Concrete.dirtyEdits(out.cst, dirty).map(_._1), List(thenB, elseB))

@@ -1,0 +1,50 @@
+surface default for effect-filesystem {
+  fragment effect-filesystem {
+    keyword read;
+    keyword readBytes;
+    keyword write;
+    keyword writeBytes;
+    keyword mkdirs;
+    keyword exists;
+    keyword isDirectory;
+    keyword isRegularFile;
+    keyword isExecutable;
+    keyword list;
+    keyword delete;
+    keyword createTempDirectory;
+    keyword resolve;
+    keyword text;
+    keyword bytes;
+    keyword ok;
+    keyword bool;
+    keyword entries;
+    keyword pathValue;
+    keyword notFound;
+    keyword io;
+    punct "(";
+    punct ")";
+    punct ",";
+    syntax Request += read : tok "read" tok "(" name tok ")";
+    syntax Request += readBytes : tok "readBytes" tok "(" name tok ")";
+    syntax Request += write : tok "write" tok "(" name tok "," str tok ")";
+    syntax Request += writeBytes : tok "writeBytes" tok "(" name tok "," str tok ")";
+    syntax Request += mkdirs : tok "mkdirs" tok "(" name tok ")";
+    syntax Request += exists : tok "exists" tok "(" name tok ")";
+    syntax Request += isDirectory : tok "isDirectory" tok "(" name tok ")";
+    syntax Request += isRegularFile : tok "isRegularFile" tok "(" name tok ")";
+    syntax Request += isExecutable : tok "isExecutable" tok "(" name tok ")";
+    syntax Request += list : tok "list" tok "(" name tok ")";
+    syntax Request += delete : tok "delete" tok "(" name tok ")";
+    syntax Request += createTempDirectory : tok "createTempDirectory" tok "(" str tok ")";
+    syntax Request += resolve : tok "resolve" tok "(" name tok "," name tok ")";
+    syntax Response += text : tok "text" tok "(" str tok ")";
+    syntax Response += bytes : tok "bytes" tok "(" str tok ")";
+    syntax Response += ok : tok "ok" tok "(" tok ")";
+    syntax Response += bool : tok "bool" tok "(" name tok ")";
+    syntax Response += entries : tok "entries" tok "(" name tok ")";
+    syntax Response += pathValue : tok "pathValue" tok "(" name tok ")";
+    syntax Error += notFound : tok "notFound" tok "(" name tok ")";
+    syntax Error += io : tok "io" tok "(" str tok ")";
+    top Request;
+  }
+}

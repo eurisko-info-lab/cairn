@@ -61,6 +61,8 @@ final class UnisonCore(packs: PackAccess):
     n("matchOption", scrut, noneB, Cst.Leaf(x), someB)
   def abort: Cst = n("abort")
   def handle(body: Cst, h: Cst): Cst = n("handle", body, h)
+  /** Hash-linked call into a stored definition (content address, not name). */
+  def call(d: Digest): Cst = n("call", Cst.Leaf(d.hex))
 
   // ---- contexts + judgment goal (Scala-level plumbing only, same
   // convention as MiniTT/STLC: never parsed/printed) ----
@@ -68,8 +70,25 @@ final class UnisonCore(packs: PackAccess):
   def ctxCons(x: String, t: Cst, r: Cst): Cst = n("ctxCons", Cst.Leaf(x), t, r)
   def hasType(ctx: Cst, term: Cst, ty: Cst): Cst = n("hasType", ctx, term, ty)
 
+  /** Type lookup for `call($h)` — host extension; store must record types. */
+  type TypeOf = Digest => Option[Cst]
+
+  def extensions(typeOf: TypeOf): Map[String, List[Cst] => Either[String, Boolean]] = Map(
+    "$call-type" -> {
+      case List(Cst.Leaf(h), t) =>
+        Right(typeOf(Digest(h)).exists(stored => stored == t))
+      case other => Left(s"$$call-type: bad args ${other.map(_.render).mkString(", ")}")
+    })
+
   def checkerCfg: CheckerCfg =
     CheckerCfg(language.judgments.values.toList, binderSpec = language.binderSpec,
+      varCtor = language.varCtor.getOrElse("var"))
+
+  def checkerCfg(typeOf: TypeOf): CheckerCfg =
+    CheckerCfg(
+      language.judgments.values.toList,
+      extensions = extensions(typeOf),
+      binderSpec = language.binderSpec,
       varCtor = language.varCtor.getOrElse("var"))
 
   /** Untrusted `Search.infer` proposes, the independent `Checker.check`
@@ -80,4 +99,21 @@ final class UnisonCore(packs: PackAccess):
     Search.infer(cfg, hasType(ctx, term, ty)).flatMap { d =>
       Checker.check(cfg, d).left.map(_.render).map(_ => d) }
 
+  def check(ctx: Cst, term: Cst, ty: Cst, typeOf: TypeOf): Either[String, Derivation] =
+    val cfg = checkerCfg(typeOf)
+    Search.infer(cfg, hasType(ctx, term, ty)).flatMap { d =>
+      Checker.check(cfg, d).left.map(_.render).map(_ => d) }
+
   def normalize(term: Cst): Either[String, Cst] = TreeEngine.normalize(language, term)
+
+  /** Host-side unfold of `call($h)` before normalize (detection / reduction). */
+  def unfoldCalls(lookup: Digest => Option[Cst])(t: Cst): Cst = t match
+    case Cst.Node("call", List(Cst.Leaf(h))) =>
+      lookup(Digest(h)).map(unfoldCalls(lookup)).getOrElse(t)
+    case Cst.Node(tag, cs) => Cst.Node(tag, cs.map(unfoldCalls(lookup)))
+    case other => other
+
+  def callTargets(t: Cst): Set[Digest] = t match
+    case Cst.Node("call", List(Cst.Leaf(h))) => Set(Digest(h))
+    case Cst.Node(_, cs) => cs.flatMap(callTargets).toSet
+    case _ => Set.empty
