@@ -30,6 +30,12 @@ class AgreementSuite extends munit.FunSuite:
       .map(dir => Path.of(dir, name))
       .find(Files.isExecutable)
 
+  private def onPathAll(name: String): List[Path] =
+    sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator).iterator
+      .map(dir => Path.of(dir, name))
+      .filter(Files.isExecutable)
+      .toList
+
   private def runCmd(cmd: List[String]): (Int, String) =
     val pb = new ProcessBuilder(cmd*)
     pb.redirectErrorStream(true)
@@ -37,14 +43,28 @@ class AgreementSuite extends munit.FunSuite:
     val out = new String(proc.getInputStream.readAllBytes())
     (proc.waitFor(), out)
 
-  /** Run exported HVM2 book when `hvm` is on PATH; else keep classical golden. */
+  /** Distinguish the intended Rust HVM2 CLI from unrelated tools that also
+    * happen to be named `hvm` on some PATH (e.g. an HVM3/Haskell build) —
+    * both can coexist on a dev machine, and only HVM2's `--help` banner
+    * identifies it; a same-named but incompatible binary earlier on PATH
+    * would otherwise be run and rejected with a confusing parse error.
+    */
+  private def isHvm2Cli(hvm: Path): Boolean =
+    try runCmd(List(hvm.toString, "--help"))._2.contains("HVM2")
+    catch case _: Exception => false
+
+  private def onPathHvm2(): Option[Path] = onPathAll("hvm").find(isHvm2Cli)
+
+  /** Run exported HVM2 book when the real HVM2 `hvm` CLI is on PATH; else
+    * keep classical golden.
+    */
   private def hvmCertify(
       book: String,
       expectation: String,
       golden: Digest
   ): (Digest, NativeSource) =
     val exportDig = HvmSurface.exportDigest("hvm2-book", book)
-    onPath("hvm") match
+    onPathHvm2() match
       case None => (golden, NativeSource.Golden)
       case Some(hvm) =>
         val dir = Files.createTempDirectory("cairn-agree-hvm")
