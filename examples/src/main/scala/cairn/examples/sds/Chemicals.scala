@@ -13,17 +13,20 @@ import cairn.core.*
   * remaining gaps.
   */
 object Chemicals:
-  /** One populated EU-CLP section body (EN text fields; demo data only). */
+  /** One populated EU-CLP section body. Host maps stay EN-keyed; [[toTerm]]
+    * projects `sectionField` with `lang en`. Multilingual variants are authored
+    * as extra language terms (same key, other langs) — see SDS `sectionFieldText`.
+    */
   final case class SectionBody(number: Int, fields: Map[String, String]):
     def title: String =
       SectionNumbering.byNumber.getOrElse(number, s"INVALID-$number")
     def outlineEntry: SectionNumbering.OutlineEntry =
       SectionNumbering.OutlineEntry(number, title)
 
-    /** Language term: `eu section N fields ( k : "v", … )`. */
+    /** Language term: `eu section N fields ( k lang en : "v", … )`. */
     def toTerm: Cst =
       val fs = fields.toList.map { case (k, v) =>
-        Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf(v))
+        Cst.node("sectionField", Cst.Leaf(k), Cst.Leaf("en"), Cst.Leaf(v))
       }
       Cst.node("euSection", Cst.Leaf(number.toString), Cst.Node("list", fs))
 

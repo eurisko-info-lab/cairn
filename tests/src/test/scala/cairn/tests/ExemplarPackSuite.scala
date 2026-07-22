@@ -288,14 +288,14 @@ class ExemplarPackSuite extends munit.FunSuite:
   test("SDS language sections: euSection/outline parse/print round-trip"):
     val g = Sds.language.grammar
     val sec = Parser.parse(g,
-      """eu section 2 fields ( hazardPhrases : "H225; H319" , signalWord : "Danger" )""")
+      """eu section 2 fields ( hazardPhrases lang en : "H225; H319" , signalWord lang en : "Danger" )""")
       .fold(e => fail(e), identity)
     RoundTrip.check(g, sec).fold(e => fail(e), identity)
     assertEquals(sec,
       Cst.node("euSection", Cst.Leaf("2"),
         Cst.Node("list", List(
-          Cst.node("sectionField", Cst.Leaf("hazardPhrases"), Cst.Leaf("H225; H319")),
-          Cst.node("sectionField", Cst.Leaf("signalWord"), Cst.Leaf("Danger"))))))
+          Cst.node("sectionField", Cst.Leaf("hazardPhrases"), Cst.Leaf("en"), Cst.Leaf("H225; H319")),
+          Cst.node("sectionField", Cst.Leaf("signalWord"), Cst.Leaf("en"), Cst.Leaf("Danger"))))))
     val outline = Parser.parse(g, """outline "Acetone" "67-64-1" sections ( s1 , s2 )""")
       .fold(e => fail(e), identity)
     RoundTrip.check(g, outline).fold(e => fail(e), identity)
@@ -340,19 +340,56 @@ class ExemplarPackSuite extends munit.FunSuite:
     val base = Chemicals.Acetone.thinModule
     val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
     val ok = Parser.parse(dl.grammar,
-      """{ replace s2 = eu section 2 fields ( signalWord : "Warning" ) ; }""")
+      """{ replace s2 = eu section 2 fields ( signalWord lang en : "Warning" ) ; }""")
       .fold(e => fail(e), identity)
     val Right((m2, _)) = Sds.applySds(base, ok): @unchecked
     assert(m2.get("s2").exists {
       case Cst.Node("euSection", List(Cst.Leaf("2"), Cst.Node("list", List(
-          Cst.Node("sectionField", List(Cst.Leaf("signalWord"), Cst.Leaf("Warning"))))))) => true
+          Cst.Node("sectionField", List(Cst.Leaf("signalWord"), Cst.Leaf("en"),
+            Cst.Leaf("Warning"))))))) => true
       case _ => false
     })
     val badNum = Parser.parse(dl.grammar,
-      """{ replace s2 = eu section 99 fields ( oops : "nope" ) ; }""")
+      """{ replace s2 = eu section 99 fields ( oops lang en : "nope" ) ; }""")
       .fold(e => fail(e), identity)
     assert(Sds.applySds(base, badNum).swap.exists(_.contains("out of range")))
     val dangling = Parser.parse(dl.grammar,
       """{ replace acetoneOutline = outline "Acetone" "67-64-1" sections ( s1 , phantom ) ; }""")
       .fold(e => fail(e), identity)
     assert(Sds.applySds(base, dangling).swap.exists(_.contains("unknown section 'phantom'")))
+
+  test("SDS multilingual section fields: parse + phrase-style lang fallback"):
+    val g = Sds.language.grammar
+    val sec = Parser.parse(g,
+      """eu section 2 fields (
+        |  signalWord lang en : "Danger" ,
+        |  signalWord lang fr : "Danger" ,
+        |  hazardPhrases lang en : "H225; H319"
+        |)""".stripMargin)
+      .fold(e => fail(e), identity)
+    RoundTrip.check(g, sec).fold(e => fail(e), identity)
+    Sds.validate(Module(List("s2" -> sec))).fold(e => fail(e), identity)
+    assertEquals(Sds.sectionFieldText(sec, "signalWord", "fr"), Some("Danger"))
+    assertEquals(Sds.sectionFieldText(sec, "signalWord", "de"), Some("Danger")) // → en
+    assertEquals(Sds.sectionFieldText(sec, "hazardPhrases", "fr"), Some("H225; H319")) // → en
+    assertEquals(Sds.sectionFieldText(sec, "missing", "en"), None)
+    // ΔSDS can add a FR sibling without replacing EN
+    val base = Module(List("s2" -> sec))
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    val addFr = Parser.parse(dl.grammar,
+      """{ replace s2 = eu section 2 fields (
+        |  signalWord lang en : "Danger" ,
+        |  signalWord lang fr : "Danger" ,
+        |  hazardPhrases lang en : "H225; H319" ,
+        |  hazardPhrases lang fr : "H225; H319"
+        |) ; }""".stripMargin)
+      .fold(e => fail(e), identity)
+    val Right((m2, _)) = Sds.applySds(base, addFr): @unchecked
+    assertEquals(Sds.sectionFieldText(m2, "s2", "hazardPhrases", "fr"), Some("H225; H319"))
+    val dup = Parser.parse(dl.grammar,
+      """{ replace s2 = eu section 2 fields (
+        |  signalWord lang en : "Danger" ,
+        |  signalWord lang en : "Warning"
+        |) ; }""".stripMargin)
+      .fold(e => fail(e), identity)
+    assert(Sds.applySds(base, dup).swap.exists(_.contains("duplicate field")))

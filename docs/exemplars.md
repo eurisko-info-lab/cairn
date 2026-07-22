@@ -50,11 +50,11 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 `SdsTutorial`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
-  `basis` / `euSection` / `outline` / `sectionField`); rendered document is a
-  compiled bidirectional view.
+  `basis` / `euSection` / `outline` / lang-tagged `sectionField`); rendered document
+  is a compiled bidirectional view.
 - `basis` cites a Law section number (SDS → Law at the object level).
-- ΔSDS = generic free ΔL + domain gate; multilingual phrase fallback; domain-aware
-  shadow rebase with semantic conflict on overridden phrases.
+- ΔSDS = generic free ΔL + domain gate; multilingual phrase + section-field
+  fallback; domain-aware shadow rebase with semantic conflict on overridden phrases.
 - Phrase-staleness machine stub (`PhraseStaleness`): official `corpusPhrase`
   never stales; free-text `phrase` translations restale to
   `StaleBecauseSourceChanged` when the English source hash drifts (GRANITE
@@ -69,9 +69,11 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   `Chemicals.toModule` projects into `euSection` + `outline` language terms.
 - SDS language section maps (`euSection` / `outline` / `sectionField` in
   `sds.cairn`): ΔSDS-editable Cairn terms (Law already owns `section`, so EU-CLP
-  bodies use `euSection`). Domain gate checks 1..16 numbers, outline ref
-  integrity, and ascending order. Acetone thin + full modules round-trip the
-  surface.
+  bodies use `euSection`). `sectionField` carries `lang` like phrases; domain
+  gate checks 1..16 numbers, outline ref integrity, ascending order, and
+  unique (key, lang) pairs. `sectionFieldText` reuses phrase multilingual
+  fallback (exact → `en` → any). Acetone host maps still project EN; thin FR
+  siblings are ΔSDS-authorable. Not Studio.
 - Section report projection (`SectionReport`): host `GrammarSpec`
   (`sds-section-report`) prints outline-validated section maps with
   `RoundTrip.check` — same trust gate as `Sds.docGrammar`, for EU-CLP bodies
@@ -82,7 +84,8 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   `corpusPhrase`; free-text `prodName` demonstrates restale.
 
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Multilingual section fields (EN-only placeholders today).
+- Broader multilingual section-field coverage (chemicals fixtures still EN-primary;
+  no section-field shadow overrides / restale machine yet).
 - Broader secondary-chemical pack depth.
 - Studio-persisted phrase-corpus / staleness UI.
 - SDS Studio authoring surface (explicit anti-goal / deferred).

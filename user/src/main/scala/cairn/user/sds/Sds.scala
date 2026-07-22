@@ -8,7 +8,7 @@ import cairn.core.*
   * `PKI → Law → SDS`. An SDS is NOT a flat document: it is a compiled view
   * over typed objects (substances, mixtures, phrases / corpus phrases,
   * products, shadows, regulatory `basis` citations into Law sections,
-  * EU-CLP `euSection` / `outline` section maps).
+  * EU-CLP `euSection` / `outline` / multilingual `sectionField` maps).
   *
   * Object language: [[languages/sds.cairn]] (`provides sds requires law`).
   * Closed composition pulls Law + PKI; compose without them fails.
@@ -18,7 +18,8 @@ import cairn.core.*
   * Regulatory section numbering (EU-CLP 1..16 + ordering) lives in
   * `cairn.examples.sds.SectionNumbering`. Chemicals fixtures and host report
   * projection (`Chemicals` / `SectionReport`) can project into / from
-  * language `euSection` + `outline` terms.
+  * language `euSection` + `outline` terms. Section-field text resolves with
+  * the same multilingual fallback as phrases (exact lang → `en` → any).
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -63,8 +64,13 @@ final class Sds(packs: PackAccess):
           case Some(n) if euClpNumbers.contains(n) => ()
           case Some(n) => errs += s"euSection '$name' number $n out of range (expected 1..16)"
           case None => errs += s"euSection '$name' number '$num' is not an integer"
+        val seen = scala.collection.mutable.HashSet.empty[(String, String)]
         for f <- fields do f match
-          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(_))) if k.nonEmpty => ()
+          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
+            if k.isEmpty then errs += s"euSection '$name': empty field key"
+            else if lang.isEmpty then errs += s"euSection '$name' field '$k': empty lang"
+            else if !seen.add((k, lang)) then
+              errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
           case other => errs += s"euSection '$name': bad field ${other.render}"
       case Cst.Node("outline", List(_, _, sectionsField)) =>
         val refs = sectionsField match
@@ -180,6 +186,28 @@ final class Sds(packs: PackAccess):
     all.collectFirst { case (l, t) if l == lang => t }
       .orElse(all.collectFirst { case (l, t) if l == "en" => t })
       .orElse(all.headOption.map(_._2))
+
+  /** Resolve a section field inside an `euSection` with the same multilingual
+    * fallback as [[phraseText]]: exact lang → `en` → any. Multiple
+    * `sectionField` siblings may share a key across langs.
+    */
+  def sectionFieldText(section: Cst, fieldKey: String, lang: String): Option[String] =
+    section match
+      case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
+        val all = fields.collect {
+          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(t)))
+              if k == fieldKey =>
+            (l, t)
+        }
+        all.collectFirst { case (l, t) if l == lang => t }
+          .orElse(all.collectFirst { case (l, t) if l == "en" => t })
+          .orElse(all.headOption.map(_._2))
+      case _ => None
+
+  /** Lookup [[sectionFieldText]] by module binding (section ref). */
+  def sectionFieldText(m: Module, sectionRef: String, fieldKey: String, lang: String)
+      : Option[String] =
+    m.get(sectionRef).flatMap(sectionFieldText(_, fieldKey, lang))
 
   /** Compile a product's document: phrases in the requested language (with
     * fallback), shadow overrides applied — a view over typed objects.

@@ -16,9 +16,12 @@ phrase-staleness stub** (`corpusPhrase` + `PhraseStaleness.restale`), an
 **SDS regulatory section-numbering stub** (`SectionNumbering` EU-CLP 1..16),
 a **chemicals corpus fixture** (`Chemicals` acetone 1..16 + sparse ethanol),
 an **SDS section-report projection** (`SectionReport` GrammarSpec + RoundTrip
-over host section maps), and **SDS language section maps** (`euSection` /
-`outline` / `sectionField` in `sds.cairn`, ΔSDS-editable; acetone wired through).
-Full suite: **476 tests green** (+2 skipped; `tests` module; `sbt test`),
+over host section maps), **SDS language section maps** (`euSection` /
+`outline` / `sectionField` in `sds.cairn`, ΔSDS-editable; acetone wired through),
+and **multilingual section fields** (`sectionField` + lang; `sectionFieldText`
+fallback mirroring phrases).
+Full suite: **477 tests green** (+2 skipped; `tests` module; `sbt test`),
+
 including a 100 000-term fuzz corpus with zero round-trip failures,
 `ParitySuite`, and `ExemplarPackSuite`.
 
@@ -43,7 +46,7 @@ language law    6d39fe8e82738f0da994d62064e4bc74035d5476e570ce85923f4741d127072a
 language pki    bebf85a46279c76fb90c3dae71b138e85def650449912bc691aae5e5b72eb3e8
 language policy df25113d6bd70b5af73d8eb3a7f86660b742caad33c2e45e0141d630432a01b6
 language query  14a04e0fbdbc91a07da588c10ff909dfb8cba28544722e97052e38dfc031150b
-language sds    c6891644e778aaf154c03e50fda4f67e13983f85e1976d972a9cd0fdc8973654
+language sds    0dd4826d8631dc54a36f99419e44dd751a3fb0f438520583ae06a19c44f5a8fc
 language search a5e2f932d079c1b0d4ba6d19e8b6a3e2aefba105c7a29a733ff046d0722a85a9
 language stlc   ef1188f151541c1e7dcb738cce62dd3ec0f7172e32313ce4b9d4aa2676bc2f2e
 rosetta quicksort2   c2de9525e314f240a4dea977e9ad3992e31d1789b03bce8d5e70ce87dc9d04fb
@@ -141,7 +144,7 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 | GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | parity | parity | Waves A–C, H1; `languages/meta.cairn` fixpoint |
 | GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | partial | **parity** | `languages/pki.cairn` + glue; `PkiMax`/`DemoPki`/`PkiTutorial`; ParitySuite |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | missing | **parity** | `ledger/Encryption.scala`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law; `euSection`/`outline`); `CompositionSealing`/`PhraseStaleness`/`SectionNumbering`/`Chemicals`/`SectionReport`/`SdsTutorial`; ExemplarPackSuite |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish | partial | **parity** | `languages/sds.cairn` (requires law; `euSection`/`outline`/`sectionField`+lang); `CompositionSealing`/`PhraseStaleness`/`SectionNumbering`/`Chemicals`/`SectionReport`/`SdsTutorial`; ExemplarPackSuite |
 | GRANITE | Law pack (PKI→Law→SDS) | missing | **parity** (thin) | `languages/law.cairn` (requires cert); `enactedBy`; LawTutorial |
 | GRANITE | Computation / Bend profile | partial | parity | `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / auth web app | N/A | **N/A deferred** | §8 anti-goal (full IDE/studio) |
@@ -177,12 +180,13 @@ that surface, not docs-only stubs. Suite: `ParitySuite` + prior wave suites.
 
 - GRANITE SDS depth beyond the spine: acetone chemicals fixture populates all
   16 EU-CLP sections; outlines pass `SectionNumbering`; `SectionReport` projects
-  host maps; section bodies are also first-class `sds.cairn` terms (`euSection` /
-  `outline` / `sectionField`, ΔSDS-editable via domain gate). Secondary chemicals
-  still sparse; section fields not yet multilingual. Phrase-staleness +
-  section-numbering *machine stubs* landed (projected state, not Studio).
-  Studio-persisted phrase-corpus UI and SDS Studio authoring surface remain
-  deferred (§8 anti-goal).
+  host maps; section bodies are first-class `sds.cairn` terms (`euSection` /
+  `outline` / lang-tagged `sectionField`, ΔSDS-editable; `sectionFieldText`
+  mirrors phrase fallback). Secondary chemicals still sparse; chemicals fixtures
+  remain EN-primary (FR siblings ΔSDS-authorable, not fixture-populated);
+  no section-field shadow/restale yet. Phrase-staleness + section-numbering
+  *machine stubs* landed (projected state, not Studio). Studio-persisted
+  phrase-corpus UI and SDS Studio authoring surface remain deferred (§8 anti-goal).
 - ROSETTA Lean proof *bodies* (Cairn emits obligations; does not re-host Lean
   proofs — §4.10). LeanCore has an **agreement envelope** vs native Lean
   `#check` (refl/subst/`natRec` ι corpus; live stdout digests when `lean` on
