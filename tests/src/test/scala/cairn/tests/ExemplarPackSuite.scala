@@ -238,3 +238,46 @@ class ExemplarPackSuite extends munit.FunSuite:
     val ethanol = Chemicals.Ethanol.pure
     assertEquals(ethanol.populatedNumbers, List(1, 2))
     assertEquals(ethanol.validateOutline.map(_.map(_.number)), Right(List(1, 2)))
+
+  test("SDS section report: acetone 16-section map round-trips"):
+    import cairn.examples.sds.{Chemicals, SectionReport}
+    val text = SectionReport.render(Chemicals.Acetone.pure).fold(e => fail(e), identity)
+    assert(text.startsWith("SDS REPORT: \"Acetone\" CAS: \"67-64-1\""))
+    assert(text.contains("section 1 \"Identification\""))
+    assert(text.contains("section 16 \"Other information\""))
+    assert(text.contains("field otherInformation :"))
+    assert(text.contains("Demo/example"))
+    // every EU-CLP section appears once, ascending
+    val sectionHeaders = text.linesIterator.filter(_.startsWith("section ")).toList
+    assertEquals(sectionHeaders.size, 16)
+    assertEquals(
+      sectionHeaders.map(_.split(" ")(1).toInt),
+      (1 to 16).toList)
+
+  test("SDS section report: ethanol sparse map round-trips"):
+    import cairn.examples.sds.{Chemicals, SectionReport}
+    val text = SectionReport.render(Chemicals.Ethanol.pure).fold(e => fail(e), identity)
+    assert(text.contains("section 1 \"Identification\""))
+    assert(text.contains("section 2 \"Hazards identification\""))
+    assert(!text.contains("section 3 "))
+    assertEquals(
+      text.linesIterator.count(_.startsWith("section ")),
+      2)
+
+  test("SDS section report: rejects outline that fails SectionNumbering"):
+    import cairn.examples.sds.{Chemicals, SectionReport}
+    val bad = Chemicals.ChemicalDoc(
+      name = "Bad",
+      cas = "0-0-0",
+      sections = Map(
+        1 -> Chemicals.SectionBody(1, Map("productName" -> "X")),
+        99 -> Chemicals.SectionBody(99, Map("oops" -> "nope"))))
+    val err = SectionReport.render(bad).swap.toOption.getOrElse(fail("expected Left"))
+    assert(err.contains("BadNumber") || err.toLowerCase.contains("out of range") || err.contains("99"),
+      clues(err))
+
+  test("SDS section report: empty document still round-trips"):
+    import cairn.examples.sds.{Chemicals, SectionReport}
+    val empty = Chemicals.ChemicalDoc("Empty", "0-0-0", Map.empty)
+    val text = SectionReport.render(empty).fold(e => fail(e), identity)
+    assertEquals(text.trim, "SDS REPORT: \"Empty\" CAS: \"0-0-0\"")

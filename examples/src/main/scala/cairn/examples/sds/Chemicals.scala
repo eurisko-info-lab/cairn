@@ -8,13 +8,16 @@ package cairn.examples.sds
   * (EU-CLP) 16-section outline with honest placeholder/content where known,
   * validated by [[SectionNumbering]]. Secondary chemicals stay sparse.
   *
-  * Not Studio: no report UI, no persisted phrase-corpus editor, no section
-  * authoring surface — see STATUS-2 / docs/exemplars remaining gaps.
+  * Report projection of these maps is [[SectionReport]] (host GrammarSpec +
+  * RoundTrip) — still not `sds.cairn` constructors. Not Studio: no report UI,
+  * no persisted phrase-corpus editor, no section authoring surface — see
+  * STATUS-2 / docs/exemplars remaining gaps.
   */
 object Chemicals:
   /** One populated EU-CLP section body (EN text fields; demo data only). */
   final case class SectionBody(number: Int, fields: Map[String, String]):
-    def title: String = SectionNumbering.byNumber(number)
+    def title: String =
+      SectionNumbering.byNumber.getOrElse(number, s"INVALID-$number")
     def outlineEntry: SectionNumbering.OutlineEntry =
       SectionNumbering.OutlineEntry(number, title)
 

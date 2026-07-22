@@ -46,7 +46,8 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
 
 `languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` +
-`PhraseStaleness` + `SectionNumbering` + `Chemicals` + `SdsTutorial`):
+`PhraseStaleness` + `SectionNumbering` + `Chemicals` + `SectionReport` +
+`SdsTutorial`):
 
 - Typed objects (substance / mixture / phrase / `corpusPhrase` / product / shadow /
   `basis`); rendered document is a compiled bidirectional view.
@@ -65,6 +66,10 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   EU-CLP sections with honest EN placeholder/content (demo, not a filing);
   ethanol stays sparse (1+2). Outlines pass `SectionNumbering.validateOutline`.
   Section bodies are host-side maps — not yet `sds.cairn` constructors.
+- Section report projection (`SectionReport`): host `GrammarSpec`
+  (`sds-section-report`) prints outline-validated section maps with
+  `RoundTrip.check` — same trust gate as `Sds.docGrammar`, for EU-CLP bodies
+  rather than product hazard lines. Not language constructors / not Studio.
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are
@@ -73,7 +78,7 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
 - Section bodies not first-class SDS language objects / ΔSDS-editable fields.
 - Multilingual section fields (EN-only placeholders today).
-- Broader secondary-chemical pack depth; report projection / render of section maps.
+- Broader secondary-chemical pack depth.
 - Studio-persisted phrase-corpus / staleness UI.
 - SDS Studio authoring surface (explicit anti-goal / deferred).
 
