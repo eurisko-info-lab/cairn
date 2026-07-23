@@ -8,18 +8,33 @@ val munit = "org.scalameta" %% "munit" % "1.0.2" % Test
 lazy val kernel = project.in(file("kernel"))
   .settings(libraryDependencies += munit)
 
-// MIGRATION-PLAN.md Phase 1: System Interface vs Handler.
-lazy val systemInterface = project.in(file("system-interface"))
+// Container-only kernel primitives (Merkle/Ledger/BFT/branch+replica-set
+// manifests/authority certs/domain agreement/identity resolution) — needed by
+// system-handler, not by core/user/proof. Split out of kernel so container
+// and content don't both have to depend on the whole thing.
+lazy val kernelContainer = project.in(file("kernel-container"))
   .dependsOn(kernel)
   .settings(libraryDependencies += munit)
 
+// Content-only kernel primitives (Rename/Rewrite/Checker) — needed by core,
+// not by system-interface/system-handler. Split out of kernel alongside
+// kernelContainer for the same reason.
+lazy val kernelRewrite = project.in(file("kernel-rewrite"))
+  .dependsOn(kernel)
+  .settings(libraryDependencies += munit)
+
+// MIGRATION-PLAN.md Phase 1: System Interface vs Handler.
+lazy val systemInterface = project.in(file("system-interface"))
+  .dependsOn(kernel, kernelContainer)
+  .settings(libraryDependencies += munit)
+
 lazy val systemHandler = project.in(file("system-handler"))
-  .dependsOn(kernel, core, systemInterface)
+  .dependsOn(kernel, kernelContainer, core, systemInterface)
   .settings(libraryDependencies += munit)
 
 // MIGRATION-PLAN.md Phase 2: pure proposal machinery.
 lazy val core = project.in(file("core"))
-  .dependsOn(kernel)
+  .dependsOn(kernel, kernelRewrite)
   .settings(libraryDependencies += munit)
 
 // MIGRATION-PLAN.md Phase 6: User — languages/policies/workflows; never imports handlers.
@@ -63,6 +78,6 @@ lazy val tests = project.in(file("tests"))
 
 lazy val root = project.in(file("."))
   .aggregate(
-    kernel, core, systemInterface, systemHandler, user, runtime,
-    proof, rosetta, surface, examples, tests)
+    kernel, kernelContainer, kernelRewrite, core, systemInterface, systemHandler,
+    user, runtime, proof, rosetta, surface, examples, tests)
   .settings(publish / skip := true)

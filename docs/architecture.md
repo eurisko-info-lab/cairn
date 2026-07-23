@@ -22,10 +22,21 @@ acceptance has an independent Kernel validation path.
 ## Module graph
 
 ```text
-kernel
-core                → kernel
-system-interface    → kernel
-system-handler      → kernel, core, system-interface
+kernel                                                # shared: Canon, Artifact,
+                                                       # Fragment, Cst, Grammar,
+                                                       # GrammarLint, MetaValidate,
+                                                       # SurfacePack, Authority,
+                                                       # Effects, EffectMeta
+kernel-container    → kernel                          # Merkle, Ledger, BftQuorum,
+                                                       # BranchManifest,
+                                                       # ReplicaSetManifest,
+                                                       # CertificateAttach,
+                                                       # DomainAgreement,
+                                                       # IdentityResolver
+kernel-rewrite      → kernel                          # Rename, Rewrite, Checker
+core                → kernel, kernel-rewrite
+system-interface    → kernel, kernel-container
+system-handler      → kernel, kernel-container, core, system-interface
 user                → kernel, core, system-interface   (↛ system-handler)
 runtime             → user, system-handler, core, kernel, system-interface
 
@@ -42,6 +53,30 @@ tests               → examples, rosetta, runtime, user
 `user.policy.PolicyLang`) are imported directly now.
 
 Key prohibition: `user ↛ system-handler`.
+
+### Kernel container/rewrite split (toward a 3-way container/content/app layout)
+
+`kernel` used to be depended on directly by every other project. Grepping real
+usage (not just file naming) showed it splits three ways: 8 files used only by
+`system-handler` (now `kernel-container`), 3 files used only by `core` (now
+`kernel-rewrite`), and 11 files genuinely needed by both sides that stay in
+`kernel` — notably `Fragment`/`Grammar`/`GrammarLint`/`MetaValidate` (because
+`system-handler.MetaActivation` validates a pack's composability before
+accepting it into CAS — the container needs the real composition/lint
+machinery, not just a value type) and `Authority`/`Effects` (because
+`core.PolicyEval` decides access via `Authority`, which itself references
+`Effects.ActionKey`). All three modules keep the `cairn.kernel` package, so
+this was a pure project-boundary + `build.sbt` change with no import rewrites.
+
+This is slice 1 of moving toward a **container** (`system-interface` +
+`system-handler` + `kernel-container`) / **content** (`core` + `user` + `proof`
++ `languages/*` + `kernel-rewrite`) / **app** (`runtime` + `surface` +
+`rosetta` + `examples` + `tests`, the only layer allowed to depend on both)
+grouping, with `kernel` remaining a shared foundation both container and
+content depend on. Physically moving directories into top-level
+`container/`/`content/`/`app/` folders, adding a module-boundary guard for the
+container/content split, and updating this doc's `## Areas` table are
+follow-up slices, not yet done.
 
 ## Digests and surfaces
 
