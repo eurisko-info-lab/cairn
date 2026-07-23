@@ -81,3 +81,78 @@ class BftQuorumSuite extends munit.FunSuite:
     // First PrePrepare locks; honest may decide valueA or stay undecided — never valueB alone vs valueA
     val decided = decisions.values.flatten.map(_.value.digest).toSet
     assert(!decided.contains(valueB.digest) || decided == Set(value.digest), clues(decided))
+
+  test("preparedLock: unprepared older slot does not mask later prepare (no collectFirst)"):
+    val seq = 0
+    val x = Value("unprepared-X".getBytes.toVector)
+    val aVal = Value("prepared-A".getBytes.toVector)
+    var st = ReplicaState(ReplicaId("b"), n = 4, faulty = false, view = 0)
+    val (stX, _) = deliver(st, Msg.PrePrepare(0, seq, x, ReplicaId("a")))
+    st = stX.copy(view = 1)
+    val p1 = designatedPrimary(ids, 1).get
+    val (stPp, _) = deliver(st, Msg.PrePrepare(1, seq, aVal, p1))
+    st = stPp
+    ids.foreach { rid =>
+      val (s, _) = deliver(st, Msg.Prepare(1, seq, aVal.digest, rid))
+      st = s
+    }
+    assertEquals(preparedLock(st, seq, beforeView = 2), Some(aVal.digest))
+    // Slot-scan path alone (locks cleared) must still pick highest prepared view.
+    assertEquals(preparedLock(st.copy(locks = Map.empty), seq, beforeView = 2), Some(aVal.digest))
+
+  test("cross-view: NewView lock rejects conflicting PrePrepare (local prepare path)"):
+    val seq = 0
+    val x = Value("X".getBytes.toVector)
+    val aVal = Value("A".getBytes.toVector)
+    val bVal = Value("B".getBytes.toVector)
+    var st = ReplicaState(ReplicaId("c"), n = 4, faulty = false, view = 0)
+    val (stX, _) = deliver(st, Msg.PrePrepare(0, seq, x, ReplicaId("a")))
+    st = stX.copy(view = 1)
+    val p1 = designatedPrimary(ids, 1).get
+    val (stPp, _) = deliver(st, Msg.PrePrepare(1, seq, aVal, p1))
+    st = stPp
+    ids.foreach { rid =>
+      val (s, _) = deliver(st, Msg.Prepare(1, seq, aVal.digest, rid))
+      st = s
+    }
+    assert(st.locks.get(seq).exists(_.valueDigest == aVal.digest), clues(st.locks))
+    // NewView into view 2 selects A; every replica installs the lock.
+    val pc = PreparedCert(seq, aVal.digest, preparedView = 1, value = Some(aVal))
+    val vcs: List[Msg.ViewChange] = ids.map(rid => Msg.ViewChange(2, List(pc), rid))
+    vcs.foreach { vc =>
+      val (s, _) = deliverViewChange(st, vc, ids)
+      st = s
+    }
+    val p2 = designatedPrimary(ids, 2).get
+    val (stNv, _) = deliverNewView(st, Msg.NewView(2, List(pc), p2), ids)
+    st = stNv
+    assertEquals(st.view, 2)
+    assertEquals(st.locks.get(seq).map(_.valueDigest), Some(aVal.digest))
+    // Byzantine primary proposes conflicting B — must not emit Prepare.
+    val (stB, out) = deliver(st, Msg.PrePrepare(2, seq, bVal, p2))
+    assert(out.isEmpty, clues(out, stB.locks))
+    assert(!stB.slots.get((2, seq)).exists(_.prePrepare.isDefined))
+
+  test("cross-view: backup learns lock only via NewView; rejects conflicting B"):
+    val seq = 0
+    val aVal = Value("A-via-nv".getBytes.toVector)
+    val bVal = Value("B-conflict".getBytes.toVector)
+    // Backup never prepared A locally — only unprepared X in view 0.
+    val x = Value("X-only".getBytes.toVector)
+    var st = ReplicaState(ReplicaId("d"), n = 4, faulty = false, view = 0)
+    val (stX, _) = deliver(st, Msg.PrePrepare(0, seq, x, ReplicaId("a")))
+    st = stX
+    assertEquals(preparedLock(st, seq, beforeView = 1), None)
+    val pc = PreparedCert(seq, aVal.digest, preparedView = 1, value = Some(aVal))
+    val vcs: List[Msg.ViewChange] = ids.map(rid => Msg.ViewChange(2, List(pc), rid))
+    vcs.foreach { vc =>
+      val (s, _) = deliverViewChange(st, vc, ids)
+      st = s
+    }
+    val p2 = designatedPrimary(ids, 2).get
+    val (stNv, _) = deliverNewView(st, Msg.NewView(2, List(pc), p2), ids)
+    st = stNv
+    assertEquals(st.locks.get(seq).map(_.valueDigest), Some(aVal.digest))
+    val (stB, out) = deliver(st, Msg.PrePrepare(2, seq, bVal, p2))
+    assert(out.isEmpty, clues(out))
+    assertEquals(preparedLock(stB, seq, beforeView = 2), Some(aVal.digest))

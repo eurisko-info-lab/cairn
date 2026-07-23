@@ -475,7 +475,8 @@ object BftFinality:
     // Keep VC evidence for the current and future views only.
     val keptVcs = viewChangeEvidence.filter { case ((nv, _), _) => nv >= state.view }
     val keptPp = prePrepareSeals.filter { case ((_, seq, _), _) => seq > hw }
-    (state.copy(slots = slots), seals, prepares, meta, keptVcs, keptPp)
+    val keptLocks = state.locks.filter { case (seq, _) => seq > hw }
+    (state.copy(slots = slots, locks = keptLocks), seals, prepares, meta, keptVcs, keptPp)
 
   /** Seal a genesis replica-set from in-process keypairs (lab / tests). */
   def sealReplicaSet(
@@ -953,22 +954,48 @@ object BftFinality:
     yield ()
 
   /** Resume a crash-interrupted follower adoption generation.
-    * Digest-only legacy journals are cleared (safely abortable) so the next
-    * pull can refetch; body-bearing journals replay without network access.
+    * Digest-only legacy journals are cleared (safely abortable). Body-bearing
+    * journals are treated as **untrusted** input: blocks are loaded from CAS,
+    * the ledger is replayed, the chain must extend the prior checkpoint, and
+    * every embedded certificate is verified before any durable mutation.
     */
   def resumeFollowerAdoption(
       home: java.nio.file.Path,
       node: Node,
+      ledgerAuth: Map[String, Vector[Byte]],
   ): Either[String, Unit] =
     loadAdoptionIntent(home).flatMap {
       case None => Right(())
       case Some(intent) if intent.phase.startsWith("legacy-digests:") || intent.certificates.isEmpty =>
-        // Not self-sufficient — abort and let the next sync refetch.
         clearAdoptionIntent(home)
       case Some(intent) =>
-        adoptVerifiedCertificates(home, intent.certificates).flatMap { _ =>
-          node.writeChain(intent.remoteChain).flatMap(_ => clearAdoptionIntent(home))
-        }
+        val casErr: cairn.systeminterface.Cas.Error => String =
+          case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+          case cairn.systeminterface.Cas.Error.Io(m)      => m
+        for
+          priorCp <- loadCheckpoint(home)
+          _ <- requireExtendsCheckpoint(intent.remoteChain, priorCp)
+          blocks <- intent.remoteChain.foldLeft[Either[String, List[Block]]](Right(Nil)) { (acc, d) =>
+            acc.flatMap { bs =>
+              CasEffects.get(node.cas, d, node.ctx).left.map(casErr).map(a =>
+                bs :+ Block.fromCanon(a.body))
+            }
+          }
+          _ <- LedgerKernel.replay(ledgerAuth, blocks, Ed25519.verify)
+          hist <- loadReplicaSetHistory(home)
+          _ <- intent.certificates.sortBy(_.height).foldLeft[Either[String, Unit]](Right(())) {
+            (acc, cert) =>
+              acc.flatMap { _ =>
+                if !blocks.exists(_.digest == cert.blockDigest) then
+                  Left(s"bft adoption: cert ${cert.digest.short} block missing from journal chain")
+                else
+                  FinalityCertificate.verifyAgainstBlocks(cert, hist, blocks, ledgerAuth)
+              }
+          }
+          _ <- adoptVerifiedCertificates(home, intent.certificates)
+          _ <- node.writeChain(intent.remoteChain)
+          _ <- clearAdoptionIntent(home)
+        yield ()
     }
 
   /** Resume interrupted adoption, then load a verified checkpoint.
@@ -979,7 +1006,7 @@ object BftFinality:
       node: Node,
       ledgerAuth: Map[String, Vector[Byte]],
   ): Either[String, Option[FinalizedCheckpoint]] =
-    resumeFollowerAdoption(home, node).flatMap(_ =>
+    resumeFollowerAdoption(home, node, ledgerAuth).flatMap(_ =>
       loadVerifiedCheckpoint(home, node, ledgerAuth))
 
   /** Durable finalized ledger checkpoint — chain adoption must extend this block. */
@@ -1246,6 +1273,14 @@ object BftFinality:
             "seal" -> Canon.CBytes(seal))
       }),
       "viewChangeEvidence" -> Canon.CList(viewChangeEvidence.map(viewChangeEvidenceCanon)),
+      "locks" -> Canon.CList(state.locks.toList.map { case (seq, lock) =>
+        Canon.cmap(
+          "seq" -> Canon.CInt(seq),
+          "preparedView" -> Canon.CInt(lock.preparedView),
+          "digest" -> Canon.CStr(lock.valueDigest.hex),
+          "value" -> lock.value.fold(Canon.CTag("none", Canon.CInt(0)))(v =>
+            Canon.CTag("some", Canon.CBytes(v.bytes))))
+      }),
       "blockMeta" -> Canon.CList(meta)))
 
   final case class DecodedReplicaState(
@@ -1320,12 +1355,26 @@ object BftFinality:
               val forView = acc.getOrElse(ev.vc.newView, Map.empty) + (ev.vc.from -> ev.vc)
               acc + (ev.vc.newView -> forView)
           }
+          val locks = fields.get("locks") match
+            case Some(CList(xs)) =>
+              xs.map { row =>
+                val value = row.asMap.get("value") match
+                  case Some(CTag("some", CBytes(bs))) => Some(Value(bs))
+                  case _                              => None
+                row.field("seq").asInt.toInt -> PreparedLock(
+                  row.field("preparedView").asInt.toInt,
+                  Digest(row.field("digest").asStr),
+                  value)
+              }.toMap
+            case _ => Map.empty[Int, PreparedLock]
           val meta = m.field("blockMeta").asList.map { row =>
             Digest(row.field("block").asStr) ->
               (row.field("height").asInt, Digest(row.field("parent").asStr))
           }.toMap
           Right(DecodedReplicaState(
-            ReplicaState(id, n, faulty = false, view = view, slots = slots, viewChanges = viewChanges),
+            ReplicaState(
+              id, n, faulty = false, view = view, slots = slots,
+              viewChanges = viewChanges, locks = locks),
             seals,
             prepareSeals,
             meta,
@@ -1408,7 +1457,13 @@ object BftFinality:
       cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
     yield cert
 
-  /** Deployable path: ask the primary to propose; on timeout, run view-change and retry. */
+  /** Deployable path: ask the primary to propose; on timeout, run view-change and retry.
+    *
+    * After requesting a view-change, concurrently polls for a certificate with
+    * backoff before retrying. Client view advances only when the cluster accepts
+    * the successor VC; if replicas reject (still on an earlier view / rate-limited),
+    * the client stays put and waits — never jumps ahead of installed view.
+    */
   def agreeNetworkRemote(
       replicaUrls: Map[String, String],
       blockDigest: Digest,
@@ -1421,33 +1476,64 @@ object BftFinality:
       maxViews: Int = 4,
   ): Either[String, FinalityCertificate] =
     val ids = replicaUrls.keys.toList
-    def attempt(v: Int, remaining: Int): Either[String, FinalityCertificate] =
+    def attempt(v: Int, remaining: Int, backoffMs: Long): Either[String, FinalityCertificate] =
       if remaining <= 0 then Left(s"bft network: no certificate after $maxViews views")
+      else if v > view + maxViews then
+        Left(s"bft network: view $v exceeds bound ${view + maxViews}")
       else
         designatedPrimary(ids, v).flatMap { primaryId =>
           replicaUrls.get(primaryId.id).toRight(s"bft: no URL for primary ${primaryId.id}").flatMap {
             primaryUrl =>
+              val shortPolls = Math.max(4, polls / 8)
               propose(primaryUrl, blockDigest, initiator, chainId, replicaSet, v) match
                 case Left(_) =>
-                  // Primary unreachable — accept a cert already minted by backups, else view-change.
-                  pollCert(replicaUrls, blockDigest, Math.max(4, polls / 8), pollSleepMs) match
+                  pollCert(replicaUrls, blockDigest, shortPolls, pollSleepMs) match
                     case Right(c) => Right(c)
                     case Left(_) =>
-                      requestNetworkViewChange(replicaUrls, v + 1, initiator, chainId, replicaSet).flatMap { _ =>
-                        Thread.sleep(pollSleepMs * 2)
-                        attempt(v + 1, remaining - 1)
+                      kickViewChange(
+                        replicaUrls, v, initiator, chainId, replicaSet, blockDigest,
+                        shortPolls, backoffMs).flatMap { nextV =>
+                        attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
                       }
                 case Right(()) =>
                   pollCert(replicaUrls, blockDigest, polls, pollSleepMs) match
                     case Right(c) => Right(c)
                     case Left(_) =>
-                      requestNetworkViewChange(replicaUrls, v + 1, initiator, chainId, replicaSet).flatMap { _ =>
-                        Thread.sleep(pollSleepMs * 2)
-                        attempt(v + 1, remaining - 1)
+                      kickViewChange(
+                        replicaUrls, v, initiator, chainId, replicaSet, blockDigest,
+                        shortPolls, backoffMs).flatMap { nextV =>
+                        attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
                       }
           }
         }
-    attempt(view, maxViews)
+    attempt(view, maxViews, Math.max(pollSleepMs, 50L))
+
+  /** Request successor view-change. Advances the client view only when a quorum
+    * accepts; otherwise backs off and keeps the current client view so we do not
+    * outrun replicas that are still installing NewView.
+    */
+  private def kickViewChange(
+      replicaUrls: Map[String, String],
+      currentView: Int,
+      initiator: Signer,
+      chainId: Digest,
+      replicaSet: Digest,
+      blockDigest: Digest,
+      polls: Int,
+      backoffMs: Long,
+  ): Either[String, Int] =
+    val target = currentView + 1
+    requestNetworkViewChange(replicaUrls, target, initiator, chainId, replicaSet) match
+      case Right(()) =>
+        // Quorum accepted — brief pause for NewView gossip (cert comes after propose).
+        Thread.sleep(Math.max(backoffMs, 40L))
+        Right(target)
+      case Left(_) =>
+        // Successor rejected or rate-limited: wait for NewView / prior VC to land.
+        Thread.sleep(backoffMs)
+        pollCert(replicaUrls, blockDigest, Math.min(polls, 4), Math.max(backoffMs / 4, 10L)) match
+          case Right(_) => Right(currentView)
+          case Left(_)  => Right(currentView)
 
   /** Fan-out a request to replica URLs concurrently; succeed once a BFT quorum
     * accepts. Completes as soon as quorum is reached; remaining calls are cancelled.
@@ -1525,16 +1611,39 @@ object BftFinality:
       polls: Int,
       pollSleepMs: Long,
   ): Either[String, FinalityCertificate] =
+    def fetchOnce(): Option[FinalityCertificate] =
+      val urls = replicaUrls.values.toList
+      if urls.isEmpty then None
+      else
+        val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(urls.size, 8).max(1))
+        val found = new java.util.concurrent.atomic.AtomicReference[FinalityCertificate](null)
+        val remaining = new java.util.concurrent.atomic.AtomicInteger(urls.size)
+        val done = new java.util.concurrent.CountDownLatch(1)
+        try
+          urls.foreach { url =>
+            exec.execute(() =>
+              try
+                fetchCerts(url).toOption.toList.flatten
+                  .find(_.blockDigest == blockDigest)
+                  .foreach { c =>
+                    found.compareAndSet(null, c)
+                    done.countDown()
+                  }
+              finally
+                if remaining.decrementAndGet() == 0 then done.countDown()
+            )
+          }
+          done.await(RpcTimeout.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+          Option(found.get())
+        finally
+          exec.shutdownNow()
     def loop(n: Int): Either[String, FinalityCertificate] =
       if n <= 0 then Left("bft network: no certificate minted")
       else
-        val found = replicaUrls.values.toList.view.flatMap { url =>
-          fetchCerts(url).toOption.toList.flatten
-        }.find(_.blockDigest == blockDigest)
-        found match
+        fetchOnce() match
           case Some(c) => Right(c)
           case None =>
-            Thread.sleep(pollSleepMs)
+            if pollSleepMs > 0 then Thread.sleep(pollSleepMs)
             loop(n - 1)
     loop(polls)
 
@@ -1587,6 +1696,8 @@ final class BftReplica private (
   private var historyMtime: Long = home.map(BftReplica.historyFileMtime).getOrElse(0L)
   /** Tip height last used for membership adoption (mtime-independent). */
   private var membershipTipHeight: Long = -1L
+  /** Pacemaker: last local view-change start (ms). Rate-limits remote churn. */
+  private var lastViewChangeStartedAt: Long = 0L
 
   certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
@@ -1608,7 +1719,7 @@ final class BftReplica private (
     if ioError.isEmpty then
       node match
         case Some(n) =>
-          BftFinality.resumeFollowerAdoption(h, n) match
+          BftFinality.resumeFollowerAdoption(h, n, ledgerAuth) match
             case Left(e) => ioError = Some(s"bft-adoption resume failed: $e")
             case Right(()) => ()
         case None => ()
@@ -1893,14 +2004,24 @@ final class BftReplica private (
             }
           }
 
-  /** Start a view-change toward `newView` (must be strictly greater than current).
-    * Returns the local signed ViewChange plus any follow-on messages (e.g. NewView).
+  /** Start a view-change toward the immediate successor view only.
+    * Remote one-signer ViewChangeRequest cannot jump arbitrarily high or
+    * spam ceremonies: bounded to `currentView + 1` and rate-limited.
     */
   def requestViewChange(newView: Int): Either[String, List[SignedMsg]] =
     refuseIfCorrupt {
-      if newView <= state.view then
-        Left(s"bft: newView $newView must exceed current view ${state.view}")
+      val now = System.currentTimeMillis()
+      if newView != state.view + 1 then
+        Left(
+          s"bft: only immediate successor view allowed " +
+            s"(current=${state.view}, requested=$newView)")
+      else if lastViewChangeStartedAt > 0L &&
+          now - lastViewChangeStartedAt < BftReplica.MinViewChangeIntervalMs then
+        Left(
+          s"bft: view-change rate limited " +
+            s"(min interval ${BftReplica.MinViewChangeIntervalMs}ms)")
       else
+        lastViewChangeStartedAt = now
         sign(keypair, Msg.ViewChange(newView, preparedWithProofs, id), setDigest, chainId).flatMap { vc =>
           receive(vc).map(out => vc :: out)
         }
@@ -2171,6 +2292,11 @@ final class BftReplica private (
     }
 
 object BftReplica:
+  /** Minimum interval between locally-started view-change ceremonies.
+    * Blocks single-signer remote churn from manufacturing unbounded VC traffic.
+    */
+  val MinViewChangeIntervalMs: Long = 250L
+
   /** Construct only from a seal-verified manifest whose entry matches `keypair`.
     *
     * Pass `home` so the replica loads and replay-verifies `replica-set-history.canon`

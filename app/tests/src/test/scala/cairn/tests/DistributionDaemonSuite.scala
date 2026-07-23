@@ -395,7 +395,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val initiator = replicas.find(_.name == "r1").get
       val cert = BftFinality.agreeNetworkRemote(
         urls, block, initiator, chainId = block, replicaSet = manifest.replicaSetDigest,
-        polls = 80, pollSleepMs = 40, maxViews = 4)
+        polls = 80, pollSleepMs = 40, maxViews = 8)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assert(cert.view >= 1, clues(cert.view))
@@ -1053,6 +1053,30 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val again = bft1.requestViewChange(viewBefore + 1)
     assert(again.isRight, again.toString)
 
+  test("view-change request is successor-only and rate-limited"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val home = java.nio.file.Files.createTempDirectory("cairn-vc-bound")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
+      .fold(e => fail(e), identity)
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      home = Some(home)).fold(e => fail(e), identity)
+    val jump = bft.requestViewChange(99)
+    assert(jump.isLeft, jump.toString)
+    assert(jump.swap.toOption.exists(_.contains("immediate successor")), jump.toString)
+    bft.requestViewChange(1).fold(e => fail(e), identity)
+    // Same successor again while still on view 0 — rate-limited, not a jump.
+    val spam = bft.requestViewChange(1)
+    assert(spam.isLeft, spam.toString)
+    assert(spam.swap.toOption.exists(_.contains("rate limited")), spam.toString)
+
   test("follower adopts certificates then recovers after restart"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
@@ -1081,7 +1105,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     BftFinality.advanceCheckpoint(homeB, cert).fold(e => fail(e), identity)
     BftFinality.saveAdoptionIntent(homeB, intent).fold(e => fail(e), identity)
     assert(java.nio.file.Files.exists(BftFinality.defaultAdoptionIntentPath(homeB)))
-    BftFinality.resumeFollowerAdoption(homeB, b).fold(e => fail(e), identity)
+    BftFinality.resumeFollowerAdoption(homeB, b, ledgerAuth).fold(e => fail(e), identity)
     assertEquals(b.chainDigests, a.chainDigests)
     assert(!java.nio.file.Files.exists(BftFinality.defaultAdoptionIntentPath(homeB)))
     val cp = BftFinality.loadCheckpoint(homeB).fold(e => fail(e), identity)
@@ -1096,7 +1120,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       homeC,
       BftFinality.AdoptionIntent(a.chainDigests, List(cert), phase = "started"))
       .fold(e => fail(e), identity)
-    BftFinality.resumeFollowerAdoption(homeC, c).fold(e => fail(e), identity)
+    BftFinality.resumeFollowerAdoption(homeC, c, ledgerAuth).fold(e => fail(e), identity)
     assertEquals(c.chainDigests, a.chainDigests)
     assert(BftFinality.loadCheckpoint(homeC).fold(e => fail(e), identity).exists(_.certificate == cert.digest))
 

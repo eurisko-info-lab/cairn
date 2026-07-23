@@ -191,7 +191,7 @@ object HttpSync:
   ): Either[String, PullReport] =
     for
       _ <- checkpointHome match
-        case Some(home) => BftFinality.resumeFollowerAdoption(home, to)
+        case Some(home) => BftFinality.resumeFollowerAdoption(home, to, authorities)
         case None       => Right(())
       chainTxt <- get(baseUrl, "/chain")
       remoteChain = new String(chainTxt).linesIterator.filter(_.nonEmpty).map(Digest(_)).toList

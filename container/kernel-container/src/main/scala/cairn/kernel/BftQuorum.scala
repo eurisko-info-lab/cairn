@@ -79,13 +79,23 @@ object BftQuorum:
       commits: Map[ReplicaId, Digest] = Map.empty,
       decided: Option[Value] = None)
 
+  /** Explicit cross-view lock for a sequence — installed on prepare quorum or NewView. */
+  final case class PreparedLock(
+      preparedView: Int,
+      valueDigest: Digest,
+      value: Option[Value] = None,
+  )
+
   final case class ReplicaState(
       id: ReplicaId,
       n: Int,
       faulty: Boolean,
       view: Int = 0,
       slots: Map[(Int, Int), Slot] = Map.empty,
-      viewChanges: Map[Int, Map[ReplicaId, Msg.ViewChange]] = Map.empty):
+      viewChanges: Map[Int, Map[ReplicaId, Msg.ViewChange]] = Map.empty,
+      /** Highest known prepared lock per sequence number. */
+      locks: Map[Int, PreparedLock] = Map.empty,
+  ):
     def f: Int = maxFaults(n)
     def q: Int = quorumSize(n)
 
@@ -117,21 +127,50 @@ object BftQuorum:
       .sortBy(_.seq)
 
   private def findValue(state: ReplicaState, dig: Digest): Option[Value] =
-    state.slots.values.view.flatMap(_.prePrepare).find(_.value.digest == dig).map(_.value)
+    state.locks.values.view.find(_.valueDigest == dig).flatMap(_.value)
+      .orElse(state.slots.values.view.flatMap(_.prePrepare).find(_.value.digest == dig).map(_.value))
 
-  /** A prior view prepared a different value for this sequence — must not be overwritten. */
+  private def installLock(
+      locks: Map[Int, PreparedLock],
+      seq: Int,
+      preparedView: Int,
+      valueDigest: Digest,
+      value: Option[Value],
+  ): Map[Int, PreparedLock] =
+    locks.get(seq) match
+      case Some(prev) if prev.preparedView > preparedView => locks
+      case Some(prev) if prev.preparedView == preparedView && prev.valueDigest != valueDigest =>
+        // Conflicting same-view lock — keep prior (should not arise for honest paths).
+        locks
+      case _ =>
+        locks + (seq -> PreparedLock(preparedView, valueDigest, value.orElse(locks.get(seq).flatMap(_.value))))
+
+  /** Highest prior prepared value for `seq` before `beforeView`.
+    * Prefers the explicit [[ReplicaState.locks]] table when its prepared view
+    * is eligible; otherwise scans slots with `maxBy` (never `collectFirst`,
+    * which can mask a later prepare behind an earlier unprepared slot).
+    */
   def preparedLock(
       state: ReplicaState,
       seq: Int,
       beforeView: Int,
   ): Option[Digest] =
-    state.slots.collectFirst {
-      case ((v, s), slot) if s == seq && v < beforeView =>
-        slot.prePrepare.flatMap { pp =>
-          val d = pp.value.digest
-          if slot.prepares.count(_._2 == d) >= state.q then Some(d) else None
-        }
-    }.flatten
+    val fromSlots =
+      state.slots.iterator.flatMap {
+        case ((view, slotSeq), slot) if slotSeq == seq && view < beforeView =>
+          slot.prePrepare.flatMap { pp =>
+            val digest = pp.value.digest
+            Option.when(slot.prepares.count(_._2 == digest) >= state.q)((view, digest))
+          }
+        case _ => None
+      }.maxByOption(_._1)
+    state.locks.get(seq).filter(_.preparedView < beforeView) match
+      case Some(lock) =>
+        // Explicit lock wins unless a slot prepare is strictly newer.
+        fromSlots match
+          case Some((v, dig)) if v > lock.preparedView => Some(dig)
+          case _ => Some(lock.valueDigest)
+      case None => fromSlots.map(_._2)
 
   /** Deliver one message; ViewChange/NewView require [[deliverViewChange]] /
     * [[deliverNewView]] with the full replica-id list for primary checks.
@@ -169,7 +208,11 @@ object BftQuorum:
           val withCommitLog =
             if follow.nonEmpty then withPrep.copy(commits = withPrep.commits + (state.id -> d))
             else withPrep
-          (state.copy(slots = state.slots + (key -> withCommitLog)), follow)
+          val locks =
+            if matching >= state.q && slot.prePrepare.exists(_.value.digest == d) then
+              installLock(state.locks, seq, view, d, slot.prePrepare.map(_.value))
+            else state.locks
+          (state.copy(slots = state.slots + (key -> withCommitLog), locks = locks), follow)
 
       case Msg.Commit(view, seq, d, from) =>
         if view != state.view then (state, Nil)
@@ -229,13 +272,20 @@ object BftQuorum:
         val merged = bodies.foldLeft(state.viewChanges.getOrElse(nv.newView, Map.empty)) { (acc, vc) =>
           acc + (vc.from -> vc)
         }
+        // Every replica installs NewView-selected prepared locks — not only the primary.
+        val locks = nv.prepared.foldLeft(state.locks) { (acc, pc) =>
+          installLock(
+            acc, pc.seq, pc.preparedView, pc.valueDigest,
+            pc.value.orElse(findValue(state, pc.valueDigest)))
+        }
         val st2 = state.copy(
           view = nv.newView,
-          viewChanges = state.viewChanges + (nv.newView -> merged))
+          viewChanges = state.viewChanges + (nv.newView -> merged),
+          locks = locks)
         val follow =
           if designatedPrimary(replicaIds, nv.newView).contains(state.id) then
             nv.prepared.flatMap { pc =>
-              pc.value.orElse(findValue(state, pc.valueDigest)).map { v =>
+              pc.value.orElse(findValue(st2, pc.valueDigest)).map { v =>
                 Msg.PrePrepare(nv.newView, pc.seq, v, state.id)
               }
             }
