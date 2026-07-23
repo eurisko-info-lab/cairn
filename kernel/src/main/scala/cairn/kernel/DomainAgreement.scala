@@ -186,11 +186,36 @@ object DomainAgreement:
           Left("domain-agreement: malformed ancestor language digest")
         else if a.childLanguage.exists(_.hex.length != 64) then
           Left("domain-agreement: malformed child language digest")
-        else a.dependencyEvidence match
-          case Canon.CInt(0) =>
-            Left("domain-agreement: missing dependency evidence")
-          case _ => Right(())
+        else parseDependencyEvidence(a.dependencyEvidence).map(_ => ())
       }
+
+  /** Canonical dependency evidence: a non-empty list of language digests. */
+  def dependencyEvidenceOf(digests: List[Digest]): Canon =
+    Canon.CTag("dependency-evidence", Canon.CList(digests.map(d => Canon.CStr(d.hex))))
+
+  /** Accept tagged or bare list forms; reject free-form / non-digest entries. */
+  def parseDependencyEvidence(c: Canon): Either[String, List[Digest]] =
+    import Canon.*
+    def fromList(xs: List[Canon]): Either[String, List[Digest]] =
+      if xs.isEmpty then Left("domain-agreement: dependencyEvidence must be non-empty")
+      else
+        xs.foldLeft[Either[String, List[Digest]]](Right(Nil)) { (acc, row) =>
+          acc.flatMap { ds =>
+            row match
+              case CStr(hex) =>
+                Digest.parse(hex).left.map(_ =>
+                  s"domain-agreement: dependencyEvidence entry is not a digest: $hex")
+                  .map(ds :+ _)
+              case other =>
+                Left(s"domain-agreement: dependencyEvidence entries must be digests, got $other")
+          }
+        }
+    c match
+      case CInt(0) => Left("domain-agreement: missing dependency evidence")
+      case CTag("dependency-evidence", CList(xs)) => fromList(xs)
+      case CList(xs) => fromList(xs)
+      case other =>
+        Left(s"domain-agreement: dependencyEvidence must list language digests, got $other")
 
   /** Ancestry-change policy. `liveSealedDigest` is the CAS digest of the prior
     * [[SealedDomainAgreement]] (what manifests store); `replaces` must cite it.

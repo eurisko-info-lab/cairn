@@ -97,9 +97,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assertEquals(cert.blockDigest, block)
     assert(cert.commits.size >= BftQuorum.quorumSize(4))
     assertEquals(cert.commits.map(_._1.id).distinct.length, cert.commits.length)
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
-    assertEquals(BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig), Right(()))
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    assertEquals(BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth), Right(()))
 
   test("BftFinality certificate rejects duplicate replica commits"):
     val auth = Keypair.dev("auth")
@@ -114,9 +113,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     val (id0, seal0) = cert.commits.head
     val duped = cert.copy(commits = List.fill(3)((id0, seal0)))
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
-    assert(BftFinality.FinalityCertificate.verify(duped, bftAuth, setDig).isLeft)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    assert(BftFinality.FinalityCertificate.verify(duped, manifest).isLeft)
 
   test("BftFinality certificate rejects under-quorum commits"):
     val auth = Keypair.dev("auth")
@@ -130,9 +128,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val cert = BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
       .fold(e => fail(e), identity)
     val thin = cert.copy(commits = cert.commits.take(1))
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
-    assert(BftFinality.FinalityCertificate.verify(thin, bftAuth, setDig).isLeft)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    assert(BftFinality.FinalityCertificate.verify(thin, manifest).isLeft)
 
   test("BftFinality rejects agreeing over a non-chain digest"):
     val auth = Keypair.dev("auth")
@@ -145,15 +142,32 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     assert(BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, fake).isLeft)
 
+  test("BftFinality certificate rejects forged height/parent vs chain"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val root = java.nio.file.Files.createTempDirectory("cairn-bft-height")
+    val node = Node(root, ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val cert = BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
+      .fold(e => fail(e), identity)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    assert(BftFinality.FinalityCertificate.verify(cert, manifest).isRight)
+    val forgedH = cert.copy(height = cert.height + 99)
+    assert(BftFinality.FinalityCertificate.verifyAgainstChain(forgedH, manifest, node, ledgerAuth).isLeft)
+    val forgedP = cert.copy(parent = Digest.of(Canon.CStr("fake-parent")))
+    assert(BftFinality.FinalityCertificate.verifyAgainstChain(forgedP, manifest, node, ledgerAuth).isLeft)
+
   test("four HttpNode BftReplicas exchange messages and mint a network certificate"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val ids = replicas.map(_.name)
-    val setDig = BftFinality.replicaSetDigest(bftAuth)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val bftAuth = manifest.authorities
+    val ids = manifest.ids
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-bft-$id")).toMap
-    // Identical sealed tip on every replica node
     val nodes = homes.map { (id, home) =>
       val n = Node(home.resolve("node"), ledgerCtx)
       n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
@@ -166,18 +180,15 @@ class DistributionDaemonSuite extends munit.FunSuite:
     try
       val ports = ids.map { id =>
         val peersRoot = homes(id)
-        val bft = BftReplica(
-          replicas.find(_.name == id).get,
-          bftAuth,
-          ids,
-          node = Some(nodes(id)),
-          ledgerAuth = ledgerAuth,
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
           certStore = Some(peersRoot.resolve("bft-certs.canon")))
+          .fold(e => fail(e), identity)
         val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
         https += http
         id -> http.start()
       }.toMap
-      // Wire replica peer directories (each sees the other three + self)
       ids.foreach { id =>
         ids.foreach { peer =>
           PeerRegistry.add(
@@ -193,32 +204,25 @@ class DistributionDaemonSuite extends munit.FunSuite:
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assert(cert.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(4))
-      assertEquals(BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig), Right(()))
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
+        Right(()))
     finally https.foreach(_.stop())
 
   test("multi-home provisioning: distinct keys + replica-set.canon + remote propose"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
     val ids = List("r0", "r1", "r2", "r3")
-    // Provision each replica's private key only under its own home.
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-mp-$id")).toMap
     val kps = ids.map { id =>
-      Keypair.loadOrCreate(homes(id), id).fold(e => fail(e), identity)
+      Keystore.loadOrCreate(homes(id), id).fold(e => fail(e), identity)
     }
-    val unsigned = ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
-      .fold(e => fail(e), identity)
-    val manifest = ReplicaSetManifest.seal(
-      unsigned,
-      kps.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
-      .fold(e => fail(e), identity)
-    ReplicaSetManifest.verifySeals(manifest, Ed25519.verify).fold(e => fail(e), identity)
-    // Every home gets the same certified public-key set (no remote private keys).
+    val manifest = BftFinality.sealReplicaSet(kps).fold(e => fail(e), identity)
     ids.foreach { id =>
       BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(id)), manifest)
         .fold(e => fail(e), identity)
-      // Ensure Keypair.load for a foreign name fails on this home
       val foreign = ids.find(_ != id).get
-      assert(Keypair.load(homes(id), foreign).isLeft, s"$id should not hold $foreign's key")
+      assert(Keystore.load(homes(id), foreign).isLeft, s"$id should not hold $foreign's key")
     }
     val nodes = homes.map { (id, home) =>
       val n = Node(home.resolve("node"), ledgerCtx)
@@ -231,12 +235,13 @@ class DistributionDaemonSuite extends munit.FunSuite:
     try
       val ports = ids.map { id =>
         val home = homes(id)
-        val kp = Keypair.load(home, id).fold(e => fail(e), identity)
-        val bft = BftReplica(
-          kp, manifest.authorities, manifest.ids,
+        val kp = Keystore.load(home, id).fold(e => fail(e), identity)
+        val bft = BftReplica.certified(
+          kp, manifest,
           node = Some(nodes(id)), ledgerAuth = ledgerAuth,
           certStore = Some(home.resolve("bft-certs.canon")),
           stateStore = Some(home.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
         val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(home), bft = Some(bft))
         https += http
         id -> http.start()
@@ -250,36 +255,33 @@ class DistributionDaemonSuite extends munit.FunSuite:
         }
       }
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-      // Initiator has no primary private key — uses /bft/propose
       val cert = BftFinality.agreeNetworkRemote(urls, 0, 0, block, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(
-        BftFinality.FinalityCertificate.verify(cert, manifest.authorities, manifest.replicaSetDigest),
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
         Right(()))
-      // State files persisted
       assert(java.nio.file.Files.exists(homes("r0").resolve("bft-state.canon")))
     finally https.foreach(_.stop())
 
-  test("replica-set digest binds public keys, not names alone"):
+  test("replica-set digest binds public keys and transition metadata"):
     val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     val b = List("r0", "r1", "r2", "r3").map(id => Keypair.dev(s"$id-alt").copy(name = id))
-    // Same ids, different key material → different digests
-    val digA = BftFinality.replicaSetDigest(a.map(k => k.name -> k.publicBytes).toMap)
-    val digB = BftFinality.replicaSetDigest(b.map(k => k.name -> k.publicBytes).toMap)
-    assert(digA != digB)
-    val namesOnly = BftFinality.replicaSetDigest(a.map(_.name))
-    assert(digA != namesOnly)
     val mA = ReplicaSetManifest.of(a.map(k => k.name -> k.publicBytes)).fold(e => fail(e), identity)
     val mB = ReplicaSetManifest.of(b.map(k => k.name -> k.publicBytes)).fold(e => fail(e), identity)
-    assertEquals(mA.replicaSetDigest, digA)
     assert(mA.replicaSetDigest != mB.replicaSetDigest)
-    // Sealed artifact round-trips member seals
-    val sealedM = ReplicaSetManifest.seal(
-      mA,
-      a.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
-      .fold(e => fail(e), identity)
-    assert(sealedM.seals.nonEmpty)
+    val mapOnly = BftFinality.replicaSetDigest(a.map(k => k.name -> k.publicBytes).toMap)
+    assert(mA.replicaSetDigest != mapOnly)
+    val amended = ReplicaSetManifest.of(
+      a.map(k => k.name -> k.publicBytes),
+      replaces = Some(mA.digest),
+      activationHeight = 10L).fold(e => fail(e), identity)
+    assert(amended.replicaSetDigest != mA.replicaSetDigest)
+    assertEquals(
+      ReplicaSetManifest.allowsTransition(amended, Some(mA), Some(mA.digest)),
+      Right(()))
+    assert(ReplicaSetManifest.allowsTransition(amended.copy(activationHeight = 0), Some(mA), Some(mA.digest)).isLeft)
+    val sealedM = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
     val reloaded = ReplicaSetManifest.fromCanon(sealedM.canon).fold(e => fail(e), identity)
     assertEquals(reloaded.seals, sealedM.seals)
     ReplicaSetManifest.verifySeals(reloaded, Ed25519.verify).fold(e => fail(e), identity)
@@ -292,15 +294,30 @@ class DistributionDaemonSuite extends munit.FunSuite:
     node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
       .fold(e => fail(e), identity)
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val ids = replicas.map(_.name)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val statePath = home.resolve("bft-state.canon")
     java.nio.file.Files.write(statePath, "not-valid-canon".getBytes(java.nio.charset.StandardCharsets.UTF_8))
-    val bft = BftReplica(
-      replicas.head, bftAuth, ids,
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
       node = Some(node), ledgerAuth = ledgerAuth,
-      stateStore = Some(statePath))
+      stateStore = Some(statePath)).fold(e => fail(e), identity)
     val block = node.chainDigests.head
     val err = bft.propose(0, 0, block)
     assert(err.isLeft, err.toString)
     assert(err.swap.toOption.exists(_.contains("refusing to operate")), err.toString)
+
+  test("Keystore encrypts private keys at rest when a secret is supplied"):
+    val kp = Keypair.dev("enc-r0")
+    val secret = Some("test-keystore-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val sealedC = Keystore.toCanon(kp, secret)
+    assert(sealedC match
+      case Canon.CTag("keypair-sealed", _) => true
+      case _ => false)
+    val loaded = Keystore.fromCanon(sealedC, secret).fold(e => fail(e), identity)
+    assertEquals(loaded.publicBytes, kp.publicBytes)
+    assertEquals(loaded.sign("ping".getBytes), kp.sign("ping".getBytes))
+    assert(Keystore.fromCanon(sealedC, None).isLeft)
+    val home = java.nio.file.Files.createTempDirectory("cairn-ks")
+    Keystore.save(home, kp).fold(e => fail(e), identity)
+    val round = Keystore.load(home, "enc-r0").fold(e => fail(e), identity)
+    assertEquals(round.sign("pong".getBytes), kp.sign("pong".getBytes))

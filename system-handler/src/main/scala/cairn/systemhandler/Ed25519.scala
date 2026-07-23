@@ -1,7 +1,7 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 import java.security.{KeyFactory, KeyPairGenerator, PrivateKey, PublicKey, Signature}
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 
@@ -32,11 +32,13 @@ object Ed25519:
       s.initVerify(pk); s.update(msg); s.verify(sig.toArray)
     catch case _: Exception => false
 
-final case class Keypair(name: String, publicKey: PublicKey, privateKey: PrivateKey):
+/** In-memory Ed25519 identity. Persist only through [[Keystore]]. */
+final case class Keypair(name: String, publicKey: PublicKey, privateKey: PrivateKey) extends Signer:
   def publicBytes: Vector[Byte] = Ed25519.publicBytes(publicKey)
   def privateBytes: Vector[Byte] = Ed25519.privateBytes(privateKey)
+  def sign(msg: Array[Byte]): Vector[Byte] = Ed25519.sign(privateKey, msg)
   def signTx(tx: Tx): SignedTx =
-    SignedTx(tx, name, Ed25519.sign(privateKey, Canon.encode(Tx.toCanon(tx))))
+    SignedTx(tx, name, sign(Canon.encode(Tx.toCanon(tx))))
 
 object Keypair:
   def dev(name: String): Keypair =
@@ -63,38 +65,14 @@ object Keypair:
           case _ => Left("keypair: bad key material")
       case other => Left(s"not a keypair: $other")
 
-  /** Load an existing durable keypair; never create. Used for self-only
-    * provisioning — remote replica public keys come from [[ReplicaSetManifest]].
-    */
+  /** @deprecated Prefer [[Keystore.load]] — private keys belong behind the keystore boundary. */
   def load(root: Path, name: String): Either[String, Keypair] =
-    val path = root.resolve("replicas").resolve(s"$name.canon")
-    if !Files.exists(path) then Left(s"missing replica keypair for '$name' at $path")
-    else
-      Canon.decode(Files.readAllBytes(path)).flatMap(fromCanon).flatMap { kp =>
-        if kp.name == name then Right(kp)
-        else Left(s"keypair name mismatch: file has '${kp.name}', expected '$name'")
-      }
+    Keystore.load(root, name)
 
-  /** Load or create a durable keypair under `$root/replicas/<name>.canon`.
-    * Prefer [[load]] for verifying remote identities; use this only for the
-    * local replica's own key.
-    */
+  /** @deprecated Prefer [[Keystore.loadOrCreate]]. */
   def loadOrCreate(root: Path, name: String): Either[String, Keypair] =
-    load(root, name).orElse {
-      try
-        val dir = root.resolve("replicas")
-        Files.createDirectories(dir)
-        val path = dir.resolve(s"$name.canon")
-        val kp = dev(name)
-        Files.write(path, Canon.encode(canon(kp)))
-        Right(kp)
-      catch case e: Exception => Left(e.getMessage)
-    }
+    Keystore.loadOrCreate(root, name)
 
+  /** @deprecated Prefer [[Keystore.save]]. */
   def save(root: Path, kp: Keypair): Either[String, Unit] =
-    try
-      val dir = root.resolve("replicas")
-      Files.createDirectories(dir)
-      Files.write(dir.resolve(s"${kp.name}.canon"), Canon.encode(canon(kp)))
-      Right(())
-    catch case e: Exception => Left(e.getMessage)
+    Keystore.save(root, kp)

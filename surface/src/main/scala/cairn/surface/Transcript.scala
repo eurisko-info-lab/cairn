@@ -3,8 +3,8 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systemhandler.{
-  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Ed25519, Filesystem, Gossip, GossipDaemon,
-  HttpGossip, HttpNode, HttpSync, Keypair, Node, PeerRegistry, Provenance, Sync}
+  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
+  HttpGossip, HttpNode, HttpSync, Keypair, Keystore, Node, PeerRegistry, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.runtime.PackLoader
@@ -734,7 +734,7 @@ object Cli:
             "repl|lsp|ui] <arg>")
 
   private def defaultAuthorities(home: Path): Either[String, Map[String, Vector[Byte]]] =
-    Keypair.loadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
+    Keystore.loadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
 
   private def serveHttp(
       home: Path,
@@ -753,20 +753,13 @@ object Cli:
         else
           for
             manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
-            _ <- Either.cond(manifest.authorities.contains(replicaName), (),
-              s"bft: replica '$replicaName' not in replica-set.canon")
-            kp <- Keypair.loadOrCreate(home, replicaName)
-            // Self public key must match the certified manifest entry.
-            _ <- Either.cond(
-              kp.publicBytes == manifest.authorities(replicaName),
-              (),
-              s"bft: local key for '$replicaName' does not match replica-set.canon — " +
-                "re-provision or update the manifest")
-          yield Some(BftReplica(
-            kp, manifest.authorities, manifest.ids,
-            node = Some(node), ledgerAuth = ledgerAuth,
-            certStore = Some(home.resolve("bft-certs.canon")),
-            stateStore = Some(home.resolve("bft-state.canon"))))
+            kp <- Keystore.loadOrCreate(home, replicaName)
+            bft <- BftReplica.certified(
+              kp, manifest,
+              node = Some(node), ledgerAuth = ledgerAuth,
+              certStore = Some(home.resolve("bft-certs.canon")),
+              stateStore = Some(home.resolve("bft-state.canon")))
+          yield Some(bft)
       http = HttpNode(node, ledgerAuth, peersRoot = Some(home), bft = bftOpt)
       bound = http.start(port)
       selfUrl = s"http://127.0.0.1:$bound"
@@ -803,20 +796,16 @@ object Cli:
       }
       _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
       cert <- BftFinality.agreeNetworkRemote(urls, view = 0, seq = 0, block)
-      _ <- BftFinality.FinalityCertificate.verify(cert, manifest.authorities, manifest.replicaSetDigest)
+      _ <- BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
   /** Create local keypairs for each name and write a sealed replica-set.canon. */
   private def bftReplicaSetInit(home: Path, names: List[String]): Either[String, String] =
     for
       kps <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
-        acc.flatMap(ks => Keypair.loadOrCreate(home, n).map(ks :+ _))
+        acc.flatMap(ks => Keystore.loadOrCreate(home, n).map(ks :+ _))
       }
-      unsigned <- ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
-      sealedM <- ReplicaSetManifest.seal(
-        unsigned,
-        kps.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
-      _ <- ReplicaSetManifest.verifySeals(sealedM, Ed25519.verify)
+      sealedM <- BftFinality.sealReplicaSet(kps)
       _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), sealedM)
     yield s"replica-set ${sealedM.digest.short} n=${sealedM.n} ids=${sealedM.ids.mkString(",")}"
 
@@ -829,12 +818,11 @@ object Cli:
     for
       ledgerAuth <- defaultAuthorities(home)
       replicas <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
-        acc.flatMap(ks => Keypair.loadOrCreate(home, n).map(ks :+ _))
+        acc.flatMap(ks => Keystore.loadOrCreate(home, n).map(ks :+ _))
       }
       cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
-      auth = replicas.map(k => k.name -> k.publicBytes).toMap
-      setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
-      _ <- BftFinality.FinalityCertificate.verify(cert, auth, setDig)
+      manifest <- BftFinality.sealReplicaSet(replicas)
+      _ <- BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth)
     yield s"bft local finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
   private def pullHttp(home: Path, baseUrl: String, ledgerCtx: EffectContext): Either[String, String] =
@@ -896,50 +884,53 @@ object Cli:
       ledgerAuth: Map[String, Vector[Byte]],
   ): Either[String, String] =
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val ids = replicas.map(_.name)
-    val setDig = BftFinality.replicaSetDigest(bftAuth)
-    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
-    val seeded: Either[String, Map[String, Node]] =
-      ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
-        acc.flatMap { m =>
-          val n = Node(homes(id).resolve("node"), ledgerCtx)
-          n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
-            .map(_ => m + (id -> n))
-        }
-      }
-    seeded.flatMap { nodes =>
-      val block = nodes("r0").chainDigests.head
-      val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
-      try
-        val portsE = ids.foldLeft[Either[String, Map[String, Int]]](Right(Map.empty)) { (acc, id) =>
-          acc.map { ports =>
-            val peersRoot = homes(id)
-            val bft = BftReplica(
-              replicas.find(_.name == id).get, bftAuth, ids,
-              node = Some(nodes(id)), ledgerAuth = ledgerAuth)
-            val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
-            https += http
-            ports + (id -> http.start())
+    BftFinality.sealReplicaSet(replicas).flatMap { manifest =>
+      val bftAuth = manifest.authorities
+      val ids = manifest.ids
+      val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
+      val seeded: Either[String, Map[String, Node]] =
+        ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
+          acc.flatMap { m =>
+            val n = Node(homes(id).resolve("node"), ledgerCtx)
+            n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+              .map(_ => m + (id -> n))
           }
         }
-        for
-          ports <- portsE
-          _ <- ids.foldLeft[Either[String, Unit]](Right(())) { (acc, id) =>
-            acc.flatMap { _ =>
-              ids.foldLeft[Either[String, Unit]](Right(())) { (acc2, peer) =>
-                acc2.flatMap(_ =>
-                  PeerRegistry.add(
-                    homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
-                    PeerRegistry.Role.Replica, publicKey = Some(bftAuth(peer))).map(_ => ()))
+      seeded.flatMap { nodes =>
+        val block = nodes("r0").chainDigests.head
+        val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+        try
+          val portsE = ids.foldLeft[Either[String, Map[String, Int]]](Right(Map.empty)) { (acc, id) =>
+            acc.flatMap { ports =>
+              val peersRoot = homes(id)
+              BftReplica.certified(
+                replicas.find(_.name == id).get, manifest,
+                node = Some(nodes(id)), ledgerAuth = ledgerAuth).map { bft =>
+                val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+                https += http
+                ports + (id -> http.start())
               }
             }
           }
-          primaryId <- BftFinality.designatedPrimary(ids, 0)
-          primary = replicas.find(_.name == primaryId.id).get
-          urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-          cert <- BftFinality.agreeNetwork(primary, urls, 0, 0, block, polls = 64, pollSleepMs = 20)
-          _ <- BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig)
-        yield cert.digest.short
-      finally https.foreach(_.stop())
+          for
+            ports <- portsE
+            _ <- ids.foldLeft[Either[String, Unit]](Right(())) { (acc, id) =>
+              acc.flatMap { _ =>
+                ids.foldLeft[Either[String, Unit]](Right(())) { (acc2, peer) =>
+                  acc2.flatMap(_ =>
+                    PeerRegistry.add(
+                      homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
+                      PeerRegistry.Role.Replica, publicKey = Some(bftAuth(peer))).map(_ => ()))
+                }
+              }
+            }
+            primaryId <- BftFinality.designatedPrimary(ids, 0)
+            primary = replicas.find(_.name == primaryId.id).get
+            urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
+            cert <- BftFinality.agreeNetwork(primary, urls, 0, 0, block, polls = 64, pollSleepMs = 30)
+            _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
+              cert, manifest, nodes("r0"), ledgerAuth)
+          yield s"bft ok ${cert.digest.short}"
+        finally https.foreach(_.stop())
+      }
     }

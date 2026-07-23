@@ -697,7 +697,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * (primary agreement owner).
     *
     * When `knownLanguages` is non-empty, child/ancestor language digests and
-    * any digest-shaped entries in `dependencyEvidence` must appear in that set.
+    * every digest in `dependencyEvidence` must appear in that set.
     */
   def plantGoverned(
       agreement: DomainAgreement,
@@ -770,29 +770,67 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       case None    => base
       case Some(m) => importModule(agreement.child, m)
 
+  /** Mint and store a sealed [[DomainAncestorDelegation]] for `claim`.
+    *
+    * The grantor must be the primary agreement's owner (resolved via
+    * [[IdentityResolver]]). Returns the claim with `ancestorDelegation` set to
+    * the sealed artifact digest, plus the grantor seal pair for [[plantGoverned]].
+    */
+  def mintAncestorDelegation(
+      claim: DomainAgreement,
+      grantorSeal: (String, Vector[Byte]),
+      identities: IdentityResolver,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean = Ed25519.verify,
+  ): Either[String, (DomainAgreement, (String, Vector[Byte]))] =
+    val known = list().toSet
+    val (gName, gSig) = grantorSeal
+    claim.primaryAncestor match
+      case None =>
+        Left("domain-delegation: trunk claims do not need ancestorDelegation")
+      case Some(p) if !known.contains(p) =>
+        Left(s"domain-delegation: unknown primary ancestor '$p'")
+      case Some(p) =>
+        for
+          grantorExpected <- load(p).domainAgreement match
+            case None =>
+              // Primary not yet governed — seal is still stored; plantGoverned will refuse.
+              Right(gName)
+            case Some(d) =>
+              getByDigest(d).left.map(e =>
+                s"domain-delegation: primary agreement unloadable: $e").flatMap { art =>
+                SealedDomainAgreement.fromCanon(art.body).map(_.agreement.owner)
+              }
+          _ <- Either.cond(gName == grantorExpected, (),
+            s"domain-delegation: grantor '$gName' is not primary owner '$grantorExpected'")
+          gPk <- identities.require(gName)
+          del = DomainAncestorDelegation(
+            ancestor = p,
+            child = claim.child,
+            grantor = gName,
+            grantee = claim.owner,
+            claimDigest = claim.claimDigest)
+          _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSig, verify)
+          sealedDel = del.seal(gSig)
+          _ = putArt(sealedDel.artifact)
+        yield (claim.copy(ancestorDelegation = Some(sealedDel.digest)), (gName, gSig))
+
   private def verifyLanguageEvidence(
       agreement: DomainAgreement,
       knownLanguages: Set[Digest],
   ): Either[String, Unit] =
+    // Schema is enforced in DomainAgreement.wellFormed; membership is optional
+    // until a pack index is supplied.
     if knownLanguages.isEmpty then Right(())
     else
-      val claimed =
-        agreement.childLanguage.toList ++ agreement.ancestorLanguages.map(_._2)
-      val missing = claimed.filterNot(knownLanguages.contains)
-      if missing.nonEmpty then
-        Left(s"domain-agreement: unknown language digest(s): ${missing.map(_.short).mkString(",")}")
-      else
-        agreement.dependencyEvidence match
-          case Canon.CList(xs) =>
-            val digs = xs.flatMap {
-              case Canon.CStr(hex) if hex.length == 64 => Digest.parse(hex).toOption
-              case _ => None
-            }
-            val bad = digs.filterNot(knownLanguages.contains)
-            if bad.nonEmpty then
-              Left(s"domain-agreement: dependencyEvidence cites unknown language(s): ${bad.map(_.short).mkString(",")}")
-            else Right(())
-          case _ => Right(())
+      for
+        deps <- DomainAgreement.parseDependencyEvidence(agreement.dependencyEvidence)
+        claimed = agreement.childLanguage.toList ++
+          agreement.ancestorLanguages.map(_._2) ++ deps
+        missing = claimed.filterNot(knownLanguages.contains).distinct
+        _ <- Either.cond(
+          missing.isEmpty, (),
+          s"domain-agreement: unknown language digest(s): ${missing.map(_.short).mkString(",")}")
+      yield ()
 
   /** Primary consent: governed primary + sealed DomainAncestorDelegation. */
   private def verifyAncestorDelegation(
