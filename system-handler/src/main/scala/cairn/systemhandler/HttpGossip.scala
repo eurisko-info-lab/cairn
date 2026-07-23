@@ -34,6 +34,33 @@ object HttpGossip:
   ): Boolean =
     BftFinality.shouldAdoptChain(mine, theirs, checkpoint)
 
+  private def syncCertificates(
+      peer: PeerRegistry.Peer,
+      local: Node,
+      authorities: Map[String, Vector[Byte]],
+      home: java.nio.file.Path,
+  ): Either[String, Boolean] =
+    BftFinality.fetchCerts(peer.baseUrl) match
+      // Finality is optional on a generic HTTP peer.
+      case Left(e) if e.contains("/bft/certs ->") => Right(false)
+      case Left(e) => Left(s"cert fetch: $e")
+      case Right(certs) =>
+        BftFinality.loadReplicaSetHistory(home).flatMap { hist =>
+          local.blocks.flatMap { blocks =>
+            certs.sortBy(_.height).foldLeft[Either[String, Boolean]](Right(false)) {
+              (acc, cert) =>
+                acc.flatMap { changed =>
+                  if !blocks.exists(_.digest == cert.blockDigest) then Right(changed)
+                  else
+                    BftFinality.FinalityCertificate.verifyAgainstBlocks(
+                      cert, hist, blocks, authorities).flatMap { _ =>
+                      BftFinality.advanceCheckpoint(home, cert).map(cp => changed || cp.certificate == cert.digest)
+                    }
+                }
+            }
+          }
+        }
+
   /** One gossip round: pick the best remote chain among `peers` and pull if it wins. */
   def round(
       localName: String,
@@ -45,6 +72,7 @@ object HttpGossip:
   ): RoundReport =
     val mine = local.chainDigests
     val errors = List.newBuilder[String]
+    val certOnly = List.newBuilder[PeerRegistry.Peer]
     val ranked = peers.flatMap { p =>
       getChain(p.baseUrl) match
         case Left(e) =>
@@ -55,12 +83,22 @@ object HttpGossip:
         case Right(chain) =>
           BftFinality.requireExtendsCheckpoint(chain, checkpoint) match
             case Left(e) => errors += s"${p.name}: $e"
-            case Right(_) => ()
+            case Right(_) => certOnly += p
           None
     }.sortBy((p, chain) => (-chain.length, chain.lastOption.map(_.hex).getOrElse("")))
 
     ranked.headOption match
-      case None => RoundReport(Nil, Nil, errors.result())
+      case None =>
+        checkpointHome match
+          case None => RoundReport(Nil, Nil, errors.result())
+          case Some(home) =>
+            certOnly.result().foldLeft[RoundReport](RoundReport(Nil, Nil, errors.result())) {
+              (report, peer) =>
+                syncCertificates(peer, local, authorities, home) match
+                  case Right(true) => report.copy(pulled = report.pulled :+ peer.name)
+                  case Right(false) => report
+                  case Left(e) => report.copy(errors = report.errors :+ s"cert sync ${peer.name}: $e")
+            }
       case Some((from, theirChain)) =>
         HttpSync.pull(from.baseUrl, local, authorities, checkpoint, checkpointHome) match
           case Left(e) =>
@@ -113,13 +151,17 @@ final class GossipDaemon(
   def last: HttpGossip.RoundReport = lastReport.get()
 
   def tick(): HttpGossip.RoundReport =
-    val peers = PeerRegistry.load(peersRoot).toOption.toList.flatMap(_.gossipPeers)
-    val checkpoint = BftFinality.loadCheckpoint(peersRoot).toOption.flatten
-    val report = HttpGossip.round(
-      localName, local, peers, authorities,
+    val report = for
+      directory <- PeerRegistry.load(peersRoot)
+      checkpoint <- BftFinality.loadVerifiedCheckpoint(peersRoot, local, authorities)
+    yield HttpGossip.round(
+      localName, local, directory.gossipPeers, authorities,
       checkpoint = checkpoint, checkpointHome = Some(peersRoot))
-    lastReport.set(report)
-    report
+    val completed = report match
+      case Right(value) => value
+      case Left(e) => HttpGossip.RoundReport(Nil, Nil, List(e))
+    lastReport.set(completed)
+    completed
 
   def start(): Unit =
     if running.compareAndSet(false, true) then

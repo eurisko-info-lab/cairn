@@ -29,6 +29,20 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val merged2 = PeerRegistry.merge(loaded, PeerRegistry.Directory(List(poison)))
     assertEquals(merged2.byName("b").map(_.baseUrl), Some("http://127.0.0.1:2"))
 
+  test("PeerRegistry resolveReplicaUrls rejects a correctly sealed attacker key"):
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val attacker = Keypair.dev("r0")
+    val peers = manifest.ids.map { id =>
+      if id == "r0" then PeerRegistry.Peer.bound(attacker, "http://evil", PeerRegistry.Role.Replica)
+      else
+        PeerRegistry.Peer.bound(
+          replicas.find(_.name == id).get, s"http://$id", PeerRegistry.Role.Replica)
+    }
+    val result = PeerRegistry.resolveReplicaUrls(PeerRegistry.Directory(peers), manifest)
+    assert(result.isLeft, result.toString)
+    assert(result.swap.toOption.exists(_.contains("public key does not match")), result.toString)
+
   test("Keystore uses PBKDF2 and still loads legacy SHA-256 seals"):
     val kp = Keypair.dev("kdf-r0")
     val secret = Some("test-keystore-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
@@ -104,6 +118,26 @@ class DistributionDaemonSuite extends munit.FunSuite:
       daemon.stop()
       assert(r.errors.isEmpty, r.errors.toString)
       assertEquals(b.chainDigests, a.chainDigests)
+    finally http.stop()
+
+  test("GossipDaemon reports a corrupt checkpoint before pulling"):
+    val auth = Keypair.dev("auth")
+    val authorities = Map(auth.name -> auth.publicBytes)
+    val remoteRoot = java.nio.file.Files.createTempDirectory("cairn-corrupt-remote")
+    val localRoot = java.nio.file.Files.createTempDirectory("cairn-corrupt-local")
+    val remote = Node(remoteRoot, ledgerCtx)
+    val local = Node(localRoot, ledgerCtx)
+    remote.append(auth, authorities, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val http = HttpNode(remote, authorities)
+    val port = http.start()
+    try
+      PeerRegistry.add(localRoot, "remote", s"http://127.0.0.1:$port").fold(e => fail(e), identity)
+      java.nio.file.Files.write(
+        BftFinality.defaultCheckpointPath(localRoot), "not canonical".getBytes)
+      val report = GossipDaemon("local", local, localRoot, authorities).tick()
+      assert(report.errors.exists(_.contains("checkpoint corrupt")), report.errors.toString)
+      assertEquals(local.chainDigests, Nil)
     finally http.stop()
 
   test("HttpNode GET /peers serves the registry"):
@@ -240,10 +274,9 @@ class DistributionDaemonSuite extends munit.FunSuite:
             PeerRegistry.Role.Replica).fold(e => fail(e), identity)
         }
       }
-      val primaryId = BftFinality.designatedPrimary(ids, view = 0).fold(e => fail(e), identity)
-      val primary = replicas.find(_.name == primaryId.id).get
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-      val cert = BftFinality.agreeNetwork(primary, urls, view = 0, seq = 0, block, polls = 64, pollSleepMs = 30)
+      val cert = BftFinality.agreeNetworkRemote(
+        urls, block, replicas.head, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
@@ -275,6 +308,60 @@ class DistributionDaemonSuite extends munit.FunSuite:
         .fold(e => fail(e), identity)
       assert(!st.slots.keys.exists { case (_, seq) => seq <= 0 }, st.slots.keys.toString)
       assert(!seals.keys.exists { case (_, seq, _, _) => seq <= 0 }, seals.keys.toString)
+    finally https.foreach(_.stop())
+
+  test("HTTP view-change failover when primary is unreachable"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val ids = manifest.ids
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-vc-$id")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    try
+      // Start everyone except the view-0 primary (r0 is sorted first).
+      val primary0 = BftFinality.designatedPrimary(ids, 0).fold(e => fail(e), identity).id
+      assertEquals(primary0, "r0")
+      val running = ids.filter(_ != primary0)
+      val ports = running.map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += http
+        id -> http.start()
+      }.toMap
+      // Unreachable primary URL + live backups.
+      val urls = ids.map { id =>
+        id -> (if id == primary0 then "http://127.0.0.1:1" else s"http://127.0.0.1:${ports(id)}")
+      }.toMap
+      running.foreach { id =>
+        ids.foreach { peer =>
+          PeerRegistry.addBound(
+            homes(id), replicas.find(_.name == peer).get,
+            urls(peer), PeerRegistry.Role.Replica).fold(e => fail(e), identity)
+        }
+      }
+      val initiator = replicas.find(_.name == "r1").get
+      val cert = BftFinality.agreeNetworkRemote(
+        urls, block, initiator, polls = 80, pollSleepMs = 40, maxViews = 4)
+        .fold(e => fail(e), identity)
+      assertEquals(cert.blockDigest, block)
+      assert(cert.view >= 1, clues(cert.view))
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r1"), ledgerAuth),
+        Right(()))
     finally https.foreach(_.stop())
 
   test("multi-home provisioning: distinct keys + replica-set.canon + remote propose"):
@@ -471,7 +558,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       peer,
       cairn.kernel.BftQuorum.Msg.Prepare(
         0, 0, BftFinality.valueOfBlock(block).digest,
-        cairn.kernel.BftQuorum.ReplicaId(peer.name)))
+        cairn.kernel.BftQuorum.ReplicaId(peer.name)),
+      manifest.replicaSetDigest)
       .fold(e => fail(e), identity)
     val err = bft.receive(prep)
     home.toFile.setWritable(true)
@@ -488,15 +576,6 @@ class DistributionDaemonSuite extends munit.FunSuite:
     node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
       .fold(e => fail(e), identity)
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-    val future = BftFinality.sealReplicaSet(replicas, activationHeight = 5L).fold(e => fail(e), identity)
-    val pre = BftReplica.certified(
-      replicas.head, future,
-      node = Some(node), ledgerAuth = ledgerAuth).fold(e => fail(e), identity)
-    val block0 = node.chainDigests.head
-    val preErr = pre.propose(0, 0, block0)
-    assert(preErr.isLeft, preErr.toString)
-    assert(preErr.swap.toOption.exists(_.contains("not yet active")), preErr.toString)
-
     val genesis = BftFinality.sealReplicaSet(replicas, activationHeight = 0L).fold(e => fail(e), identity)
     BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis).fold(e => fail(e), identity)
     val draft = ReplicaSetManifest.of(
@@ -513,6 +592,14 @@ class DistributionDaemonSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), successor)
       .fold(e => fail(e), identity)
+    val block0 = node.chainDigests.head
+    val pre = BftReplica.certified(
+      replicas.head, successor,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      home = Some(home)).fold(e => fail(e), identity)
+    val preErr = pre.propose(0, 0, block0)
+    assert(preErr.isLeft, preErr.toString)
+    assert(preErr.swap.toOption.exists(_.contains("not yet active")), preErr.toString)
     node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
       .fold(e => fail(e), identity) // tip height becomes 1
     val hist = BftFinality.loadReplicaSetHistory(home).fold(e => fail(e), identity)
@@ -534,7 +621,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val pp = BftFinality.sign(
       primary,
       cairn.kernel.BftQuorum.Msg.PrePrepare(
-        0, 1, BftFinality.valueOfBlock(block1), primaryId))
+        0, 1, BftFinality.valueOfBlock(block1), primaryId),
+      genesis.replicaSetDigest)
       .fold(e => fail(e), identity)
     val recvErr = post.receive(pp)
     assert(recvErr.isLeft, recvErr.toString)

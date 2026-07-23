@@ -81,9 +81,9 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 | Capability | Bound |
 | --- | --- |
-| Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership. Replica URLs are Ed25519-bound; unsigned gossip plants remain operator-trust. |
-| Gossip daemon | Pull-based fork choice (length, tip-hex) **constrained by finalized checkpoint**; no push epidemic |
-| BFT finality | Classic `n=3f+1`; certifies replay-valid sealed PoA blocks. `seq` must equal block height. Active set is `history.activeAt(height)`. Durable checkpoint constrains gossip/pull. **View-change**: timeout → ViewChange(+prepared proofs) → NewView → new primary re-proposes; current view is durable. Propose/view-change HTTP requires a replica seal. Each process holds only its own private key behind `Keystore`. Slot state is compacted past the finalized high-water. |
+| Peer discovery | Directory / announce — not open DHT. Replica URLs must verify against the **active manifest public key** (`resolveReplicaUrls`); sealed `generation` beats stale replays. Unsigned gossip plants remain operator-trust. |
+| Gossip daemon | Pull-based fork choice constrained by **verified** finalized checkpoint (corrupt file fails closed). Equal chains still synchronize certificates. |
+| BFT finality | Classic `n=3f+1`. `seq` = height. Messages bind `replicaSet`. View-change broadcasts local VC, self-delivers NewView, and tolerates `f` unreachable peers. Prepared claims carry value + optional prepare-vote seals; NewView carries VC evidence and is checked against `selectPrepared`. Cross-view locks reject conflicting PrePrepares. Durable state binds replica-set digest. Hot-reload adopts a successor set when this key remains a member (clean epoch state). |
 | Domain governance | Owner + grantor seals resolved via `IdentityResolver`. Language digests are mandatory (`PackAccess.loadClosed` or explicit index); `Branches.auditGoverned` walks the sealed agreement/delegation graph and asserts manifest≡agreement ancestry/refs. Governed `referTo` is rejected — amend via `plantGoverned`. |
 | Keystore | Encrypted at rest by default (`CAIRN_KEYSTORE_SECRET` → PBKDF2-HMAC-SHA256 → AES-GCM). Legacy SHA-256 seals still load. Create-only paths; wrong secret never replaces identity files. |
 | Useful-work market | Still deferred; `RecordCertificate` remains the natural anchor |

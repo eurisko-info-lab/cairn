@@ -63,6 +63,11 @@ final class HttpNode(
           case other => reply(ex, 405, s"method $other".getBytes))
     }
     bft.foreach { replica =>
+      def replicaPeers(root: java.nio.file.Path): List[PeerRegistry.Peer] =
+        PeerRegistry.load(root).toOption.toList.flatMap(_.replicas).filter { peer =>
+          replica.authorities.get(peer.name).contains(peer.publicKey.getOrElse(Vector.empty)) &&
+            PeerRegistry.Peer.verifyBinding(peer).isRight
+        }
       s.createContext("/bft/msg", ex =>
         if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
         else
@@ -74,10 +79,8 @@ final class HttpNode(
                 case Right(out) =>
                   reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
                   peersRoot.foreach { root =>
-                    PeerRegistry.load(root).foreach { dir =>
-                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
-                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
-                      }
+                    replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                      out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
                     }
                   }
       )
@@ -95,10 +98,8 @@ final class HttpNode(
                 case Right(out) =>
                   reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
                   peersRoot.foreach { root =>
-                    PeerRegistry.load(root).foreach { dir =>
-                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
-                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
-                      }
+                    replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                      out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
                     }
                   }
       )
@@ -117,10 +118,8 @@ final class HttpNode(
                 case Right(out) =>
                   reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
                   peersRoot.foreach { root =>
-                    PeerRegistry.load(root).foreach { dir =>
-                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
-                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
-                      }
+                    replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                      out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
                     }
                   }
       )
@@ -205,24 +204,33 @@ object HttpSync:
       fetchedBlobs <- publishedDigests.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap(n => fetchIfMissing(baseUrl, to, d, n))
       }
-      // Adopt remote finality certs that verify against local membership history.
+      // Adopt remote finality certs only after proving them against the candidate
+      // chain; never consult `to.chainDigests` before this chain is committed.
       _ <- checkpointHome match
         case None => Right(())
         case Some(home) =>
-          (BftFinality.fetchCerts(baseUrl), BftFinality.loadReplicaSetHistory(home)) match
-            case (Right(remoteCerts), Right(hist)) =>
-              remoteCerts.sortBy(_.height).foldLeft[Either[String, Unit]](Right(())) { (acc, cert) =>
-                acc.flatMap { _ =>
-                  BftFinality.FinalityCertificate.verifyAgainstHistory(
-                    cert, hist, to, authorities) match
-                    case Left(_) => Right(())
-                    case Right(_) => BftFinality.advanceCheckpoint(home, cert).map(_ => ())
+          BftFinality.fetchCerts(baseUrl) match
+            // `/bft/certs` is optional for ordinary non-BFT HTTP peers.
+            case Left(e) if e.contains("/bft/certs ->") => Right(())
+            case Left(e) => Left(s"bft cert fetch failed: $e")
+            case Right(remoteCerts) =>
+              BftFinality.loadReplicaSetHistory(home).flatMap { hist =>
+                remoteCerts.sortBy(_.height).foldLeft[Either[String, Unit]](Right(())) {
+                  (acc, cert) =>
+                    acc.flatMap { _ =>
+                      if !blocks.exists(_.digest == cert.blockDigest) then Right(())
+                      else
+                        BftFinality.FinalityCertificate.verifyAgainstBlocks(
+                          cert, hist, blocks, authorities).flatMap { _ =>
+                          BftFinality.advanceCheckpoint(home, cert).map(_ => ())
+                        }
+                    }
                 }
               }
-            case _ => Right(())
-      _ <- BftFinality.requireExtendsCheckpoint(
-        remoteChain,
-        checkpointHome.flatMap(h => BftFinality.loadCheckpoint(h).toOption.flatten).orElse(checkpoint))
+      durableCheckpoint <- checkpointHome match
+        case None => Right(checkpoint)
+        case Some(home) => BftFinality.loadCheckpoint(home).map(_.orElse(checkpoint))
+      _ <- BftFinality.requireExtendsCheckpoint(remoteChain, durableCheckpoint)
       _ <- to.writeChain(remoteChain)
     yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
 

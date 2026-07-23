@@ -27,11 +27,12 @@ object PeerRegistry:
       case "replica" => Right(Replica)
       case other     => Left(s"unknown peer role '$other'")
 
-  def bindingBytes(name: String, baseUrl: String, role: Role): Array[Byte] =
+  def bindingBytes(name: String, baseUrl: String, role: Role, generation: Long = 0L): Array[Byte] =
     Canon.encode(Canon.cmap(
       "name" -> Canon.CStr(name),
       "baseUrl" -> Canon.CStr(baseUrl),
-      "role" -> Canon.CStr(role.name)))
+      "role" -> Canon.CStr(role.name),
+      "generation" -> Canon.CInt(generation)))
 
   final case class Peer(
       name: String,
@@ -40,6 +41,7 @@ object PeerRegistry:
       publicKey: Option[Vector[Byte]] = None,
       lastSeenEpochMs: Long = Instant.now().toEpochMilli,
       urlSeal: Option[Vector[Byte]] = None,
+      generation: Long = 0L,
   ):
     def canon: Canon = Canon.cmap(
       "name" -> Canon.CStr(name),
@@ -49,7 +51,8 @@ object PeerRegistry:
         Canon.CTag("some", Canon.CBytes(pk))),
       "lastSeen" -> Canon.CInt(lastSeenEpochMs),
       "urlSeal" -> urlSeal.fold(Canon.CTag("none", Canon.CInt(0)))(s =>
-        Canon.CTag("some", Canon.CBytes(s))))
+        Canon.CTag("some", Canon.CBytes(s))),
+      "generation" -> Canon.CInt(generation))
 
   object Peer:
     def fromCanon(c: Canon): Either[String, Peer] =
@@ -69,7 +72,8 @@ object PeerRegistry:
             role,
             pk,
             c.field("lastSeen").asInt,
-            seal)
+            seal,
+            fields.get("generation").map(_.asInt).getOrElse(0L))
           verifyBinding(peer).map(_ => peer)
         }
       catch
@@ -77,7 +81,7 @@ object PeerRegistry:
 
     /** Build a peer whose URL is Ed25519-bound to `signer`. */
     def bound(signer: Signer, baseUrl: String, role: Role = Role.Gossip): Peer =
-      val seal = signer.sign(bindingBytes(signer.name, baseUrl, role))
+      val seal = signer.sign(bindingBytes(signer.name, baseUrl, role, generation = 0L))
       Peer(
         signer.name,
         baseUrl,
@@ -96,7 +100,7 @@ object PeerRegistry:
         case (Some(_), None, _) =>
           Left(s"peer '${p.name}': publicKey requires urlSeal")
         case (Some(pk), Some(seal), _) =>
-          if Ed25519.verify(pk, bindingBytes(p.name, p.baseUrl, p.role), seal) then Right(())
+          if Ed25519.verify(pk, bindingBytes(p.name, p.baseUrl, p.role, p.generation), seal) then Right(())
           else Left(s"peer '${p.name}': bad urlSeal")
 
   final case class Directory(peers: List[Peer]):
@@ -179,6 +183,24 @@ object PeerRegistry:
         case Left(_) => acc
         case Right(()) =>
           acc.byName(rp.name) match
-            case Some(lp) if lp.lastSeenEpochMs >= rp.lastSeenEpochMs => acc
+            case Some(lp) if lp.generation > rp.generation => acc
+            case Some(lp) if lp.generation == rp.generation &&
+                lp.lastSeenEpochMs >= rp.lastSeenEpochMs => acc
             case _ => acc.upsert(rp)
+    }
+
+  /** Resolve authenticated replica endpoints for exactly this manifest. */
+  def resolveReplicaUrls(
+      dir: Directory,
+      manifest: ReplicaSetManifest,
+  ): Either[String, Map[String, String]] =
+    manifest.ids.foldLeft[Either[String, Map[String, String]]](Right(Map.empty)) { (acc, id) =>
+      acc.flatMap { urls =>
+        dir.byName(id).toRight(s"bft: peer '$id' missing from peers.canon").flatMap { peer =>
+          if peer.role != Role.Replica then Left(s"bft: peer '$id' is not a replica")
+          else if !peer.publicKey.contains(manifest.authorities(id)) then
+            Left(s"bft: peer '$id' public key does not match replica-set manifest")
+          else Peer.verifyBinding(peer).map(_ => urls + (id -> peer.baseUrl))
+        }
+      }
     }

@@ -23,15 +23,30 @@ object BftQuorum:
   final case class Value(bytes: Vector[Byte]):
     def digest: Digest = Digest.of(Canon.CBytes(bytes))
 
-  /** Proof that a replica prepared `valueDigest` at `seq` in `preparedView`. */
-  final case class PreparedCert(seq: Int, valueDigest: Digest, preparedView: Int)
+  /** Proof that a replica prepared `valueDigest` at `seq` in `preparedView`.
+    * `value` enables re-proposal without relying on local slot memory.
+    * `prepareVotes` are distinct Prepare seals (network); empty in the in-process sim.
+    */
+  final case class PreparedCert(
+      seq: Int,
+      valueDigest: Digest,
+      preparedView: Int,
+      value: Option[Value] = None,
+      prepareVotes: List[(ReplicaId, Vector[Byte])] = Nil,
+  )
 
   enum Msg:
     case PrePrepare(view: Int, seq: Int, value: Value, from: ReplicaId)
     case Prepare(view: Int, seq: Int, valueDigest: Digest, from: ReplicaId)
     case Commit(view: Int, seq: Int, valueDigest: Digest, from: ReplicaId)
     case ViewChange(newView: Int, prepared: List[PreparedCert], from: ReplicaId)
-    case NewView(newView: Int, prepared: List[PreparedCert], from: ReplicaId)
+    case NewView(
+        newView: Int,
+        prepared: List[PreparedCert],
+        from: ReplicaId,
+        /** Quorum of ViewChange bodies used to derive `prepared` (may be empty in legacy sim paths). */
+        viewChanges: List[ViewChange] = Nil,
+    )
 
   final case class Decision(view: Int, seq: Int, value: Value, commits: List[ReplicaId])
 
@@ -69,7 +84,7 @@ object BftQuorum:
     vcs.toList.flatMap(_.prepared)
       .groupBy(_.seq)
       .values
-      .map(_.maxBy(p => (p.preparedView, p.valueDigest.hex)))
+      .map(_.maxBy(p => (p.preparedView, p.value.isDefined, p.prepareVotes.size, p.valueDigest.hex)))
       .toList
       .sortBy(_.seq)
 
@@ -79,7 +94,7 @@ object BftQuorum:
         slot.prePrepare.filter { pp =>
           val d = pp.value.digest
           slot.prepares.count(_._2 == d) >= state.q
-        }.map(pp => PreparedCert(seq, pp.value.digest, v))
+        }.map(pp => PreparedCert(seq, pp.value.digest, v, value = Some(pp.value)))
     }.flatten
       .groupBy(_.seq)
       .values
@@ -90,6 +105,20 @@ object BftQuorum:
   private def findValue(state: ReplicaState, dig: Digest): Option[Value] =
     state.slots.values.view.flatMap(_.prePrepare).find(_.value.digest == dig).map(_.value)
 
+  /** A prior view prepared a different value for this sequence — must not be overwritten. */
+  def preparedLock(
+      state: ReplicaState,
+      seq: Int,
+      beforeView: Int,
+  ): Option[Digest] =
+    state.slots.collectFirst {
+      case ((v, s), slot) if s == seq && v < beforeView =>
+        slot.prePrepare.flatMap { pp =>
+          val d = pp.value.digest
+          if slot.prepares.count(_._2 == d) >= state.q then Some(d) else None
+        }
+    }.flatten
+
   /** Deliver one message; ViewChange/NewView require [[deliverViewChange]] /
     * [[deliverNewView]] with the full replica-id list for primary checks.
     */
@@ -99,13 +128,16 @@ object BftQuorum:
       case pp @ Msg.PrePrepare(view, seq, value, _) =>
         if view != state.view then (state, Nil)
         else
-          val key = (view, seq)
-          val slot = state.slots.getOrElse(key, Slot())
-          if slot.prePrepare.isDefined then (state, Nil)
-          else
-            val updated = slot.copy(prePrepare = Some(pp))
-            (state.copy(slots = state.slots + (key -> updated)),
-              List(Msg.Prepare(view, seq, value.digest, state.id)))
+          preparedLock(state, seq, view) match
+            case Some(locked) if locked != value.digest => (state, Nil)
+            case _ =>
+              val key = (view, seq)
+              val slot = state.slots.getOrElse(key, Slot())
+              if slot.prePrepare.isDefined then (state, Nil)
+              else
+                val updated = slot.copy(prePrepare = Some(pp))
+                (state.copy(slots = state.slots + (key -> updated)),
+                  List(Msg.Prepare(view, seq, value.digest, state.id)))
 
       case Msg.Prepare(view, seq, d, from) =>
         if view != state.view then (state, Nil)
@@ -154,7 +186,8 @@ object BftQuorum:
       val forView = state.viewChanges.getOrElse(vc.newView, Map.empty) + (vc.from -> vc)
       val st2 = state.copy(viewChanges = state.viewChanges + (vc.newView -> forView))
       if forView.size >= st2.q && designatedPrimary(replicaIds, vc.newView).contains(st2.id) then
-        (st2, List(Msg.NewView(vc.newView, selectPrepared(forView.values), st2.id)))
+        val selected = selectPrepared(forView.values)
+        (st2, List(Msg.NewView(vc.newView, selected, st2.id, forView.values.toList)))
       else (st2, Nil)
 
   def deliverNewView(
@@ -164,19 +197,30 @@ object BftQuorum:
   ): (ReplicaState, List[Msg]) =
     if state.faulty || nv.newView <= state.view then (state, Nil)
     else if !designatedPrimary(replicaIds, nv.newView).contains(nv.from) then (state, Nil)
-    else if state.viewChanges.getOrElse(nv.newView, Map.empty).size < state.q then (state, Nil)
     else
-      // Advance view; new primary re-broadcasts PrePrepares so normal prepare/commit runs.
-      val st2 = state.copy(view = nv.newView)
-      val follow =
-        if designatedPrimary(replicaIds, nv.newView).contains(state.id) then
-          nv.prepared.flatMap { pc =>
-            findValue(state, pc.valueDigest).map { v =>
-              Msg.PrePrepare(nv.newView, pc.seq, v, state.id)
+      val evidence =
+        if nv.viewChanges.nonEmpty then nv.viewChanges
+        else state.viewChanges.getOrElse(nv.newView, Map.empty).values.toList
+      if evidence.size < state.q then (state, Nil)
+      else if selectPrepared(evidence).map(p => (p.seq, p.valueDigest, p.preparedView)) !=
+          nv.prepared.map(p => (p.seq, p.valueDigest, p.preparedView)) then (state, Nil)
+      else
+        // Merge evidence into local view-change log, advance view, re-propose prepared values.
+        val merged = evidence.foldLeft(state.viewChanges.getOrElse(nv.newView, Map.empty)) { (acc, vc) =>
+          acc + (vc.from -> vc)
+        }
+        val st2 = state.copy(
+          view = nv.newView,
+          viewChanges = state.viewChanges + (nv.newView -> merged))
+        val follow =
+          if designatedPrimary(replicaIds, nv.newView).contains(state.id) then
+            nv.prepared.flatMap { pc =>
+              pc.value.orElse(findValue(state, pc.valueDigest)).map { v =>
+                Msg.PrePrepare(nv.newView, pc.seq, v, state.id)
+              }
             }
-          }
-        else Nil
-      (st2, follow)
+          else Nil
+        (st2, follow)
 
   def runAgreement(
       replicaIds: List[ReplicaId],

@@ -129,6 +129,8 @@ object ReplicaSetManifest:
       Left("replica-set: duplicate predecessorApprovals")
     else if m.activationHeight < 0 then
       Left("replica-set: activationHeight must be >= 0")
+    else if m.replaces.isEmpty && m.activationHeight != 0 then
+      Left("replica-set: genesis activationHeight must be 0")
     else Right(())
 
   /** Safe path component: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. */
@@ -220,6 +222,7 @@ object ReplicaSetManifest:
       liveArtifactDigest: Option[Digest] = None,
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean =
         (_, _, _) => true,
+      minActivation: Long = -1L,
   ): Either[String, Unit] =
     live match
       case None =>
@@ -238,6 +241,10 @@ object ReplicaSetManifest:
           Left(
             s"replica-set: activationHeight ${proposed.activationHeight} must exceed " +
               s"predecessor ${prev.activationHeight}")
+        else if proposed.activationHeight <= minActivation then
+          Left(
+            s"replica-set: activationHeight ${proposed.activationHeight} must exceed " +
+              s"finalized high-water $minActivation")
         else
           verifyPredecessorApprovals(proposed, prev, verify)
 

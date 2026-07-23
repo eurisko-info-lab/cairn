@@ -921,12 +921,7 @@ object Cli:
       height = proved._2
       manifest <- BftFinality.loadActiveReplicaSet(home, height)
       dir <- PeerRegistry.load(home)
-      urls <- manifest.ids.foldLeft[Either[String, Map[String, String]]](Right(Map.empty)) { (acc, id) =>
-        acc.flatMap { m =>
-          dir.byName(id).map(_.baseUrl).toRight(s"bft: peer '$id' missing from peers.canon")
-            .map(url => m + (id -> url))
-        }
-      }
+      urls <- PeerRegistry.resolveReplicaUrls(dir, manifest)
       initiator <- localReplicaSigner(home, manifest.ids)
       cert <- BftFinality.agreeNetworkRemote(urls, block, initiator)
       hist <- BftFinality.loadReplicaSetHistory(home)
