@@ -190,6 +190,9 @@ object HttpSync:
       checkpointHome: Option[java.nio.file.Path] = None,
   ): Either[String, PullReport] =
     for
+      _ <- checkpointHome match
+        case Some(home) => BftFinality.resumeFollowerAdoption(home, to)
+        case None       => Right(())
       chainTxt <- get(baseUrl, "/chain")
       remoteChain = new String(chainTxt).linesIterator.filter(_.nonEmpty).map(Digest(_)).toList
       _ <- BftFinality.requireExtendsCheckpoint(remoteChain, checkpoint)

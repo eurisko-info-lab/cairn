@@ -934,38 +934,52 @@ class DistributionDaemonSuite extends munit.FunSuite:
         stateStore = Some(homes(k.name).resolve("bft-state.canon")),
         home = Some(homes(k.name))).fold(e => fail(e), identity)
     }.toMap
-    def deliverAll(from: String, msgs: List[BftFinality.SignedMsg], exclude: Set[String] = Set.empty): Unit =
-      msgs.foreach { sm =>
+    def isCommit(sm: BftFinality.SignedMsg): Boolean = sm.msg match
+      case Msg.Commit(_, _, _, _) => true
+      case _                      => false
+    def deliverAll(
+        from: String,
+        msgs: List[BftFinality.SignedMsg],
+        exclude: Set[String] = Set.empty,
+        dropCommits: Boolean = false,
+    ): Unit =
+      val filtered = if dropCommits then msgs.filterNot(isCommit) else msgs
+      filtered.foreach { sm =>
         bfts.foreach { (id, r) =>
           if id != from && !exclude.contains(id) then
             r.receive(sm).fold(e => fail(s"$id: $e"), identity)
         }
       }
-    // Primary proposes; everyone prepares — then primary is excluded (fails).
+    // Primary proposes; circulate Prepares only — intercept all Commits.
     val out0 = bfts("r0").propose(0, 0, block).fold(e => fail(e), identity)
-    deliverAll("r0", out0)
-    // Exchange prepare/commit follow-ons among honest backups (exclude failed primary).
+    deliverAll("r0", out0, dropCommits = true)
     var round = 0
     var progress = true
     while round < 16 && progress do
       progress = false
       bfts.foreach { (id, r) =>
-        if id != "r0" then
-          val out = r.drainOutbound()
-          if out.nonEmpty then
-            progress = true
-            deliverAll(id, out, exclude = Set("r0"))
+        val out = r.drainOutbound()
+        val kept = out.filterNot(isCommit)
+        // Drop commits from the failed primary and from backups during prepare phase.
+        if kept.nonEmpty then
+          progress = true
+          deliverAll(id, kept, exclude = Set("r0"), dropCommits = true)
+        else if out.nonEmpty then
+          // Consume commits without delivering them.
+          ()
       }
       round += 1
-    // View-change without the failed primary.
     val honest = List("r1", "r2", "r3")
+    assert(honest.forall(id => bfts(id).finalityCerts.isEmpty),
+      clues(honest.map(id => id -> bfts(id).finalityCerts.map(_.view))))
+    // Fail primary; view-change with prepared evidence; finalize in view 1.
     honest.foreach { id =>
       val out = bfts(id).requestViewChange(1).fold(e => fail(e), identity)
       deliverAll(id, out, exclude = Set("r0"))
     }
     round = 0
     progress = true
-    while round < 16 && progress do
+    while round < 24 && progress do
       progress = false
       honest.foreach { id =>
         val out = bfts(id).drainOutbound()
@@ -974,9 +988,13 @@ class DistributionDaemonSuite extends munit.FunSuite:
           deliverAll(id, out, exclude = Set("r0"))
       }
       round += 1
-    val certs = honest.flatMap(id => bfts(id).finalityCerts)
-    assert(certs.exists(_.blockDigest == block), clues(certs.map(c => (c.blockDigest.short, c.view))))
-    // Durable prepare/VC evidence survived the failover path on a backup.
+    val certs = honest.flatMap(id => bfts(id).finalityCerts.filter(_.blockDigest == block))
+    assert(certs.nonEmpty, "expected certificate after view-change")
+    assert(certs.forall(_.view >= 1), clues(certs.map(_.view)))
+    assert(certs.exists(_.view == 1), clues(certs.map(_.view)))
+    assertEquals(certs.map(_.blockDigest).toSet, Set(block))
+    // New primary for view 1 re-proposed via NewView prepared path.
+    assert(honest.exists(id => bfts(id).currentView >= 1))
     val state = Canon.decode(java.nio.file.Files.readAllBytes(homes("r1").resolve("bft-state.canon")))
       .flatMap(BftFinality.decodeReplicaStateWithReplicaSet)
       .fold(e => fail(e), identity)
@@ -1057,7 +1075,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     BftFinality.advanceCheckpoint(homeA, cert).fold(e => fail(e), identity)
     // Persist certs before checkpoint on follower, then interrupt before chain write.
     val intent = BftFinality.AdoptionIntent(
-      a.chainDigests, List(cert.digest), phase = "certs-checkpoint")
+      a.chainDigests, List(cert), phase = "certs-checkpoint")
     BftFinality.mergeVerifiedCerts(homeB, List(cert)).fold(e => fail(e), identity)
     BftFinality.advanceCheckpoint(homeB, cert).fold(e => fail(e), identity)
     BftFinality.saveAdoptionIntent(homeB, intent).fold(e => fail(e), identity)
@@ -1067,6 +1085,19 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(!java.nio.file.Files.exists(BftFinality.defaultAdoptionIntentPath(homeB)))
     val cp = BftFinality.loadCheckpoint(homeB).fold(e => fail(e), identity)
     assert(cp.exists(_.certificate == cert.digest))
+    // Journal with bodies alone (no prior cert store write) can still resume.
+    val homeC = java.nio.file.Files.createTempDirectory("cairn-adopt-c")
+    val c = Node(homeC.resolve("node"), ledgerCtx)
+    Sync.pull(a, c, ledgerAuth, None).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homeC), manifest)
+      .fold(e => fail(e), identity)
+    BftFinality.saveAdoptionIntent(
+      homeC,
+      BftFinality.AdoptionIntent(a.chainDigests, List(cert), phase = "started"))
+      .fold(e => fail(e), identity)
+    BftFinality.resumeFollowerAdoption(homeC, c).fold(e => fail(e), identity)
+    assertEquals(c.chainDigests, a.chainDigests)
+    assert(BftFinality.loadCheckpoint(homeC).fold(e => fail(e), identity).exists(_.certificate == cert.digest))
 
   test("peer URL generations advance monotonically on rebind"):
     val root = java.nio.file.Files.createTempDirectory("cairn-peer-gen")

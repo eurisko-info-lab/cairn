@@ -164,3 +164,39 @@ class ModuleBoundarySuite extends munit.FunSuite:
         if !line.contains("[[") // scaladoc link
       yield s"${file}:${i + 1}: '$bad' — ${line.trim}"
     assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("content does not import system-handler"):
+    val banned = List("cairn.systemhandler")
+    val hits =
+      importViolations(Path.of("content/core/src/main/scala"), "core", banned) ++
+        importViolations(Path.of("content/user/src/main/scala"), "user", banned) ++
+        importViolations(Path.of("content/proof/src/main/scala"), "proof", banned) ++
+        importViolations(Path.of("content/kernel-rewrite/src/main/scala"), "kernel-rewrite", banned)
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("container does not import content.user or content.proof"):
+    val banned = List("cairn.user", "cairn.proof")
+    val hits =
+      importViolations(Path.of("container/system-handler/src/main/scala"), "system-handler", banned) ++
+        importViolations(Path.of("container/system-interface/src/main/scala"), "system-interface", banned) ++
+        importViolations(Path.of("container/kernel-container/src/main/scala"), "kernel-container", banned)
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("container→core imports are allowlisted (shrink toward empty)"):
+    // Remaining core imports keep systemHandler.dependsOn(core) alive until
+    // Branches/MetaActivation/EffectContext factories move to app/runtime and
+    // AuthorityGate.DefaultProver is deleted in favor of PolicyEvalProver.
+    val allowedFiles = Set(
+      "AuthorityGate.scala", // DefaultProver → PolicyEval (temporary)
+      "EffectContext.scala", // PolicyEval.* factory policies
+      "MetaActivation.scala", // cairn.core.Meta
+      "Cas.scala", // Branches → SemanticRepository/Delta/…
+    )
+    val hits =
+      for
+        file <- scalaFilesUnder(Path.of("container/system-handler/src/main/scala"))
+        if !allowedFiles.contains(file.getFileName.toString)
+        (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
+        if line.trim.startsWith("import") && line.contains("cairn.core")
+      yield s"${file}:${i + 1}: ${line.trim}"
+    assert(hits.isEmpty, hits.mkString("\n"))

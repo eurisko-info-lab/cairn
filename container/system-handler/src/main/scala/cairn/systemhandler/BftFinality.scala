@@ -802,7 +802,37 @@ object BftFinality:
       }
     }
 
-  private val client = HttpClient.newHttpClient()
+  private val client = HttpClient.newBuilder()
+    .connectTimeout(java.time.Duration.ofSeconds(2))
+    .build()
+
+  /** Per-request deadline for BFT HTTP RPCs (blackholed peers must fail closed). */
+  private val RpcTimeout: java.time.Duration = java.time.Duration.ofSeconds(3)
+
+  private def httpPost(url: String, body: Array[Byte]): Either[String, Array[Byte]] =
+    try
+      val resp = client.send(
+        HttpRequest.newBuilder(URI.create(url))
+          .timeout(RpcTimeout)
+          .header("Content-Type", "application/octet-stream")
+          .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+          .build(),
+        HttpResponse.BodyHandlers.ofByteArray())
+      if resp.statusCode() == 200 then Right(resp.body())
+      else Left(s"POST $url -> ${resp.statusCode()}: ${new String(resp.body())}")
+    catch case e: Exception => Left(e.getMessage)
+
+  private def httpGet(url: String): Either[String, Array[Byte]] =
+    try
+      val resp = client.send(
+        HttpRequest.newBuilder(URI.create(url))
+          .timeout(RpcTimeout)
+          .GET()
+          .build(),
+        HttpResponse.BodyHandlers.ofByteArray())
+      if resp.statusCode() == 200 then Right(resp.body())
+      else Left(s"GET $url -> ${resp.statusCode()}")
+    catch case e: Exception => Left(e.getMessage)
 
   def loadCerts(path: java.nio.file.Path): Either[String, List[FinalityCertificate]] =
     if !java.nio.file.Files.exists(path) then Right(Nil)
@@ -824,15 +854,21 @@ object BftFinality:
   def defaultAdoptionIntentPath(home: java.nio.file.Path): java.nio.file.Path =
     home.resolve("bft-adoption.canon")
 
-  /** One recoverable follower adoption generation: certs → checkpoint → chain. */
+  /** One recoverable follower adoption generation: certs → checkpoint → chain.
+    * Certificate **bodies** are stored in the journal so a crash after the
+    * initial write (before cert-store merge) can still replay.
+    */
   final case class AdoptionIntent(
       remoteChain: List[Digest],
-      certDigests: List[Digest],
+      certificates: List[FinalityCertificate],
       phase: String,
   ):
+    def certDigests: List[Digest] = certificates.map(_.digest)
     def canon: Canon = Canon.CTag("bft-adoption", Canon.cmap(
       "remoteChain" -> Canon.cstrs(remoteChain.map(_.hex)),
-      "certDigests" -> Canon.cstrs(certDigests.map(_.hex)),
+      "certificates" -> Canon.CList(certificates.map(_.canon)),
+      // Legacy field kept for older journals that only stored digests.
+      "certDigests" -> Canon.cstrs(certificates.map(_.digest.hex)),
       "phase" -> Canon.CStr(phase)))
 
   object AdoptionIntent:
@@ -841,10 +877,17 @@ object BftFinality:
       c match
         case CTag("bft-adoption", m) =>
           try
-            Right(AdoptionIntent(
-              m.field("remoteChain").asList.map(r => Digest(r.asStr)),
-              m.field("certDigests").asList.map(r => Digest(r.asStr)),
-              m.field("phase").asStr))
+            val fields = m.asMap
+            val chain = m.field("remoteChain").asList.map(r => Digest(r.asStr))
+            val phase = m.field("phase").asStr
+            fields.get("certificates") match
+              case Some(CList(xs)) =>
+                xs.foldLeft[Either[String, List[FinalityCertificate]]](Right(Nil)) { (acc, row) =>
+                  acc.flatMap(cs => FinalityCertificate.fromCanon(row).map(cs :+ _))
+                }.map(certs => AdoptionIntent(chain, certs, phase))
+              case _ =>
+                // Legacy digest-only journal — not self-sufficient; resume must abort/clear.
+                Right(AdoptionIntent(chain, Nil, phase = s"legacy-digests:$phase"))
           catch case e: CodecError => Left(e.getMessage)
         case other => Left(s"not bft-adoption: $other")
 
@@ -892,7 +935,7 @@ object BftFinality:
       }
 
   /** Commit chain+certs+checkpoint as one recoverable generation.
-    * Call after remote certs are verified against the candidate chain.
+    * Journal embeds verified certificate bodies before any other durable write.
     */
   def adoptFollowerGeneration(
       home: java.nio.file.Path,
@@ -900,10 +943,7 @@ object BftFinality:
       remoteChain: List[Digest],
       verifiedCerts: List[FinalityCertificate],
   ): Either[String, Unit] =
-    val intent = AdoptionIntent(
-      remoteChain,
-      verifiedCerts.map(_.digest),
-      phase = "started")
+    val intent = AdoptionIntent(remoteChain, verifiedCerts, phase = "started")
     for
       _ <- saveAdoptionIntent(home, intent)
       _ <- adoptVerifiedCertificates(home, verifiedCerts)
@@ -912,27 +952,35 @@ object BftFinality:
       _ <- clearAdoptionIntent(home)
     yield ()
 
-  /** Resume a crash-interrupted follower adoption generation. */
+  /** Resume a crash-interrupted follower adoption generation.
+    * Digest-only legacy journals are cleared (safely abortable) so the next
+    * pull can refetch; body-bearing journals replay without network access.
+    */
   def resumeFollowerAdoption(
       home: java.nio.file.Path,
       node: Node,
   ): Either[String, Unit] =
     loadAdoptionIntent(home).flatMap {
       case None => Right(())
+      case Some(intent) if intent.phase.startsWith("legacy-digests:") || intent.certificates.isEmpty =>
+        // Not self-sufficient — abort and let the next sync refetch.
+        clearAdoptionIntent(home)
       case Some(intent) =>
-        loadCerts(defaultCertStorePath(home)).flatMap { certs =>
-          val wanted = intent.certDigests.toSet
-          val present = certs.filter(c => wanted.contains(c.digest))
-          if present.map(_.digest).toSet != wanted then
-            Left(
-              s"bft adoption: incomplete certs for interrupted generation " +
-                s"(have ${present.size}/${wanted.size})")
-          else
-            adoptVerifiedCertificates(home, present).flatMap { _ =>
-              node.writeChain(intent.remoteChain).flatMap(_ => clearAdoptionIntent(home))
-            }
+        adoptVerifiedCertificates(home, intent.certificates).flatMap { _ =>
+          node.writeChain(intent.remoteChain).flatMap(_ => clearAdoptionIntent(home))
         }
     }
+
+  /** Resume interrupted adoption, then load a verified checkpoint.
+    * Call on every gossip/CLI startup and before chain-adoption entry points.
+    */
+  def recoverAndLoadCheckpoint(
+      home: java.nio.file.Path,
+      node: Node,
+      ledgerAuth: Map[String, Vector[Byte]],
+  ): Either[String, Option[FinalizedCheckpoint]] =
+    resumeFollowerAdoption(home, node).flatMap(_ =>
+      loadVerifiedCheckpoint(home, node, ledgerAuth))
 
   /** Durable finalized ledger checkpoint — chain adoption must extend this block. */
   final case class FinalizedCheckpoint(
@@ -1293,32 +1341,18 @@ object BftFinality:
     decodeReplicaStateWithReplicaSet(c).map(d => (d.state, d.commitSeals, d.blockMeta))
 
   def postMsg(baseUrl: String, sm: SignedMsg): Either[String, Unit] =
-    try
-      val resp = client.send(
-        HttpRequest.newBuilder(URI.create(s"$baseUrl/bft/msg"))
-          .header("Content-Type", "application/octet-stream")
-          .POST(HttpRequest.BodyPublishers.ofByteArray(Canon.encode(sm.canon)))
-          .build(),
-        HttpResponse.BodyHandlers.ofByteArray())
-      if resp.statusCode() == 200 then Right(())
-      else Left(s"POST $baseUrl/bft/msg -> ${resp.statusCode()}: ${new String(resp.body())}")
-    catch case e: Exception => Left(e.getMessage)
+    httpPost(s"$baseUrl/bft/msg", Canon.encode(sm.canon)).map(_ => ())
 
   def fetchCerts(baseUrl: String): Either[String, List[FinalityCertificate]] =
-    try
-      val resp = client.send(
-        HttpRequest.newBuilder(URI.create(s"$baseUrl/bft/certs")).GET().build(),
-        HttpResponse.BodyHandlers.ofByteArray())
-      if resp.statusCode() != 200 then Left(s"GET $baseUrl/bft/certs -> ${resp.statusCode()}")
-      else
-        Canon.decode(resp.body()).flatMap {
-          case Canon.CList(xs) =>
-            xs.foldLeft[Either[String, List[FinalityCertificate]]](Right(Nil)) { (acc, c) =>
-              acc.flatMap(cs => FinalityCertificate.fromCanon(c).map(cs :+ _))
-            }
-          case other => Left(s"bad certs payload: $other")
-        }
-    catch case e: Exception => Left(e.getMessage)
+    httpGet(s"$baseUrl/bft/certs").flatMap { body =>
+      Canon.decode(body).flatMap {
+        case Canon.CList(xs) =>
+          xs.foldLeft[Either[String, List[FinalityCertificate]]](Right(Nil)) { (acc, c) =>
+            acc.flatMap(cs => FinalityCertificate.fromCanon(c).map(cs :+ _))
+          }
+        case other => Left(s"bad certs payload: $other")
+      }
+    }
 
   /** Ask the designated primary to propose (initiator needs a replica key, not the primary's).
     * Sequence is derived from block height on the primary — callers do not pick slots.
@@ -1331,18 +1365,8 @@ object BftFinality:
       replicaSet: Digest,
       view: Int = 0,
   ): Either[String, Unit] =
-    try
-      val req = ProposeRequest.sign(initiator, blockDigest, chainId, replicaSet, view)
-      val body = Canon.encode(req.canon)
-      val resp = client.send(
-        HttpRequest.newBuilder(URI.create(s"$primaryUrl/bft/propose"))
-          .header("Content-Type", "application/octet-stream")
-          .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-          .build(),
-        HttpResponse.BodyHandlers.ofByteArray())
-      if resp.statusCode() == 200 then Right(())
-      else Left(s"POST $primaryUrl/bft/propose -> ${resp.statusCode()}: ${new String(resp.body())}")
-    catch case e: Exception => Left(e.getMessage)
+    val req = ProposeRequest.sign(initiator, blockDigest, chainId, replicaSet, view)
+    httpPost(s"$primaryUrl/bft/propose", Canon.encode(req.canon)).map(_ => ())
 
   /** @deprecated Prefer [[propose(String, Digest, Signer, Digest, Digest, Int)]] — seq is height-bound. */
   def propose(
@@ -1425,26 +1449,49 @@ object BftFinality:
         }
     attempt(view, maxViews)
 
-  /** Fan-out a request to replica URLs; succeed once at least a BFT quorum accepts.
-    * Up to `f` unreachable replicas (including a dead primary) are tolerated.
+  /** Fan-out a request to replica URLs concurrently; succeed once a BFT quorum
+    * accepts. Completes as soon as quorum is reached; remaining calls are cancelled.
+    * Each RPC must itself enforce a request deadline (see [[RpcTimeout]]).
     */
   def fanoutQuorum(
       replicaUrls: Map[String, String],
       post: (String, String) => Either[String, Unit],
+      timeoutMs: Long = 3000L,
   ): Either[String, Unit] =
     val n = replicaUrls.size
     if !BftQuorum.validReplicaCount(n) then
       Left(s"bft: n=$n is not a valid 3f+1 size")
     else
       val q = BftQuorum.quorumSize(n)
-      val results = replicaUrls.toList.map { (name, url) =>
-        name -> post(name, url)
-      }
-      val ok = results.count(_._2.isRight)
-      if ok >= q then Right(())
-      else
-        val errs = results.collect { case (name, Left(e)) => s"$name: $e" }
-        Left(s"bft: quorum fan-out reached $ok/$n (need $q): ${errs.mkString("; ")}")
+      val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(n, 8).max(1))
+      try
+        val futs = replicaUrls.toList.map { (name, url) =>
+          java.util.concurrent.CompletableFuture.supplyAsync(
+            () => name -> post(name, url),
+            exec)
+        }
+        val results = scala.collection.mutable.ListBuffer.empty[(String, Either[String, Unit])]
+        val pending = scala.collection.mutable.ListBuffer.from(futs)
+        val deadline = System.nanoTime() + timeoutMs * 1000000L
+        while pending.nonEmpty && results.count(_._2.isRight) < q && System.nanoTime() < deadline do
+          val done = pending.filter(_.isDone).toList
+          if done.isEmpty then
+            Thread.sleep(5)
+          else
+            done.foreach { f =>
+              try results += f.getNow(null)
+              catch case e: Exception =>
+                results += (("?", Left(e.getMessage)): (String, Either[String, Unit]))
+              pending -= f
+            }
+        pending.foreach(_.cancel(true))
+        val ok = results.count(_._2.isRight)
+        if ok >= q then Right(())
+        else
+          val errs = results.collect { case (name, Left(e)) => s"$name: $e" }
+          Left(s"bft: quorum fan-out reached $ok/$n (need $q): ${errs.mkString("; ")}")
+      finally
+        exec.shutdownNow()
 
   /** Broadcast a view-change request; quorum acceptance is enough (dead primary OK). */
   def requestNetworkViewChange(
@@ -1454,22 +1501,11 @@ object BftFinality:
       chainId: Digest,
       replicaSet: Digest,
   ): Either[String, Unit] =
-    try
-      val req = ViewChangeRequest.sign(initiator, newView, chainId, replicaSet)
-      val body = Canon.encode(req.canon)
-      fanoutQuorum(replicaUrls, { (name, url) =>
-        try
-          val resp = client.send(
-            HttpRequest.newBuilder(URI.create(s"$url/bft/view-change"))
-              .header("Content-Type", "application/octet-stream")
-              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-              .build(),
-            HttpResponse.BodyHandlers.ofByteArray())
-          if resp.statusCode() == 200 then Right(())
-          else Left(s"POST $url/bft/view-change -> ${resp.statusCode()}: ${new String(resp.body())}")
-        catch case e: Exception => Left(e.getMessage)
-      })
-    catch case e: Exception => Left(e.getMessage)
+    val req = ViewChangeRequest.sign(initiator, newView, chainId, replicaSet)
+    val body = Canon.encode(req.canon)
+    fanoutQuorum(replicaUrls, { (name, url) =>
+      httpPost(s"$url/bft/view-change", body).map(_ => ())
+    })
 
   /** @deprecated Prefer the epoch-bound [[agreeNetworkRemote]] overload. */
   def agreeNetworkRemote(
@@ -1780,32 +1816,39 @@ final class BftReplica private (
     else if pc.prepareVotes.isEmpty then
       Left(s"bft: prepared seq ${pc.seq} missing prepare-quorum evidence")
     else
-      val ids = pc.prepareVotes.map(_._1.id)
-      if ids.length != ids.distinct.length then
-        Left(s"bft: duplicate prepare votes for seq ${pc.seq}")
-      else if ids.exists(id => !authorities.contains(id)) then
-        Left(s"bft: unknown prepare voter for seq ${pc.seq}")
-      else if ids.distinct.length < quorumSize(n) then
-        Left(s"bft: prepare votes ${ids.distinct.length} < quorum ${quorumSize(n)}")
-      else
-        val from = pc.prePrepareFrom.get
-        val pp = Msg.PrePrepare(pc.preparedView, pc.seq, pc.value.get, from)
-        BftFinality.verify(
-          authorities,
-          SignedMsg(pp, from, pc.prePrepareSeal.get, setDigest, chainId),
-          Some(setDigest),
-          Some(chainId)).flatMap { _ =>
-          pc.prepareVotes.foldLeft[Either[String, Unit]](Right(())) { case (acc, (rid, seal)) =>
-            acc.flatMap { _ =>
-              val prep = Msg.Prepare(pc.preparedView, pc.seq, pc.valueDigest, rid)
-              BftFinality.verify(
-                authorities,
-                SignedMsg(prep, rid, seal, setDigest, chainId),
-                Some(setDigest),
-                Some(chainId))
+      val from = pc.prePrepareFrom.get
+      BftFinality.designatedPrimary(replicaIds, pc.preparedView).flatMap { primary =>
+        if primary != from then
+          Left(
+            s"bft: prepared PrePrepare from ${from.id} is not designated primary " +
+              s"${primary.id} for view ${pc.preparedView}")
+        else
+          val ids = pc.prepareVotes.map(_._1.id)
+          if ids.length != ids.distinct.length then
+            Left(s"bft: duplicate prepare votes for seq ${pc.seq}")
+          else if ids.exists(id => !authorities.contains(id)) then
+            Left(s"bft: unknown prepare voter for seq ${pc.seq}")
+          else if ids.distinct.length < quorumSize(n) then
+            Left(s"bft: prepare votes ${ids.distinct.length} < quorum ${quorumSize(n)}")
+          else
+            val pp = Msg.PrePrepare(pc.preparedView, pc.seq, pc.value.get, from)
+            BftFinality.verify(
+              authorities,
+              SignedMsg(pp, from, pc.prePrepareSeal.get, setDigest, chainId),
+              Some(setDigest),
+              Some(chainId)).flatMap { _ =>
+              pc.prepareVotes.foldLeft[Either[String, Unit]](Right(())) { case (acc, (rid, seal)) =>
+                acc.flatMap { _ =>
+                  val prep = Msg.Prepare(pc.preparedView, pc.seq, pc.valueDigest, rid)
+                  BftFinality.verify(
+                    authorities,
+                    SignedMsg(prep, rid, seal, setDigest, chainId),
+                    Some(setDigest),
+                    Some(chainId))
+                }
+              }
             }
-          }
-        }
+      }
 
   /** Verify NewView as a real certificate of sealed ViewChange envelopes. */
   private def verifyNewViewCertificate(nv: Msg.NewView): Either[String, Unit] =

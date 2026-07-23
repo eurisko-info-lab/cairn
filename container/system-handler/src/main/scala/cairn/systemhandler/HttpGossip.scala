@@ -153,6 +153,7 @@ final class GossipDaemon(
 
   def tick(): HttpGossip.RoundReport =
     val report = for
+      _ <- BftFinality.resumeFollowerAdoption(peersRoot, local)
       directory <- PeerRegistry.load(peersRoot)
       checkpoint <- BftFinality.loadVerifiedCheckpoint(peersRoot, local, authorities)
     yield HttpGossip.round(

@@ -88,10 +88,20 @@ naming it rewrites onto (`"languages*"`, matched by
 `core.PolicyEval.packLoaderWorkspace`) stays a symbolic name, intentionally
 decoupled from the physical path, so it did not need to change.
 
-Remaining follow-up (slice 3): add an actual `ModuleBoundarySuite` guard that
-enforces container ⟂ content (no direct cross-imports outside `kernel`/
-`kernel-container`/`app`), and refresh this doc's `## Areas` table to name
-`container`/`content`/`app` directly instead of the pre-split area names.
+Remaining follow-up (slice 3): finish neutralizing the container/content cut:
+
+1. Move effect schemas to a shared `contracts` project (today still under
+   `container/system-interface`); drop `kernelContainer` from its dependsOn.
+2. Keep [[cairn.systeminterface.AuthorizationProver]] as the shared prove
+   contract — [[AuthorityGate]] already depends on it; delete the temporary
+   `AuthorityGate.DefaultProver` once all composition roots inject
+   [[cairn.runtime.PolicyEvalProver]].
+3. Move `EffectContext.for*` factories, `MetaActivation`, and `Branches` into
+   `app/runtime`, then drop `systemHandler.dependsOn(core)`.
+4. Point `content/user` at contracts (not `container/`) for PackAccess.
+5. `ModuleBoundarySuite` already forbids content→system-handler and
+   container→user/proof, and allowlists remaining handler→core imports —
+   shrink that allowlist to empty.
 
 ## Digests and surfaces
 

@@ -976,7 +976,7 @@ object Cli:
     val node = Node(root, ledgerCtx)
     for
       auth <- defaultAuthorities(home)
-      checkpoint <- BftFinality.loadCheckpoint(home)
+      checkpoint <- BftFinality.recoverAndLoadCheckpoint(home, node, auth)
       r <- HttpSync.pull(baseUrl, node, auth, checkpoint, Some(home))
     yield s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
 
@@ -986,7 +986,7 @@ object Cli:
     val node = Node(root, ledgerCtx)
     for
       auth <- defaultAuthorities(home)
-      checkpoint <- BftFinality.loadCheckpoint(home)
+      checkpoint <- BftFinality.recoverAndLoadCheckpoint(home, node, auth)
     yield
       val report = HttpGossip.round(
         "nodeA", node,
