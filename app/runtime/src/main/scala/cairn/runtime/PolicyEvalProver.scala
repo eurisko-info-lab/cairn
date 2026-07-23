@@ -5,9 +5,10 @@ import cairn.kernel.Authority.*
 import cairn.systeminterface.AuthorizationProver
 
 /** App-layer [[AuthorizationProver]] backed by Core [[PolicyEval]].
-  * Composition roots should inject this into [[cairn.systemhandler.AuthorityGate]]
-  * so container code does not import PolicyEval directly once the temporary
-  * [[cairn.systemhandler.AuthorityGate.DefaultProver]] adapter is removed.
+  * Composition roots inject this into every
+  * [[cairn.systemhandler.AuthorityGate]] construction — the `prover`
+  * parameter has no default, so container code never imports `PolicyEval`
+  * directly.
   */
 object PolicyEvalProver extends AuthorizationProver:
   def propose(req: EffectRequest, policies: List[EffectPolicy]): AuthorizationDerivation =

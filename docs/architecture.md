@@ -59,7 +59,7 @@ container/kernel-container  → kernel                  # Merkle, Ledger, BftQuo
 content/kernel-rewrite      → kernel                  # Rename, Rewrite, Checker
 content/core                → kernel, kernel-rewrite
 container/system-interface  → kernel, kernel-container            # LedgerTransport only
-container/system-handler    → kernel, kernel-container, core, system-interface, contracts
+container/system-handler    → kernel, kernel-container, system-interface, contracts
 content/user                → kernel, core, contracts   (↛ system-handler, ↛ container/*)
 app/runtime                 → user, system-handler, core, kernel, system-interface, contracts
 
@@ -113,10 +113,24 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
    — hoisting them out to drop `system-interface`'s `kernelContainer`
    dependency entirely is a separate, deliberately deferred step so it
    doesn't collide with in-flight `Ledger.scala` work).
-2. Keep [[cairn.systeminterface.AuthorizationProver]] as the shared prove
-   contract — [[AuthorityGate]] already depends on it; delete the temporary
-   `AuthorityGate.DefaultProver` once all composition roots inject
-   [[cairn.runtime.PolicyEvalProver]].
+2. **Done.** Deleted the temporary `AuthorityGate.DefaultProver`; its
+   `prover` parameter (and every companion factory that used to default it)
+   is now required. 28 call sites across 4 files relied on the default: 7
+   bare `AuthorityGate()` constructions, 2 `AuthorityGate.bootstrapped()`,
+   and 19 `AuthorityGate.enforcing(...)` calls, spread across
+   `app/tests/AuthoritySuite.scala` (23 of the 28), `app/runtime/
+   EffectContexts.scala`, and `app/examples/sds/{SdsCausalWorkflow,
+   SdsCorpusTutorial}.scala` — every one now passes
+   [[cairn.runtime.PolicyEvalProver]] explicitly. The one call site inside
+   `system-handler` itself that used a default (`EffectContext.bootstrapped`,
+   which could never reach `PolicyEvalProver` across the module boundary)
+   turned out to have zero real callers anywhere in the repo, so it was
+   deleted outright rather than given a parameter nobody would supply.
+   Collapsing the factory overloads hit one real Scala constraint: two
+   overloads of the same method can't both carry default arguments, so the
+   rarely-used `bootstrapped(replay, registry, revocation, prover)` form
+   (confirmed zero callers) had its `registry`/`revocation` defaults dropped
+   to resolve the ambiguity against the more common 3-arg `bootstrapped`.
 3. **Done.** Moved `EffectContext.for*` factories, `MetaActivation`, and
    `Branches` into `app/runtime`. `MetaActivation` had zero real callers
    anywhere in the repo, so it moved with no call-site changes. `Branches`
@@ -140,11 +154,13 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
    `EffectContext.scala` no longer import `cairn.core` at all.
 4. **Done.** `content/user` depends on `contracts` (not `container/
    system-interface`) for `PackAccess`.
-5. `ModuleBoundarySuite`'s container→core allowlist is down to its last
-   entry: `AuthorityGate.scala`, for `DefaultProver` (item 2). Reaching empty
-   now only needs item 2: deleting `DefaultProver` and having every
-   `AuthorityGate` construction site inject `cairn.runtime.PolicyEvalProver`
-   explicitly — a different call-site set than this slice's, not yet done.
+5. **Done.** `ModuleBoundarySuite`'s container→core allowlist reached empty
+   — the test is now "container never imports `cairn.core`", zero
+   exceptions. `systemHandler.dependsOn(core)` is gone from `build.sbt`;
+   `container/system-handler` compiles without `content/core` ever being
+   built first. This closes out the container/content split's hardening
+   roadmap entirely — `container` and `content` share only `kernel` and
+   `contracts`, and neither depends on the other's implementation.
 
 ## Digests and surfaces
 

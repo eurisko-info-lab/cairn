@@ -187,20 +187,14 @@ class ModuleBoundarySuite extends munit.FunSuite:
     val hits = importViolations(Path.of("contracts/src/main/scala"), "contracts", banned)
     assert(hits.isEmpty, hits.mkString("\n"))
 
-  test("container→core imports are allowlisted (shrink toward empty)"):
-    // Remaining core import keeps systemHandler.dependsOn(core) alive until
-    // AuthorityGate.DefaultProver is deleted in favor of PolicyEvalProver
-    // (every AuthorityGate construction site would need to inject it
-    // explicitly). MetaActivation, Branches, and EffectContext's
-    // PolicyEval-calling factories (now cairn.runtime.EffectContexts)
-    // already moved to app/runtime.
-    val allowedFiles = Set(
-      "AuthorityGate.scala", // DefaultProver → PolicyEval (temporary)
-    )
+  test("container never imports cairn.core"):
+    // AuthorityGate.DefaultProver, EffectContext's PolicyEval-calling
+    // factories (now cairn.runtime.EffectContexts), MetaActivation, and
+    // Branches all moved to app/runtime — systemHandler.dependsOn(core) is
+    // gone from build.sbt. No exceptions remain.
     val hits =
       for
         file <- scalaFilesUnder(Path.of("container/system-handler/src/main/scala"))
-        if !allowedFiles.contains(file.getFileName.toString)
         (line, i) <- Files.readAllLines(file).asScala.zipWithIndex
         if line.trim.startsWith("import") && line.contains("cairn.core")
       yield s"${file}:${i + 1}: ${line.trim}"

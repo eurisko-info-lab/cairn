@@ -20,10 +20,13 @@ import cairn.systeminterface.AuthorizationProver
   * registry, default instance, or thread-local context: composition roots
   * and tests construct [[EffectContext]]s and authorize through them.
   *
-  * A directly-constructed `AuthorityGate()` starts in `Mode.Audit` with no
-  * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with
-  * allow-all policies (test / non-pack-loader wiring). PackLoader production
-  * wiring uses [[cairn.runtime.EffectContexts.forPackLoader]] instead.
+  * A directly-constructed `AuthorityGate(prover = ...)` starts in
+  * `Mode.Audit` with no policies. [[AuthorityGate.bootstrapped]] builds an
+  * Enforce gate with allow-all policies (test / non-pack-loader wiring).
+  * PackLoader production wiring uses
+  * [[cairn.runtime.EffectContexts.forPackLoader]] instead. `prover` has no
+  * default — composition roots inject [[cairn.runtime.PolicyEvalProver]]
+  * explicitly (container code cannot supply it itself).
   *
   * Replay: successful Enforce authorizations consume grant [[CapabilityGrant.nonce]]
   * and [[EffectRequest.requestId]] via a shared issuer-scoped [[ReplayStore]]
@@ -37,7 +40,7 @@ final class AuthorityGate(
     @volatile private var policies: List[EffectPolicy] = Nil,
     private val replay: ReplayStore = ReplayStore.memory(),
     private val revocation: RevocationView = RevocationView.empty,
-    private val prover: AuthorizationProver = AuthorityGate.DefaultProver,
+    private val prover: AuthorizationProver,
 ):
   private val events = scala.collection.mutable.ListBuffer[AuthorityEvent]()
 
@@ -176,21 +179,6 @@ object AuthorityGate:
   enum Mode:
     case Audit, Enforce
 
-  /** Temporary adapter keeping PolicyEval reachable until Branches/MetaActivation
-    * leave the handler and `systemHandler.dependsOn(core)` can be dropped.
-    * Prefer [[cairn.runtime.PolicyEvalProver]] from app composition roots.
-    */
-  object DefaultProver extends AuthorizationProver:
-    import cairn.core.PolicyEval
-    def propose(req: EffectRequest, policies: List[EffectPolicy]): AuthorizationDerivation =
-      PolicyEval.propose(req, policies)
-    def prove(
-        req: EffectRequest,
-        policies: List[EffectPolicy],
-        nowMillis: Long,
-    ): Either[String, AuthorizationProof] =
-      PolicyEval.prove(req, policies, nowMillis)
-
   private def bootstrapPolicies(registry: RuntimeEffectRegistry): List[EffectPolicy] =
     registry.allActionKeys.toList.map(k =>
       EffectPolicy(s"bootstrap-allow-${k.id}", "*", k, Resource("*", "*"), Decision.Allow))
@@ -206,36 +194,23 @@ object AuthorityGate:
   def bootstrapped(
       registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
       revocation: RevocationView = RevocationView.empty,
-  ): AuthorityGate =
-    bootstrapped(registry, revocation, DefaultProver)
-
-  def bootstrapped(
-      registry: RuntimeEffectRegistry,
-      revocation: RevocationView,
       prover: AuthorizationProver,
   ): AuthorityGate =
     enforcing(bootstrapPolicies(registry), ReplayStore.memory(), revocation, prover)
 
   /** Fresh Enforce gate with the given policies (private in-memory replay). */
-  def enforcing(policies: List[EffectPolicy]): AuthorityGate =
-    enforcing(policies, ReplayStore.memory(), RevocationView.empty, DefaultProver)
+  def enforcing(policies: List[EffectPolicy], prover: AuthorizationProver): AuthorityGate =
+    enforcing(policies, ReplayStore.memory(), RevocationView.empty, prover)
 
   /** Fresh Enforce gate with policies + revocation view. */
-  def enforcing(policies: List[EffectPolicy], revocation: RevocationView): AuthorityGate =
-    enforcing(policies, ReplayStore.memory(), revocation, DefaultProver)
+  def enforcing(policies: List[EffectPolicy], revocation: RevocationView, prover: AuthorizationProver): AuthorityGate =
+    enforcing(policies, ReplayStore.memory(), revocation, prover)
 
   /** Fresh Enforce gate sharing an issuer-scoped [[ReplayStore]]. */
-  def enforcing(policies: List[EffectPolicy], replay: ReplayStore): AuthorityGate =
-    enforcing(policies, replay, RevocationView.empty, DefaultProver)
+  def enforcing(policies: List[EffectPolicy], replay: ReplayStore, prover: AuthorizationProver): AuthorityGate =
+    enforcing(policies, replay, RevocationView.empty, prover)
 
   /** Fresh Enforce gate with shared replay + revocation. */
-  def enforcing(
-      policies: List[EffectPolicy],
-      replay: ReplayStore,
-      revocation: RevocationView,
-  ): AuthorityGate =
-    enforcing(policies, replay, revocation, DefaultProver)
-
   def enforcing(
       policies: List[EffectPolicy],
       replay: ReplayStore,
@@ -249,16 +224,6 @@ object AuthorityGate:
       replay: ReplayStore,
       registry: RuntimeEffectRegistry,
       revocation: RevocationView,
-  ): AuthorityGate =
-    bootstrapped(replay, registry, revocation, DefaultProver)
-
-  def bootstrapped(
-      replay: ReplayStore,
-      registry: RuntimeEffectRegistry,
-      revocation: RevocationView,
       prover: AuthorizationProver,
   ): AuthorityGate =
     enforcing(bootstrapPolicies(registry), replay, revocation, prover)
-
-  def bootstrapped(replay: ReplayStore): AuthorityGate =
-    bootstrapped(replay, RuntimeEffectRegistry.seeds, RevocationView.empty, DefaultProver)

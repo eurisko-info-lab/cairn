@@ -39,7 +39,7 @@ lazy val systemInterface = project.in(file("container/system-interface"))
   .settings(libraryDependencies += munit)
 
 lazy val systemHandler = project.in(file("container/system-handler"))
-  .dependsOn(kernel, kernelContainer, core, systemInterface, contracts)
+  .dependsOn(kernel, kernelContainer, systemInterface, contracts)
   .settings(libraryDependencies += munit)
 
 // MIGRATION-PLAN.md Phase 2: pure proposal machinery.

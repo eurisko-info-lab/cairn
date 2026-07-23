@@ -6,7 +6,7 @@ import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
 import cairn.core.PolicyEval
 import cairn.kernel.Authority
 import cairn.systemhandler.{AuthorityGate, CasAdminEffects, CasEffects, DiskCas, EffectContext, Filesystem, Keypair, MemCas, Provenance, ReplayStore, Sync}
-import cairn.runtime.Branches
+import cairn.runtime.{Branches, PolicyEvalProver}
 import cairn.surface.{Cli, Transcript}
 import cairn.systeminterface.Cas
 import cairn.kernel.{Cst, Tx}
@@ -29,7 +29,7 @@ class AuthoritySuite extends munit.FunSuite:
   private val appendReq = EffectRequest(alice, ledgerAppend, Resource("ledger", "/tmp/node"))
 
   test("Phase 4 audit mode records via audit(); check cannot mint AuthorizedRequest"):
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     gate.install(List(PolicyEval.allowAll("allow-read", alice, fsRead)))
     assert(gate.check(readReq).isLeft, "audit mode must not mint AuthorizedRequest")
     val audited = gate.audit(readReq)
@@ -41,7 +41,7 @@ class AuthoritySuite extends munit.FunSuite:
     })
 
   test("Phase 4 audit records would-deny when no policy matches"):
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     assert(gate.check(readReq).isLeft)
     val _ = gate.audit(readReq)
     val ev = gate.drainEvents()
@@ -51,7 +51,7 @@ class AuthoritySuite extends munit.FunSuite:
     })
 
   test("Phase 5 enforce mode rejects without allow policy"):
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     gate.setMode(AuthorityGate.Mode.Enforce)
     val denied = gate.check(appendReq)
     assert(denied.isLeft, denied.toString)
@@ -61,7 +61,7 @@ class AuthoritySuite extends munit.FunSuite:
     })
 
   test("Phase 5 enforce mode allows with matching policy"):
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     gate.setMode(AuthorityGate.Mode.Enforce)
     gate.install(List(PolicyEval.allowAll("allow-append", alice, ledgerAppend)))
     val allowed = gate.check(appendReq)
@@ -80,8 +80,8 @@ class AuthoritySuite extends munit.FunSuite:
     assertEquals(d.decision, Decision.Deny)
 
   test("separately constructed gates are distinct; Mode can diverge"):
-    val fs = AuthorityGate.bootstrapped()
-    val random = AuthorityGate.bootstrapped()
+    val fs = AuthorityGate.bootstrapped(prover = PolicyEvalProver)
+    val random = AuthorityGate.bootstrapped(prover = PolicyEvalProver)
     assert(fs ne random, "each bootstrapped() call must return a fresh gate")
     assertEquals(fs.currentMode, AuthorityGate.Mode.Enforce)
     assertEquals(random.currentMode, AuthorityGate.Mode.Enforce)
@@ -91,7 +91,7 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("EffectContext authorize then Filesystem.perform"):
     import cairn.systeminterface.Filesystem as Fs
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     gate.setMode(AuthorityGate.Mode.Enforce)
     gate.install(List(PolicyEval.allowAll("allow-alice", alice, fsRead)))
     val aliceCtx = EffectContext(alice, gate)
@@ -111,7 +111,7 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("AuthorizedEffect covers check rejects mismatched resource"):
     import cairn.systeminterface.Filesystem as Fs
-    val gate = AuthorityGate()
+    val gate = AuthorityGate(prover = PolicyEvalProver)
     gate.setMode(AuthorityGate.Mode.Enforce)
     gate.install(List(PolicyEval.allowAll("allow-alice", alice, fsRead)))
     val aliceCtx = EffectContext(alice, gate)
@@ -240,11 +240,11 @@ class AuthoritySuite extends munit.FunSuite:
       Resource("*", "*"),
       Decision.Allow,
       conditions = Map("meta:expiresAtEpochMillis" -> "1000"))
-    val gate = AuthorityGate.enforcing(List(policy))
+    val gate = AuthorityGate.enforcing(List(policy), PolicyEvalProver)
     val req = readReq
     assert(gate.check(req, nowMillis = 500).isRight)
     assert(gate.check(req, nowMillis = 2000).isLeft)
-    val ctx = EffectContext(alice, AuthorityGate.enforcing(List(policy)), clock = () => 2000L)
+    val ctx = EffectContext(alice, AuthorityGate.enforcing(List(policy), PolicyEvalProver), clock = () => 2000L)
     assert(ctx.authorize(req).isLeft)
 
   test("nonce: included in grant canon; reused nonce denied"):
@@ -255,7 +255,7 @@ class AuthoritySuite extends munit.FunSuite:
       Resource("*", "*"),
       Decision.Allow,
       conditions = Map("meta:nonce" -> "n-1"))
-    val gate = AuthorityGate.enforcing(List(policy))
+    val gate = AuthorityGate.enforcing(List(policy), PolicyEvalProver)
     val req = readReq
     val d = PolicyEval.propose(req, List(policy))
     assertEquals(d.grant.flatMap(_.nonce), Some("n-1"))
@@ -265,7 +265,7 @@ class AuthoritySuite extends munit.FunSuite:
     assert(gate.check(req, nowMillis = 0).isLeft, "replay nonce")
 
   test("replay: requestId consumed; second authorize denied"):
-    val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead)))
+    val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead)), PolicyEvalProver)
     val r1 = readReq.copy(requestId = Some("req-42"))
     val r2 = readReq.copy(requestId = Some("req-42"))
     assert(gate.check(r1).isRight)
@@ -278,14 +278,14 @@ class AuthoritySuite extends munit.FunSuite:
     val policy = EffectPolicy(
       "once", alice, fsRead, Resource("*", "*"), Decision.Allow,
       conditions = Map("meta:nonce" -> "shared-n"))
-    val g1 = AuthorityGate.enforcing(List(policy), store)
-    val g2 = AuthorityGate.enforcing(List(policy), store)
+    val g1 = AuthorityGate.enforcing(List(policy), store, PolicyEvalProver)
+    val g2 = AuthorityGate.enforcing(List(policy), store, PolicyEvalProver)
     assert(g1.check(readReq, nowMillis = 0).isRight, "first gate consumes")
     assert(g2.check(readReq, nowMillis = 0).isLeft, "second gate sees durable replay")
     // Distinct issuer (subject) may reuse the same nonce string
     val bob = Subject("bob")
     val bobPolicy = policy.copy(id = "bob-once", subject = bob)
-    val bobGate = AuthorityGate.enforcing(List(bobPolicy), store)
+    val bobGate = AuthorityGate.enforcing(List(bobPolicy), store, PolicyEvalProver)
     val bobReq = EffectRequest(bob, fsRead, EffectMeta.filesystem.resource.at("/tmp/x"))
     assert(bobGate.check(bobReq, nowMillis = 0).isRight, "issuer-scoped")
     val snap = store.snapshot
@@ -428,7 +428,7 @@ class AuthoritySuite extends munit.FunSuite:
     assert(Authority.checkProof(attenuated.toOption.get, policies).isRight)
 
   test("gate Enforce path: Core prove → Kernel checkProof"):
-    val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("allow", alice, fsRead)))
+    val gate = AuthorityGate.enforcing(List(PolicyEval.allowAll("allow", alice, fsRead)), PolicyEvalProver)
     assert(gate.check(readReq, nowMillis = 0).isRight)
     assert(gate.check(appendReq, nowMillis = 0).isLeft)
 
@@ -461,7 +461,7 @@ class AuthoritySuite extends munit.FunSuite:
     val d = PolicyEval.propose(req, List(banana))
     assertEquals(d.decision, Decision.Deny)
     assert(PolicyEval.prove(req, List(banana), nowMillis = 0).isLeft)
-    val gate = AuthorityGate.enforcing(List(banana))
+    val gate = AuthorityGate.enforcing(List(banana), PolicyEvalProver)
     assert(gate.check(req, nowMillis = 0).isLeft)
 
   test("EffectContext capabilities: covering VerifiedCapability authorizes without policy"):
@@ -470,7 +470,7 @@ class AuthoritySuite extends munit.FunSuite:
     val broadReq = EffectRequest(alice, fsRead, EffectMeta.filesystem.resource.at("/tmp*"))
     val proof = PolicyEval.prove(broadReq, policies, nowMillis = 0).toOption.get
     val cap = Authority.VerifiedCapability.fromProof(proof, policies).toOption.get
-    val emptyGate = AuthorityGate.enforcing(Nil) // no policies
+    val emptyGate = AuthorityGate.enforcing(Nil, PolicyEvalProver) // no policies
     val ctx = EffectContext(alice, emptyGate, capabilities = List(cap), clock = () => 0L)
     val ok = ctx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
     assert(ok.isRight, ok.toString)
@@ -482,7 +482,7 @@ class AuthoritySuite extends munit.FunSuite:
       .copy(subject = alice, clock = () => 0L)
     assert(rooted.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/b")).isRight)
     // empty capabilities fall back to policy path
-    val policyCtx = EffectContext(alice, AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead))))
+    val policyCtx = EffectContext(alice, AuthorityGate.enforcing(List(PolicyEval.allowAll("a", alice, fsRead)), PolicyEvalProver))
     assert(policyCtx.authorize(readReq).isRight)
 
   test("capability forgery: raw CapabilityGrant cannot enter withCapabilities"):
@@ -780,7 +780,7 @@ class AuthoritySuite extends munit.FunSuite:
     val view = RevocationView.of(log)
     val ctx = EffectContext(
       alice,
-      AuthorityGate.enforcing(Nil, view),
+      AuthorityGate.enforcing(Nil, view, PolicyEvalProver),
       capabilities = List(cap),
       clock = () => 0L,
       revocation = view)
@@ -789,7 +789,7 @@ class AuthoritySuite extends munit.FunSuite:
     assert(denied.swap.toOption.exists(_.contains("revoked")), denied.toString)
     // Without revocation, same capability authorizes
     val okCtx = EffectContext(
-      alice, AuthorityGate.enforcing(Nil), capabilities = List(cap), clock = () => 0L)
+      alice, AuthorityGate.enforcing(Nil, PolicyEvalProver), capabilities = List(cap), clock = () => 0L)
     assert(okCtx.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/a")).isRight)
 
   test("disk RuntimeEffectRegistry drives authorize vocabulary"):
@@ -809,7 +809,7 @@ class AuthoritySuite extends munit.FunSuite:
       RuntimeEffectRegistry.seeds.allActionKeys.map(k => (k.family, k.name)))
 
   test("EffectContext.recordAudit yields AuditedEffect; authorize refuses Audit mode"):
-    val gate = AuthorityGate() // Audit mode
+    val gate = AuthorityGate(prover = PolicyEvalProver) // Audit mode
     gate.install(List(PolicyEval.allowAll("a", alice, fsRead)))
     val ctx = EffectContext(alice, gate)
     val audited = ctx.recordAudit(fsRead, EffectMeta.filesystem.resource.at("/tmp/a"))
@@ -825,7 +825,7 @@ class AuthoritySuite extends munit.FunSuite:
     val policies = List(PolicyEval.allowAll("a", alice, fsRead))
     val proof = PolicyEval.prove(readReq, policies, 0).toOption.get
     val cap = Authority.VerifiedCapability.fromProof(proof, policies).toOption.get
-    val gate = AuthorityGate.enforcing(Nil)
+    val gate = AuthorityGate.enforcing(Nil, PolicyEvalProver)
     assert(gate.checkCapability(req, cap, 0).isLeft, "verified read@/tmp/a must not cover /tmp/secret")
     assert(gate.checkCapability(readReq, cap, 0).isRight)
 

@@ -5,7 +5,7 @@ import cairn.systemhandler.{AuthorityGate, CasEffects, DiskCas, EffectContext}
 import cairn.kernel.*
 import cairn.kernel.Authority.*
 import cairn.core.*
-import cairn.runtime.PackLoader
+import cairn.runtime.{PackLoader, PolicyEvalProver}
 import java.nio.file.{Files, Path}
 
 /** Full SDS tutorial workflow over the corpus + staleness machine with
@@ -130,7 +130,7 @@ object SdsCorpusTutorial:
     val cap = putCapability(editor, digHex).fold(e => throw RuntimeException(e), identity)
     val capCtx = EffectContext(
       editor,
-      AuthorityGate.enforcing(Nil),
+      AuthorityGate.enforcing(Nil, PolicyEvalProver),
       capabilities = List(cap),
       clock = () => 0L)
     val putOk = CasEffects.put(cas, shadowed.artifact, capCtx).isRight
@@ -139,7 +139,7 @@ object SdsCorpusTutorial:
     // 7. Empty grant bundle must deny the same put
     val denyCtx = EffectContext(
       editor,
-      AuthorityGate.enforcing(Nil),
+      AuthorityGate.enforcing(Nil, PolicyEvalProver),
       capabilities = Nil,
       clock = () => 0L)
     val denied = CasEffects.put(cas, shadowed.artifact, denyCtx).isLeft

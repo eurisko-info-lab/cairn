@@ -28,7 +28,7 @@ object EffectContexts:
       PolicyEval.packLoaderWorkspace(subject), registry)
     EffectContext(
       subject = subject,
-      gate = AuthorityGate.enforcing(policies, revocation),
+      gate = AuthorityGate.enforcing(policies, revocation, PolicyEvalProver),
       capabilities = capabilities,
       audit = audit,
       clock = () => System.currentTimeMillis(),
@@ -123,7 +123,7 @@ object EffectContexts:
     val rebound = RuntimeEffectRegistry.rebind(policies, registry)
     EffectContext(
       subject = Subject("local"),
-      gate = AuthorityGate.enforcing(rebound, revocation),
+      gate = AuthorityGate.enforcing(rebound, revocation, PolicyEvalProver),
       capabilities = capabilities,
       audit = audit,
       clock = () => System.currentTimeMillis(),

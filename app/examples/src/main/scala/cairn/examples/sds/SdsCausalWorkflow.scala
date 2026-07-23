@@ -5,7 +5,7 @@ import cairn.systemhandler.{AuthorityGate, DiskCas, Ed25519, EffectContext, Node
 import cairn.kernel.*
 import cairn.kernel.Authority.*
 import cairn.core.*
-import cairn.runtime.{Branches, PackLoader, WorkflowRunner}
+import cairn.runtime.{Branches, PackLoader, PolicyEvalProver, WorkflowRunner}
 import java.nio.file.{Files, Path}
 
 /** SDS verified-application path through the causal repository.
@@ -154,7 +154,7 @@ object SdsCausalWorkflow:
           case Right(cap) =>
             val capCtx = EffectContext(
               subject,
-              AuthorityGate.enforcing(Nil),
+              AuthorityGate.enforcing(Nil, PolicyEvalProver),
               capabilities = List(cap),
               clock = () => 0L)
             capCtx.authorize(putKey, EffectMeta.cas.resource.at(tipDigest.hex)).isRight

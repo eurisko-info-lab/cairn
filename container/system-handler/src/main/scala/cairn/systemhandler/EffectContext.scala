@@ -122,11 +122,3 @@ object EffectContext:
       clock = () => System.currentTimeMillis(),
       registry = registry,
       revocation = revocation)
-
-  /** Fresh allow-all Enforce gate + local subject (tests / broad wiring). */
-  def bootstrapped(
-      audit: Audit = Audit.Local,
-      registry: RuntimeEffectRegistry = RuntimeEffectRegistry.seeds,
-      revocation: RevocationView = RevocationView.empty,
-  ): EffectContext =
-    local(AuthorityGate.bootstrapped(registry, revocation), audit, registry, revocation)
