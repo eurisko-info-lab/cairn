@@ -93,11 +93,33 @@ object BranchManifest:
 
 /** Pure checks for ledger domain ancestry (trunk / primary / references). */
 object DomainBranch:
+  /** Walk primary ancestors from `start` (exclusive) via `primaryOf`. */
+  def primaryChain(
+      start: String,
+      firstParent: Option[String],
+      primaryOf: String => Option[String],
+  ): Either[String, List[String]] =
+    @annotation.tailrec
+    def go(cur: Option[String], seen: Set[String], acc: List[String]): Either[String, List[String]] =
+      cur match
+        case None => Right(acc.reverse)
+        case Some(p) if p == start || seen.contains(p) =>
+          Left(s"domain: primary ancestry cycle involving '$start'")
+        case Some(p) => go(primaryOf(p), seen + p, p :: acc)
+    go(firstParent, Set.empty, Nil)
+
   /** Well-formed when primary and each reference name a known branch (or
-    * primary is absent = hang off the global trunk), and the branch does not
-    * list itself as ancestor.
+    * primary is absent = hang off the global trunk), the branch does not
+    * list itself as ancestor, and following primary links never cycles.
+    *
+    * `primaryOf` supplies each known branch's primary ancestor for transitive
+    * cycle detection; defaults to "no further parents" (immediate checks only).
     */
-  def wellFormed(m: BranchManifest, knownBranches: Set[String]): Either[String, Unit] =
+  def wellFormed(
+      m: BranchManifest,
+      knownBranches: Set[String],
+      primaryOf: String => Option[String] = _ => None,
+  ): Either[String, Unit] =
     if m.primaryAncestor.contains(m.branch) then Left(s"domain: '${m.branch}' cannot be its own primary ancestor")
     else if m.references.contains(m.branch) then Left(s"domain: '${m.branch}' cannot reference itself")
     else if m.primaryAncestor.exists(m.references.contains) then
@@ -109,4 +131,5 @@ object DomainBranch:
         case _ =>
           m.references.find(r => !knownBranches.contains(r)) match
             case Some(r) => Left(s"domain: reference '$r' is not a known branch")
-            case None    => Right(())
+            case None =>
+              primaryChain(m.branch, m.primaryAncestor, primaryOf).map(_ => ())

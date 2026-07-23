@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `repl-status-export-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/repl-status-export-workflow.yaml
+-- Source-file: repl-status-export-workflow.yaml
 -- Description: Repl status and export commands over persisted eval history
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript repl-status-export {

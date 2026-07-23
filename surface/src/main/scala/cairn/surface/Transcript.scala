@@ -24,15 +24,34 @@ import java.nio.file.Path
   *   fetch BRANCH ;                    second node pulls + verifies by hash
   *   deferred "REASON" ;               honest coverage stub (no Cairn equivalent yet)
   *   porcelain THEME ;                 run Plumbing.charbTheme (promoted Charb name)
+  *   fork-from CHILD trunk ;           plant domain branch on ledger trunk
+  *   fork-from CHILD of PARENT ;       plant domain branch under primary
+  *   refer CHILD to OTHER ;            soft domain reference
   */
 object Transcript:
+  /** Typed step result — success / expected failure / deferral are not
+    * string-prefix conventions that CI can accidentally game.
+    */
+  enum StepOutcome:
+    case Executed(evidence: Canon)
+    case ExpectedFailure(error: Canon)
+    case Deferred(reason: String, sourceCapability: String)
+
+    def summary: String = this match
+      case Executed(Canon.CStr(s)) => s
+      case Executed(Canon.CTag("porcelain", Canon.CStr(theme))) => s"porcelain $theme"
+      case Executed(other) => other.toString
+      case ExpectedFailure(Canon.CStr(s)) => s"expected failure: ...$s..."
+      case ExpectedFailure(e) => s"expected failure: $e"
+      case Deferred(reason, _) => s"deferred: $reason"
+
   val grammar: GrammarSpec = GrammarSpec(
     name = "cairn-transcript",
     tokens = TokenSpec(
       keywords = List("transcript", "lang", "roundtrip", "eval", "expect",
         "delta", "claim", "publish", "fetch", "node", "on", "from", "to",
         "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language",
-        "deferred", "porcelain"),
+        "deferred", "porcelain", "fork-from", "trunk", "of", "refer"),
       puncts = List("{", "}", ";", ","),
       lineComment = Some("--"),
       identContExtra = "_'-"),
@@ -59,6 +78,12 @@ object Transcript:
         ConstructorSpec("query", List(Elem.Tok("query"), Elem.StrLeaf, Elem.Tok("expect"), Elem.NumLeaf, Elem.Tok(";"))),
         ConstructorSpec("deferred", List(Elem.Tok("deferred"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("porcelain", List(Elem.Tok("porcelain"), Elem.NameLeaf, Elem.Tok(";"))),
+        ConstructorSpec("forkTrunk", List(
+          Elem.Tok("fork-from"), Elem.NameLeaf, Elem.Tok("trunk"), Elem.Tok(";"))),
+        ConstructorSpec("forkOf", List(
+          Elem.Tok("fork-from"), Elem.NameLeaf, Elem.Tok("of"), Elem.NameLeaf, Elem.Tok(";"))),
+        ConstructorSpec("referTo", List(
+          Elem.Tok("refer"), Elem.NameLeaf, Elem.Tok("to"), Elem.NameLeaf, Elem.Tok(";"))),
         ConstructorSpec("expectfail", List(Elem.Tok("expectfail"), Elem.StrLeaf, Elem.Cat("step")))))),
     precCategories = Nil,
     printRules = List(
@@ -97,6 +122,15 @@ object Transcript:
         PrintSeg.Lit("deferred"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("porcelain", List(
         PrintSeg.Lit("porcelain"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("forkTrunk", List(
+        PrintSeg.Lit("fork-from"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("trunk"), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("forkOf", List(
+        PrintSeg.Lit("fork-from"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("of"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("referTo", List(
+        PrintSeg.Lit("refer"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+        PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("expectfail", List(
         PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
@@ -104,12 +138,12 @@ object Transcript:
   /** Node name, absolute root, and whether a chain file exists (FS-gated probe). */
   final case class Report(
       name: String,
-      steps: List[String],
+      steps: List[StepOutcome],
       workDir: Path,
       nodes: List[(String, Path, Boolean)] = Nil,
   ):
     def render: String =
-      val body = (s"transcript '$name':" :: steps.map("  ✓ " + _)).mkString("\n")
+      val body = (s"transcript '$name':" :: steps.map(s => "  ✓ " + s.summary)).mkString("\n")
       val nodeLines =
         if nodes.isEmpty then Nil
         else
@@ -129,6 +163,8 @@ object Transcript:
           case None =>
             List("", s"workDir: ${workDir.toAbsolutePath.normalize}")
       (body :: nodeLines ++ browse).mkString("\n")
+
+    def summaries: List[String] = steps.map(_.summary)
 
   private[surface] def fsAbs(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
 
@@ -213,15 +249,20 @@ object Transcript:
     var module = Module(Nil)
     val authority = Keypair.dev("dev-authority")
     def authorities = Map(authority.name -> authority.publicBytes)
-    val log = List.newBuilder[String]
+    val log = List.newBuilder[StepOutcome]
+    def ok(msg: String): Unit = log += StepOutcome.Executed(Canon.CStr(msg))
+    def okCanon(c: Canon): Unit = log += StepOutcome.Executed(c)
     val nodes = scala.collection.mutable.LinkedHashMap[String, Node]()
+    lazy val domainBranches =
+      val cas = DiskCas(workDir.resolve("domain-cas"))
+      cairn.systemhandler.Branches(cas, workDir.resolve("domain-refs"), EffectContext.forBranches())
     def ensureNode(n: String): Either[String, Node] =
       nodes.get(n) match
         case Some(node) => Right(node)
         case None =>
           val path = workDir.resolve(n).toAbsolutePath.normalize
           fsMkdirs(path, fsCtx).map { _ =>
-            log += s"node $n at $path"
+            ok(s"node $n at $path")
             val node = Node(path, ledgerCtx)
             nodes(n) = node
             node
@@ -252,8 +293,8 @@ object Transcript:
               authority.signTx(Tx.SetBranchHead(branch, module.artifact.key)))
           b <- node.append(authority, authorities, txs)
         yield
-          log += s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}"
-          log += s"blockchain node: ${node.root.toAbsolutePath.normalize}"
+          ok(s"published $branch at block ${b.digest.short} root ${b.stateRoot.short}")
+          ok(s"blockchain node: ${node.root.toAbsolutePath.normalize}")
       }
 
     def fetchBetween(branch: String, fromN: String, toN: String): Either[String, Unit] =
@@ -267,13 +308,13 @@ object Transcript:
           case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
           case cairn.systeminterface.Cas.Error.Io(m)      => m
         }
-      yield log += s"fetched $branch head ${art.digest.short} on $toN"
+      yield ok(s"fetched $branch head ${art.digest.short} on $toN")
 
     def runStep(step: Cst): Either[String, Unit] =
       step match
         case Cst.Node("lang", List(Cst.Leaf(n))) =>
           packs.get(n).toRight(s"unknown language pack '$n' (registered: ${packs.keys.mkString(", ")})")
-            .map { l => lang = Some(l); module = Module(Nil); log += s"lang $n (${l.digest.short})" }
+            .map { l => lang = Some(l); module = Module(Nil); ok(s"lang $n (${l.digest.short})") }
         case Cst.Node("loadLang", List(Cst.Leaf(file))) =>
           val p = Path.of(file)
           (for
@@ -288,7 +329,7 @@ object Transcript:
             }
           yield l).map { l =>
             packs = packs + (l.name -> l)
-            log += s"loaded language ${l.name} (${l.digest.short}) from $file" }
+            ok(s"loaded language ${l.name} (${l.digest.short}) from $file") }
         case Cst.Node("nodeD", List(Cst.Leaf(n))) =>
           ensureNode(n).map(_ => ())
         case Cst.Node("roundtrip", List(Cst.Leaf(s))) =>
@@ -296,7 +337,7 @@ object Transcript:
             l <- need
             t <- parseIn(l, s)
             _ <- RoundTrip.check(l.grammar, t)
-          yield log += s"roundtrip ok: $s"
+          yield ok(s"roundtrip ok: $s")
         case Cst.Node("eval", List(Cst.Leaf(src), Cst.Leaf(expected))) =>
           for
             l <- need
@@ -304,7 +345,7 @@ object Transcript:
             e <- parseIn(l, expected)
             v <- TreeEngine.normalize(l, t)
             _ <- if v == e then Right(()) else Left(s"eval mismatch: $src ~> ${v.render}, expected ${e.render}")
-          yield log += s"eval $src => $expected"
+          yield ok(s"eval $src => $expected")
         case Cst.Node("delta", List(Cst.Leaf(src))) =>
           for
             l <- need
@@ -313,7 +354,7 @@ object Transcript:
             res <- Delta.apply(l, module, ch)
           yield
             module = res._1
-            log += s"delta applied: module ${res._2.base.short} -> ${res._2.result.short}"
+            ok(s"delta applied: module ${res._2.base.short} -> ${res._2.result.short}")
         case Cst.Node("claim", List(Cst.Leaf(cn), Cst.Leaf(input), Cst.Leaf(expected))) =>
           for
             l <- need
@@ -323,7 +364,7 @@ object Transcript:
             suite = cairn.proof.TestSuite(s"$cn-tests", module.digest,
               List(cairn.proof.TestCase(cn, i, e)))
             cert <- cairn.proof.Certify.byTests(claim, suite, t => TreeEngine.normalize(l, t))
-          yield log += s"claim $cn certified (${cert.artifact.digest.short})"
+          yield ok(s"claim $cn certified (${cert.artifact.digest.short})")
         case Cst.Node("publishOn", List(Cst.Leaf(branch), Cst.Leaf(nodeName))) =>
           ensureNode(nodeName).flatMap(publishTo(_, branch))
         case Cst.Node("publish", List(Cst.Leaf(branch))) =>
@@ -338,7 +379,7 @@ object Transcript:
             acc.flatMap(ps => ensureNode(n).map(node => ps :+ Gossip.Peer(n, node)))
           }.flatMap { peers =>
             Gossip.converge(peers, authorities).map { reorgs =>
-              log += s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)" }
+              ok(s"gossip converged over ${peers.map(_.name).mkString(",")} (${reorgs.length} reorgs)") }
           }
         case Cst.Node("port", List(Cst.Leaf(host))) =>
           portModules.values.headOption.toRight("no rosetta module registered for port steps").flatMap { m =>
@@ -360,7 +401,7 @@ object Transcript:
                       }
                     }
                   scalaCli match
-                    case None => Right(log += s"port $host verified (host toolchain absent, fixpoint only)")
+                    case None => Right(ok(s"port $host verified (host toolchain absent, fixpoint only)"))
                     case Some(cli) =>
                       val portDir = workDir.resolve(s"port-${java.util.UUID.randomUUID()}")
                       val f = portDir.resolve(out.fileName)
@@ -371,11 +412,11 @@ object Transcript:
                           processCtx
                         ) match
                           case Right(r) if r.ok && r.combined.contains("ALL TESTS PASS") =>
-                            Right(log += s"port $host tests pass in host")
+                            Right(ok(s"port $host tests pass in host"))
                           case Right(r) => Left(s"port $host host run failed:\n${r.combined}")
                           case Left(e)  => Left(s"port $host host run failed: $e")
                       }
-                else Right(log += s"port $host verified (byte fixpoint)")
+                else Right(ok(s"port $host verified (byte fixpoint)"))
               }
             }
           }.map(_ => ())
@@ -385,21 +426,33 @@ object Transcript:
             res <- Query.run(q, module)
             _ <- if res.hits.length == expected.toInt then Right(())
                  else Left(s"query '$qsrc' returned ${res.hits.length} hits, expected $expected")
-          yield log += s"query ok: $qsrc => ${res.hits.length}"
+          yield ok(s"query ok: $qsrc => ${res.hits.length}")
         case Cst.Node("expectfail", List(Cst.Leaf(substring), inner)) =>
           runStep(inner) match
             case Left(err) if err.contains(substring) =>
-              log += s"expected failure: ...${substring}..."; Right(())
+              log += StepOutcome.ExpectedFailure(Canon.CStr(substring)); Right(())
             case Left(err) => Left(s"failed with wrong message: $err (wanted ...$substring...)")
             case Right(_)  => Left(s"step succeeded but was expected to fail with ...$substring...")
         case Cst.Node("deferred", List(Cst.Leaf(reason))) =>
-          log += s"deferred: $reason"; Right(())
+          log += StepOutcome.Deferred(reason, "transcript"); Right(())
         case Cst.Node("porcelain", List(Cst.Leaf(theme))) =>
           val home = workDir
           val e = Porcelain.env(home, packLoader, ledgerCtx)
           Plumbing.charbTheme(theme, e).map { out =>
-            log += s"porcelain $theme"
-            out.linesIterator.foreach(line => log += s"  $line")
+            okCanon(Canon.CTag("porcelain", Canon.CStr(theme)))
+            out.linesIterator.foreach(line => ok(s"  $line"))
+          }
+        case Cst.Node("forkTrunk", List(Cst.Leaf(child))) =>
+          domainBranches.forkFrom(child, None).map { m =>
+            ok(s"fork-from $child trunk (primary=${m.primaryAncestor.getOrElse("∅")})")
+          }
+        case Cst.Node("forkOf", List(Cst.Leaf(child), Cst.Leaf(parent))) =>
+          domainBranches.forkFrom(child, Some(parent)).map { m =>
+            ok(s"fork-from $child of $parent (primary=${m.primaryAncestor.getOrElse("∅")})")
+          }
+        case Cst.Node("referTo", List(Cst.Leaf(child), Cst.Leaf(other))) =>
+          domainBranches.referTo(child, other).map { m =>
+            ok(s"refer $child to $other (refs=${m.references.mkString(",")})")
           }
         case other => Left(s"unknown transcript step: ${other.render}")
 

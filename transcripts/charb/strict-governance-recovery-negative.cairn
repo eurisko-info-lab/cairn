@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `strict-governance-recovery-negative-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-governance-recovery-negative-workflow.yaml
+-- Source-file: strict-governance-recovery-negative-workflow.yaml
 -- Description: Negative replay-inspect precondition followed by recovery
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript strict-governance-recovery-negative {

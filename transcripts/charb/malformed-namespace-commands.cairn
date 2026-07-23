@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `malformed-namespace-commands-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/malformed-namespace-commands-workflow.yaml
+-- Source-file: malformed-namespace-commands-workflow.yaml
 -- Description: Malformed namespace command rejection messages
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript malformed-namespace-commands {

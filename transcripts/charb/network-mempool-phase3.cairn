@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `network-mempool-phase3-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/network-mempool-phase3-workflow.yaml
+-- Source-file: network-mempool-phase3-workflow.yaml
 -- Description: Phase 3 networking/mempool command coverage
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript network-mempool-phase3 {

@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `recovery-suggestions-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/recovery-suggestions-workflow.yaml
+-- Source-file: recovery-suggestions-workflow.yaml
 -- Description: Tests recovery suggestions in consistency check
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript recovery-suggestions {

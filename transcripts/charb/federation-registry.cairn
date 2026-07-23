@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `federation-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/federation-registry-workflow.yaml
+-- Source-file: federation-registry-workflow.yaml
 -- Description: Federation trust registry listing, inspection, and status summary
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript federation-registry {

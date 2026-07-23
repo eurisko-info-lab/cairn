@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `manifest-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/manifest-registry-workflow.yaml
+-- Source-file: manifest-registry-workflow.yaml
 -- Description: Manifest registry listing, inspection, and status summary
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript manifest-registry {

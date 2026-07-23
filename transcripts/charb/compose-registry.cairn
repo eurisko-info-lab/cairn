@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `compose-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/compose-registry-workflow.yaml
+-- Source-file: compose-registry-workflow.yaml
 -- Description: Composed language registry listing, inspection, and status
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript compose-registry {

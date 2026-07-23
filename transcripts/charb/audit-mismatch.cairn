@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `audit-mismatch-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/audit-mismatch-workflow.yaml
+-- Source-file: audit-mismatch-workflow.yaml
 -- Description: Audit replay enhanced diagnostics for malformed chain rows
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript audit-mismatch {

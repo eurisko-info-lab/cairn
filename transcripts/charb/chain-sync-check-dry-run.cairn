@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-sync-check-dry-run-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-sync-check-dry-run-workflow.yaml
+-- Source-file: chain-sync-check-dry-run-workflow.yaml
 -- Description: Chain sync --check and --dry-run report planned changes without mutating state
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-sync-check-dry-run {

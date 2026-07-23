@@ -199,6 +199,29 @@ object Delta:
     case Malformed(detail: String)
     case InvalidTerm(name: String, errors: List[LanguageChecker.TermError])
 
+    def canon: Canon = this match
+      case AlreadyDefined(op, name) =>
+        Canon.CTag("already-defined", Canon.cmap("op" -> Canon.CStr(op), "name" -> Canon.CStr(name)))
+      case NotDefined(op, name) =>
+        Canon.CTag("not-defined", Canon.cmap("op" -> Canon.CStr(op), "name" -> Canon.CStr(name)))
+      case StillReferenced(name, by) =>
+        Canon.CTag("still-referenced", Canon.cmap(
+          "name" -> Canon.CStr(name),
+          "by" -> Canon.cstrs(by.toList.sorted)))
+      case FootprintMismatch(name, declared, actual) =>
+        Canon.CTag("footprint-mismatch", Canon.cmap(
+          "name" -> Canon.CStr(name),
+          "declared" -> Canon.cstrs(declared.toList.sorted),
+          "actual" -> Canon.cstrs(actual.toList.sorted)))
+      case PathError(name, detail) =>
+        Canon.CTag("path-error", Canon.cmap("name" -> Canon.CStr(name), "detail" -> Canon.CStr(detail)))
+      case Malformed(detail) =>
+        Canon.CTag("malformed", Canon.CStr(detail))
+      case InvalidTerm(name, errors) =>
+        Canon.CTag("invalid-term", Canon.cmap(
+          "name" -> Canon.CStr(name),
+          "errors" -> Canon.CList(errors.map(_.canon))))
+
     def render: String = this match
       case AlreadyDefined("add", name)            => s"ΔL add: '$name' already defined (use replace)"
       case AlreadyDefined("rename-target", name)  => s"ΔL rename: target '$name' already defined"

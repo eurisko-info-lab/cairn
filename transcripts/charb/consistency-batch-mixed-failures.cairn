@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `consistency-batch-mixed-failures-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/consistency-batch-mixed-failures-workflow.yaml
+-- Source-file: consistency-batch-mixed-failures-workflow.yaml
 -- Description: consistency batch reports mixed audit and governance root mismatches across repos
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript consistency-batch-mixed-failures {

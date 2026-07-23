@@ -91,22 +91,76 @@ object ChangeAlgebra:
   * artifact naming both change-sets — never silent, never textual.
   */
 object Merge:
+  /** Digest-ordered application order used when witnessing commutation. */
+  enum Order:
+    case Canonical, Reversed
+    def canon: Canon = Canon.CStr(this match
+      case Canonical => "canonical"
+      case Reversed  => "reversed")
+    def render: String = this match
+      case Canonical => "canonical order"
+      case Reversed  => "reversed order"
+
+  /** Typed evidence for a merge conflict that name-overlap alone did not
+    * predict. Part of [[Conflict.canon]] so distinct causes cannot share an
+    * artifact digest.
+    */
+  enum ConflictWitness:
+    case ApplyFailed(order: Order, rejection: Delta.Rejection)
+    case ResultsDiffer(first: Digest, second: Digest)
+    case DomainValidationFailed(judgment: String, detail: Canon)
+
+    def canon: Canon = this match
+      case ApplyFailed(order, rejection) =>
+        Canon.CTag("apply-failed", Canon.cmap(
+          "order" -> order.canon,
+          "rejection" -> rejection.canon))
+      case ResultsDiffer(first, second) =>
+        Canon.CTag("results-differ", Canon.cmap(
+          "first" -> Canon.CStr(first.hex),
+          "second" -> Canon.CStr(second.hex)))
+      case DomainValidationFailed(judgment, detail) =>
+        Canon.CTag("domain-validation-failed", Canon.cmap(
+          "judgment" -> Canon.CStr(judgment),
+          "detail" -> detail))
+
+    def render: String = this match
+      case ApplyFailed(order, rejection) =>
+        s"${order.render} failed: ${rejection.render}"
+      case ResultsDiffer(first, second) =>
+        s"order-dependent result: ${first.short} vs ${second.short}"
+      case DomainValidationFailed(judgment, detail) =>
+        val d = detail match
+          case Canon.CStr(s) => s
+          case other         => other.toString
+        s"module gate '$judgment' rejected: $d"
+
   /** `witness`, when present, explains a conflict that footprint disjointness
-    * alone didn't predict — either order failed to apply, or the two orders
-    * applied to different results — as opposed to an outright name overlap
+    * alone didn't predict — apply failure, order-dependent results, or a
+    * [[ModuleGate]] rejection — as opposed to an outright name overlap
     * (`overlap.nonEmpty`, `witness = None`). Optional and last so every
     * existing 3-arg `Conflict(overlap, changeA, changeB)` call site is
     * unaffected.
     */
-  final case class Conflict(overlap: Set[String], changeA: Digest, changeB: Digest, witness: Option[String] = None):
-    def canon: Canon = Canon.cmap(
-      "overlap" -> Canon.cstrs(overlap.toList.sorted),
-      "changeA" -> Canon.CStr(changeA.hex),
-      "changeB" -> Canon.CStr(changeB.hex))
+  final case class Conflict(
+      overlap: Set[String],
+      changeA: Digest,
+      changeB: Digest,
+      witness: Option[ConflictWitness] = None,
+  ):
+    def canon: Canon =
+      val base = List(
+        "overlap" -> Canon.cstrs(overlap.toList.sorted),
+        "changeA" -> Canon.CStr(changeA.hex),
+        "changeB" -> Canon.CStr(changeB.hex))
+      val withWitness = witness match
+        case None    => base
+        case Some(w) => base :+ ("witness" -> w.canon)
+      Canon.cmap(withWitness*)
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("merge-conflict", canon))
     def render: String =
       if overlap.nonEmpty then s"merge conflict on {${overlap.toList.sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
-      else s"merge conflict between ${changeA.short} and ${changeB.short}: ${witness.getOrElse("order-dependent result")}"
+      else s"merge conflict between ${changeA.short} and ${changeB.short}: ${witness.map(_.render).getOrElse("order-dependent result")}"
 
   /** Disjoint-footprint branches merge automatically — but footprint
     * disjointness (no shared definition NAME) is a syntactic approximation
@@ -117,11 +171,18 @@ object Merge:
     * though the two change-sets never touch the same name. This WITNESSES
     * commutation instead of assuming it: both orders are actually applied
     * against `base`, and the merge only succeeds if both apply cleanly AND
-    * agree on the result. Either failure surfaces as a `Conflict` (never an
-    * exception — a disjoint-footprint pair failing this check is a real,
-    * anticipatable outcome, not a broken invariant).
+    * agree on the result. An optional [[ModuleGate]] then re-checks the
+    * merged module under domain judgments. Either failure surfaces as a
+    * `Conflict` (never an exception — a disjoint-footprint pair failing this
+    * check is a real, anticipatable outcome, not a broken invariant).
     */
-  def threeWay(l: ComposedLanguage, base: Module, changeA: Cst, changeB: Cst): Either[Conflict, (Module, Delta.ValidatedChangeSet)] =
+  def threeWay(
+      l: ComposedLanguage,
+      base: Module,
+      changeA: Cst,
+      changeB: Cst,
+      gate: ModuleGate = ModuleGate.passthrough,
+  ): Either[Conflict, (Module, Delta.ValidatedChangeSet)] =
     val fa = ChangeAlgebra.footprint(l, changeA)
     val fb = ChangeAlgebra.footprint(l, changeB)
     val overlap = fa.intersect(fb)
@@ -133,16 +194,20 @@ object Merge:
       val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
       val canonical = ChangeAlgebra.compose(l, first, second)
       val reversed = ChangeAlgebra.compose(l, second, first)
-      def conflict(detail: String) = Conflict(overlap, digA, digB, Some(detail))
-      for
-        canonResult <- Delta.apply(l, base, canonical)
-          .left.map(e => conflict(s"disjoint footprints but merge failed to apply: $e"))
-        reversedResult <- Delta.apply(l, base, reversed)
-          .left.map(e => conflict(s"disjoint footprints but reverse order failed to apply: $e"))
-        result <- Either.cond(canonResult._1.digest == reversedResult._1.digest, canonResult,
-          conflict(s"disjoint footprints but order-dependent result: " +
-            s"${canonResult._1.digest.short} vs ${reversedResult._1.digest.short}"))
-      yield result
+      def conflict(w: ConflictWitness) = Conflict(overlap, digA, digB, Some(w))
+      (Delta.applyTyped(l, base, canonical), Delta.applyTyped(l, base, reversed)) match
+        case (Left(rej), _) =>
+          Left(conflict(ConflictWitness.ApplyFailed(Order.Canonical, rej)))
+        case (_, Left(rej)) =>
+          Left(conflict(ConflictWitness.ApplyFailed(Order.Reversed, rej)))
+        case (Right(canonResult), Right(reversedResult)) =>
+          if canonResult._1.digest != reversedResult._1.digest then
+            Left(conflict(ConflictWitness.ResultsDiffer(
+              canonResult._1.digest, reversedResult._1.digest)))
+          else
+            gate(canonResult._1) match
+              case Left(w) => Left(conflict(w))
+              case Right(()) => Right(canonResult)
 
 /** M18: language migrations — revision morphisms between language versions
   * that transport modules and change-sets, kernel-validated against the

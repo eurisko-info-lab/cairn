@@ -19,8 +19,8 @@ CAIRN-PROMPT §7: *Transcripts are CI.*
 
 ## Full Charb suite (`transcripts/charb/` — **85**/85)
 
-Every `*-workflow.yaml` under
-`~/Projects/all-git-repos/pi-forall/charb/transcripts/` has a Cairn port:
+Every `*-workflow.yaml` under a Charb transcripts checkout (pass `--source`)
+has a Cairn port:
 
 | Kind | Count | Mechanism |
 | --- | --- | --- |
@@ -28,7 +28,9 @@ Every `*-workflow.yaml` under
 | **Porcelain-promoted** | ~28 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
 | Still `deferred` | ~13 | §8 out of scope or no plumbing yet |
 
-Regenerate: `python3 scripts/gen-charb-transcripts.py`
+Regenerate: `python3 scripts/gen-charb-transcripts.py --source DIR`
+(or `--pin-only` to refresh `dispositions.tsv` from existing ports).
+Pinned dispositions: `transcripts/charb/dispositions.tsv`.
 
 ## granit-rust (`transcripts/granit-rust/`)
 
@@ -39,6 +41,16 @@ Regenerate: `python3 scripts/gen-charb-transcripts.py`
 
 ## Still host/Scala
 
-Full SDS causal + domain trunk planting in transcripts — `forkFrom` porcelain
-step is the next promotion target (`integration-cross-namespace` already shows
-domain ancestry via `domain show`).
+SDS causal workflow (commitTip / merge / certificates) remains partly
+Scala-hosted in `SdsCausalWorkflow`, but **domain trunk planting** is now a
+transcript: `transcripts/sds-domain-journey.cairn` uses `fork-from` / `refer`.
+Regenerate Charb ports with an explicit source dir:
+
+```bash
+python3 scripts/gen-charb-transcripts.py --source /path/to/charb/transcripts
+# or refresh pinned dispositions only:
+python3 scripts/gen-charb-transcripts.py --pin-only
+```
+
+Exact per-workflow disposition lives in `transcripts/charb/dispositions.tsv`
+(CI asserts exact match, not mere count thresholds).

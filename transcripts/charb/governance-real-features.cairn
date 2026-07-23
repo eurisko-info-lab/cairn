@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `governance-real-features-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/governance-real-features-workflow.yaml
+-- Source-file: governance-real-features-workflow.yaml
 -- Description: Real state-backed advanced auth, distributed workflow, and crypto governance
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript governance-real-features {

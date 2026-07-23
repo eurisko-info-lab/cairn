@@ -508,11 +508,11 @@ class WaveH2Suite extends munit.FunSuite:
       processCtx = processCtx,
       fsCtx = fsCtx) match
       case Right(report) =>
-        assert(report.steps.exists(_.startsWith("loaded language stlc")), report.render)
-        assert(report.steps.exists(_.startsWith("gossip converged")), report.render)
-        assert(report.steps.count(_.startsWith("expected failure")) == 2, report.render)
-        assert(report.steps.exists(_.startsWith("query ok")), report.render)
-        assert(report.steps.exists(_.startsWith("port scala")), report.render)
+        assert(report.summaries.exists(_.startsWith("loaded language stlc")), report.render)
+        assert(report.summaries.exists(_.startsWith("gossip converged")), report.render)
+        assert(report.summaries.count(_.startsWith("expected failure")) == 2, report.render)
+        assert(report.summaries.exists(_.startsWith("query ok")), report.render)
+        assert(report.summaries.exists(_.startsWith("port scala")), report.render)
       case Left(e) => fail(e)
 
   test("M49: transcript v2 grammar round-trips and lints clean"):

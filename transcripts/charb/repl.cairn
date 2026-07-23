@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `repl-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/repl-workflow.yaml
+-- Source-file: repl-workflow.yaml
 -- Description: Real repl eval/history/clear command flow
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript repl {

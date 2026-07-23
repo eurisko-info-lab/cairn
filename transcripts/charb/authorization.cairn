@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `authorization-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/authorization-workflow.yaml
+-- Source-file: authorization-workflow.yaml
 -- Description: Role grants and authorization checks for chain actions
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript authorization {

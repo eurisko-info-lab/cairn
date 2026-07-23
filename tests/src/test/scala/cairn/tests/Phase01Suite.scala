@@ -233,3 +233,24 @@ class BranchSuite extends munit.FunSuite:
     assert(DomainBranch.wellFormed(
       BranchManifest("SDS", None, Nil, primaryAncestor = Some("LAW"), references = List("LAW")),
       known).isLeft)
+
+  test("DomainBranch.wellFormed rejects transitive primary cycles"):
+    val known = Set("A", "B", "C")
+    // A→B→C→A
+    val primaryOf: String => Option[String] =
+      case "A" => Some("B")
+      case "B" => Some("C")
+      case "C" => Some("A")
+      case _   => None
+    assert(DomainBranch.wellFormed(
+      BranchManifest("A", None, Nil, primaryAncestor = Some("B")),
+      known, primaryOf).isLeft)
+    assert(DomainBranch.primaryChain("A", Some("B"), primaryOf).isLeft)
+    // acyclic A→B→C→trunk is fine
+    val acyclic: String => Option[String] =
+      case "A" => Some("B")
+      case "B" => Some("C")
+      case _   => None
+    assert(DomainBranch.wellFormed(
+      BranchManifest("A", None, Nil, primaryAncestor = Some("B")),
+      known, acyclic).isRight)

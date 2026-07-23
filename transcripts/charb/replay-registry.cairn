@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `replay-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/replay-registry-workflow.yaml
+-- Source-file: replay-registry-workflow.yaml
 -- Description: Replay root listing and inspection across audit and governance accumulators
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript replay-registry {

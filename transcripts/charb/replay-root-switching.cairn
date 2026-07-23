@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `replay-root-switching-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/replay-root-switching-workflow.yaml
+-- Source-file: replay-root-switching-workflow.yaml
 -- Description: history entries can be promoted and rolled back for both audit and governance replay roots
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript replay-root-switching {

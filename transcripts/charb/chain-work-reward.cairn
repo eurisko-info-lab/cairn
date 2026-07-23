@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-work-reward-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-reward-workflow.yaml
+-- Source-file: chain-work-reward-workflow.yaml
 -- Description: Applies completed verification work rewards to chain account reputation and quota
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-reward {

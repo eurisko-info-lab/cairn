@@ -94,22 +94,30 @@ object SemanticRepository:
   def commutes(language: ComposedLanguage, a: Cst, b: Cst): Boolean =
     ChangeAlgebra.commutes(language, a, b)
 
-  /** Three-way semantic merge over change histories (M17). */
+  /** Three-way semantic merge over change histories (M17). Optional
+    * [[ModuleGate]] re-checks the merged module (SDS / Search / …).
+    */
   def merge(
       language: ComposedLanguage,
       base: Module,
       changeA: Cst,
       changeB: Cst,
+      gate: ModuleGate = ModuleGate.passthrough,
   ): Either[Merge.Conflict, (Module, Delta.ValidatedChangeSet)] =
-    Merge.threeWay(language, base, changeA, changeB)
+    Merge.threeWay(language, base, changeA, changeB, gate)
 
-  /** Transport a module across a language migration (M18). */
+  /** Transport a module across a language migration (M18), then require an
+    * optional [[ModuleGate]] on the transported module.
+    */
   def migrateModule(
       mig: LangMigration,
       target: ComposedLanguage,
       module: Module,
+      gate: ModuleGate = ModuleGate.passthrough,
   ): Either[String, Module] =
-    Migrate.module(mig, target, module)
+    Migrate.module(mig, target, module).flatMap { m2 =>
+      ModuleGate.require(gate, m2).map(_ => m2)
+    }
 
   /** Transport a change-set across a language migration (M18). */
   def migrateChange(
@@ -132,8 +140,9 @@ object SemanticRepository:
       changeA: Cst,
       changeB: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      gate: ModuleGate = ModuleGate.passthrough,
   ): Either[String, Outcome] =
-    merge(language, base, changeA, changeB) match
+    merge(language, base, changeA, changeB, gate) match
       case Left(conflict) => Right(Outcome.Conflicted(conflict))
       case Right((merged, vcs)) =>
         migration match
@@ -141,9 +150,12 @@ object SemanticRepository:
             Right(Outcome.Accepted(merged, vcs, vcs.change, migrated = false))
           case Some((mig, target)) =>
             migrateChange(mig, language, target, vcs.change).flatMap { ch2 =>
-              migrateModule(mig, target, base).flatMap { base2 =>
-                Delta.apply(target, base2, ch2).map { (mod2, vcs2) =>
-                  Outcome.Accepted(mod2, vcs2, ch2, migrated = true)
+              // Transport base without re-running the merge gate; gate the
+              // post-migration tip instead (module shape may have changed).
+              Migrate.module(mig, target, base).flatMap { base2 =>
+                Delta.apply(target, base2, ch2).flatMap { (mod2, vcs2) =>
+                  ModuleGate.require(gate, mod2).map(_ =>
+                    Outcome.Accepted(mod2, vcs2, ch2, migrated = true))
                 }
               }
             }

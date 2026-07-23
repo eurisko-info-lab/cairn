@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `verbose-audit-replay-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/verbose-audit-replay-workflow.yaml
+-- Source-file: verbose-audit-replay-workflow.yaml
 -- Description: Tests verbose event-by-event audit replay output
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript verbose-audit-replay {

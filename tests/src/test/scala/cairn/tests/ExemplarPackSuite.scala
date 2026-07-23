@@ -707,8 +707,28 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(result.isLeft, result)
     result.swap.foreach { c =>
       assert(c.overlap.isEmpty, "no name-level overlap — this is the witnessed, not footprint, case")
-      assert(c.witness.exists(_.contains("invalid")), c.render)
+      c.witness match
+        case Some(Merge.ConflictWitness.DomainValidationFailed("sds.validate", _)) => ()
+        case other => fail(s"expected DomainValidationFailed(sds.validate), got $other; ${c.render}")
+      assert(c.canon.asMap.contains("witness"), c.canon.toString)
     }
+
+  test("conflict artifact digests differ by typed witness (not free-form strings)"):
+    val digA = Digest.of(Canon.CStr("change-a"))
+    val digB = Digest.of(Canon.CStr("change-b"))
+    val overlap = Set.empty[String]
+    val applyFail = Merge.Conflict(overlap, digA, digB, Some(
+      Merge.ConflictWitness.ApplyFailed(
+        Merge.Order.Canonical,
+        Delta.Rejection.Malformed("boom"))))
+    val differ = Merge.Conflict(overlap, digA, digB, Some(
+      Merge.ConflictWitness.ResultsDiffer(
+        Digest.of(Canon.CStr("r1")), Digest.of(Canon.CStr("r2")))))
+    val domain = Merge.Conflict(overlap, digA, digB, Some(
+      Merge.ConflictWitness.DomainValidationFailed(
+        "sds.validate", Canon.CStr("outline duplicate"))))
+    val digests = Set(applyFail.artifact.digest.hex, differ.artifact.digest.hex, domain.artifact.digest.hex)
+    assertEquals(digests.size, 3, "distinct witnesses must not collapse to one digest")
 
   test("EU-CLP profile language + annex-II module + sectionNumberOk judgment"):
     import cairn.examples.sds.{EuClp, SectionNumbering}

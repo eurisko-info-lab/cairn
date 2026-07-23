@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `e2e-path-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/e2e-path-workflow.yaml
+-- Source-file: e2e-path-workflow.yaml
 -- Description: One-shot kernel demo: e2e path through full lifecycle, then run object
 -- Rich sibling adaptation also under transcripts/.
 transcript e2e-path {

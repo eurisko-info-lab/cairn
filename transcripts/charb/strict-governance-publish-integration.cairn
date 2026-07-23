@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `strict-governance-publish-integration-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-governance-publish-integration-workflow.yaml
+-- Source-file: strict-governance-publish-integration-workflow.yaml
 -- Description: Governance + publish flow with strict verification and replay diagnostics
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript strict-governance-publish-integration {

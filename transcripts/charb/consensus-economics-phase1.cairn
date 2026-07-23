@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `consensus-economics-phase1-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/consensus-economics-phase1-workflow.yaml
+-- Source-file: consensus-economics-phase1-workflow.yaml
 -- Description: Phase 1 consensus/economics command coverage
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript consensus-economics-phase1 {

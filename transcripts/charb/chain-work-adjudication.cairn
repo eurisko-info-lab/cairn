@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-work-adjudication-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-adjudication-workflow.yaml
+-- Source-file: chain-work-adjudication-workflow.yaml
 -- Description: Adjudicates one shared work request across multiple users and updates reputation by correctness
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-adjudication {

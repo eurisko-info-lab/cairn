@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-singleton-enforcement-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-singleton-enforcement-workflow.yaml
+-- Source-file: chain-singleton-enforcement-workflow.yaml
 -- Description: Attach, re-attach, and sync enforce a stable global chain identity
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-singleton-enforcement {

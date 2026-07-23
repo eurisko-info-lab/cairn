@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-recovery-negative-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-recovery-negative-workflow.yaml
+-- Source-file: chain-recovery-negative-workflow.yaml
 -- Description: Reset preview guardrails and reconcile failure on ahead-of-global local state
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript chain-recovery-negative {

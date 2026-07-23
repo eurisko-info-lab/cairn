@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `governance-supplychain-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/governance-supplychain-workflow.yaml
+-- Source-file: governance-supplychain-workflow.yaml
 -- Description: Real state-backed supply-chain governance command flow
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript governance-supplychain {

@@ -685,6 +685,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * (e.g. SDS primary=LAW, references=CHEMISTRY). Optionally seeds a tip via
     * [[importModule]]; domain fields survive subsequent advances.
     */
+  private def primaryOf(known: Set[String])(name: String): Option[String] =
+    if known.contains(name) then load(name).primaryAncestor else None
+
   def forkFrom(
       child: String,
       primary: Option[String],
@@ -695,7 +698,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     val refs = references.distinct.filterNot(r => primary.contains(r) || r == child)
     val draft = BranchManifest(
       child, None, Nil, primaryAncestor = primary, references = refs)
-    DomainBranch.wellFormed(draft, known).flatMap { _ =>
+    DomainBranch.wellFormed(draft, known, primaryOf(known)).flatMap { _ =>
       if known.contains(child) then
         val cur = load(child)
         if cur.primaryAncestor == primary && cur.references == refs then
@@ -725,7 +728,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       else if cur.references.contains(other) then Right(cur)
       else
         val next = cur.copy(references = cur.references :+ other)
-        DomainBranch.wellFormed(next, known).map(_ => storeManifest(next))
+        DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => storeManifest(next))
 
   def list(): List[String] =
     if !refsExists(refsDir) then Nil

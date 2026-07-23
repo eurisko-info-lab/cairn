@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `enhanced-chain-status-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/enhanced-chain-status-workflow.yaml
+-- Source-file: enhanced-chain-status-workflow.yaml
 -- Description: Tests chain status with --show-audit flag
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript enhanced-chain-status {

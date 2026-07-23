@@ -232,10 +232,17 @@ LeanCore `#check` envelope.
   CON/DUP/ERA books (not full ABI / Bend / HVM5); live `hvm` optional on PATH
 - **Semantic merge** — everyday path is `commitTip(ValidatedTip)` →
   `mergeBranches` (causal LCA by shared module-result digests; replay-checked
-  histories; causal digests on `BranchManifest`). Ledger publish remains
-  **opt-in**. Accepts are journaled across CAS + refs + optional ledger
+  histories; causal digests on `BranchManifest`). `Merge.threeWay` witnesses
+  commutation with typed `Merge.ConflictWitness` evidence
+  (`ApplyFailed` / `ResultsDiffer` / `DomainValidationFailed`) committed in
+  `Conflict.canon`, and accepts an optional `ModuleGate` for whole-module
+  domain checks (SDS `validate`, …). Ledger publish remains **opt-in**.
+  Accepts are journaled across CAS + refs + optional ledger
   (`recoverPendingAccepts`); `reclaimOrphanBlobs` is the mark/sweep reclaim
   path for unreferenced accept blobs (`liveCasRoots`).
+- **Domain ancestry residuals** — transitive primary-cycle detection is in;
+  namespace authority, ownership rules, ancestry-change policy, and evidence
+  tying domain ancestry to language dependencies remain open.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
@@ -271,16 +278,18 @@ LeanCore `#check` envelope.
 
 ## Test health and golden digests
 
-Full suite: `sbt test`. Golden digests for every shipped language and Rosetta
-artifact: `sbt "examples/runMain cairn.examples.Main digests"` — checked
-against the values recorded in CI (`.github/workflows/ci.yml`), not frozen
-here, since they change whenever a language's semantic content changes.
-Bootstrap transcripts (`mvp` / `max`, plus adapted imports listed in
+Full suite: `sbt test`. Language and Rosetta digests: print with
+`sbt "examples/runMain cairn.examples.Main digests"` and compare against the
+checked-in fixture `tests/golden/digests.txt` — CI runs that comparison
+explicitly (`.github/workflows/ci.yml` step **Golden digests**). Digests change
+whenever a language's semantic content changes; update the fixture in the same
+commit. Bootstrap transcripts (`mvp` / `max`, plus adapted imports listed in
 `transcripts/SOURCES.md`) exercise the publish/fetch/gossip/query path end to
 end via `sbt "examples/runMain cairn.examples.Main transcript transcripts/…"`.
 Charb YAML themes promote through [porcelain.md](porcelain.md) (`Plumbing` /
 `Porcelain` / `porcelain THEME ;`) when engines exist; otherwise they stay
-`deferred`. `emit-languages` regenerates the
+`deferred`. Exact Charb dispositions are pinned in
+`transcripts/charb/dispositions.tsv`. `emit-languages` regenerates the
 checked-in `.cairn` mirrors for `pki`/`law`/`sds`/`search`/`stlc`/`meta`;
 `git diff --exit-code languages/` must be clean after running it — CI enforces
 this (the language-sync check).

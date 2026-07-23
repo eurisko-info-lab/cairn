@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-maintenance-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-maintenance-workflow.yaml
+-- Source-file: chain-maintenance-workflow.yaml
 -- Description: Chain maintenance views report timeline, compare, stats, and compact results
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-maintenance {

@@ -41,9 +41,9 @@ class Phase8Suite extends munit.FunSuite:
     val work = java.nio.file.Files.createTempDirectory("cairn-mvp")
     Transcript.run(src, Map("stlc" -> Stlc.language), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
       case Right(report) =>
-        assert(report.steps.exists(_.startsWith("published main")), report.render)
-        assert(report.steps.exists(_.startsWith("fetched main")), report.render)
-        assert(report.steps.count(_.startsWith("eval")) == 3, report.render)
+        assert(report.summaries.exists(_.startsWith("published main")), report.render)
+        assert(report.summaries.exists(_.startsWith("fetched main")), report.render)
+        assert(report.summaries.count(_.startsWith("eval")) == 3, report.render)
       case Left(e) => fail(e)
 
   test("transcript grammar round-trips (S46 + S11 law)"):
@@ -73,15 +73,32 @@ class Phase8Suite extends munit.FunSuite:
           src, packs.loadClosed(), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
         case Right(report) =>
           assert(
-            report.steps.exists(_.startsWith("published")) ||
-              report.steps.exists(_.startsWith("expected failure")),
+            report.summaries.exists(_.startsWith("published")) ||
+              report.summaries.exists(_.startsWith("expected failure")),
             report.render)
           assert(
-            report.steps.exists(_.startsWith("fetched")) ||
-              report.steps.exists(_.contains("gossip")) ||
-              report.steps.exists(_.startsWith("expected failure")),
+            report.summaries.exists(_.startsWith("fetched")) ||
+              report.summaries.exists(_.contains("gossip")) ||
+              report.summaries.exists(_.startsWith("expected failure")),
             report.render)
         case Left(e) => fail(e)
+
+  private lazy val expectedDispositions: Map[String, String] =
+    val candidates =
+      List("transcripts/charb/dispositions.tsv", "../transcripts/charb/dispositions.tsv")
+        .map(java.nio.file.Path.of(_))
+    val path = candidates.find(java.nio.file.Files.isRegularFile(_)).getOrElse(
+      fail("transcripts/charb/dispositions.tsv missing — run scripts/gen-charb-transcripts.py"))
+    val text = Filesystem.run(Fs.Request.Read(Fs.Path(path.toString)), fsCtx) match
+      case Right(Fs.Response.Text(s)) => s
+      case other => fail(s"read dispositions: $other")
+    text.linesIterator
+      .map(_.trim).filter(l => l.nonEmpty && !l.startsWith("#"))
+      .map { line =>
+        val parts = line.split("\t", 3)
+        require(parts.length >= 2, s"bad dispositions row: $line")
+        parts(0) -> parts(1)
+      }.toMap
 
   test("all Charb YAML ports under transcripts/charb/ run"):
     val dirCandidates =
@@ -104,19 +121,38 @@ class Phase8Suite extends munit.FunSuite:
       Transcript.run(
           src, packs.loadClosed(), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
         case Right(report) =>
+          val disposition =
+            if report.steps.exists {
+                  case Transcript.StepOutcome.Deferred(_, _) => true
+                  case _                                     => false
+                }
+            then "deferred"
+            else if report.steps.exists {
+                  case Transcript.StepOutcome.Executed(Canon.CTag("porcelain", _)) => true
+                  case _ => false
+                }
+            then "porcelain"
+            else "runnable"
           val ok =
-            report.steps.exists(_.startsWith("deferred:")) ||
-              report.steps.exists(_.startsWith("porcelain ")) ||
-              report.steps.exists(_.startsWith("published")) ||
-              report.steps.exists(_.startsWith("expected failure"))
+            disposition == "deferred" || disposition == "porcelain" ||
+              report.summaries.exists(_.startsWith("published")) ||
+              report.summaries.exists(_.startsWith("expected failure"))
           assert(ok, report.render)
-          if report.steps.exists(_.startsWith("deferred:")) then deferred += 1
-          else if report.steps.exists(_.startsWith("porcelain ")) then porcelain += 1
-          else runnable += 1
+          disposition match
+            case "deferred"  => deferred += 1
+            case "porcelain" => porcelain += 1
+            case _           => runnable += 1
+          val name = f.getFileName.toString.stripSuffix(".cairn")
+          expectedDispositions.get(name) match
+            case Some(want) =>
+              assertEquals(disposition, want, s"$name disposition drift")
+            case None =>
+              fail(s"missing pinned disposition for $name (regenerate dispositions.tsv)")
         case Left(e) => fail(s"${f.getFileName}: $e")
-    assert(deferred <= 15, s"deferred=$deferred (expected ≤15 after porcelain)")
-    assert(porcelain >= 25, s"porcelain=$porcelain")
     assertEquals(runnable + porcelain + deferred, 85)
+    assertEquals(deferred, expectedDispositions.values.count(_ == "deferred"))
+    assertEquals(porcelain, expectedDispositions.values.count(_ == "porcelain"))
+    assertEquals(runnable, expectedDispositions.values.count(_ == "runnable"))
 
   test("porcelain CLI auth check and chain status"):
     val home = java.nio.file.Files.createTempDirectory("cairn-porcelain")
@@ -137,7 +173,22 @@ class Phase8Suite extends munit.FunSuite:
     val work = java.nio.file.Files.createTempDirectory("cairn-ledger-settlement")
     Transcript.run(src, Map.empty, work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
       case Right(report) =>
-        assert(report.steps.exists(_.startsWith("deferred:")), report.render)
+        assert(report.steps.exists {
+          case Transcript.StepOutcome.Deferred(_, _) => true
+          case _                                     => false
+        }, report.render)
+      case Left(e) => fail(e)
+
+  test("sds-domain-journey transcript plants PKI→LAW→SDS + CHEMISTRY ref"):
+    val src = readTranscriptSource(
+      List("transcripts/sds-domain-journey.cairn", "../transcripts/sds-domain-journey.cairn"),
+      "sds-domain-journey.cairn missing")
+    val work = java.nio.file.Files.createTempDirectory("cairn-sds-domain")
+    Transcript.run(src, Map.empty, work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
+      case Right(report) =>
+        assert(report.summaries.exists(_.startsWith("fork-from SDS of LAW")), report.render)
+        assert(report.summaries.exists(_.startsWith("refer SDS to CHEMISTRY")), report.render)
+        assert(report.summaries.exists(_.startsWith("fork-from sds-author of SDS")), report.render)
       case Left(e) => fail(e)
 
   // ---- PKI (S47) ----

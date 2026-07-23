@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `patch-conflict-merge-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/patch-conflict-merge-workflow.yaml
+-- Source-file: patch-conflict-merge-workflow.yaml
 -- Description: Conflicting patches: composeSequentially stays dirty, preferLeft resolves clean
 -- Rich sibling adaptation also under transcripts/.
 transcript patch-conflict-merge {

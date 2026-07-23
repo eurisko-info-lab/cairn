@@ -1,0 +1,11 @@
+-- Domain trunk planting via transcript DSL (fork-from / refer).
+-- Mirrors examples/sds/SdsDomainTree without a Scala host driver.
+transcript sds-domain-journey {
+  fork-from PKI trunk ;
+  fork-from CHEMISTRY trunk ;
+  fork-from LAW of PKI ;
+  fork-from SDS of LAW ;
+  refer SDS to CHEMISTRY ;
+  fork-from sds-author of SDS ;
+  fork-from sds-approved of SDS ;
+}

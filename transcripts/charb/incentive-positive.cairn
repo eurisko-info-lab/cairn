@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `incentive-positive-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/incentive-positive-workflow.yaml
+-- Source-file: incentive-positive-workflow.yaml
 -- Description: Complete multi-version workflow: v1.0 → v2.0 with revocation/supersession
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript incentive-positive {

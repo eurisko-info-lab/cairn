@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `replay-history-diff-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/replay-history-diff-workflow.yaml
+-- Source-file: replay-history-diff-workflow.yaml
 -- Description: History diff commands compare recorded replay root entries
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript replay-history-diff {

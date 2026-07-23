@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `e2e-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/e2e-registry-workflow.yaml
+-- Source-file: e2e-registry-workflow.yaml
 -- Description: E2E status and inspect commands for per-package path visibility
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript e2e-registry {

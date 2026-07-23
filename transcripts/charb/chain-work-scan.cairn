@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-work-scan-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-scan-workflow.yaml
+-- Source-file: chain-work-scan-workflow.yaml
 -- Description: Scans verification targets and generates bounded chain work requests
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-scan {

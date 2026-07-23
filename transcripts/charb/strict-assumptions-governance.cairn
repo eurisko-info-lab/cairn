@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `strict-assumptions-governance-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-assumptions-governance-workflow.yaml
+-- Source-file: strict-assumptions-governance-workflow.yaml
 -- Description: Governance flow with strict-assumptions verification
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript strict-assumptions-governance {

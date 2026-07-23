@@ -463,6 +463,8 @@ final class Sds(packs: PackAccess):
 
   /** Rebase an industrial shadow over a base revision. Disjoint overrides
     * merge; overlapping phrase/product edits surface as Merge.Conflict.
+    * The SDS whole-document gate runs inside [[Merge.threeWay]] via
+    * [[ModuleGate]], so domain rejection is witnessed on the conflict artifact.
     */
   def rebaseShadow(
       base: Module,
@@ -478,21 +480,9 @@ final class Sds(packs: PackAccess):
         Artifact(ArtifactKind.ChangeSet, Cst.toCanon(baseChange)).digest,
         Artifact(ArtifactKind.ChangeSet, Cst.toCanon(shadowChange)).digest))
     else
-      Merge.threeWay(language, base, baseChange, shadowChange).flatMap { result =>
-        validate(result._1) match
-          case Left(err) =>
-            // Merge.threeWay already witnessed name-level commutation; this
-            // is the SDS-specific whole-document gate rejecting a
-            // footprint-disjoint combination anyway (e.g. two individually
-            // fine mixture edits whose percentages now jointly exceed 100)
-            // — a real, anticipatable conflict, not a broken invariant.
-            Left(Merge.Conflict(
-              overlap,
-              Artifact(ArtifactKind.ChangeSet, Cst.toCanon(baseChange)).digest,
-              Artifact(ArtifactKind.ChangeSet, Cst.toCanon(shadowChange)).digest,
-              Some(s"disjoint footprints but merged SDS document is invalid: $err")))
-          case Right(_) => Right(result)
-      }
+      Merge.threeWay(
+        language, base, baseChange, shadowChange,
+        ModuleGate.host("sds.validate")(validate))
 
   // ---- the compiled document view (a bidirectional surface, M47) ----
 

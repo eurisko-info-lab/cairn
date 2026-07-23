@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `kernel-introspection-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/kernel-introspection-workflow.yaml
+-- Source-file: kernel-introspection-workflow.yaml
 -- Description: Enhanced kernel inspection with event counts and diagnostics
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript kernel-introspection {

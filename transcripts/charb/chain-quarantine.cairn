@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `chain-quarantine-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-quarantine-workflow.yaml
+-- Source-file: chain-quarantine-workflow.yaml
 -- Description: chain repair separates malformed transport rows from semantically invalid rows and exposes both via quarantine commands
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-quarantine {

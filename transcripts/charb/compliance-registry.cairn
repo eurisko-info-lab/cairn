@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `compliance-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/compliance-registry-workflow.yaml
+-- Source-file: compliance-registry-workflow.yaml
 -- Description: Compliance report registry listing, inspection, and drift status summary
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript compliance-registry {

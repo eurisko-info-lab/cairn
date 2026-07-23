@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `hardening-phase5-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/hardening-phase5-workflow.yaml
+-- Source-file: hardening-phase5-workflow.yaml
 -- Description: Phase 5 decentralization hardening command coverage
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript hardening-phase5 {

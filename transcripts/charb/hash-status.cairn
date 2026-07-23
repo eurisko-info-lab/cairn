@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `hash-status-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/hash-status-workflow.yaml
+-- Source-file: hash-status-workflow.yaml
 -- Description: Hash status overview of hashable artifact counts
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript hash-status {

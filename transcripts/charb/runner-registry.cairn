@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `runner-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/runner-registry-workflow.yaml
+-- Source-file: runner-registry-workflow.yaml
 -- Description: Runner registry listing, inspection, and selection
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript runner-registry {

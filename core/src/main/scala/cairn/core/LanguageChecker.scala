@@ -18,6 +18,24 @@ object LanguageChecker:
     case SortMismatch(ctor: String, expectedSort: String, actualSort: String)
     case UnexpectedLeaf(expectedSort: String, text: String)
 
+    def canon: Canon = this match
+      case UnknownConstructor(ctor) =>
+        Canon.CTag("unknown-ctor", Canon.CStr(ctor))
+      case ArityMismatch(ctor, expected, actual) =>
+        Canon.CTag("arity-mismatch", Canon.cmap(
+          "ctor" -> Canon.CStr(ctor),
+          "expected" -> Canon.CInt(expected),
+          "actual" -> Canon.CInt(actual)))
+      case SortMismatch(ctor, expectedSort, actualSort) =>
+        Canon.CTag("sort-mismatch", Canon.cmap(
+          "ctor" -> Canon.CStr(ctor),
+          "expected" -> Canon.CStr(expectedSort),
+          "actual" -> Canon.CStr(actualSort)))
+      case UnexpectedLeaf(expectedSort, text) =>
+        Canon.CTag("unexpected-leaf", Canon.cmap(
+          "expected" -> Canon.CStr(expectedSort),
+          "text" -> Canon.CStr(text)))
+
     def render: String = this match
       case UnknownConstructor(ctor) => s"unknown constructor '$ctor'"
       case ArityMismatch(ctor, expected, actual) =>

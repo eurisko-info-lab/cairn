@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `audit-registry-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/audit-registry-workflow.yaml
+-- Source-file: audit-registry-workflow.yaml
 -- Description: Audit chain log listing, inspection, and status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript audit-registry {

@@ -1,5 +1,5 @@
 -- Ported from Marble/Charb `runner-selection-workflow.yaml`
--- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/runner-selection-workflow.yaml
+-- Source-file: runner-selection-workflow.yaml
 -- Description: Runner lifecycle: register → object put → select by capabilities → run object → verify
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript runner-selection {
