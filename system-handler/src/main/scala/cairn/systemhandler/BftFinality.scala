@@ -30,10 +30,9 @@ object BftFinality:
     val sorted = replicaIds.sorted
     if sorted.isEmpty then Left("bft: empty replica set")
     else if sorted.length != sorted.distinct.length then Left("bft: duplicate replica ids")
-    else
-      val n = sorted.length
-      if n > 1 && n < 4 then Left(s"bft: n=$n is not a valid BFT size (need 1 or ≥4)")
-      else Right(ReplicaId(sorted(Math.floorMod(view, n))))
+    else if !BftQuorum.validReplicaCount(sorted.length) then
+      Left(s"bft: n=${sorted.length} is not a valid 3f+1 size (need 1,4,7,10,…)")
+    else Right(ReplicaId(sorted(Math.floorMod(view, sorted.length))))
 
   def msgFrom(msg: Msg): ReplicaId = msg match
     case Msg.PrePrepare(_, _, _, from) => from
@@ -178,26 +177,29 @@ object BftFinality:
         expectedReplicaSet: Digest,
     ): Either[String, Unit] =
       val n = authorities.size
-      val q = quorumSize(n)
-      val ids = cert.commits.map(_._1.id)
-      if cert.replicaSet != expectedReplicaSet then
-        Left(s"bft finality: replicaSet ${cert.replicaSet.short} != expected ${expectedReplicaSet.short}")
-      else if replicaSetDigest(authorities.keys.toList) != expectedReplicaSet then
-        Left("bft finality: authorities do not match certificate replicaSet")
-      else if ids.length != ids.distinct.length then
-        Left(s"bft finality: duplicate replica commits: ${ids.mkString(",")}")
-      else if ids.exists(id => !authorities.contains(id)) then
-        Left(s"bft finality: unknown replica in commits")
-      else if ids.distinct.length < q then
-        Left(s"bft finality: ${ids.distinct.length} distinct commits < quorum $q")
+      if !BftQuorum.validReplicaCount(n) then
+        Left(s"bft finality: n=$n is not a valid 3f+1 size")
       else
-        val valueDigest = valueOfBlock(cert.blockDigest).digest
-        cert.commits.foldLeft[Either[String, Unit]](Right(())) { case (acc, (id, seal)) =>
-          acc.flatMap { _ =>
-            val commit = Msg.Commit(cert.view, cert.seq, valueDigest, id)
-            BftFinality.verify(authorities, SignedMsg(commit, id, seal))
+        val q = quorumSize(n)
+        val ids = cert.commits.map(_._1.id)
+        if cert.replicaSet != expectedReplicaSet then
+          Left(s"bft finality: replicaSet ${cert.replicaSet.short} != expected ${expectedReplicaSet.short}")
+        else if replicaSetDigest(authorities.keys.toList) != expectedReplicaSet then
+          Left("bft finality: authorities do not match certificate replicaSet")
+        else if ids.length != ids.distinct.length then
+          Left(s"bft finality: duplicate replica commits: ${ids.mkString(",")}")
+        else if ids.exists(id => !authorities.contains(id)) then
+          Left(s"bft finality: unknown replica in commits")
+        else if ids.distinct.length < q then
+          Left(s"bft finality: ${ids.distinct.length} distinct commits < quorum $q")
+        else
+          val valueDigest = valueOfBlock(cert.blockDigest).digest
+          cert.commits.foldLeft[Either[String, Unit]](Right(())) { case (acc, (id, seal)) =>
+            acc.flatMap { _ =>
+              val commit = Msg.Commit(cert.view, cert.seq, valueDigest, id)
+              BftFinality.verify(authorities, SignedMsg(commit, id, seal))
+            }
           }
-        }
 
   def valueOfBlock(blockDigest: Digest): Value =
     Value(blockDigest.hex.getBytes(StandardCharsets.US_ASCII).toVector)
@@ -327,6 +329,100 @@ object BftFinality:
       Right(())
     catch case e: Exception => Left(e.getMessage)
 
+  def loadReplicaSet(path: java.nio.file.Path): Either[String, ReplicaSetManifest] =
+    if !java.nio.file.Files.exists(path) then Left(s"missing replica-set manifest at $path")
+    else Canon.decode(java.nio.file.Files.readAllBytes(path)).flatMap(ReplicaSetManifest.fromCanon)
+
+  def saveReplicaSet(path: java.nio.file.Path, m: ReplicaSetManifest): Either[String, Unit] =
+    try
+      java.nio.file.Files.createDirectories(
+        Option(path.getParent).getOrElse(path.toAbsolutePath.getParent))
+      java.nio.file.Files.write(path, Canon.encode(m.canon))
+      Right(())
+    catch case e: Exception => Left(e.getMessage)
+
+  def defaultReplicaSetPath(home: java.nio.file.Path): java.nio.file.Path =
+    home.resolve("replica-set.canon")
+
+  /** Encode durable protocol state (slots + commit seals + block meta). */
+  def encodeReplicaState(
+      state: BftQuorum.ReplicaState,
+      commitSeals: Map[(Int, Int, String, String), Vector[Byte]],
+      blockMeta: Map[Digest, (Long, Digest)],
+  ): Canon =
+    import BftQuorum.*
+    val slots = state.slots.toList.map { case ((view, seq), slot) =>
+      Canon.cmap(
+        "view" -> Canon.CInt(view),
+        "seq" -> Canon.CInt(seq),
+        "prePrepare" -> slot.prePrepare.fold(Canon.CTag("none", Canon.CInt(0)))(pp =>
+          Canon.CTag("some", msgCanon(pp))),
+        "prepares" -> Canon.CList(slot.prepares.toList.map { (id, d) =>
+          Canon.cmap("from" -> Canon.CStr(id.id), "digest" -> Canon.CStr(d.hex))
+        }),
+        "commits" -> Canon.CList(slot.commits.toList.map { (id, d) =>
+          Canon.cmap("from" -> Canon.CStr(id.id), "digest" -> Canon.CStr(d.hex))
+        }),
+        "decided" -> slot.decided.fold(Canon.CTag("none", Canon.CInt(0)))(v =>
+          Canon.CTag("some", Canon.CBytes(v.bytes))))
+    }
+    val seals = commitSeals.toList.map { case ((v, s, hex, rid), seal) =>
+      Canon.cmap(
+        "view" -> Canon.CInt(v), "seq" -> Canon.CInt(s),
+        "digest" -> Canon.CStr(hex), "replica" -> Canon.CStr(rid),
+        "seal" -> Canon.CBytes(seal))
+    }
+    val meta = blockMeta.toList.map { case (d, hp) =>
+      val (h, p) = hp
+      Canon.cmap(
+        "block" -> Canon.CStr(d.hex), "height" -> Canon.CInt(h), "parent" -> Canon.CStr(p.hex))
+    }
+    Canon.CTag("bft-replica-state", Canon.cmap(
+      "id" -> Canon.CStr(state.id.id),
+      "n" -> Canon.CInt(state.n),
+      "slots" -> Canon.CList(slots),
+      "commitSeals" -> Canon.CList(seals),
+      "blockMeta" -> Canon.CList(meta)))
+
+  def decodeReplicaState(c: Canon): Either[String, (BftQuorum.ReplicaState, Map[(Int, Int, String, String), Vector[Byte]], Map[Digest, (Long, Digest)])] =
+    import Canon.*, BftQuorum.*
+    c match
+      case CTag("bft-replica-state", m) =>
+        try
+          val id = ReplicaId(m.field("id").asStr)
+          val n = m.field("n").asInt.toInt
+          val slots = m.field("slots").asList.map { row =>
+            val view = row.field("view").asInt.toInt
+            val seq = row.field("seq").asInt.toInt
+            val pp = row.field("prePrepare") match
+              case CTag("some", body) => parseMsg(body).toOption.collect { case p: Msg.PrePrepare => p }
+              case _ => None
+            val prepares = row.field("prepares").asList.map { r =>
+              ReplicaId(r.field("from").asStr) -> Digest(r.field("digest").asStr)
+            }.toMap
+            val commits = row.field("commits").asList.map { r =>
+              ReplicaId(r.field("from").asStr) -> Digest(r.field("digest").asStr)
+            }.toMap
+            val decided = row.field("decided") match
+              case CTag("some", CBytes(bs)) => Some(Value(bs))
+              case _ => None
+            (view, seq) -> Slot(pp, prepares, commits, decided)
+          }.toMap
+          val seals = m.field("commitSeals").asList.map { row =>
+            (row.field("view").asInt.toInt, row.field("seq").asInt.toInt,
+              row.field("digest").asStr, row.field("replica").asStr) ->
+              (row.field("seal") match
+                case CBytes(bs) => bs
+                case _ => throw CodecError("seal"))
+          }.toMap
+          val meta = m.field("blockMeta").asList.map { row =>
+            Digest(row.field("block").asStr) ->
+              (row.field("height").asInt, Digest(row.field("parent").asStr))
+          }.toMap
+          Right((ReplicaState(id, n, faulty = false, slots), seals, meta))
+        catch case e: CodecError => Left(e.getMessage)
+      case other => Left(s"not bft-replica-state: $other")
+
   def postMsg(baseUrl: String, sm: SignedMsg): Either[String, Unit] =
     try
       val resp = client.send(
@@ -355,7 +451,29 @@ object BftFinality:
         }
     catch case e: Exception => Left(e.getMessage)
 
-  /** Broadcast PrePrepare and poll replicas until one mints a certificate. */
+  /** Ask the designated primary to propose (initiator needs no primary private key). */
+  def propose(
+      primaryUrl: String,
+      view: Int,
+      seq: Int,
+      blockDigest: Digest,
+  ): Either[String, Unit] =
+    try
+      val body = Canon.encode(Canon.cmap(
+        "view" -> Canon.CInt(view),
+        "seq" -> Canon.CInt(seq),
+        "block" -> Canon.CStr(blockDigest.hex)))
+      val resp = client.send(
+        HttpRequest.newBuilder(URI.create(s"$primaryUrl/bft/propose"))
+          .header("Content-Type", "application/octet-stream")
+          .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+          .build(),
+        HttpResponse.BodyHandlers.ofByteArray())
+      if resp.statusCode() == 200 then Right(())
+      else Left(s"POST $primaryUrl/bft/propose -> ${resp.statusCode()}: ${new String(resp.body())}")
+    catch case e: Exception => Left(e.getMessage)
+
+  /** Broadcast PrePrepare from a local primary keypair, then poll for a cert. */
   def agreeNetwork(
       primary: Keypair,
       replicaUrls: Map[String, String],
@@ -375,23 +493,44 @@ object BftFinality:
       _ <- replicaUrls.toList.foldLeft[Either[String, Unit]](Right(())) { case (acc, (name, url)) =>
         acc.flatMap(_ => postMsg(url, pp).left.map(e => s"$name: $e"))
       }
-      cert <- {
-        def loop(n: Int): Either[String, FinalityCertificate] =
-          if n <= 0 then Left("bft network: no certificate minted")
-          else
-            val found = replicaUrls.values.toList.view.flatMap { url =>
-              fetchCerts(url).toOption.toList.flatten
-            }.find(_.blockDigest == blockDigest)
-            found match
-              case Some(c) => Right(c)
-              case None =>
-                Thread.sleep(pollSleepMs)
-                // Re-fan-out: ask each replica to process empty by re-posting is
-                // unnecessary — /bft/msg already fans out follow-ons. Just poll.
-                loop(n - 1)
-        loop(polls)
-      }
+      cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
     yield cert
+
+  /** Deployable path: ask the primary's HTTP node to propose; poll any replica for the cert. */
+  def agreeNetworkRemote(
+      replicaUrls: Map[String, String],
+      view: Int,
+      seq: Int,
+      blockDigest: Digest,
+      polls: Int = 64,
+      pollSleepMs: Long = 30,
+  ): Either[String, FinalityCertificate] =
+    val ids = replicaUrls.keys.toList
+    for
+      primaryId <- designatedPrimary(ids, view)
+      primaryUrl <- replicaUrls.get(primaryId.id).toRight(s"bft: no URL for primary ${primaryId.id}")
+      _ <- propose(primaryUrl, view, seq, blockDigest)
+      cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
+    yield cert
+
+  private def pollCert(
+      replicaUrls: Map[String, String],
+      blockDigest: Digest,
+      polls: Int,
+      pollSleepMs: Long,
+  ): Either[String, FinalityCertificate] =
+    def loop(n: Int): Either[String, FinalityCertificate] =
+      if n <= 0 then Left("bft network: no certificate minted")
+      else
+        val found = replicaUrls.values.toList.view.flatMap { url =>
+          fetchCerts(url).toOption.toList.flatten
+        }.find(_.blockDigest == blockDigest)
+        found match
+          case Some(c) => Right(c)
+          case None =>
+            Thread.sleep(pollSleepMs)
+            loop(n - 1)
+    loop(polls)
 
 /** Per-process BFT replica state machine backed by [[BftQuorum.deliver]]. */
 final class BftReplica(
@@ -401,6 +540,7 @@ final class BftReplica(
     val node: Option[Node] = None,
     val ledgerAuth: Map[String, Vector[Byte]] = Map.empty,
     certStore: Option[java.nio.file.Path] = None,
+    stateStore: Option[java.nio.file.Path] = None,
 ):
   import BftQuorum.*
   import BftFinality.*
@@ -415,6 +555,17 @@ final class BftReplica(
     certStore.flatMap(BftFinality.loadCerts(_).toOption).getOrElse(Nil)
   private var blockMeta: Map[Digest, (Long, Digest)] = Map.empty
 
+  // Restore durable protocol state if present.
+  stateStore.foreach { path =>
+    if java.nio.file.Files.exists(path) then
+      Canon.decode(java.nio.file.Files.readAllBytes(path)).flatMap(BftFinality.decodeReplicaState) match
+        case Right((st, seals, meta)) if st.id.id == keypair.name && st.n == n =>
+          state = st
+          commitSeals ++= seals
+          blockMeta = meta
+        case _ => ()
+  }
+
   def id: ReplicaId = ReplicaId(keypair.name)
   def setDigest: Digest = replicaSetDigest(replicaIds)
   def drainOutbound(): List[SignedMsg] =
@@ -426,6 +577,25 @@ final class BftReplica(
   /** Bind ledger evidence for a block before / while agreeing. */
   def noteSealedBlock(blockDigest: Digest, height: Long, parent: Digest): Unit =
     blockMeta = blockMeta + (blockDigest -> (height, parent))
+    persistState()
+
+  /** Primary-only: sign and locally deliver a PrePrepare for a sealed block. */
+  def propose(view: Int, seq: Int, blockDigest: Digest): Either[String, List[SignedMsg]] =
+    for
+      primary <- designatedPrimary(replicaIds, view)
+      _ <- Either.cond(primary.id == keypair.name, (),
+        s"bft: this replica ${keypair.name} is not primary for view $view (${primary.id})")
+      _ <- (node, ledgerAuth.nonEmpty) match
+        case (Some(n), true) =>
+          requireSealedBlock(n, ledgerAuth, blockDigest).map { (b, h) =>
+            noteSealedBlock(blockDigest, h, b.parent)
+          }
+        case _ =>
+          if blockMeta.contains(blockDigest) then Right(())
+          else Left(s"bft: block ${blockDigest.short} not noted as sealed")
+      pp <- sign(keypair, Msg.PrePrepare(view, seq, valueOfBlock(blockDigest), primary))
+      out <- receive(pp)
+    yield pp :: out
 
   def receive(sm: SignedMsg): Either[String, List[SignedMsg]] =
     val primaryOk = sm.msg match
@@ -466,8 +636,19 @@ final class BftReplica(
         }
         outbound ++= signedOut
         tryMintCertificates()
+        persistState()
         signedOut
       }
+    }
+
+  private def persistState(): Unit =
+    stateStore.foreach { path =>
+      val c = BftFinality.encodeReplicaState(state, commitSeals.toMap, blockMeta)
+      try
+        java.nio.file.Files.createDirectories(
+          Option(path.getParent).getOrElse(path.toAbsolutePath.getParent))
+        java.nio.file.Files.write(path, Canon.encode(c))
+      catch case _: Exception => ()
     }
 
   private def tryMintCertificates(): Unit =

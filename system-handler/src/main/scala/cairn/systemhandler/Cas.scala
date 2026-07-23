@@ -690,30 +690,26 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     if known.contains(name) then load(name).primaryAncestor else None
 
   /** Plant or amend a domain branch under a [[DomainAgreement]].
-    * Validates structural well-formedness, ownership / ancestry-change policy,
-    * stores the agreement certificate in CAS, and records its digest on the
-    * manifest. Local bootstrap without governance still uses [[forkFrom]].
     *
-    * Fail-closed: if the child already cites a `domainAgreement` digest that
-    * cannot be loaded/decoded, planting is rejected (never silently treated
-    * as first plant).
+    * Cryptographic identity: `ownerSeal` is **required**. The public key is
+    * resolved via [[IdentityResolver]] — never taken from the caller. Under a
+    * primary, `grantorSeal` is required and the grantor key is likewise resolved
+    * (primary agreement owner).
     *
-    * Under a primary ancestor the primary must itself be governed, and
-    * `agreement.ancestorDelegation` must cite a loadable
-    * [[DomainAncestorDelegation]] sealed by the primary owner (`grantorSeal`).
-    *
-    * When `ownerSeal` is provided, the seal must authenticate `agreement.owner`
-    * over [[DomainAgreement.canon]] via `verify`.
+    * When `knownLanguages` is non-empty, child/ancestor language digests and
+    * any digest-shaped entries in `dependencyEvidence` must appear in that set.
     */
   def plantGoverned(
       agreement: DomainAgreement,
+      identities: IdentityResolver,
+      ownerSeal: (String, Vector[Byte]),
       module: Option[Module] = None,
-      ownerSeal: Option[(String, Vector[Byte], Vector[Byte])] = None,
-      grantorSeal: Option[(String, Vector[Byte], Vector[Byte])] = None,
-      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean =
-        (_, _, _) => false,
+      grantorSeal: Option[(String, Vector[Byte])] = None,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean = Ed25519.verify,
+      knownLanguages: Set[Digest] = Set.empty,
   ): Either[String, BranchManifest] =
     val known = list().toSet
+    val (ownerName, ownerSig) = ownerSeal
     val liveE: Either[String, Option[DomainAgreement]] =
       if !known.contains(agreement.child) then Right(None)
       else
@@ -730,18 +726,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                   case Right(ag) => Right(Some(ag))
     for
       live <- liveE
-      _ <- ownerSeal match
-        case None => Right(())
-        case Some((name, pk, seal)) =>
-          DomainAgreement.authenticateOwner(agreement, name, pk, seal, verify)
+      ownerPk <- identities.require(agreement.owner)
+      _ <- DomainAgreement.authenticateOwner(agreement, ownerName, ownerPk, ownerSig, verify)
       _ <- DomainAgreement.wellFormed(agreement, known, primaryOf(known))
-      _ <- verifyAncestorDelegation(agreement, known, grantorSeal, verify)
+      _ <- verifyLanguageEvidence(agreement, knownLanguages)
+      _ <- verifyAncestorDelegation(agreement, known, identities, grantorSeal, verify)
       _ <- DomainAgreement.allowsTransition(agreement, live)
       art = agreement.artifact
       _ = putArt(art)
-      // Keep the delegation cert in the child's certificate list when present.
-      certDigests =
-        art.digest :: agreement.ancestorDelegation.toList
+      certDigests = art.digest :: agreement.ancestorDelegation.toList
       base <-
         if known.contains(agreement.child) then
           val cur = load(agreement.child)
@@ -763,15 +756,38 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           }
     yield module match
       case None    => base
-      case Some(m) =>
-        // importModule → advance preserves domainAgreement
-        importModule(agreement.child, m)
+      case Some(m) => importModule(agreement.child, m)
+
+  private def verifyLanguageEvidence(
+      agreement: DomainAgreement,
+      knownLanguages: Set[Digest],
+  ): Either[String, Unit] =
+    if knownLanguages.isEmpty then Right(())
+    else
+      val claimed =
+        agreement.childLanguage.toList ++ agreement.ancestorLanguages.map(_._2)
+      val missing = claimed.filterNot(knownLanguages.contains)
+      if missing.nonEmpty then
+        Left(s"domain-agreement: unknown language digest(s): ${missing.map(_.short).mkString(",")}")
+      else
+        agreement.dependencyEvidence match
+          case Canon.CList(xs) =>
+            val digs = xs.flatMap {
+              case Canon.CStr(hex) if hex.length == 64 => Digest.parse(hex).toOption
+              case _ => None
+            }
+            val bad = digs.filterNot(knownLanguages.contains)
+            if bad.nonEmpty then
+              Left(s"domain-agreement: dependencyEvidence cites unknown language(s): ${bad.map(_.short).mkString(",")}")
+            else Right(())
+          case _ => Right(())
 
   /** Primary consent: governed primary + sealed DomainAncestorDelegation. */
   private def verifyAncestorDelegation(
       agreement: DomainAgreement,
       known: Set[String],
-      grantorSeal: Option[(String, Vector[Byte], Vector[Byte])],
+      identities: IdentityResolver,
+      grantorSeal: Option[(String, Vector[Byte])],
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
   ): Either[String, Unit] =
     agreement.primaryAncestor match
@@ -802,10 +818,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           del <- DomainAncestorDelegation.fromCanon(delArt.body).left.map(e =>
             s"domain-delegation: cannot decode ${delDig.short}: $e")
           _ <- DomainAncestorDelegation.matches(del, agreement, primaryAg.owner)
-          seal <- grantorSeal.toRight(
+          sealPair <- grantorSeal.toRight(
             "domain-agreement: plant under primary requires grantorSeal")
-          (gName, gPk, gSeal) = seal
-          _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSeal, verify)
+          (gName, gSig) = sealPair
+          gPk <- identities.require(primaryAg.owner)
+          _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSig, verify)
         yield ()
 
   def forkFrom(

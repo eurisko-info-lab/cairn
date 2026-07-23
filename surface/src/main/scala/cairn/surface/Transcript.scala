@@ -718,6 +718,8 @@ object Cli:
         Digest.parse(hex).flatMap { d =>
           bftAgreeLocal(home, d, ledgerCtx)
         }
+      case "bft" :: "replica-set" :: "init" :: names if names.nonEmpty =>
+        bftReplicaSetInit(home, names)
       case List("smoke", "distribution") =>
         smokeDistribution(ledgerCtx)
       case porcelainCmd :: rest
@@ -750,19 +752,21 @@ object Cli:
         if !withBft then Right(None)
         else
           for
-            dir <- PeerRegistry.load(home)
-            ids0 = dir.replicas.map(_.name)
-            ids = if ids0.contains(replicaName) then ids0.distinct else (ids0 :+ replicaName).distinct
-            _ <- BftFinality.designatedPrimary(ids, 0)
+            manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
+            _ <- Either.cond(manifest.authorities.contains(replicaName), (),
+              s"bft: replica '$replicaName' not in replica-set.canon")
             kp <- Keypair.loadOrCreate(home, replicaName)
-            auth2 <- ids.foldLeft[Either[String, Map[String, Vector[Byte]]]](Right(Map.empty)) { (acc, n) =>
-              acc.flatMap { m =>
-                Keypair.loadOrCreate(home, n).map(k => m + (n -> k.publicBytes))
-              }
-            }
+            // Self public key must match the certified manifest entry.
+            _ <- Either.cond(
+              kp.publicBytes == manifest.authorities(replicaName),
+              (),
+              s"bft: local key for '$replicaName' does not match replica-set.canon — " +
+                "re-provision or update the manifest")
           yield Some(BftReplica(
-            kp, auth2, ids, node = Some(node), ledgerAuth = ledgerAuth,
-            certStore = Some(home.resolve("bft-certs.canon"))))
+            kp, manifest.authorities, manifest.ids,
+            node = Some(node), ledgerAuth = ledgerAuth,
+            certStore = Some(home.resolve("bft-certs.canon")),
+            stateStore = Some(home.resolve("bft-state.canon"))))
       http = HttpNode(node, ledgerAuth, peersRoot = Some(home), bft = bftOpt)
       bound = http.start(port)
       selfUrl = s"http://127.0.0.1:$bound"
@@ -773,7 +777,7 @@ object Cli:
       System.out.println(s"Cairn HTTP node at $selfUrl")
       System.out.println(s"  GET /chain  /heads  /blob/<digest>  /peers")
       if withBft then
-        System.out.println(s"  POST /bft/msg  GET /bft/certs  (replica=$replicaName)")
+        System.out.println(s"  POST /bft/msg  POST /bft/propose  GET /bft/certs  (replica=$replicaName)")
       else
         System.out.println(s"  (gossip only — use `serve replica <name>` to enable BFT)")
       System.out.println(s"serving $root (CAIRN_HOME=$home)")
@@ -782,28 +786,35 @@ object Cli:
       http.stop()
       s"serve stopped (was :$bound)"
 
-  /** Network agreement against registered `role=replica` peers. */
+  /** Network agreement: ask the designated primary to propose (no remote private keys). */
   private def bftAgree(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
     for
       ledgerAuth <- defaultAuthorities(home)
+      manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
       dir <- PeerRegistry.load(home)
-      reps = dir.replicas
-      _ <- Either.cond(reps.nonEmpty, (), "bft: no role=replica peers — add some or use `bft agree local`")
-      ids = reps.map(_.name)
-      primaryId <- BftFinality.designatedPrimary(ids, view = 0)
-      primary <- Keypair.loadOrCreate(home, primaryId.id)
-      urls = reps.map(p => p.name -> p.baseUrl).toMap
-      _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
-      cert <- BftFinality.agreeNetwork(primary, urls, view = 0, seq = 0, block)
-      auth <- ids.foldLeft[Either[String, Map[String, Vector[Byte]]]](Right(Map.empty)) { (acc, n) =>
-        acc.flatMap(m => Keypair.loadOrCreate(home, n).map(k => m + (n -> k.publicBytes)))
+      urls <- manifest.ids.foldLeft[Either[String, Map[String, String]]](Right(Map.empty)) { (acc, id) =>
+        acc.flatMap { m =>
+          dir.byName(id).map(_.baseUrl).toRight(s"bft: peer '$id' missing from peers.canon")
+            .map(url => m + (id -> url))
+        }
       }
-      setDig = BftFinality.replicaSetDigest(ids)
-      _ <- BftFinality.FinalityCertificate.verify(cert, auth, setDig)
+      _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
+      cert <- BftFinality.agreeNetworkRemote(urls, view = 0, seq = 0, block)
+      _ <- BftFinality.FinalityCertificate.verify(cert, manifest.authorities, manifest.replicaSetDigest)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
+
+  /** Create local keypairs for each name and write a certified replica-set.canon. */
+  private def bftReplicaSetInit(home: Path, names: List[String]): Either[String, String] =
+    for
+      kps <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
+        acc.flatMap(ks => Keypair.loadOrCreate(home, n).map(ks :+ _))
+      }
+      manifest <- ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
+      _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
+    yield s"replica-set ${manifest.digest.short} n=${manifest.n} ids=${manifest.ids.mkString(",")}"
 
   /** In-process lab agreement bound to a local sealed block (not network). */
   private def bftAgreeLocal(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =

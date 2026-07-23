@@ -44,7 +44,8 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 | --- | --- |
 | Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership |
 | Gossip daemon | Pull-based fork choice; no push epidemic or anti-entropy beyond want/have |
-| BFT finality | Static authenticated replica set (`f < n/3`); certifies replay-valid sealed PoA blocks — does not replace M36 round-robin sealing. Durable keys under `$CAIRN_HOME/replicas/`. |
+| BFT finality | Classic `n=3f+1` only; certifies replay-valid sealed PoA blocks. Authority is a `replica-set.canon` manifest of public keys — not unsigned peer gossip. Each process holds only its own private key; proposers use `POST /bft/propose`. Durable slot/view state in `bft-state.canon`. |
+| Domain governance | Owner + grantor seals resolved via `IdentityResolver` (ledger identities / bootstrap) — caller-supplied public keys are not accepted. |
 | Useful-work market | Still deferred; `RecordCertificate` remains the natural anchor |
 
 ## Operational layers
@@ -57,13 +58,14 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 ```bash
 ./bin/cairn serve 8743
-./bin/cairn serve replica r0 8743   # installs /bft/msg + /bft/certs
+./bin/cairn bft replica-set init r0 r1 r2 r3       # write replica-set.canon + local keys
+./bin/cairn serve replica r0 8743   # installs /bft/msg + /bft/propose + /bft/certs
 ./bin/cairn peer add alice http://127.0.0.1:8743
 ./bin/cairn peer add r1 http://127.0.0.1:8744 replica
 ./bin/cairn peer discover http://127.0.0.1:8743
 ./bin/cairn gossip once
 ./bin/cairn gossip run 5
-./bin/cairn bft agree <64-hex-block-digest>        # network (needs role=replica peers)
+./bin/cairn bft agree <64-hex-block-digest>        # asks primary /bft/propose (no remote sk)
 ./bin/cairn bft agree local <64-hex-block-digest>  # in-process lab
 ./bin/cairn smoke distribution                     # packaged two-node gossip + four-node BFT
 ./bin/cairn pull http://127.0.0.1:8743

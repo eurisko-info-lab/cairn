@@ -63,19 +63,38 @@ object Keypair:
           case _ => Left("keypair: bad key material")
       case other => Left(s"not a keypair: $other")
 
-  /** Load or create a durable keypair under `$root/replicas/<name>.canon`. */
-  def loadOrCreate(root: Path, name: String): Either[String, Keypair] =
-    val dir = root.resolve("replicas")
-    val path = dir.resolve(s"$name.canon")
-    if Files.exists(path) then
+  /** Load an existing durable keypair; never create. Used for self-only
+    * provisioning — remote replica public keys come from [[ReplicaSetManifest]].
+    */
+  def load(root: Path, name: String): Either[String, Keypair] =
+    val path = root.resolve("replicas").resolve(s"$name.canon")
+    if !Files.exists(path) then Left(s"missing replica keypair for '$name' at $path")
+    else
       Canon.decode(Files.readAllBytes(path)).flatMap(fromCanon).flatMap { kp =>
         if kp.name == name then Right(kp)
         else Left(s"keypair name mismatch: file has '${kp.name}', expected '$name'")
       }
-    else
+
+  /** Load or create a durable keypair under `$root/replicas/<name>.canon`.
+    * Prefer [[load]] for verifying remote identities; use this only for the
+    * local replica's own key.
+    */
+  def loadOrCreate(root: Path, name: String): Either[String, Keypair] =
+    load(root, name).orElse {
       try
+        val dir = root.resolve("replicas")
         Files.createDirectories(dir)
+        val path = dir.resolve(s"$name.canon")
         val kp = dev(name)
         Files.write(path, Canon.encode(canon(kp)))
         Right(kp)
       catch case e: Exception => Left(e.getMessage)
+    }
+
+  def save(root: Path, kp: Keypair): Either[String, Unit] =
+    try
+      val dir = root.resolve("replicas")
+      Files.createDirectories(dir)
+      Files.write(dir.resolve(s"${kp.name}.canon"), Canon.encode(canon(kp)))
+      Right(())
+    catch case e: Exception => Left(e.getMessage)

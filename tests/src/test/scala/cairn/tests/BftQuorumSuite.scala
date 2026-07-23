@@ -51,6 +51,17 @@ class BftQuorumSuite extends munit.FunSuite:
     assertEquals(quorumSize(7), 5)
     assertEquals(5 + 5 - 7, 3) // |Q1 ∩ Q2| ≥ f+1
 
+  test("validReplicaCount requires classic 3f+1 (rejects n=5)"):
+    assert(validReplicaCount(1))
+    assert(validReplicaCount(4))
+    assert(validReplicaCount(7))
+    assert(validReplicaCount(10))
+    assert(!validReplicaCount(5))
+    assert(!validReplicaCount(6))
+    assert(!validReplicaCount(8))
+    assert(!quorumsIntersect(5))
+    assert(!quorumsIntersect(8))
+
   test("equivocating primary: honestAgree holds (no split brain)"):
     val valueB = Value("other-digest".getBytes.toVector)
     val decisions = runEquivocation(

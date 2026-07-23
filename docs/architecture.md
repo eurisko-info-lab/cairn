@@ -244,11 +244,11 @@ LeanCore `#check` envelope.
   (`recoverPendingAccepts`); `reclaimOrphanBlobs` is the mark/sweep reclaim
   path for unreferenced accept blobs (`liveCasRoots`).
 - **Domain ancestry residuals** — transitive primary-cycle detection,
-  `DomainAgreement` / `plantGoverned` (owner, language digests, `replaces`,
-  fail-closed live load), and primary-owner `DomainAncestorDelegation` are in.
-  Peer-attested namespace registries, open BFT membership, and a useful-work
-  market remain open; automatic tying of agreements to PackLoader language
-  digests likewise.
+  `DomainAgreement` / `plantGoverned` (required owner seal via
+  `IdentityResolver`, language digests against an optional pack index,
+  `replaces`, fail-closed live load), and primary-owner
+  `DomainAncestorDelegation` are in. Peer-attested namespace registries,
+  open BFT membership, and a useful-work market remain open.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /

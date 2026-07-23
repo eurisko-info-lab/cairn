@@ -72,8 +72,6 @@ final class HttpNode(
               replica.receive(sm) match
                 case Left(e) => reply(ex, 400, e.getBytes)
                 case Right(out) =>
-                  // Reply before fan-out so nested POSTs cannot deadlock on this
-                  // request thread (even with a thread pool, keep the critical path short).
                   reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
                   peersRoot.foreach { root =>
                     PeerRegistry.load(root).foreach { dir =>
@@ -82,6 +80,30 @@ final class HttpNode(
                       }
                     }
                   }
+      )
+      s.createContext("/bft/propose", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(body) =>
+              try
+                val view = body.field("view").asInt.toInt
+                val seq = body.field("seq").asInt.toInt
+                Digest.parse(body.field("block").asStr).flatMap { block =>
+                  replica.propose(view, seq, block)
+                } match
+                  case Left(e) => reply(ex, 400, e.getBytes)
+                  case Right(out) =>
+                    reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                    peersRoot.foreach { root =>
+                      PeerRegistry.load(root).foreach { dir =>
+                        dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
+                          out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
+                        }
+                      }
+                    }
+              catch case e: CodecError => reply(ex, 400, e.getMessage.getBytes)
       )
       s.createContext("/bft/certs", ex =>
         reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
@@ -161,6 +183,11 @@ object HttpSync:
       }
       _ <- to.writeChain(remoteChain)
     yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
+
+object IdentityResolvers:
+  /** Resolve identities from a node's replayed ledger, falling back to bootstrap. */
+  def fromNode(node: Node, bootstrap: Map[String, Vector[Byte]]): Either[String, IdentityResolver] =
+    node.state(bootstrap).map(st => IdentityResolver.of(bootstrap, st))
 
 object Gossip:
   final case class Reorg(node: String, fromHead: Option[Digest], toHead: Digest, forkPoint: Int)

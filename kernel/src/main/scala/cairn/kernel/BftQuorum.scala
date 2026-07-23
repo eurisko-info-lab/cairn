@@ -36,6 +36,13 @@ object BftQuorum:
   def quorumSize(n: Int): Int =
     2 * maxFaults(n) + 1
 
+  /** Classic PBFT sizes only: `n = 3f+1` (covers n=1 with f=0, and 4,7,10,…).
+    * Arbitrary `n ≥ 4` is **not** safe with `q = 2f+1` — e.g. n=5,f=1,q=3
+    * allows two quorums to intersect in a single (possibly Byzantine) replica.
+    */
+  def validReplicaCount(n: Int): Boolean =
+    n >= 1 && n == 3 * maxFaults(n) + 1
+
   /** One replica's local logs for a single (view, seq) slot. */
   final case class Slot(
       prePrepare: Option[Msg.PrePrepare] = None,
@@ -104,7 +111,8 @@ object BftQuorum:
       maxRounds: Int = 8
   ): Either[String, Map[ReplicaId, Option[Decision]]] =
     val n = replicaIds.length
-    if !replicaIds.contains(primary) then Left("primary not in replica set")
+    if !validReplicaCount(n) then Left(s"bft: n=$n is not a valid 3f+1 size")
+    else if !replicaIds.contains(primary) then Left("primary not in replica set")
     else if faultyIds.size > maxFaults(n) then
       Left(s"faulty set size ${faultyIds.size} exceeds f=${maxFaults(n)} for n=$n")
     else
@@ -136,14 +144,16 @@ object BftQuorum:
     }.toSet
     honest.size <= 1
 
-  /** Quorum intersection: any two quorums of size `2f+1` in `n=3f+1` share a
-    * replica (classic PBFT lemma). Research/sim documentation aid.
+  /** Quorum intersection: any two quorums of size `2f+1` share **more than f**
+    * replicas when `n = 3f+1` (so at least one is honest). Research/sim aid.
     */
   def quorumsIntersect(n: Int): Boolean =
-    val f = maxFaults(n)
-    val q = quorumSize(n)
-    // |Q1 ∩ Q2| >= q + q - n = (2f+1)*2 - (3f+1) = f+1 >= 1 when f >= 0, n>=1
-    q + q - n >= 1 && n >= 3 * f + 1
+    if !validReplicaCount(n) then false
+    else
+      val f = maxFaults(n)
+      val q = quorumSize(n)
+      // |Q1 ∩ Q2| ≥ 2q − n = f+1 > f
+      q + q - n >= f + 1
 
   /** Equivocating primary: two PrePrepares for the same (view,seq) with
     * different values. Honest replicas lock the first; conflicting second is

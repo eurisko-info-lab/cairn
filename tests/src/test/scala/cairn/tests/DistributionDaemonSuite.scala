@@ -195,3 +195,63 @@ class DistributionDaemonSuite extends munit.FunSuite:
       assert(cert.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(4))
       assertEquals(BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig), Right(()))
     finally https.foreach(_.stop())
+
+  test("multi-home provisioning: distinct keys + replica-set.canon + remote propose"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val ids = List("r0", "r1", "r2", "r3")
+    // Provision each replica's private key only under its own home.
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-mp-$id")).toMap
+    val kps = ids.map { id =>
+      Keypair.loadOrCreate(homes(id), id).fold(e => fail(e), identity)
+    }
+    val manifest = ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
+      .fold(e => fail(e), identity)
+    // Every home gets the same certified public-key set (no remote private keys).
+    ids.foreach { id =>
+      BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(id)), manifest)
+        .fold(e => fail(e), identity)
+      // Ensure Keypair.load for a foreign name fails on this home
+      val foreign = ids.find(_ != id).get
+      assert(Keypair.load(homes(id), foreign).isLeft, s"$id should not hold $foreign's key")
+    }
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    try
+      val ports = ids.map { id =>
+        val home = homes(id)
+        val kp = Keypair.load(home, id).fold(e => fail(e), identity)
+        val bft = BftReplica(
+          kp, manifest.authorities, manifest.ids,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(home.resolve("bft-certs.canon")),
+          stateStore = Some(home.resolve("bft-state.canon")))
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(home), bft = Some(bft))
+        https += http
+        id -> http.start()
+      }.toMap
+      ids.foreach { id =>
+        ids.foreach { peer =>
+          PeerRegistry.add(
+            homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
+            PeerRegistry.Role.Replica,
+            publicKey = Some(manifest.authorities(peer))).fold(e => fail(e), identity)
+        }
+      }
+      val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
+      // Initiator has no primary private key — uses /bft/propose
+      val cert = BftFinality.agreeNetworkRemote(urls, 0, 0, block, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      assertEquals(cert.blockDigest, block)
+      assertEquals(
+        BftFinality.FinalityCertificate.verify(cert, manifest.authorities, manifest.replicaSetDigest),
+        Right(()))
+      // State files persisted
+      assert(java.nio.file.Files.exists(homes("r0").resolve("bft-state.canon")))
+    finally https.foreach(_.stop())
