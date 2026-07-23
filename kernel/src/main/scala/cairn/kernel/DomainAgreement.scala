@@ -8,6 +8,9 @@ package cairn.kernel
   * which language digests the child/ancestors claim, and whether an ancestry
   * change is an allowed amendment of a prior agreement.
   *
+  * Under a primary ancestor, planting also requires a separate
+  * [[DomainAncestorDelegation]] certificate sealed by the primary's owner.
+  *
   * Stored as a [[ArtifactKind.Certificate]] body tagged `domain-agreement`.
   */
 final case class DomainAgreement(
@@ -23,7 +26,13 @@ final case class DomainAgreement(
     dependencyEvidence: Canon,
     /** Prior agreement digest when amending ancestry; absent for first plant. */
     replaces: Option[Digest] = None,
+    /** Digest of a [[DomainAncestorDelegation]] when hanging under a primary. */
+    ancestorDelegation: Option[Digest] = None,
 ):
+  /** Agreement body without the delegation pointer — what a grantor seals against. */
+  def claimCanon: Canon = copy(ancestorDelegation = None).canon
+  def claimDigest: Digest = Digest.of(claimCanon)
+
   def canon: Canon = Canon.cmap(
     "child" -> Canon.CStr(child),
     "primaryAncestor" -> primaryAncestor.fold(Canon.CTag("none", Canon.CStr("")))(n =>
@@ -37,6 +46,8 @@ final case class DomainAgreement(
     }),
     "dependencyEvidence" -> dependencyEvidence,
     "replaces" -> replaces.fold(Canon.CTag("none", Canon.CStr("")))(d =>
+      Canon.CTag("some", Canon.CStr(d.hex))),
+    "ancestorDelegation" -> ancestorDelegation.fold(Canon.CTag("none", Canon.CStr("")))(d =>
       Canon.CTag("some", Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.Certificate, Canon.CTag("domain-agreement", canon))
   def digest: Digest = artifact.digest
@@ -66,7 +77,8 @@ object DomainAgreement:
         childLanguage = m.get("childLanguage").flatMap(dig),
         ancestorLanguages = langs,
         dependencyEvidence = m.getOrElse("dependencyEvidence", Canon.CInt(0)),
-        replaces = m.get("replaces").flatMap(dig)))
+        replaces = m.get("replaces").flatMap(dig),
+        ancestorDelegation = m.get("ancestorDelegation").flatMap(dig)))
     catch
       case e: CodecError => Left(e.getMessage)
       case e: IllegalArgumentException => Left(e.getMessage)
@@ -85,6 +97,10 @@ object DomainAgreement:
       Left(s"domain-agreement: primary must not also appear in references")
     else if a.references.length != a.references.distinct.length then
       Left("domain-agreement: duplicate references")
+    else if a.primaryAncestor.isEmpty && a.ancestorDelegation.isDefined then
+      Left("domain-agreement: trunk plant must not cite ancestorDelegation")
+    else if a.primaryAncestor.isDefined && a.ancestorDelegation.isEmpty then
+      Left("domain-agreement: plant under primary requires ancestorDelegation")
     else
       val draft = BranchManifest(
         a.child, None, Nil,
@@ -135,8 +151,8 @@ object DomainAgreement:
               s"(got ${proposed.replaces.map(_.short).getOrElse("none")})")
         else Right(())
 
-  /** Authenticate that `signer` is the declared owner (name match + optional
-    * seal over the agreement canon). Call before [[Branches.plantGoverned]].
+  /** Authenticate that `signer` is the declared owner (name match + seal over
+    * the full agreement canon including any delegation pointer).
     */
   def authenticateOwner(
       agreement: DomainAgreement,
@@ -149,4 +165,76 @@ object DomainAgreement:
       Left(s"domain-agreement: signer '$signerName' is not owner '${agreement.owner}'")
     else if !verify(signerPublic, Canon.encode(agreement.canon), seal) then
       Left(s"domain-agreement: bad owner seal from '${agreement.owner}'")
+    else Right(())
+
+/** Consent from a primary domain's owner that a named child may hang under it.
+  *
+  * Separate from [[DomainAgreement]]: the child's owner claims the plant; the
+  * ancestor's owner seals this grant. Stored as Certificate tagged
+  * `domain-ancestor-delegation`. Soft references do not require delegation.
+  */
+final case class DomainAncestorDelegation(
+    ancestor: String,
+    child: String,
+    grantor: String,
+    grantee: String,
+    /** Digest of the child's agreement [[DomainAgreement.claimCanon]]. */
+    claimDigest: Digest,
+):
+  def canon: Canon = Canon.cmap(
+    "ancestor" -> Canon.CStr(ancestor),
+    "child" -> Canon.CStr(child),
+    "grantor" -> Canon.CStr(grantor),
+    "grantee" -> Canon.CStr(grantee),
+    "claimDigest" -> Canon.CStr(claimDigest.hex))
+  def artifact: Artifact =
+    Artifact(ArtifactKind.Certificate, Canon.CTag("domain-ancestor-delegation", canon))
+  def digest: Digest = artifact.digest
+
+object DomainAncestorDelegation:
+  def fromCanon(c: Canon): Either[String, DomainAncestorDelegation] =
+    import Canon.*
+    try
+      val body = c match
+        case CTag("domain-ancestor-delegation", inner) => inner
+        case other                                     => other
+      Right(DomainAncestorDelegation(
+        ancestor = body.field("ancestor").asStr,
+        child = body.field("child").asStr,
+        grantor = body.field("grantor").asStr,
+        grantee = body.field("grantee").asStr,
+        claimDigest = Digest(body.field("claimDigest").asStr)))
+    catch
+      case e: CodecError => Left(e.getMessage)
+      case e: IllegalArgumentException => Left(e.getMessage)
+
+  def authenticateGrantor(
+      del: DomainAncestorDelegation,
+      signerName: String,
+      signerPublic: Vector[Byte],
+      seal: Vector[Byte],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, Unit] =
+    if signerName != del.grantor then
+      Left(s"domain-delegation: signer '$signerName' is not grantor '${del.grantor}'")
+    else if !verify(signerPublic, Canon.encode(del.canon), seal) then
+      Left(s"domain-delegation: bad grantor seal from '${del.grantor}'")
+    else Right(())
+
+  /** Structural match against a proposed child agreement + primary owner. */
+  def matches(
+      del: DomainAncestorDelegation,
+      agreement: DomainAgreement,
+      primaryOwner: String,
+  ): Either[String, Unit] =
+    if !agreement.primaryAncestor.contains(del.ancestor) then
+      Left(s"domain-delegation: ancestor '${del.ancestor}' != primary ${agreement.primaryAncestor}")
+    else if del.child != agreement.child then
+      Left(s"domain-delegation: child '${del.child}' != '${agreement.child}'")
+    else if del.grantee != agreement.owner then
+      Left(s"domain-delegation: grantee '${del.grantee}' != owner '${agreement.owner}'")
+    else if del.grantor != primaryOwner then
+      Left(s"domain-delegation: grantor '${del.grantor}' != primary owner '$primaryOwner'")
+    else if del.claimDigest != agreement.claimDigest then
+      Left(s"domain-delegation: claimDigest ${del.claimDigest.short} != ${agreement.claimDigest.short}")
     else Right(())

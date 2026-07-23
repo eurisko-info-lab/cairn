@@ -37,8 +37,12 @@ change-digest edges for merge/LCA — not domain names.
 **Namespace governance** uses `DomainAgreement` (certificate body tagged
 `domain-agreement`): owner subject, child/ancestor language digests, dependency
 evidence, and an ancestry-change policy (`replaces` must cite the live agreement
-digest; owner and child name are sticky). `Branches.plantGoverned` stores the
-agreement on the manifest (`domainAgreement` digest). Ungoverned local
+digest; owner and child name are sticky). Plants under a primary also require a
+separate `DomainAncestorDelegation` certificate (tagged
+`domain-ancestor-delegation`) sealed by the **primary's owner**, cited from
+`ancestorDelegation` and verified with `grantorSeal` in `plantGoverned`. Soft
+`references` stay structural (no per-ref delegation). The primary must itself be
+governed before children can `plantGoverned` under it. Ungoverned local
 `forkFrom` remains available for bootstrap.
 
 ## Invariants

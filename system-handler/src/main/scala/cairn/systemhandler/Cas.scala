@@ -698,6 +698,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * cannot be loaded/decoded, planting is rejected (never silently treated
     * as first plant).
     *
+    * Under a primary ancestor the primary must itself be governed, and
+    * `agreement.ancestorDelegation` must cite a loadable
+    * [[DomainAncestorDelegation]] sealed by the primary owner (`grantorSeal`).
+    *
     * When `ownerSeal` is provided, the seal must authenticate `agreement.owner`
     * over [[DomainAgreement.canon]] via `verify`.
     */
@@ -705,6 +709,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       agreement: DomainAgreement,
       module: Option[Module] = None,
       ownerSeal: Option[(String, Vector[Byte], Vector[Byte])] = None,
+      grantorSeal: Option[(String, Vector[Byte], Vector[Byte])] = None,
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean =
         (_, _, _) => false,
   ): Either[String, BranchManifest] =
@@ -730,26 +735,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         case Some((name, pk, seal)) =>
           DomainAgreement.authenticateOwner(agreement, name, pk, seal, verify)
       _ <- DomainAgreement.wellFormed(agreement, known, primaryOf(known))
-      // Ancestor delegation: primary (if any) must exist; soft refs likewise
-      // already checked by DomainBranch.wellFormed. Require that a primary
-      // with its own live agreement is loadable (fail closed on corruption).
-      _ <- agreement.primaryAncestor match
-        case None => Right(())
-        case Some(p) if !known.contains(p) =>
-          Left(s"domain-agreement: unknown primary ancestor '$p'")
-        case Some(p) =>
-          load(p).domainAgreement match
-            case None => Right(())
-            case Some(d) =>
-              getByDigest(d) match
-                case Left(e) =>
-                  Left(s"domain-agreement: primary '$p' agreement ${d.short} unloadable: $e")
-                case Right(art) =>
-                  DomainAgreement.fromCanon(art.body).left.map(e =>
-                    s"domain-agreement: primary '$p' agreement decode: $e").map(_ => ())
+      _ <- verifyAncestorDelegation(agreement, known, grantorSeal, verify)
       _ <- DomainAgreement.allowsTransition(agreement, live)
       art = agreement.artifact
       _ = putArt(art)
+      // Keep the delegation cert in the child's certificate list when present.
+      certDigests =
+        art.digest :: agreement.ancestorDelegation.toList
       base <-
         if known.contains(agreement.child) then
           val cur = load(agreement.child)
@@ -757,7 +749,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             primaryAncestor = agreement.primaryAncestor,
             references = agreement.references,
             domainAgreement = Some(art.digest),
-            certificates = (cur.certificates :+ art.digest).distinct)
+            certificates = (cur.certificates ++ certDigests).distinct)
           DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => storeManifest(next))
         else
           forkFrom(
@@ -767,13 +759,54 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             agreement.references).map { planted =>
             storeManifest(planted.copy(
               domainAgreement = Some(art.digest),
-              certificates = (planted.certificates :+ art.digest).distinct))
+              certificates = (planted.certificates ++ certDigests).distinct))
           }
     yield module match
       case None    => base
       case Some(m) =>
         // importModule → advance preserves domainAgreement
         importModule(agreement.child, m)
+
+  /** Primary consent: governed primary + sealed DomainAncestorDelegation. */
+  private def verifyAncestorDelegation(
+      agreement: DomainAgreement,
+      known: Set[String],
+      grantorSeal: Option[(String, Vector[Byte], Vector[Byte])],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, Unit] =
+    agreement.primaryAncestor match
+      case None =>
+        if grantorSeal.isDefined then
+          Left("domain-agreement: trunk plant must not supply grantorSeal")
+        else Right(())
+      case Some(p) if !known.contains(p) =>
+        Left(s"domain-agreement: unknown primary ancestor '$p'")
+      case Some(p) =>
+        for
+          delDig <- agreement.ancestorDelegation.toRight(
+            "domain-agreement: plant under primary requires ancestorDelegation")
+          primaryAg <- load(p).domainAgreement match
+            case None =>
+              Left(
+                s"domain-agreement: primary '$p' must be governed before children " +
+                  "can plantGoverned under it")
+            case Some(d) =>
+              getByDigest(d) match
+                case Left(e) =>
+                  Left(s"domain-agreement: primary '$p' agreement ${d.short} unloadable: $e")
+                case Right(art) =>
+                  DomainAgreement.fromCanon(art.body).left.map(e =>
+                    s"domain-agreement: primary '$p' agreement decode: $e")
+          delArt <- getByDigest(delDig).left.map(e =>
+            s"domain-delegation: cannot load ${delDig.short}: $e")
+          del <- DomainAncestorDelegation.fromCanon(delArt.body).left.map(e =>
+            s"domain-delegation: cannot decode ${delDig.short}: $e")
+          _ <- DomainAncestorDelegation.matches(del, agreement, primaryAg.owner)
+          seal <- grantorSeal.toRight(
+            "domain-agreement: plant under primary requires grantorSeal")
+          (gName, gPk, gSeal) = seal
+          _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSeal, verify)
+        yield ()
 
   def forkFrom(
       child: String,

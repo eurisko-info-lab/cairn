@@ -718,6 +718,8 @@ object Cli:
         Digest.parse(hex).flatMap { d =>
           bftAgreeLocal(home, d, ledgerCtx)
         }
+      case List("smoke", "distribution") =>
+        smokeDistribution(ledgerCtx)
       case porcelainCmd :: rest
           if Set("chain", "auth", "branch", "domain", "compose", "catalog",
             "workflow", "recover", "replay", "tx", "light", "porcelain").contains(porcelainCmd) =>
@@ -725,7 +727,7 @@ object Cli:
       case _ =>
         Left(
           "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|" +
-            "serve|pull|fetch-hash|peer|gossip|bft|" +
+            "serve|pull|fetch-hash|peer|gossip|bft|smoke|" +
             "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
             "repl|lsp|ui] <arg>")
 
@@ -840,4 +842,89 @@ object Cli:
         auth)
       s"gossip once: pulled=${report.pulled.mkString(",")}" +
         s" reorgs=${report.reorgs.size} errors=${report.errors.size}"
+    }
+
+  /** Packaged-executable smoke: two-node HTTP gossip + four-node BFT certificate. */
+  private def smokeDistribution(ledgerCtx: EffectContext): Either[String, String] =
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    // --- two-node gossip ---
+    val aRoot = java.nio.file.Files.createTempDirectory("cairn-smoke-a")
+    val bRoot = java.nio.file.Files.createTempDirectory("cairn-smoke-b")
+    val peersRoot = java.nio.file.Files.createTempDirectory("cairn-smoke-p")
+    val a = Node(aRoot, ledgerCtx)
+    val b = Node(bRoot, ledgerCtx)
+    a.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes)))) match
+      case Left(e) => Left(e)
+      case Right(_) =>
+        val httpA = HttpNode(a, ledgerAuth, peersRoot = Some(peersRoot))
+        val portA = httpA.start()
+        try
+          PeerRegistry.add(peersRoot, "a", s"http://127.0.0.1:$portA") match
+            case Left(e) => Left(e)
+            case Right(_) =>
+              val report = HttpGossip.round("b", b,
+                PeerRegistry.load(peersRoot).fold(_ => Nil, _.gossipPeers), ledgerAuth)
+              if report.errors.nonEmpty then Left(s"gossip errors: ${report.errors}")
+              else if b.chainDigests != a.chainDigests then
+                Left(s"gossip diverge: a=${a.chainDigests} b=${b.chainDigests}")
+              else
+                // --- four-node BFT ---
+                smokeBft(ledgerCtx, auth, ledgerAuth).map { certShort =>
+                  s"smoke distribution ok: gossip-pulled=a bft-cert=$certShort"
+                }
+        finally httpA.stop()
+
+  private def smokeBft(
+      ledgerCtx: EffectContext,
+      auth: Keypair,
+      ledgerAuth: Map[String, Vector[Byte]],
+  ): Either[String, String] =
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
+    val ids = replicas.map(_.name)
+    val setDig = BftFinality.replicaSetDigest(ids)
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
+    val seeded: Either[String, Map[String, Node]] =
+      ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
+        acc.flatMap { m =>
+          val n = Node(homes(id).resolve("node"), ledgerCtx)
+          n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+            .map(_ => m + (id -> n))
+        }
+      }
+    seeded.flatMap { nodes =>
+      val block = nodes("r0").chainDigests.head
+      val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+      try
+        val portsE = ids.foldLeft[Either[String, Map[String, Int]]](Right(Map.empty)) { (acc, id) =>
+          acc.map { ports =>
+            val peersRoot = homes(id)
+            val bft = BftReplica(
+              replicas.find(_.name == id).get, bftAuth, ids,
+              node = Some(nodes(id)), ledgerAuth = ledgerAuth)
+            val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+            https += http
+            ports + (id -> http.start())
+          }
+        }
+        for
+          ports <- portsE
+          _ <- ids.foldLeft[Either[String, Unit]](Right(())) { (acc, id) =>
+            acc.flatMap { _ =>
+              ids.foldLeft[Either[String, Unit]](Right(())) { (acc2, peer) =>
+                acc2.flatMap(_ =>
+                  PeerRegistry.add(
+                    homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
+                    PeerRegistry.Role.Replica, publicKey = Some(bftAuth(peer))).map(_ => ()))
+              }
+            }
+          }
+          primaryId <- BftFinality.designatedPrimary(ids, 0)
+          primary = replicas.find(_.name == primaryId.id).get
+          urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
+          cert <- BftFinality.agreeNetwork(primary, urls, 0, 0, block, polls = 64, pollSleepMs = 20)
+          _ <- BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig)
+        yield cert.digest.short
+      finally https.foreach(_.stop())
     }

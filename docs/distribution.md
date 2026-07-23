@@ -65,5 +65,6 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 ./bin/cairn gossip run 5
 ./bin/cairn bft agree <64-hex-block-digest>        # network (needs role=replica peers)
 ./bin/cairn bft agree local <64-hex-block-digest>  # in-process lab
+./bin/cairn smoke distribution                     # packaged two-node gossip + four-node BFT
 ./bin/cairn pull http://127.0.0.1:8743
 ```

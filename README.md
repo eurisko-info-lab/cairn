@@ -75,6 +75,7 @@ sbt examples/assembly && ./bin/cairn home                         # fat jar + wr
 ./bin/cairn bft agree <block-digest-hex>                          # network finality (replica peers)
 ./bin/cairn bft agree local <block-digest-hex>                    # in-process sealed-block lab
 ./bin/cairn serve replica <name> [port]                           # HTTP node with /bft/msg
+./bin/cairn smoke distribution                                    # two-node gossip + four-node BFT via fat jar
 sbt "examples/runMain cairn.examples.Main ui"                     # Web explorer → http://127.0.0.1:8765
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
 sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest

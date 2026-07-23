@@ -2,7 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{MemCas, DiskCas, Branches, CasEffects, EffectContext}
+import cairn.systemhandler.{MemCas, DiskCas, Branches, CasEffects, EffectContext, Ed25519, Keypair}
 import cairn.core.TreeEngine
 import cairn.examples.stlc.Stlc
 
@@ -174,6 +174,23 @@ class DeltaSuite extends munit.FunSuite:
 class BranchSuite extends munit.FunSuite:
   private val casCtx = EffectContext.forBranches()
 
+  /** Put a primary-owner delegation for `claim` and return the agreement with pointer + seal triple. */
+  private def mintDelegation(
+      cas: DiskCas,
+      claim: DomainAgreement,
+      grantor: Keypair,
+  ): (DomainAgreement, (String, Vector[Byte], Vector[Byte])) =
+    val del = DomainAncestorDelegation(
+      ancestor = claim.primaryAncestor.get,
+      child = claim.child,
+      grantor = grantor.name,
+      grantee = claim.owner,
+      claimDigest = claim.claimDigest)
+    CasEffects.put(cas, del.artifact, casCtx).fold(e => fail(e.toString), identity)
+    val seal = Ed25519.sign(grantor.privateKey, Canon.encode(del.canon))
+    (claim.copy(ancestorDelegation = Some(del.digest)),
+      (grantor.name, grantor.publicBytes, seal))
+
   test("branch manifests: append-only history surviving restart (S18)"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-branches")
     val cas = DiskCas(dir)
@@ -238,68 +255,158 @@ class BranchSuite extends munit.FunSuite:
     val dir = java.nio.file.Files.createTempDirectory("cairn-domain-agree")
     val cas = DiskCas(dir)
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
-    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    val lawOwner = Keypair.dev("law-owner")
+    val alice = Keypair.dev("alice")
+    // Primary must be governed before children can plant under it.
+    val lawAg = DomainAgreement(
+      child = "LAW",
+      primaryAncestor = None,
+      references = Nil,
+      owner = lawOwner.name,
+      childLanguage = Some(Digest.of(Canon.CStr("law-lang"))),
+      ancestorLanguages = Nil,
+      dependencyEvidence = Canon.cstrs(List("root")),
+      replaces = None)
+    branches.plantGoverned(lawAg).fold(e => fail(e), identity)
     val lawLang = Digest.of(Canon.CStr("law-lang"))
     val sdsLang = Digest.of(Canon.CStr("sds-lang"))
-    val a0 = DomainAgreement(
+    val claim0 = DomainAgreement(
       child = "SDS",
       primaryAncestor = Some("LAW"),
       references = Nil,
-      owner = "alice",
+      owner = alice.name,
       childLanguage = Some(sdsLang),
       ancestorLanguages = List("LAW" -> lawLang),
       dependencyEvidence = Canon.cstrs(List("cert")),
       replaces = None)
-    val planted = branches.plantGoverned(a0).fold(e => fail(e), identity)
+    val (a0, gSeal0) = mintDelegation(cas, claim0, lawOwner)
+    val planted = branches.plantGoverned(
+      a0, grantorSeal = Some(gSeal0), verify = Ed25519.verify).fold(e => fail(e), identity)
     assertEquals(planted.primaryAncestor, Some("LAW"))
     assert(planted.domainAgreement.contains(a0.digest), planted.domainAgreement)
+    assert(planted.certificates.contains(a0.ancestorDelegation.get))
+    // missing delegation rejected
+    assert(branches.plantGoverned(claim0).isLeft)
     // amendment without replaces is rejected once live agreement exists
-    branches.forkFrom("CHEMISTRY", primary = None).fold(e => fail(e), identity)
+    val chemAg = DomainAgreement(
+      child = "CHEMISTRY",
+      primaryAncestor = None,
+      references = Nil,
+      owner = lawOwner.name,
+      childLanguage = Some(Digest.of(Canon.CStr("chem-lang"))),
+      ancestorLanguages = Nil,
+      dependencyEvidence = Canon.cstrs(List("root")),
+      replaces = None)
+    branches.plantGoverned(chemAg).fold(e => fail(e), identity)
     val chemLang = Digest.of(Canon.CStr("chem-lang"))
-    val noReplace = a0.copy(
+    val noReplace = claim0.copy(
       references = List("CHEMISTRY"),
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
       replaces = None)
     assert(branches.plantGoverned(noReplace).isLeft)
-    // proper amendment: cite prior digest, add CHEMISTRY ref
-    val a1 = noReplace.copy(replaces = Some(a0.digest))
-    val amended = branches.plantGoverned(a1).fold(e => fail(e), identity)
+    // proper amendment: cite prior digest, add CHEMISTRY ref + fresh delegation
+    val claim1 = noReplace.copy(replaces = Some(a0.digest))
+    val (a1, gSeal1) = mintDelegation(cas, claim1, lawOwner)
+    val amended = branches.plantGoverned(
+      a1, grantorSeal = Some(gSeal1), verify = Ed25519.verify).fold(e => fail(e), identity)
     assertEquals(amended.references, List("CHEMISTRY"))
     assertEquals(amended.domainAgreement, Some(a1.digest))
     // owner reassignment rejected
-    assert(branches.plantGoverned(a1.copy(owner = "mallory", replaces = Some(a1.digest))).isLeft)
+    val badOwner = a1.copy(owner = "mallory", replaces = Some(a1.digest))
+    assert(branches.plantGoverned(badOwner, grantorSeal = Some(gSeal1), verify = Ed25519.verify).isLeft)
 
   test("DomainAgreement plantGoverned fails closed when live agreement is unloadable"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-domain-failclosed")
     val cas = DiskCas(dir)
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
-    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    val lawOwner = Keypair.dev("law-owner")
+    val alice = Keypair.dev("alice")
+    val lawAg = DomainAgreement(
+      child = "LAW",
+      primaryAncestor = None,
+      references = Nil,
+      owner = lawOwner.name,
+      childLanguage = Some(Digest.of(Canon.CStr("law-lang"))),
+      ancestorLanguages = Nil,
+      dependencyEvidence = Canon.cstrs(List("root")),
+      replaces = None)
+    branches.plantGoverned(lawAg).fold(e => fail(e), identity)
     val lawLang = Digest.of(Canon.CStr("law-lang"))
     val sdsLang = Digest.of(Canon.CStr("sds-lang"))
-    val a0 = DomainAgreement(
+    val claim0 = DomainAgreement(
       child = "SDS",
       primaryAncestor = Some("LAW"),
       references = Nil,
-      owner = "alice",
+      owner = alice.name,
       childLanguage = Some(sdsLang),
       ancestorLanguages = List("LAW" -> lawLang),
       dependencyEvidence = Canon.cstrs(List("cert")),
       replaces = None)
-    branches.plantGoverned(a0).fold(e => fail(e), identity)
+    val (a0, gSeal0) = mintDelegation(cas, claim0, lawOwner)
+    branches.plantGoverned(a0, grantorSeal = Some(gSeal0), verify = Ed25519.verify)
+      .fold(e => fail(e), identity)
     // Delete the live agreement blob from CAS while leaving the manifest pointer.
     val agr = a0.digest
     val obj = dir.resolve("objects").resolve(agr.hex.take(2)).resolve(agr.hex.drop(2))
     assert(java.nio.file.Files.exists(obj), s"expected CAS object at $obj")
     java.nio.file.Files.delete(obj)
-    branches.forkFrom("CHEMISTRY", primary = None).fold(e => fail(e), identity)
+    val chemAg = DomainAgreement(
+      child = "CHEMISTRY",
+      primaryAncestor = None,
+      references = Nil,
+      owner = lawOwner.name,
+      childLanguage = Some(Digest.of(Canon.CStr("chem-lang"))),
+      ancestorLanguages = Nil,
+      dependencyEvidence = Canon.cstrs(List("root")),
+      replaces = None)
+    branches.plantGoverned(chemAg).fold(e => fail(e), identity)
     val chemLang = Digest.of(Canon.CStr("chem-lang"))
-    val a1 = a0.copy(
+    val claim1 = claim0.copy(
       references = List("CHEMISTRY"),
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
       replaces = Some(a0.digest))
-    val err = branches.plantGoverned(a1)
+    val (a1, gSeal1) = mintDelegation(cas, claim1, lawOwner)
+    val err = branches.plantGoverned(a1, grantorSeal = Some(gSeal1), verify = Ed25519.verify)
     assert(err.isLeft, err.toString)
     assert(err.swap.toOption.exists(_.contains("cannot load live")), err.toString)
+
+  test("DomainAgreement rejects plant under ungoverned primary and bad delegation seals"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-domain-deleg")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    val lawOwner = Keypair.dev("law-owner")
+    val alice = Keypair.dev("alice")
+    val claim = DomainAgreement(
+      child = "SDS",
+      primaryAncestor = Some("LAW"),
+      references = Nil,
+      owner = alice.name,
+      childLanguage = Some(Digest.of(Canon.CStr("sds-lang"))),
+      ancestorLanguages = List("LAW" -> Digest.of(Canon.CStr("law-lang"))),
+      dependencyEvidence = Canon.cstrs(List("cert")))
+    // Primary exists via forkFrom but is not governed → reject
+    val (a, seal) = mintDelegation(cas, claim, lawOwner)
+    assert(branches.plantGoverned(a, grantorSeal = Some(seal), verify = Ed25519.verify).isLeft)
+    // Govern LAW, then reject wrong grantor seal
+    val lawAg = DomainAgreement(
+      child = "LAW",
+      primaryAncestor = None,
+      references = Nil,
+      owner = lawOwner.name,
+      childLanguage = Some(Digest.of(Canon.CStr("law-lang"))),
+      ancestorLanguages = Nil,
+      dependencyEvidence = Canon.cstrs(List("root")))
+    branches.plantGoverned(lawAg).fold(e => fail(e), identity)
+    val mallory = Keypair.dev("mallory")
+    val badSeal = (
+      lawOwner.name,
+      lawOwner.publicBytes,
+      Ed25519.sign(mallory.privateKey, Canon.encode(
+        DomainAncestorDelegation("LAW", "SDS", lawOwner.name, alice.name, claim.claimDigest).canon)))
+    assert(branches.plantGoverned(a, grantorSeal = Some(badSeal), verify = Ed25519.verify).isLeft)
+    // Good seal succeeds
+    assert(branches.plantGoverned(a, grantorSeal = Some(seal), verify = Ed25519.verify).isRight)
 
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")
