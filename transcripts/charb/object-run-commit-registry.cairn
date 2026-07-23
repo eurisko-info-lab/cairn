@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `object-run-commit-registry-workflow.yaml`
 -- Source-file: object-run-commit-registry-workflow.yaml
 -- Description: Object/run/commit registry listing, inspection, and status summary
--- Deferred: needs new plumbing or stays §8 out of scope.
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript object-run-commit-registry {
-  deferred "Charb/Marble CLI: Object/run/commit registry listing, inspection, and status summary — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
+  porcelain object-run-commit-registry ;
 }

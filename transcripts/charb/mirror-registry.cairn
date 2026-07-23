@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `mirror-registry-workflow.yaml`
 -- Source-file: mirror-registry-workflow.yaml
 -- Description: Mirror policy check registry listing, inspection, and status summary
--- Deferred: needs new plumbing or stays §8 out of scope.
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript mirror-registry {
-  deferred "Charb/Marble CLI: Mirror policy check registry listing, inspection, and status summary — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
+  porcelain mirror-registry ;
 }

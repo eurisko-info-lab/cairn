@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `federation-registry-workflow.yaml`
 -- Source-file: federation-registry-workflow.yaml
 -- Description: Federation trust registry listing, inspection, and status summary
--- Deferred: needs new plumbing or stays §8 out of scope.
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript federation-registry {
-  deferred "Charb/Marble CLI: Federation trust registry listing, inspection, and status summary — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
+  porcelain federation-registry ;
 }

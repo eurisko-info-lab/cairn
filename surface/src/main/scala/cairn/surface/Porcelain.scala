@@ -41,6 +41,11 @@ object Porcelain:
     "strict-governance-publish-integration", "governance-real-features",
     "tx-state-phase2",
     "incentive-positive",
+    "chain-quarantine",
+    "federation-registry",
+    "governance-supplychain",
+    "mirror-registry",
+    "object-run-commit-registry",
   )
 
   def env(

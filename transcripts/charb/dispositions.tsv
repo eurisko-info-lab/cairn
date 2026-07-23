@@ -12,7 +12,7 @@ cert-payload	runnable
 chain-divergence	runnable	
 chain-json-export	porcelain	
 chain-maintenance	runnable	
-chain-quarantine	deferred	
+chain-quarantine	porcelain	
 chain-recovery	runnable	
 chain-recovery-negative	porcelain	
 chain-repair	porcelain	
@@ -36,10 +36,10 @@ e2e-path	runnable
 e2e-registry	runnable	
 enhanced-chain-status	runnable	
 event-filtering	runnable	
-federation-registry	deferred	
+federation-registry	porcelain	
 governance-kernel-introspection	porcelain	
 governance-real-features	porcelain	
-governance-supplychain	deferred	
+governance-supplychain	porcelain	
 hardening-phase5	runnable	
 hash-artifacts	runnable	
 hash-status	runnable	
@@ -57,10 +57,10 @@ language-registry	runnable
 malformed-generated-commands	runnable	
 malformed-namespace-commands	runnable	
 manifest-registry	runnable	
-mirror-registry	deferred	
+mirror-registry	porcelain	
 multi-language-matrix	runnable	
 network-mempool-phase3	deferred	
-object-run-commit-registry	deferred	
+object-run-commit-registry	porcelain	
 patch-conflict-merge	runnable	
 patch-registry	runnable	
 pi-core-descriptor	runnable	

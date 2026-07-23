@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `governance-supplychain-workflow.yaml`
 -- Source-file: governance-supplychain-workflow.yaml
 -- Description: Real state-backed supply-chain governance command flow
--- Deferred: needs new plumbing or stays §8 out of scope.
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript governance-supplychain {
-  deferred "Charb/Marble CLI: Real state-backed supply-chain governance command flow — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
+  porcelain governance-supplychain ;
 }

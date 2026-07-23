@@ -34,16 +34,33 @@ sbt "examples/runMain cairn.examples.Main light verify"
 sbt "examples/runMain cairn.examples.Main porcelain authorization"
 ```
 
-## Promoted Charb themes (~28)
+## Promoted Charb themes (~33)
 
 See `Porcelain.promotedThemes` and `scripts/gen-charb-transcripts.py` (`PORCELAIN`).
 Each maps to `Plumbing.charbTheme` (auth, chain status/export/compare, branch/domain,
-compose/catalog, workflow list, recover, replay snapshot, tx state, light verify).
+compose/catalog, workflow list, recover, replay snapshot, tx state, light verify,
+chain quarantine, federation registry, supply-chain governance, mirror registry,
+object/run/commit registry).
 
-## Still deferred (~13)
+Five of these (`chain-quarantine`, `federation-registry`, `governance-supplychain`,
+`mirror-registry`, `object-run-commit-registry`) were promoted from deferred by
+recognizing they were thin listings over engines that already existed —
+`CasAdminEffects.fsck`/`Branches.reclaimOrphanBlobs` (quarantine), the ledger's
+own `authorities`/`certificates` maps (federation), `Branches.forkFrom`/`referTo`
+(supply-chain governance — the same primitives `fork-from`/`refer` transcript
+steps use), `Sync.compare` (mirror), and `Provenance.index` joined with
+`Branches.list`/`load` (object/run/commit) — not new engines, just names nobody
+had given them yet.
 
-§8 out of scope or no engine yet: chain quarantine, work-market / stake /
-consensus-economics / network-mempool / federation, compliance / mirror /
-deps-lock registries, object-run-commit, governance-supplychain (needs SDS
-`forkFrom` transcript steps), etc. Regenerate with
-`python3 scripts/gen-charb-transcripts.py` after extending plumbing.
+## Still deferred (~8)
+
+§8 out of scope or no engine yet — these need a genuinely new domain concept,
+not just a listing over something that exists: work-market (chain-work-scan/
+-adjudication/-reward — no "work request" or reputation-scoring concept
+anywhere), stake registry, consensus-economics-phase1 (the ledger is append-only
+quorum publication, not stake-weighted consensus), network-mempool-phase3
+(transport exists via `HttpNode`/`Gossip`; a pending-tx pool does not — txs
+apply directly), compliance-registry (no drift-tracking type), deps-lock-
+evidence-registry (`Provenance` tracks build inputs, not package deps/lockfiles).
+Regenerate with `python3 scripts/gen-charb-transcripts.py` after extending
+plumbing.

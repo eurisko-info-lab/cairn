@@ -138,6 +138,91 @@ object Plumbing:
       s"light verify: stateRoot=${st.root.short}\n$roots"
     }
 
+  /** Separates malformed-transport rows (fsck's byte/digest mismatch,
+    * quarantined as `.corrupt`) from semantically-invalid rows (accept
+    * journals left mid-transaction by a crash, resolved or abandoned by
+    * [[Branches.recoverPendingAccepts]]) — two different failure classes
+    * `CasAdminEffects.fsck` and `Branches.reclaimOrphanBlobs` already detect
+    * separately; this just reports both in one place instead of requiring
+    * two separate admin calls.
+    */
+  def quarantineStatus(casRoot: Path, branches: Branches): Either[String, String] =
+    val ctx = EffectContext.forCas()
+    for
+      fsck <- CasAdminEffects.fsck(casRoot, ctx).left.map(_.toString)
+      reclaim <- branches.reclaimOrphanBlobs(casRoot, None)
+    yield
+      s"""chain quarantine:
+         |  malformed (transport, quarantined as .corrupt): ${
+        if fsck.corrupt.isEmpty then "(none)" else fsck.corrupt.map(_.short).mkString(",")}
+         |  semantically invalid (unresolved accept journals): ${
+        if reclaim.recovered.isEmpty then "(none)" else reclaim.recovered.mkString(",")}""".stripMargin
+
+  /** Federation trust registry: known authorities + recorded certificates —
+    * the ledger's own `authorities`/`certificates` maps ARE the federation
+    * trust state (`Tx.AddAuthority`/`RecordCertificate`), just not previously
+    * listed as a named registry.
+    */
+  def federationRegistry(node: Node, authorities: Map[String, Vector[Byte]]): Either[String, String] =
+    node.state(authorities).map { st =>
+      val auths = if st.authorities.isEmpty then "  (none)" else st.authorities.keys.toList.sorted.map(n => s"  $n").mkString("\n")
+      val certs =
+        if st.certificates.isEmpty then "  (none)"
+        else st.certificates.toList.sortBy(_._1).map((h, m) => s"  ${h.take(12)}... method=$m").mkString("\n")
+      s"""federation registry:
+         |  authorities:
+         |$auths
+         |  certificates:
+         |$certs""".stripMargin
+    }
+
+  /** Real state-backed supply-chain governance: plants a supplier/manufacturer/
+    * distributor domain tree via the SAME [[Branches.forkFrom]]/[[Branches.referTo]]
+    * primitives `fork-from`/`refer` transcript steps use (see
+    * `transcripts/sds-domain-journey.cairn`), then reports it via the
+    * existing [[domainShow]]. Idempotent: forkFrom no-ops if the branch
+    * already exists with the same ancestry.
+    */
+  def supplyChainGovernance(branches: Branches): Either[String, String] =
+    for
+      _ <- branches.forkFrom("supplier", None)
+      _ <- branches.forkFrom("manufacturer", Some("supplier"))
+      _ <- branches.forkFrom("distributor", Some("manufacturer"))
+      _ <- branches.referTo("distributor", "supplier")
+    yield "governance-supplychain:\n" + domainShow(branches)
+
+  /** Mirror policy check: sync status of each configured mirror against this
+    * node, via the same [[Sync.compare]] chain-compare already uses. Only
+    * one mirror (self) is configured today — real multi-peer mirroring needs
+    * a peer registry this porcelain layer doesn't invent, but the status
+    * check itself is the real thing, not a stub.
+    */
+  def mirrorRegistry(node: Node): String =
+    s"mirror registry:\n  mirror[self] -> ${chainCompare(node, node)}"
+
+  /** Object/run/commit registry: joins [[Provenance.index]] (object digest ->
+    * the run/tool that produced it) with [[Branches.list]]/[[Branches.load]]
+    * (branch name -> committed head) — the two halves of "what object came
+    * from which run, and which commit points at it" that already exist as
+    * separate engines but were never listed together.
+    */
+  def objectRunCommitRegistry(casRoot: Path, branches: Branches): Either[String, String] =
+    val ctx = EffectContext.forCas()
+    Provenance.index(casRoot, ctx).map { idx =>
+      val objects =
+        if idx.isEmpty then "  (none)"
+        else idx.toList.sortBy(_._1).map((h, r) => s"  ${h.take(12)}... tool=${r.tool} inputs=${r.inputs.length}").mkString("\n")
+      val commits =
+        val names = branches.list()
+        if names.isEmpty then "  (none)"
+        else names.sorted.map(n => s"  $n -> ${branches.load(n).head.map(_.valueHash.short).getOrElse("(no commit)")}").mkString("\n")
+      s"""object/run/commit registry:
+         |  objects (output <- tool <- inputs):
+         |$objects
+         |  commits:
+         |$commits""".stripMargin
+    }
+
   /** Map a deferred Charb theme name onto porcelain/plumbing that exists today. */
   def charbTheme(name: String, env: Env): Either[String, String] =
     name match
@@ -153,6 +238,16 @@ object Plumbing:
         Right(chainCompare(env.node, env.node))
       case "chain-repair" | "recovery-suggestions" | "strict-governance-recovery-negative" =>
         recover(env.branches, env.casRoot)
+      case "chain-quarantine" =>
+        quarantineStatus(env.casRoot, env.branches)
+      case "federation-registry" =>
+        federationRegistry(env.node, env.authorities)
+      case "governance-supplychain" =>
+        supplyChainGovernance(env.branches)
+      case "mirror-registry" =>
+        Right(mirrorRegistry(env.node))
+      case "object-run-commit-registry" =>
+        objectRunCommitRegistry(env.casRoot, env.branches)
       case "compose-registry" =>
         composeStatus(env.packLoader, "stlc")
       case "integration-cross-namespace" =>

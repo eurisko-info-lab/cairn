@@ -60,6 +60,11 @@ PORCELAIN = {
     "governance-real-features",
     "tx-state-phase2",
     "incentive-positive",
+    "chain-quarantine",
+    "federation-registry",
+    "governance-supplychain",
+    "mirror-registry",
+    "object-run-commit-registry",
 }
 
 
