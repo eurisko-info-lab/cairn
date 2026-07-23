@@ -1,4 +1,5 @@
 package cairn.surface
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.kernel.Authority.*
@@ -147,7 +148,7 @@ object Plumbing:
     * two separate admin calls.
     */
   def quarantineStatus(casRoot: Path, branches: Branches): Either[String, String] =
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     for
       fsck <- CasAdminEffects.fsck(casRoot, ctx).left.map(_.toString)
       reclaim <- branches.reclaimOrphanBlobs(casRoot, None)
@@ -207,7 +208,7 @@ object Plumbing:
     * separate engines but were never listed together.
     */
   def objectRunCommitRegistry(casRoot: Path, branches: Branches): Either[String, String] =
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     Provenance.index(casRoot, ctx).map { idx =>
       val objects =
         if idx.isEmpty then "  (none)"

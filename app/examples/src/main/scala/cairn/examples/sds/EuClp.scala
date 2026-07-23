@@ -1,9 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import cairn.user.sds.Sds
 
 /** EU-CLP / REACH Annex II regulatory profile pack (versioned language).
@@ -16,7 +16,7 @@ import cairn.user.sds.Sds
   * section bodies + `sectionNumberOk`), not section numbering alone.
   */
 object EuClp:
-  private lazy val packs = PackLoader(EffectContext.forPackLoader())
+  private lazy val packs = PackLoader(EffectContexts.forPackLoader())
   lazy val language: ComposedLanguage = packs.requireClosed("eu-clp")
   private lazy val sds = Sds(packs)
 

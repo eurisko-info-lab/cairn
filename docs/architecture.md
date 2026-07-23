@@ -117,31 +117,34 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
    contract — [[AuthorityGate]] already depends on it; delete the temporary
    `AuthorityGate.DefaultProver` once all composition roots inject
    [[cairn.runtime.PolicyEvalProver]].
-3. Move `EffectContext.for*` factories, `MetaActivation`, and `Branches` into
-   `app/runtime`, then drop `systemHandler.dependsOn(core)`. **`MetaActivation`
-   and `Branches` done.** `MetaActivation` had zero real callers anywhere in
-   the repo, so it moved with no call-site changes. `Branches` (formerly in
-   `system-handler/Cas.scala`) turned out not to need an internal pure/
-   effectful split at all — it's a composition-root-level orchestrator (calls
-   both container effects via `ctx` *and* Core's `SemanticRepository`/`Delta`/
-   `ChangeAlgebra`/`PatchGraph`), exactly what `app/runtime` already holds
-   alongside `PackLoader`/`EffectBootstrap`/`WorkflowRunner` — so the whole
-   class relocated verbatim (package `cairn.systemhandler` → `cairn.runtime`),
-   with call sites in `app/surface`, `app/examples`, `app/tests` updated to
-   import it from its new home. `Cas.scala` no longer imports `cairn.core` at
-   all. Only `EffectContext`'s factories remain: its case class can't itself
-   move (22 files inside `system-handler` construct/consume it by type — only
-   its `PolicyEval`-calling factory methods could relocate, meaning renaming
-   ~75 `EffectContext.forXxx(...)` call sites across `app/`) — a separately-
-   scoped future slice.
+3. **Done.** Moved `EffectContext.for*` factories, `MetaActivation`, and
+   `Branches` into `app/runtime`. `MetaActivation` had zero real callers
+   anywhere in the repo, so it moved with no call-site changes. `Branches`
+   (formerly in `system-handler/Cas.scala`) turned out not to need an
+   internal pure/effectful split at all — it's a composition-root-level
+   orchestrator (calls both container effects via `ctx` *and* Core's
+   `SemanticRepository`/`Delta`/`ChangeAlgebra`/`PatchGraph`), exactly what
+   `app/runtime` already holds — so the whole class relocated verbatim
+   (package `cairn.systemhandler` → `cairn.runtime`). `EffectContext`'s 8
+   `PolicyEval`-calling factories (`forPackLoader`, `forLedger`, `forProcess`,
+   `forLsp`, `forBackend`, `forCas`, `forBranches`, `forFilesystem`) plus
+   their shared private `localCtx` helper moved to a new
+   `cairn.runtime.EffectContexts` object — the `EffectContext` case class
+   itself stays in `system-handler` (22 files there construct/consume it by
+   type), keeping only `Audit`/`local`/`bootstrapped`, none of which touch
+   `cairn.core`. 144 call sites across 47 files in `app/` were repointed to
+   `EffectContexts.forXxx` via a scripted rename, verified by compiling (a
+   handful of fully-qualified `cairn.systemhandler.EffectContext.forXxx`
+   call sites needed a follow-up fix the script's regex didn't catch, plus
+   ~20 now-unused `EffectContext` imports were cleaned up). `Cas.scala` and
+   `EffectContext.scala` no longer import `cairn.core` at all.
 4. **Done.** `content/user` depends on `contracts` (not `container/
    system-interface`) for `PackAccess`.
-5. `ModuleBoundarySuite`'s container→core allowlist shrank from 4 entries to
-   2 (`AuthorityGate.scala`, `EffectContext.scala` — `MetaActivation.scala`
-   and `Cas.scala` came off); the `EffectContext`-factory move above is what's
-   needed to reach empty (`AuthorityGate.scala`'s `DefaultProver` also needs
-   those factories moved first, per item 2, since it can't inject
-   `PolicyEvalProver` from inside `container/system-handler`).
+5. `ModuleBoundarySuite`'s container→core allowlist is down to its last
+   entry: `AuthorityGate.scala`, for `DefaultProver` (item 2). Reaching empty
+   now only needs item 2: deleting `DefaultProver` and having every
+   `AuthorityGate` construction site inject `cairn.runtime.PolicyEvalProver`
+   explicitly — a different call-site set than this slice's, not yet done.
 
 ## Digests and surfaces
 

@@ -1,6 +1,7 @@
 package cairn.examples.pki
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{CasEffects, EffectContext, Node}
+import cairn.systemhandler.{CasEffects, Node}
 import cairn.kernel.*
 import cairn.systemhandler.{Ed25519, Encryption, Keypair}
 import java.security.KeyPair
@@ -99,7 +100,7 @@ object PkiTutorial:
     val afterTamper = PkiMax.validate(tampered, "leaf", now, Set("root")).isLeft
 
     // Publish trust-anchor certificate digest on ledger
-    val node = Node(work, EffectContext.forLedger())
+    val node = Node(work, EffectContexts.forLedger())
     val alice = h.root.signing
     val auth = Map(alice.name -> alice.publicBytes)
     val anchorArt = Artifact(ArtifactKind.Certificate, Cst.toCanon(h.root.cert))

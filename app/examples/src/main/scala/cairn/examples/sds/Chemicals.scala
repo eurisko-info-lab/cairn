@@ -1,9 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 
 /** Chemicals corpus — host maps remain convenient fixtures for EN-primary
   * report views; **instance modules** load from `.cairn` under
@@ -13,7 +13,7 @@ import cairn.systemhandler.EffectContext
   */
 object Chemicals:
   private lazy val sdsLanguage: ComposedLanguage =
-    PackLoader(EffectContext.forPackLoader()).requireClosed("sds")
+    PackLoader(EffectContexts.forPackLoader()).requireClosed("sds")
 
   /** One populated EU-CLP section body. Host [[fields]] stay EN-keyed (for
     * [[SectionReport]]); [[locales]] carry non-EN overlays (`lang` → key → text).

@@ -1,15 +1,15 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import cairn.examples.law.LawTutorial
 import cairn.examples.stlc.Stlc
 
 /** Exemplar languages as `.cairn` data + PKI → Law → SDS dependency DAG. */
 class ExemplarPackSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Law = cairn.examples.law.Law(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
@@ -948,14 +948,14 @@ class ExemplarPackSuite extends munit.FunSuite:
     assertEquals(
       reg.allActionKeys.map(k => (k.family, k.name)),
       EffectMeta.allActionKeys.map(k => (k.family, k.name)))
-    val fsCtx = EffectContext.forFilesystem("/tmp*", registry = reg)
+    val fsCtx = EffectContexts.forFilesystem("/tmp*", registry = reg)
     val readKey = reg.require(Effects.Family.Filesystem).actionKey("read")
     assert(fsCtx.authorize(readKey, reg.require(Effects.Family.Filesystem).resource.at("/tmp/x")).isRight)
 
   test("ReplayReplication: want/have + revocation absorb + checkGrant (merge, not BFT)"):
     import cairn.systemhandler.{MemCas, ReplayReplication, ReplayStore, RevocationLog}
     val cas = MemCas()
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     val a = ReplayStore.memory()
     val b = ReplayStore.memory()
     a.consumeNonce("alice", "n1").fold(e => fail(e), identity)

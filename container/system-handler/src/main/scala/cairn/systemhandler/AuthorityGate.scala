@@ -23,7 +23,7 @@ import cairn.systeminterface.AuthorizationProver
   * A directly-constructed `AuthorityGate()` starts in `Mode.Audit` with no
   * policies. [[AuthorityGate.bootstrapped]] builds an Enforce gate with
   * allow-all policies (test / non-pack-loader wiring). PackLoader production
-  * wiring uses [[EffectContext.forPackLoader]] instead.
+  * wiring uses [[cairn.runtime.EffectContexts.forPackLoader]] instead.
   *
   * Replay: successful Enforce authorizations consume grant [[CapabilityGrant.nonce]]
   * and [[EffectRequest.requestId]] via a shared issuer-scoped [[ReplayStore]]
@@ -199,7 +199,7 @@ object AuthorityGate:
     * policy per known [[Effects.ActionKey]] from [[registry]] (default seeds),
     * any subject (`"*"`), any resource. Still used for ledger/process/LSP and
     * suites that do not exercise path-scoped denial. PackLoader production
-    * uses [[EffectContext.forPackLoader]].
+    * uses [[cairn.runtime.EffectContexts.forPackLoader]].
     *
     * Each call returns a **fresh** gate — never a shared singleton.
     */

@@ -1,15 +1,16 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.{DiskCas, EffectContext, Provenance}
+import cairn.systemhandler.{DiskCas, Provenance}
 import cairn.examples.search.SearchTutorial
 import java.nio.file.Files
 
 /** Fact–Intent–Hint search pack: object language + CAS provenance spine. */
 class SearchSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
 
   test("search pack loads from languages/*.cairn at runtime"):
@@ -79,7 +80,7 @@ class SearchSuite extends munit.FunSuite:
     assert(r.goalMet)
     assert(r.whyHops >= 1, r.toString)
     assert(r.whyTools.contains("explore"), r.whyTools.toString)
-    val hops = Provenance.why(dir.resolve("cas"), Digest(r.factDigest), EffectContext.forCas())
+    val hops = Provenance.why(dir.resolve("cas"), Digest(r.factDigest), EffectContexts.forCas())
       .fold(e => fail(e), identity)
     assert(hops.exists(_.record.inputs.exists(_.hex == r.intentDigest)), hops.toString)
     assert(r.languageProvides.contains("search"))
@@ -108,7 +109,7 @@ class SearchSuite extends munit.FunSuite:
     val edge = Search.certifyEdge(cas, board, "link", factDig).fold(e => fail(e), identity)
     assertEquals(edge.certificate.method, "test-suite")
     assertEquals(edge.certificate.claim, edge.claim.artifact.digest)
-    val hops = Provenance.why(dir.resolve("cas"), edge.certDigest, EffectContext.forCas())
+    val hops = Provenance.why(dir.resolve("cas"), edge.certDigest, EffectContexts.forCas())
       .fold(e => fail(e), identity)
     assert(hops.exists(_.record.inputs.exists(_ == factDig)), hops.toString)
     assert(hops.exists(_.record.inputs.exists(_ == intentDig)) ||

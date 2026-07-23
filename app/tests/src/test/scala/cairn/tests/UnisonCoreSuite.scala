@@ -1,4 +1,5 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
@@ -14,7 +15,7 @@ import cairn.systemhandler.EffectContext
   * what isn't (no user-declarable ADTs/abilities, no Unison-surface syntax).
   */
 class UnisonCoreSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
   private val Unison = cairn.examples.unison.Unison(UnisonCore)
 

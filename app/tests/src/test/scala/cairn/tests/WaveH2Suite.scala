@@ -1,6 +1,7 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem}
+import cairn.systemhandler.{CasEffects, DiskCas, Filesystem}
 import cairn.kernel.*
 import cairn.surface.*
 import cairn.core.*
@@ -14,17 +15,17 @@ import cairn.systemhandler.Keypair
 class WaveH2Suite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
 
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
   private val SearchPack = cairn.examples.search.Search(packs)
   private val Riemann = cairn.examples.riemann.Riemann(packs)
   private val UnisonCore = cairn.examples.unison.UnisonCore(packs)
   private val Unison = cairn.examples.unison.Unison(UnisonCore)
-  private val ledgerCtx = EffectContext.forLedger()
-  private val processCtx = EffectContext.forProcess()
-  private val lspCtx = EffectContext.forLsp()
-  private val fsCtx = EffectContext.forFilesystem()
+  private val ledgerCtx = EffectContexts.forLedger()
+  private val processCtx = EffectContexts.forProcess()
+  private val lspCtx = EffectContexts.forLsp()
+  private val fsCtx = EffectContexts.forFilesystem()
 
   private def readTranscriptSource(candidates: List[String], missing: String): String =
     val paths = candidates.map(java.nio.file.Path.of(_))
@@ -351,7 +352,7 @@ class WaveH2Suite extends munit.FunSuite:
     // 3. CAS: artifacts by kind
     val dir = java.nio.file.Files.createTempDirectory("cairn-query")
     val cas = DiskCas(dir)
-    val casCtx = EffectContext.forCas()
+    val casCtx = EffectContexts.forCas()
     val claimArt = cairn.proof.Claim("c1", Cst.node("x"), Stlc.language.digest).artifact
     val baseArt = Stlc.base.artifact
     CasEffects.put(cas, claimArt, casCtx).fold(e => fail(e.toString), identity)

@@ -1,8 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systemhandler.Filesystem
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
 
@@ -12,7 +13,7 @@ import java.nio.file.Path
   * projections.
   */
 object ChemicalSource:
-  private val fsCtx = EffectContext.forFilesystem()
+  private val fsCtx = EffectContexts.forFilesystem()
 
   private def fsPath(p: Path): Fs.Path =
     Fs.Path(p.toAbsolutePath.normalize.toString)

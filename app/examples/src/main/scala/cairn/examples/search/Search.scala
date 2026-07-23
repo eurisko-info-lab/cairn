@@ -1,4 +1,5 @@
 package cairn.examples.search
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.systeminterface.{Cas, PackAccess}
@@ -126,7 +127,7 @@ final class Search(packs: PackAccess):
       factTerm: Cst,
       intentDigest: Digest,
       tool: String = "explore",
-      ctx: EffectContext = EffectContext.forCas(),
+      ctx: EffectContext = EffectContexts.forCas(),
   ): Digest =
     val art = Artifact(ArtifactKind.Term, Cst.toCanon(factTerm))
     val d = CasEffects.put(cas, art, ctx).fold(e => throw RuntimeException(e.toString), _.valueHash)
@@ -134,7 +135,7 @@ final class Search(packs: PackAccess):
       .fold(e => throw RuntimeException(e.toString), identity)
     d
 
-  def putTerm(cas: Cas, term: Cst, ctx: EffectContext = EffectContext.forCas()): Digest =
+  def putTerm(cas: Cas, term: Cst, ctx: EffectContext = EffectContexts.forCas()): Digest =
     CasEffects.put(cas, Artifact(ArtifactKind.Term, Cst.toCanon(term)), ctx)
       .fold(e => throw RuntimeException(e.toString), _.valueHash)
 
@@ -157,7 +158,7 @@ final class Search(packs: PackAccess):
       edgeName: String,
       factDigest: Digest,
       tool: String = "supports",
-      ctx: EffectContext = EffectContext.forCas(),
+      ctx: EffectContext = EffectContexts.forCas(),
   ): Either[String, EdgeCert] =
     wellFormed(board).flatMap { _ =>
       board.get(edgeName).toRight(s"no edge named '$edgeName'").flatMap {

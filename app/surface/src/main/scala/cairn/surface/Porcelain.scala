@@ -1,4 +1,5 @@
 package cairn.surface
+import cairn.runtime.EffectContexts
 
 import cairn.runtime.{Branches, PackLoader}
 import cairn.systemhandler.*
@@ -57,7 +58,7 @@ object Porcelain:
     val kp = Keypair.dev("porcelain-dev")
     val authorities = Map(kp.name -> kp.publicBytes)
     val node = Node(home.resolve("nodeA"), ledgerCtx)
-    val branches = Branches(cas, home.resolve("refs"), EffectContext.forBranches())
+    val branches = Branches(cas, home.resolve("refs"), EffectContexts.forBranches())
     val replay = ReplayStore.memory()
     Plumbing.Env(node, branches, home, authorities, packLoader, replay)
 

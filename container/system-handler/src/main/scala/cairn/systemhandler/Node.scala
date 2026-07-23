@@ -14,7 +14,7 @@ import java.nio.file.Path
   * authenticates as the signing authority (`Subject(authority.name)`), not
   * the process-local subject — that identity is intrinsic to the seal.
   * CAS puts/gets on the node store go through [[CasEffects]]; the chain file
-  * is read/written through [[Filesystem]] (use [[EffectContext.forLedger]]).
+  * is read/written through [[Filesystem]] (use [[cairn.runtime.EffectContexts.forLedger]]).
   */
 final class Node(val root: Path, val ctx: EffectContext):
   val cas: Cas = DiskCas(root)

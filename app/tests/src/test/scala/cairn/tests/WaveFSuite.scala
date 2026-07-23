@@ -1,10 +1,10 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.core.Ports2.*
 import cairn.rosetta.Scaffold
-import cairn.systemhandler.EffectContext
 import cairn.examples.quicksort.QuickSort2
 
 /** Wave F acceptance (M30–M34). */
@@ -12,7 +12,7 @@ class WaveFSuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(300, "s")
   val m = QuickSort2.module
   val allPorts: List[PortV2] = List(ScalaPort2, LeanPort2, HaskellPort2, RustPort2)
-  private val scaffoldCtx = EffectContext.forFilesystem()
+  private val scaffoldCtx = EffectContexts.forFilesystem()
 
   test("M30: generic Ord-constrained quicksort is one canonical artifact"):
     assertEquals(m.artifact.kind, ArtifactKind.RosettaDecl)

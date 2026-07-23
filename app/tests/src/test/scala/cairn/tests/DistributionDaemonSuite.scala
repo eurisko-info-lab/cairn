@@ -1,11 +1,12 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.systemhandler.*
 
 /** Peer discovery, HTTP gossip daemon, and BFT finality certificates. */
 class DistributionDaemonSuite extends munit.FunSuite:
-  private val ledgerCtx = EffectContext.forLedger()
+  private val ledgerCtx = EffectContexts.forLedger()
   private val ksSecret = Some("cairn-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
 
   test("PeerRegistry round-trips and merges by lastSeen"):

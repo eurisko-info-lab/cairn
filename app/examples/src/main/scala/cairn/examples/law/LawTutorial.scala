@@ -16,7 +16,7 @@ object LawTutorial:
   )
 
   def run(): Report =
-    val packs = cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader())
+    val packs = cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader())
     val Law = cairn.examples.law.Law(packs)
     val Pki = cairn.examples.pki.Pki(packs)
     val lang = Law.language

@@ -1,9 +1,9 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 /** MiniTT (§5b, §2c): minimal dependent type core, checked by the same
   * generic kernel Checker/Search as STLC/PKI. See MiniTT.scala's doc
   * comment for exactly what's in scope (Π types, one hardcoded Nat
@@ -11,7 +11,7 @@ import cairn.systemhandler.EffectContext
   * polymorphism, no user inductives, no tactics/elaboration, not Lean).
   */
 class MiniTTSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val MiniTT = cairn.examples.minitt.MiniTT(packs)
 
   test("minitt pack loads from languages/*.cairn at runtime"):

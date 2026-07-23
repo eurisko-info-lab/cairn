@@ -1,10 +1,11 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.core.{ChangeAlgebra, Delta, Module, PatchGraph}
 import cairn.examples.stlc.Stlc
 import cairn.kernel.{Cst, Digest}
 import cairn.runtime.{Branches, WorkflowRunner}
-import cairn.systemhandler.{EffectContext, MemCas}
+import cairn.systemhandler.MemCas
 
 /** Patch DAG + bootstrap import + workflow runner (architecture priorities 4–6). */
 class PatchGraphSuite extends munit.FunSuite:
@@ -48,7 +49,7 @@ class PatchGraphSuite extends munit.FunSuite:
   test("Branches.importModule is bootstrap/import — no ValidatedChangeSet required"):
     val cas = MemCas()
     val refs = java.nio.file.Files.createTempDirectory("cairn-import")
-    val branches = Branches(cas, refs, EffectContext.forBranches())
+    val branches = Branches(cas, refs, EffectContexts.forBranches())
     val mod = cairn.core.Module(List("x" -> cairn.kernel.Cst.Leaf("1")))
     val m = branches.importModule("boot", mod)
     assertEquals(m.head.map(_.valueHash), Some(mod.digest))

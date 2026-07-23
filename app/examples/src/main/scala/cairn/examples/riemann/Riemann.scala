@@ -1,4 +1,5 @@
 package cairn.examples.riemann
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.systemhandler.{EffectContext, Filesystem}
@@ -184,7 +185,7 @@ final class Riemann(packs: PackAccess):
 
   def writeArtifacts(
       dir: Path,
-      ctx: EffectContext = EffectContext.forFilesystem(),
+      ctx: EffectContext = EffectContexts.forFilesystem(),
   ): Either[String, (Path, Path)] =
     def fsPath(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
     def fsMkdirs(p: Path): Either[String, Unit] =

@@ -12,7 +12,7 @@ import java.nio.file.{Files, Path}
   *
   * CAS put/get go through [[CasEffects]] with [[ctx]]; refs-directory
   * read/write/mkdirs/list go through [[Filesystem]] with the same [[ctx]]
-  * (use [[EffectContext.forBranches]] at the composition root).
+  * (use [[EffectContexts.forBranches]] at the composition root).
   *
   * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
   * [[cairn.core.SemanticRepository.integrate]] then either advance the target

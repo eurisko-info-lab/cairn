@@ -1,14 +1,14 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import cairn.examples.stlc.Stlc
 
 /** Wave H part 1 (M41–M42): full meta surface + bootstrap fixpoint. */
 class WaveH1Suite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
 
   test("M41: complete STLC written in the meta surface is digest-identical"):
     val text = Meta.printLanguage("stlc", Stlc.fragments).fold(e => fail(e), identity)

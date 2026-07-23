@@ -1,9 +1,9 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import cairn.examples.riemann.RiemannTutorial
 import java.nio.file.Files
 
@@ -13,7 +13,7 @@ import java.nio.file.Files
   * unproven (no Theorem/Certificate, no `sorry`, generated Lean is a `def`).
   */
 class RiemannSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Riemann = cairn.examples.riemann.Riemann(packs)
 
   test("riemann pack loads from languages/*.cairn at runtime"):

@@ -1,10 +1,10 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.systemhandler.Encryption
 import cairn.core.*
 import cairn.core.Ports2.*
-import cairn.systemhandler.EffectContext
 import cairn.runtime.PackLoader
 import cairn.examples.pki.{DemoPki, PkiMax, PkiTutorial}
 import cairn.examples.sds.{CompositionSealing, SdsTutorial}
@@ -18,7 +18,7 @@ import cairn.examples.quicksort.QuickSortApp
 class ParitySuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
 
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Law = cairn.examples.law.Law(packs)
   private val Sds = cairn.examples.sds.Sds(packs)
 

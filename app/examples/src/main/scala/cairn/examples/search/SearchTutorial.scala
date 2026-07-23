@@ -1,4 +1,5 @@
 package cairn.examples.search
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.{Parser, Module, Delta}
@@ -24,13 +25,13 @@ object SearchTutorial:
 
   def run(
       workDir: Path,
-      fsCtx: EffectContext = EffectContext.forFilesystem(),
-      casCtx: EffectContext = EffectContext.forCas(),
+      fsCtx: EffectContext = EffectContexts.forFilesystem(),
+      casCtx: EffectContext = EffectContexts.forCas(),
   ): Report =
     Filesystem.run(Fs.Request.Mkdirs(Fs.Path(workDir.toAbsolutePath.normalize.toString)), fsCtx)
       .fold(e => throw RuntimeException(e.toString), _ => ())
     val Search = cairn.examples.search.Search(
-      cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
+      cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader()))
     val cas = DiskCas(workDir.resolve("cas"))
     val lang = Search.language
     val provides = lang.fragments.flatMap(_.provides).toSet

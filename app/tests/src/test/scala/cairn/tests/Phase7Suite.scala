@@ -1,6 +1,7 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{CasEffects, EffectContext, Keypair, Node}
+import cairn.systemhandler.{CasEffects, Keypair, Node}
 import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
@@ -13,7 +14,7 @@ class Phase7Suite extends munit.FunSuite:
   test("agreement: ledger state root — kernel replay vs app recomputation (S43)"):
     val alice = Keypair.dev("alice")
     val auth = Map("alice" -> alice.publicBytes)
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-agree"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-agree"), EffectContexts.forLedger())
     CasEffects.put(node.cas, Stlc.base.artifact, node.ctx).fold(e => fail(e.toString), identity)
     val txs = List(
       alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)),

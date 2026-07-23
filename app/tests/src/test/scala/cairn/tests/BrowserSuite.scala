@@ -1,4 +1,5 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.systemhandler.{CasEffects, EffectContext, Keypair, Node}
 import cairn.kernel.*
@@ -11,7 +12,7 @@ import java.nio.file.Files
 /** Browser API: navigate local node/CAS with typed artifact views. */
 class BrowserSuite extends munit.FunSuite:
   private val client = HttpClient.newHttpClient()
-  private val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
+  private val packs = cairn.runtime.PackLoader(EffectContexts.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
 
   private def casPut(node: Node, art: Artifact): Unit =
@@ -25,7 +26,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("browser API serves overview, chain, blocks, typed artifact view"):
     val root = Files.createTempDirectory("cairn-ui")
-    val node = Node(root, EffectContext.forLedger())
+    val node = Node(root, EffectContexts.forLedger())
     val alice = Keypair.dev("alice")
     val auth = Map(alice.name -> alice.publicBytes)
     val term = Artifact(ArtifactKind.Term, Cst.toCanon(Cst.Leaf("true")))
@@ -75,7 +76,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("GET /api/schema/<lang>/<sort>: constructors + child sorts, derived from the composed language"):
     val root = Files.createTempDirectory("cairn-schema")
-    val node = Node(root, EffectContext.forLedger())
+    val node = Node(root, EffectContexts.forLedger())
     val langs = Map("stlc" -> cairn.examples.stlc.Stlc.language)
     val srv = BrowserServer(node, langs, 0)
     val port = srv.start()
@@ -92,7 +93,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("POST /api/parse validates editor buffer against a language"):
     val root = Files.createTempDirectory("cairn-ui-parse")
-    val node = Node(root, EffectContext.forLedger())
+    val node = Node(root, EffectContexts.forLedger())
     val langs = Map("stlc" -> cairn.examples.stlc.Stlc.language)
     val srv = BrowserServer(node, langs, 0)
     val port = srv.start()
@@ -110,7 +111,7 @@ class BrowserSuite extends munit.FunSuite:
 
   test("GET /api/board returns Fact–Intent graph from IR module"):
     val root = Files.createTempDirectory("cairn-ui-board")
-    val node = Node(root, EffectContext.forLedger())
+    val node = Node(root, EffectContexts.forLedger())
     val board = Module(List(
       "origin" -> Cst.node("origin", Cst.Leaf("start")),
       "goal" -> Cst.node("goal", Cst.Leaf("done")),
@@ -136,7 +137,7 @@ class BrowserSuite extends munit.FunSuite:
   test("browser trust API: revoke + delegate publish CAS digests"):
     import cairn.systemhandler.{DelegationLog, RevocationLog}
     val root = Files.createTempDirectory("cairn-ui-trust")
-    val node = Node(root, EffectContext.forLedger())
+    val node = Node(root, EffectContexts.forLedger())
     val rev = RevocationLog()
     val del = DelegationLog()
     val srv = BrowserServer(node, Map.empty, 0, revocations = rev, delegations = del)

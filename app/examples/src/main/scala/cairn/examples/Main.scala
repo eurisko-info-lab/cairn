@@ -1,8 +1,9 @@
 package cairn.examples
+import cairn.runtime.EffectContexts
 
 import cairn.runtime.PackLoader
 import cairn.surface.Cli
-import cairn.systemhandler.{EffectContext, Filesystem}
+import cairn.systemhandler.Filesystem
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
 
@@ -12,12 +13,12 @@ import java.nio.file.Path
   */
 @main def Main(args: String*): Unit =
     // Composition roots use narrow deployment policies (not allow-all bootstrap).
-    val workspaceCtx = EffectContext.forPackLoader()
+    val workspaceCtx = EffectContexts.forPackLoader()
     val packLoader = PackLoader(workspaceCtx)
-    val ledgerCtx = EffectContext.forLedger()
-    val processCtx = EffectContext.forProcess()
-    val lspCtx = EffectContext.forLsp()
-    val fsCtx = EffectContext.forFilesystem()
+    val ledgerCtx = EffectContexts.forLedger()
+    val processCtx = EffectContexts.forProcess()
+    val lspCtx = EffectContexts.forLsp()
+    val fsCtx = EffectContexts.forFilesystem()
     val pki = cairn.examples.pki.Pki(packLoader)
     val law = cairn.examples.law.Law(packLoader)
     val sds = cairn.examples.sds.Sds(packLoader)

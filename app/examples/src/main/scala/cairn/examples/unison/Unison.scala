@@ -1,4 +1,5 @@
 package cairn.examples.unison
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
@@ -53,7 +54,7 @@ final class Unison(core: UnisonCore):
     def size: Int = digests.size
 
   object Store:
-    def empty: Store = Store(MemCas(), Set.empty, Map.empty, EffectContext.forCas())
+    def empty: Store = Store(MemCas(), Set.empty, Map.empty, EffectContexts.forCas())
 
   /** The names language: name -> ref <digest>. Its ΔL is the patch language. */
   val namesFragment: Fragment = Fragment(

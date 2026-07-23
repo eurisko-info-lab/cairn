@@ -1,9 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import cairn.user.sds.Sds
 
 /** Report / interchange projection pack — **not** SDS language.
@@ -20,7 +20,7 @@ import cairn.user.sds.Sds
   * RoundTrip-able text twin). RoundTrip is the trust gate for text surfaces.
   */
 object SectionReport:
-  private lazy val packs = PackLoader(EffectContext.forPackLoader())
+  private lazy val packs = PackLoader(EffectContexts.forPackLoader())
   private lazy val sds = Sds(packs)
   lazy val language: ComposedLanguage = packs.requireClosed("sds-report")
   lazy val grammar: GrammarSpec = language.grammar

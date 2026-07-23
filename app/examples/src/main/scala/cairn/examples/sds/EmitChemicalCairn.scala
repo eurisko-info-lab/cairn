@@ -1,13 +1,13 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import java.nio.file.{Files, Path}
 
 /** One-shot emitter for SDS chemical instance `.cairn` modules. */
 @main def EmitChemicalCairn(args: String*): Unit =
-  val packs = PackLoader(EffectContext.forPackLoader())
+  val packs = PackLoader(EffectContexts.forPackLoader())
   val sds = Sds(packs)
   val g = ModuleSurface.grammar(sds.language)
   val outDir = Path.of(args.headOption.getOrElse("content/languages/sds/chemicals"))

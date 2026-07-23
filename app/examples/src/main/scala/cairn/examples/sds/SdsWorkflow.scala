@@ -1,9 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import java.nio.file.Path
 
 /** SDS causal workflow as an ordinary Cairn language + checked instance module.
@@ -17,7 +17,7 @@ import java.nio.file.Path
   * legality are disk SoT, loadable via [[PackLoader]] without recompiling Scala.
   */
 object SdsWorkflow:
-  private lazy val packs = PackLoader(EffectContext.forPackLoader())
+  private lazy val packs = PackLoader(EffectContexts.forPackLoader())
   lazy val language: ComposedLanguage = packs.requireClosed("sds-workflow")
 
   final case class Step(name: String, phase: String)

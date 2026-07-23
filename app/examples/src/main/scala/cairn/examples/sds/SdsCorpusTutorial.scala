@@ -1,4 +1,5 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.systemhandler.{AuthorityGate, CasEffects, DiskCas, EffectContext}
 import cairn.kernel.*
@@ -70,7 +71,7 @@ object SdsCorpusTutorial:
 
   def run(work: Path): Report =
     Files.createDirectories(work)
-    val packs = PackLoader(EffectContext.forPackLoader())
+    val packs = PackLoader(EffectContexts.forPackLoader())
     val Sds = cairn.examples.sds.Sds(packs)
     val lang = Sds.language
     val dl = Delta.deltaOf(lang).fold(e => throw RuntimeException(e.map(_.render).mkString), identity)

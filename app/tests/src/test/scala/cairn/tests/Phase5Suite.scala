@@ -1,7 +1,8 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.systemhandler.{Ed25519, Keypair, Node, Sync}
-import cairn.systemhandler.{CasEffects, EffectContext}
+import cairn.systemhandler.CasEffects
 import cairn.kernel.*
 import cairn.examples.stlc.Stlc
 
@@ -59,7 +60,7 @@ class Phase5Suite extends munit.FunSuite:
     node.append(alice, authorities, txs).fold(e => throw AssertionError(e), identity)
 
   test("PoA block seals, tampered block rejected (S38)"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-node"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-node"), EffectContexts.forLedger())
     val block = publishStlc(node)
     assertEquals(node.state(authorities).map(_.heads.keySet), Right(Set("main")))
     // tamper: swap authority name
@@ -73,10 +74,10 @@ class Phase5Suite extends munit.FunSuite:
       authorities, tampered2, Ed25519.verify).isLeft)
 
   test("publication records digests only, second node materializes by hash (S39/S40 acceptance)"):
-    val nodeA = Node(java.nio.file.Files.createTempDirectory("cairn-nodeA"), EffectContext.forLedger())
+    val nodeA = Node(java.nio.file.Files.createTempDirectory("cairn-nodeA"), EffectContexts.forLedger())
     publishStlc(nodeA)
     // "second local node process": fresh object over a different directory
-    val nodeB = Node(java.nio.file.Files.createTempDirectory("cairn-nodeB"), EffectContext.forLedger())
+    val nodeB = Node(java.nio.file.Files.createTempDirectory("cairn-nodeB"), EffectContexts.forLedger())
     val fetched = Sync.pull(nodeA, nodeB, authorities).fold(e => throw AssertionError(e), identity)
     assert(fetched.nonEmpty)
     // node B independently verifies the chain and reads the branch head
@@ -91,16 +92,16 @@ class Phase5Suite extends munit.FunSuite:
       assertEquals(casGetDigest(nodeB, f.artifact.digest).map(_.digest), Right(f.artifact.digest))
 
   test("two nodes converge on a published head (S41 acceptance)"):
-    val a = Node(java.nio.file.Files.createTempDirectory("cairn-a"), EffectContext.forLedger())
-    val b = Node(java.nio.file.Files.createTempDirectory("cairn-b"), EffectContext.forLedger())
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-a"), EffectContexts.forLedger())
+    val b = Node(java.nio.file.Files.createTempDirectory("cairn-b"), EffectContexts.forLedger())
     publishStlc(a)
     Sync.pull(a, b, authorities).toOption.get
     assertEquals(a.chainDigests, b.chainDigests)
     assertEquals(a.state(authorities).map(_.root), b.state(authorities).map(_.root))
 
   test("divergence surfaces as competing heads, no silent corruption (S42 acceptance)"):
-    val a = Node(java.nio.file.Files.createTempDirectory("cairn-a2"), EffectContext.forLedger())
-    val b = Node(java.nio.file.Files.createTempDirectory("cairn-b2"), EffectContext.forLedger())
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-a2"), EffectContexts.forLedger())
+    val b = Node(java.nio.file.Files.createTempDirectory("cairn-b2"), EffectContexts.forLedger())
     // both start from the same genesis block
     val reg = List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes)))
     a.append(alice, authorities, reg).toOption.get

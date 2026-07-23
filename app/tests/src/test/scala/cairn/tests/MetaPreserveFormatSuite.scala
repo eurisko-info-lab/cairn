@@ -21,7 +21,7 @@ import cairn.core.*
   *     against itself would always be a no-op.
   */
 class MetaPreserveFormatSuite extends munit.FunSuite:
-  private val packs = cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader())
+  private val packs = cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader())
   private val Search = cairn.examples.search.Search(packs)
   private val name = "search"
   private val fragments = Search.fragments

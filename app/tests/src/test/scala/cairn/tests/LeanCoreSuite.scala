@@ -1,9 +1,9 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 /** LeanCore (§5b, §2c amendment, §8b): the formal-methods IR ladder's rung
   * past MiniTT — identity types (`Eq`/`refl`/`subst`) and a minimal
   * environment of checked declarations, on top of everything MiniTT already
@@ -13,7 +13,7 @@ import cairn.systemhandler.EffectContext
   * universe polymorphism, real Lean syntax).
   */
 class LeanCoreSuite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val LeanCore = cairn.examples.leancore.LeanCore(packs)
 
   test("leancore pack loads from languages/*.cairn at runtime"):

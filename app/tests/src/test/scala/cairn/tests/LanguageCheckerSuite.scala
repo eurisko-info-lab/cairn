@@ -51,7 +51,7 @@ class LanguageCheckerSuite extends munit.FunSuite:
     assert(LanguageChecker.expectedSortAt(stlc, term, List(5)).isLeft)
 
   test("a grammar category spanning multiple sorts accepts any member (Search: Fact and Intent)"):
-    val packs = cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader())
+    val packs = cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader())
     val search = cairn.examples.search.Search(packs).language
     val fact = Cst.node("fact", Cst.Leaf("some fact")) // sort Fact
     val intent = Cst.node("intent", Cst.Leaf("explore")) // sort Intent — different sort, same top category

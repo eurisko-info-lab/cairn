@@ -1,6 +1,7 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{CasEffects, EffectContext, Encryption, Keypair, Node}
+import cairn.systemhandler.{CasEffects, Encryption, Keypair, Node}
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
@@ -48,7 +49,7 @@ object SdsTutorial:
     "regBasis" -> Cst.node("basis", Cst.Leaf("cleanerProduct"), Cst.Leaf("3")))).sorted
 
   def run(work: java.nio.file.Path): Report =
-    val Sds = cairn.examples.sds.Sds(PackLoader(EffectContext.forPackLoader()))
+    val Sds = cairn.examples.sds.Sds(PackLoader(EffectContexts.forPackLoader()))
     val base = acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
     val en = Sds.render(base, "cleanerProduct", "en").fold(e => throw RuntimeException(e), identity)
@@ -89,7 +90,7 @@ object SdsTutorial:
 
     // Ledger publish of industrial module
     val alice = Keypair.dev("alice")
-    val node = Node(work, EffectContext.forLedger())
+    val node = Node(work, EffectContexts.forLedger())
     CasEffects.put(node.cas, industrial.artifact, node.ctx)
       .fold(e => throw RuntimeException(e.toString), identity)
     node.append(alice, Map("alice" -> alice.publicBytes), List(

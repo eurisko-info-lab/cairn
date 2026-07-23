@@ -95,7 +95,7 @@ object EffectBootstrap:
     yield (ef.family, ef, pinned)
 
   /** Load all effect packs from disk; verify against host seeds. */
-  def load(packs: PackLoader, fsCtx: EffectContext = EffectContext.forFilesystem()): Either[String, Loaded] =
+  def load(packs: PackLoader, fsCtx: EffectContext = EffectContexts.forFilesystem()): Either[String, Loaded] =
     if !Effects.Family.idsMatchPackDecls then
       Left(s"Family enum ids ${Effects.Family.values.map(_.toString).toSet} != packDecls family ids")
     else
@@ -119,5 +119,5 @@ object EffectBootstrap:
       }
 
   /** Convenience: load or throw (composition-root / test helper). */
-  def require(packs: PackLoader, fsCtx: EffectContext = EffectContext.forFilesystem()): Loaded =
+  def require(packs: PackLoader, fsCtx: EffectContext = EffectContexts.forFilesystem()): Loaded =
     load(packs, fsCtx).fold(e => throw RuntimeException(e), identity)

@@ -1,4 +1,5 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.systemhandler.{AuthorityGate, DiskCas, Ed25519, EffectContext, Node, Keypair}
 import cairn.kernel.*
@@ -43,7 +44,7 @@ object SdsCausalWorkflow:
   )
 
   def run(work: Path): Report =
-    val packs = PackLoader(EffectContext.forPackLoader())
+    val packs = PackLoader(EffectContexts.forPackLoader())
     val Sds = cairn.examples.sds.Sds(packs)
     val lang = Sds.language
     val dl = Delta.deltaOf(lang).fold(e => throw RuntimeException(e.map(_.render).mkString), identity)
@@ -59,7 +60,7 @@ object SdsCausalWorkflow:
       throw RuntimeException(s"unexpected certificate kinds: $certKinds")
 
     val cas = DiskCas(work.resolve("cas"))
-    val branches = Branches(cas, work.resolve("refs"), EffectContext.forBranches())
+    val branches = Branches(cas, work.resolve("refs"), EffectContexts.forBranches())
     val base = SdsTutorial.acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
     EuClp.conform(Chemicals.Acetone.thinModule) match
@@ -171,7 +172,7 @@ object SdsCausalWorkflow:
         Right(tipSigHex.take(16))
       case "publish" =>
         val kp = alice.getOrElse(throw RuntimeException("sign before publish"))
-        val node = Node(work.resolve("ledger"), EffectContext.forLedger())
+        val node = Node(work.resolve("ledger"), EffectContexts.forLedger())
         val auth = Map(kp.name -> kp.publicBytes)
         node.append(kp, auth, List(kp.signTx(Tx.RegisterIdentity(kp.name, kp.publicBytes))))
           .fold(e => throw RuntimeException(e), identity)

@@ -1,8 +1,9 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{MemCas, DiskCas, CasEffects, EffectContext, Ed25519, Keypair}
+import cairn.systemhandler.{MemCas, DiskCas, CasEffects, Ed25519, Keypair}
 import cairn.runtime.Branches
 import cairn.core.TreeEngine
 import cairn.examples.stlc.Stlc
@@ -173,7 +174,7 @@ class DeltaSuite extends munit.FunSuite:
     RoundTrip.check(dl.grammar, t).fold(e => fail(e), identity)
 
 class BranchSuite extends munit.FunSuite:
-  private val casCtx = EffectContext.forBranches()
+  private val casCtx = EffectContexts.forBranches()
 
   /** Put a sealed primary-owner delegation via [[Branches.mintAncestorDelegation]]. */
   private def mintDelegation(

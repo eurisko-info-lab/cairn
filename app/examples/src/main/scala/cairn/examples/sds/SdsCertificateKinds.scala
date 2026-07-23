@@ -1,9 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
-import cairn.systemhandler.EffectContext
 import java.nio.file.Path
 
 /** SDS workflow evidence certificate kinds as a Cairn language + checked module.
@@ -17,7 +17,7 @@ import java.nio.file.Path
   * is ordinary content-addressed artifacts without Scala-private kind logic.
   */
 object SdsCertificateKinds:
-  private lazy val packs = PackLoader(EffectContext.forPackLoader())
+  private lazy val packs = PackLoader(EffectContexts.forPackLoader())
   lazy val language: ComposedLanguage = packs.requireClosed("sds-certificate")
 
   lazy val workflowKindsModule: Module =

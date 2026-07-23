@@ -1,8 +1,9 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasAdmin, CasAdminEffects, CasEffects, Chunker, DigestMigration, DiskCas, EffectContext}
+import cairn.systemhandler.{CasAdmin, CasAdminEffects, CasEffects, Chunker, DigestMigration, DiskCas}
 import cairn.examples.stlc.Stlc
 
 /** Wave A acceptance (M1–M5).
@@ -11,7 +12,7 @@ import cairn.examples.stlc.Stlc
   * direct DiskCas trait contract (putBytesAlgo / getBytesKey).
   */
 class WaveASuite extends munit.FunSuite:
-  private val casCtx = EffectContext.forCas()
+  private val casCtx = EffectContexts.forCas()
 
   test("M1: distinct schemas => distinct type hashes"):
     import Canon.*

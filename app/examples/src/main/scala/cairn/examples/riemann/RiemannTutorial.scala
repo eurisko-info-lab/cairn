@@ -1,4 +1,5 @@
 package cairn.examples.riemann
+import cairn.runtime.EffectContexts
 
 import cairn.core.*
 import cairn.systemhandler.{EffectContext, Filesystem}
@@ -23,9 +24,9 @@ object RiemannTutorial:
       certificateExists: Boolean
   )
 
-  def run(dir: Path, fsCtx: EffectContext = EffectContext.forFilesystem()): Report =
+  def run(dir: Path, fsCtx: EffectContext = EffectContexts.forFilesystem()): Report =
     val Riemann = cairn.examples.riemann.Riemann(
-      cairn.runtime.PackLoader(cairn.systemhandler.EffectContext.forPackLoader()))
+      cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader()))
     val lang = Riemann.language
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet

@@ -1,4 +1,5 @@
 package cairn.surface
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
@@ -29,7 +30,7 @@ final class BrowserServer(
     node: Node,
     languages: Map[String, ComposedLanguage],
     port: Int = 0,
-    fsCtx: EffectContext = EffectContext.forFilesystem(),
+    fsCtx: EffectContext = EffectContexts.forFilesystem(),
     revocations: RevocationLog = RevocationLog(),
     delegations: DelegationLog = DelegationLog(),
 ):
@@ -596,7 +597,7 @@ final class BrowserServer(
 
 object BrowserServer:
   /** Serve UI for a local node/CAS root until interrupted.
-    * Root directory creation is authorized via [[fsCtx]] ([[EffectContext.forFilesystem]]).
+    * Root directory creation is authorized via [[fsCtx]] ([[EffectContexts.forFilesystem]]).
     */
   def serve(
       root: Path,

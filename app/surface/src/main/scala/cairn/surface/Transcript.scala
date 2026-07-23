@@ -1,4 +1,5 @@
 package cairn.surface
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
@@ -218,7 +219,7 @@ object Transcript:
     * language registry (domain packs stay out of the surface layer — they are
     * injected by callers, §4.11). EffectContexts and packLoader are explicit — no
     * ambient AuthorityGate / PackAccess. Run/node directories use [[fsCtx]]
-    * ([[EffectContext.forFilesystem]] at the CLI composition root).
+    * ([[EffectContexts.forFilesystem]] at the CLI composition root).
     */
   def run(
       src: String,
@@ -258,7 +259,7 @@ object Transcript:
     val nodes = scala.collection.mutable.LinkedHashMap[String, Node]()
     lazy val domainBranches =
       val cas = DiskCas(workDir.resolve("domain-cas"))
-      cairn.runtime.Branches(cas, workDir.resolve("domain-refs"), EffectContext.forBranches())
+      cairn.runtime.Branches(cas, workDir.resolve("domain-refs"), EffectContexts.forBranches())
     def ensureNode(n: String): Either[String, Node] =
       nodes.get(n) match
         case Some(node) => Right(node)
@@ -593,7 +594,7 @@ object Cli:
       case "repo" :: rest =>
         // Semantic repository surface: Branches + SemanticRepository spine.
         val refs = home.resolve("refs")
-        val branches = cairn.runtime.Branches(cas, refs, EffectContext.forBranches())
+        val branches = cairn.runtime.Branches(cas, refs, EffectContexts.forBranches())
         rest match
           case List("branches") | Nil =>
             val names = branches.list()

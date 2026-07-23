@@ -1,4 +1,5 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.Authority.*
 import cairn.kernel.{Artifact, ArtifactKind, Canon, Digest, EffectMeta, Effects}
@@ -120,7 +121,7 @@ class AuthoritySuite extends munit.FunSuite:
   test("pack-loader narrow policy allows WorkspaceRead under languages*"):
     import cairn.systemhandler.Workspace
     import cairn.systeminterface.Workspace as Ws
-    val ctx = EffectContext.forPackLoader()
+    val ctx = EffectContexts.forPackLoader()
     assertEquals(ctx.subject, Subject("local"))
     assertEquals(ctx.gate.currentMode, AuthorityGate.Mode.Enforce)
     val langDirs = Workspace.run(Ws.Request.LanguageDirs, ctx)
@@ -132,25 +133,25 @@ class AuthoritySuite extends munit.FunSuite:
   test("pack-loader narrow policy denies wrong path"):
     import cairn.systemhandler.Workspace
     import cairn.systeminterface.Workspace as Ws
-    val ctx = EffectContext.forPackLoader()
+    val ctx = EffectContexts.forPackLoader()
     val denied = Workspace.run(
       Ws.Request.ReadText(cairn.systeminterface.Filesystem.Path("/etc/passwd")), ctx)
     assert(denied.isLeft, denied.toString)
 
   test("pack-loader narrow policy denies wrong action"):
-    val ctx = EffectContext.forPackLoader()
+    val ctx = EffectContexts.forPackLoader()
     assert(ctx.authorize(fsWrite, EffectMeta.workspace.resource.at("languages/stlc.cairn")).isLeft)
     assert(ctx.authorize(ledgerAppend, EffectMeta.workspace.resource.at("languages")).isLeft)
 
   test("pack-loader narrow policy denies wrong subject"):
-    val ctx = EffectContext.forPackLoader()
+    val ctx = EffectContexts.forPackLoader()
     val aliceCtx = ctx.withSubject(alice)
     assert(aliceCtx.authorize(wsRead, EffectMeta.workspace.resource.at("languages")).isLeft)
     assert(ctx.authorize(wsRead, EffectMeta.workspace.resource.at("languages")).isRight)
 
   test("PackLoader loads packs under forPackLoader gate"):
     import cairn.runtime.PackLoader
-    val packs = PackLoader(EffectContext.forPackLoader())
+    val packs = PackLoader(EffectContexts.forPackLoader())
     val stlc = packs.requireOwn("stlc")
     assert(stlc.nonEmpty)
 
@@ -293,7 +294,7 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("ReplayStore: CAS publish/merge syncs issuer-scoped snapshots across stores"):
     val cas = MemCas()
-    val casCtx = EffectContext.forCas()
+    val casCtx = EffectContexts.forCas()
     val a = ReplayStore.memory()
     val b = ReplayStore.memory()
     assert(a.consumeNonce("alice", "n1").isRight)
@@ -477,7 +478,7 @@ class AuthoritySuite extends munit.FunSuite:
     assert(miss.isLeft)
     // Composition-root factory accepts a grant bundle; capability-first denies write
     assert(ctx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/a")).isLeft)
-    val rooted = EffectContext.forFilesystem("/tmp*", capabilities = List(cap))
+    val rooted = EffectContexts.forFilesystem("/tmp*", capabilities = List(cap))
       .copy(subject = alice, clock = () => 0L)
     assert(rooted.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp/b")).isRight)
     // empty capabilities fall back to policy path
@@ -539,11 +540,11 @@ class AuthoritySuite extends munit.FunSuite:
     val dir = java.nio.file.Files.createTempDirectory("cairn-sync-abort")
     val aliceKp = Keypair.dev("alice")
     val auth = Map("alice" -> aliceKp.publicBytes)
-    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContext.forLedger())
+    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContexts.forLedger())
     src.append(aliceKp, auth, List(aliceKp.signTx(Tx.RegisterIdentity("alice", aliceKp.publicBytes))))
       .fold(e => fail(e), identity)
     // Consumer CAS denied — contains/get/put must not be treated as "missing"
-    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContext.forPackLoader())
+    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContexts.forPackLoader())
     val chainFile = dir.resolve("denied").resolve("chain")
     assert(!java.nio.file.Files.exists(chainFile))
     val pull = Sync.pull(src, denied, auth)
@@ -607,7 +608,7 @@ class AuthoritySuite extends munit.FunSuite:
     assert(Canon.encode(att.canon).toSeq != c1, "attenuation witness must affect canon")
 
   test("narrow deployment policies: process/ledger/lsp deny out-of-scope"):
-    val proc = EffectContext.forProcess()
+    val proc = EffectContexts.forProcess()
     assert(proc.authorize(
       EffectMeta.process.actionKey("run"),
       EffectMeta.process.resource.at("scala-cli")).isRight)
@@ -615,17 +616,17 @@ class AuthoritySuite extends munit.FunSuite:
       EffectMeta.process.actionKey("run"),
       EffectMeta.process.resource.at("/bin/sh")).isLeft, "narrow process denylist")
     assert(proc.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
-    val led = EffectContext.forLedger()
+    val led = EffectContexts.forLedger()
     val authSubj = led.withSubject(Subject("alice"))
     assert(authSubj.authorize(
       EffectMeta.ledgerTransport.actionKey("append"),
       EffectMeta.ledgerTransport.resource.at("/tmp/node")).isRight)
     assert(authSubj.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isLeft)
-    val lsp = EffectContext.forLsp()
+    val lsp = EffectContexts.forLsp()
     assert(lsp.authorize(
       EffectMeta.lsp.actionKey("read"), EffectMeta.lsp.resource.any).isRight)
     assert(lsp.authorize(fsWrite, EffectMeta.filesystem.resource.at("/x")).isLeft)
-    val casCtx = EffectContext.forCas()
+    val casCtx = EffectContexts.forCas()
     assert(casCtx.authorize(
       EffectMeta.cas.actionKey("put"),
       EffectMeta.cas.resource.at("abc")).isRight)
@@ -636,12 +637,12 @@ class AuthoritySuite extends munit.FunSuite:
     assert(led.authorize(fsRead, EffectMeta.filesystem.resource.at("/tmp")).isRight,
       "forLedger includes chain FS")
     assert(led.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp")).isRight)
-    val fsCtx = EffectContext.forFilesystem("/tmp*")
+    val fsCtx = EffectContexts.forFilesystem("/tmp*")
     assert(fsCtx.authorize(fsWrite, EffectMeta.filesystem.resource.at("/tmp/x")).isRight)
     assert(fsCtx.authorize(
       EffectMeta.ledgerTransport.actionKey("append"),
       EffectMeta.ledgerTransport.resource.at("/tmp")).isLeft)
-    val brCtx = EffectContext.forBranches()
+    val brCtx = EffectContexts.forBranches()
     assert(brCtx.authorize(
       EffectMeta.cas.actionKey("put"),
       EffectMeta.cas.resource.at("abc")).isRight)
@@ -652,7 +653,7 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("CasEffects: authorize → perform put/get/contains over MemCas"):
     val store = MemCas()
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     val art = Artifact(ArtifactKind.Term, Canon.CStr("hello-cas"))
     val put = CasEffects.run(store, Cas.Request.Put(art), ctx)
     assert(put.isRight, put.toString)
@@ -665,52 +666,52 @@ class AuthoritySuite extends munit.FunSuite:
       case _ => Digest.ofBytes(Array.empty)
     }, Right(art.digest))
     assertEquals(CasEffects.contains(store, key.valueHash, ctx), Right(true))
-    val denied = CasEffects.run(store, Cas.Request.Get(key.valueHash), EffectContext.forPackLoader())
+    val denied = CasEffects.run(store, Cas.Request.Get(key.valueHash), EffectContexts.forPackLoader())
     assert(denied.isLeft, denied.toString)
-    assert(CasEffects.contains(store, key.valueHash, EffectContext.forPackLoader()).isLeft)
+    assert(CasEffects.contains(store, key.valueHash, EffectContexts.forPackLoader()).isLeft)
 
   test("CasAdminEffects: stats authorized under forCas; denied under forPackLoader"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-cas-admin")
-    val ok = CasAdminEffects.stats(dir, EffectContext.forCas())
+    val ok = CasAdminEffects.stats(dir, EffectContexts.forCas())
     assert(ok.isRight, ok.toString)
-    val denied = CasAdminEffects.stats(dir, EffectContext.forPackLoader())
+    val denied = CasAdminEffects.stats(dir, EffectContexts.forPackLoader())
     assert(denied.isLeft, denied.toString)
 
   test("Provenance.why: stats-gated index under forCas; denied under forPackLoader"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-prov-auth")
     val disk = DiskCas(dir)
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     val out = Digest.ofBytes("out".getBytes)
     Provenance.record(disk, out, Nil, "test", ctx).fold(e => fail(e.toString), identity)
     val hops = Provenance.why(dir, out, ctx)
     assert(hops.isRight, hops.toString)
     assert(hops.exists(_.nonEmpty), hops.toString)
-    assert(Provenance.why(dir, out, EffectContext.forPackLoader()).isLeft)
+    assert(Provenance.why(dir, out, EffectContexts.forPackLoader()).isLeft)
 
   test("Branches refs FS: gated under forBranches; denied under forCas-only"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-refs-auth")
     val cas = MemCas()
     val art = Artifact(ArtifactKind.Term, Canon.CStr("branch-seed"))
-    val key = CasEffects.put(cas, art, EffectContext.forCas()).fold(e => fail(e.toString), identity)
-    val denied = Branches(cas, dir.resolve("refs"), EffectContext.forCas())
+    val key = CasEffects.put(cas, art, EffectContexts.forCas()).fold(e => fail(e.toString), identity)
+    val denied = Branches(cas, dir.resolve("refs"), EffectContexts.forCas())
     intercept[RuntimeException](denied.advance("main", key))
-    val ok = Branches(cas, dir.resolve("refs"), EffectContext.forBranches())
+    val ok = Branches(cas, dir.resolve("refs"), EffectContexts.forBranches())
     ok.advance("main", key)
     assertEquals(ok.load("main").head, Some(key))
     assertEquals(ok.list(), List("main"))
 
   test("Node chain FS: gated under forLedger; denied under forCas-only"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-chain-auth")
-    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContext.forCas())
+    val denied = cairn.systemhandler.Node(dir.resolve("denied"), EffectContexts.forCas())
     intercept[RuntimeException](denied.chainDigests)
     val alice = Keypair.dev("alice")
     val auth = Map("alice" -> alice.publicBytes)
-    val ok = cairn.systemhandler.Node(dir.resolve("ok"), EffectContext.forLedger())
+    val ok = cairn.systemhandler.Node(dir.resolve("ok"), EffectContexts.forLedger())
     assertEquals(ok.chainDigests, Nil)
     val block = ok.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
     assert(block.isRight, block.toString)
     assertEquals(ok.chainDigests, List(block.toOption.get.digest))
-    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContext.forLedger())
+    val src = cairn.systemhandler.Node(dir.resolve("src"), EffectContexts.forLedger())
     src.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
       .fold(e => fail(e), identity)
     val pullDenied = Sync.pull(src, denied, auth)
@@ -718,44 +719,44 @@ class AuthoritySuite extends munit.FunSuite:
 
   test("Transcript run-dir FS: gated under forFilesystem; denied under forCas-only"):
     val work = java.nio.file.Files.createTempDirectory("cairn-tx-fs")
-    val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
+    val packs = cairn.runtime.PackLoader(EffectContexts.forPackLoader())
     val src = """transcript t { node a ; }"""
     val denied = Transcript.run(
       src, Map.empty, work, Map.empty, packs,
-      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forCas())
+      EffectContexts.forLedger(), EffectContexts.forProcess(), EffectContexts.forCas())
     assert(denied.isLeft, denied.toString)
     assert(denied.swap.exists(_.contains("denied")), denied.toString)
     val ok = Transcript.run(
       src, Map.empty, work.resolve("ok"), Map.empty, packs,
-      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forFilesystem())
+      EffectContexts.forLedger(), EffectContexts.forProcess(), EffectContexts.forFilesystem())
     assert(ok.isRight, ok.toString)
 
   test("Cli hash ReadBytes: gated under forFilesystem; denied under forCas-only"):
     val f = java.nio.file.Files.createTempFile("cairn-hash", ".txt")
     java.nio.file.Files.writeString(f, "hello")
-    val packs = cairn.runtime.PackLoader(EffectContext.forPackLoader())
+    val packs = cairn.runtime.PackLoader(EffectContexts.forPackLoader())
     val denied = Cli.main(
       List("hash", f.toString), Map.empty, Map.empty, packs,
-      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forLsp(), EffectContext.forCas())
+      EffectContexts.forLedger(), EffectContexts.forProcess(), EffectContexts.forLsp(), EffectContexts.forCas())
     assert(denied.isLeft, denied.toString)
     assert(denied.swap.exists(_.contains("denied")), denied.toString)
     val ok = Cli.main(
       List("hash", f.toString), Map.empty, Map.empty, packs,
-      EffectContext.forLedger(), EffectContext.forProcess(), EffectContext.forLsp(), EffectContext.forFilesystem())
+      EffectContexts.forLedger(), EffectContexts.forProcess(), EffectContexts.forLsp(), EffectContexts.forFilesystem())
     assert(ok.isRight, ok.toString)
 
   test("CasAdminEffects.artifacts: gated under forLedger/forCas; denied under forFilesystem-only"):
     val root = java.nio.file.Files.createTempDirectory("cairn-arts")
     val art = Artifact(ArtifactKind.Term, Cst.toCanon(Cst.Leaf("x")))
-    CasEffects.put(DiskCas(root), art, EffectContext.forCas()).fold(e => fail(e.toString), identity)
-    val denied = CasAdminEffects.artifacts(root, EffectContext.forFilesystem())
+    CasEffects.put(DiskCas(root), art, EffectContexts.forCas()).fold(e => fail(e.toString), identity)
+    val denied = CasAdminEffects.artifacts(root, EffectContexts.forFilesystem())
     assert(denied.isLeft, denied.toString)
-    val ok = CasAdminEffects.artifacts(root, EffectContext.forLedger())
+    val ok = CasAdminEffects.artifacts(root, EffectContexts.forLedger())
     assert(ok.exists(_.exists(_.digest == art.digest)), ok.toString)
 
   test("LedgerTransport: authorize → perform append over Node"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-lt")
-    val node = cairn.systemhandler.Node(dir, EffectContext.forLedger())
+    val node = cairn.systemhandler.Node(dir, EffectContexts.forLedger())
     val alice = Keypair.dev("alice")
     val auth = Map("alice" -> alice.publicBytes)
     val req = cairn.systeminterface.LedgerTransport.Request.Append(
@@ -763,7 +764,7 @@ class AuthoritySuite extends munit.FunSuite:
     val got = cairn.systemhandler.LedgerTransport.run(node, alice, req, node.ctx)
     assert(got.isRight, got.toString)
     val denied = cairn.systemhandler.LedgerTransport.run(
-      node, alice, req, EffectContext.forPackLoader())
+      node, alice, req, EffectContexts.forPackLoader())
     assert(denied.isLeft, denied.toString)
 
   test("revoked capability cannot authorize (RevocationView on capability path)"):
@@ -794,11 +795,11 @@ class AuthoritySuite extends munit.FunSuite:
   test("disk RuntimeEffectRegistry drives authorize vocabulary"):
     import cairn.runtime.{EffectBootstrap, PackLoader}
     import cairn.systemhandler.RuntimeEffectRegistry
-    val packs = PackLoader(EffectContext.forPackLoader())
+    val packs = PackLoader(EffectContexts.forPackLoader())
     val loaded = EffectBootstrap.load(packs).fold(e => fail(e), identity)
     val reg = loaded.registry
     assert(reg.recognizes(reg.require(Effects.Family.Filesystem).actionKey("read")))
-    val ctx = EffectContext.forFilesystem("/tmp*", registry = reg)
+    val ctx = EffectContexts.forFilesystem("/tmp*", registry = reg)
     val key = reg.require(Effects.Family.Filesystem).actionKey("read")
     val res = reg.require(Effects.Family.Filesystem).resource.at("/tmp/z")
     assert(ctx.authorize(key, res).isRight, ctx.authorize(key, res).toString)
@@ -867,7 +868,7 @@ class AuthoritySuite extends munit.FunSuite:
   test("Branches.attachCertificate rejects forged tip; WorkflowRunner.Report is not a gate"):
     val cas = MemCas()
     val refs = Files.createTempDirectory("cairn-cert-forge")
-    val branches = Branches(cas, refs, EffectContext.forBranches())
+    val branches = Branches(cas, refs, EffectContexts.forBranches())
     val mod = cairn.core.Module(List("x" -> Cst.Leaf("1")))
     branches.importModule("main", mod)
     val forged = Artifact(ArtifactKind.Certificate, Canon.cmap(

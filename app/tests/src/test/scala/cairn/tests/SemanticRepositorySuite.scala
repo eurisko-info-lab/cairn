@@ -1,9 +1,10 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
-import cairn.systemhandler.{CasAdminEffects, CasEffects, DiskCas, EffectContext, Provenance, Keypair, Node}
+import cairn.systemhandler.{CasAdminEffects, CasEffects, DiskCas, Provenance, Keypair, Node}
 import cairn.runtime.Branches
 import java.nio.file.Files
 
@@ -14,7 +15,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
   val lang = Stlc.language
   val dl = Delta.deltaOf(lang).toOption.get
   val m0 = Module(List("a" -> Stlc.tru, "b" -> Stlc.fls))
-  private val casCtx = EffectContext.forBranches()
+  private val casCtx = EffectContexts.forBranches()
 
   def parseChange(src: String): Cst =
     Parser.parse(dl.grammar, src).fold(e => fail(e), identity)
@@ -89,7 +90,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(Right(_)) =>
         val alice = Keypair.dev("alice")
         val auth = Map("alice" -> alice.publicBytes)
-        val node = cairn.systemhandler.Node(dir.resolve("ledger"), EffectContext.forLedger())
+        val node = cairn.systemhandler.Node(dir.resolve("ledger"), EffectContexts.forLedger())
         node.append(alice, auth, List(alice.signTx(Tx.RegisterIdentity("alice", alice.publicBytes))))
           .fold(e => fail(e), identity)
         // Accept is local-only: heads stay empty until explicit publishHead

@@ -1,6 +1,7 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{CasEffects, EffectContext, Ed25519, Gossip, HttpNode, HttpSync, Keypair, Node, Provenance}
+import cairn.systemhandler.{CasEffects, Ed25519, Gossip, HttpNode, HttpSync, Keypair, Node, Provenance}
 import cairn.kernel.*
 import cairn.core.Module
 import cairn.core.{Parser, RoundTrip}
@@ -23,7 +24,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M35: Merkle state + inclusion proofs ----
 
   test("M35: inclusion proof verifies against root without full state"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-merkle"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-merkle"), EffectContexts.forLedger())
     casPut(node, Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     node.append(alice, bootAuth, List(
@@ -55,7 +56,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M36: multi-authority PoA ----
 
   test("M36: 2-of-3 rotation — add authorities by quorum, seal round-robin"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth"), EffectContexts.forLedger())
     // block 0: alice bootstraps herself as first on-chain authority
     val b0 = node.append(alice, bootAuth, List(
       alice.signTx(Tx.AddAuthority("alice", alice.publicBytes, Nil)))).fold(e => fail(e), identity)
@@ -75,7 +76,7 @@ class WaveGSuite extends munit.FunSuite:
     assertEquals(LedgerKernel.expectedSealer(st, 3), Some("alice"))
 
   test("M36: insufficient quorum rejected; removed authority cannot seal"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth2"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-auth2"), EffectContexts.forLedger())
     node.append(alice, bootAuth, List(
       alice.signTx(Tx.AddAuthority("alice", alice.publicBytes, Nil)))).fold(e => fail(e), identity)
     val addBobPayload = Tx.approvalPayload(Tx.AddAuthority("bob", bob.publicBytes, Nil))
@@ -110,7 +111,7 @@ class WaveGSuite extends munit.FunSuite:
     assert(cairn.core.Delta.deltaOf(dp).isRight) // Δ(ΔPolicy)
 
   test("M37: head update violating policy rejected with policy cited"):
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-policy"), EffectContexts.forLedger())
     casPut(node, Stlc.base.artifact)
     val key = Stlc.base.artifact.key
     val certDigest = Digest.of(Canon.CStr("some-proof-cert"))
@@ -136,7 +137,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M38: HTTP sync ----
 
   test("M38: two nodes sync over localhost HTTP; interrupted pull resumes"):
-    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-a"), EffectContext.forLedger())
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-a"), EffectContexts.forLedger())
     casPut(a, Stlc.language.artifact)
     Stlc.fragments.foreach(f => casPut(a, f.artifact))
     a.append(alice, bootAuth,
@@ -147,7 +148,7 @@ class WaveGSuite extends munit.FunSuite:
     val http = HttpNode(a, bootAuth)
     val port = http.start()
     try
-      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-b"), EffectContext.forLedger())
+      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-b"), EffectContexts.forLedger())
       val r1 = HttpSync.pull(s"http://localhost:$port", b, bootAuth).fold(e => fail(e), identity)
       assert(r1.fetchedBlocks > 0 || r1.fetchedBlobs > 0)
       assertEquals(b.state(bootAuth).map(_.heads("main")), Right(Stlc.language.artifact.key))
@@ -158,7 +159,7 @@ class WaveGSuite extends munit.FunSuite:
     finally http.stop()
 
   test("M38: fetchByHash shares a single definition by digest — no chain, branch, or publish needed"):
-    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-a"), EffectContext.forLedger())
+    val a = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-a"), EffectContexts.forLedger())
     // Deliberately never appended to a's chain and never published: this
     // artifact only exists in a's local CAS, unreachable via /chain or pull.
     val term = Stlc.tru
@@ -167,7 +168,7 @@ class WaveGSuite extends munit.FunSuite:
     val http = HttpNode(a, bootAuth)
     val port = http.start()
     try
-      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-b"), EffectContext.forLedger())
+      val b = Node(java.nio.file.Files.createTempDirectory("cairn-http-hash-b"), EffectContexts.forLedger())
       assertEquals(CasEffects.contains(b.cas, art.digest, b.ctx), Right(false))
       val fetched = HttpSync.fetchByHash(s"http://localhost:$port", b, art.digest).fold(e => fail(e), identity)
       assertEquals(fetched, art.digest)
@@ -180,7 +181,7 @@ class WaveGSuite extends munit.FunSuite:
   // ---- M39: gossip + fork choice ----
 
   test("M39: three nodes converge; fork surfaces as an explicit reorg event"):
-    def freshNode(tag: String) = Node(java.nio.file.Files.createTempDirectory(s"cairn-gossip-$tag"), EffectContext.forLedger())
+    def freshNode(tag: String) = Node(java.nio.file.Files.createTempDirectory(s"cairn-gossip-$tag"), EffectContexts.forLedger())
     val (a, b, c) = (freshNode("a"), freshNode("b"), freshNode("c"))
     // a builds 2 blocks; b builds 1 different block; c is empty
     register(a)
@@ -204,7 +205,7 @@ class WaveGSuite extends munit.FunSuite:
   test("M40: `why` walks 4 provenance hops from port text back to fragments"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-prov")
     val cas = cairn.systemhandler.DiskCas(dir)
-    val ctx = EffectContext.forCas()
+    val ctx = EffectContexts.forCas()
     val lang = Stlc.language
     def put(art: Artifact): Unit =
       CasEffects.put(cas, art, ctx).fold(e => fail(e.toString), identity)

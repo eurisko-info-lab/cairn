@@ -1,6 +1,7 @@
 package cairn.tests
+import cairn.runtime.EffectContexts
 
-import cairn.systemhandler.{EffectContext, Filesystem, Keypair, Node}
+import cairn.systemhandler.{Filesystem, Keypair, Node}
 import cairn.runtime.PackLoader
 import cairn.kernel.*
 import cairn.core.*
@@ -13,11 +14,11 @@ import scala.jdk.CollectionConverters.*
   * PKI pack with generic ΔPKI + Ed25519 chain validation + trust anchors.
   */
 class Phase8Suite extends munit.FunSuite:
-  private val packs = PackLoader(EffectContext.forPackLoader())
+  private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
-  private val ledgerCtx = EffectContext.forLedger()
-  private val processCtx = EffectContext.forProcess()
-  private val fsCtx = EffectContext.forFilesystem()
+  private val ledgerCtx = EffectContexts.forLedger()
+  private val processCtx = EffectContexts.forProcess()
+  private val fsCtx = EffectContexts.forFilesystem()
 
   private def readTranscriptSource(candidates: List[String], missing: String): String =
     val paths = candidates.map(java.nio.file.Path.of(_))
@@ -291,7 +292,7 @@ class Phase8Suite extends munit.FunSuite:
     val anchorDigest = Pki.anchorCertificateDigest(registry, "root").toOption.get
     val authority = Keypair.dev("authority")
     val auth = Map("authority" -> authority.publicBytes)
-    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"), EffectContext.forLedger())
+    val node = Node(java.nio.file.Files.createTempDirectory("cairn-pki"), EffectContexts.forLedger())
     val txs = List(
       authority.signTx(Tx.RegisterIdentity("authority", authority.publicBytes)),
       authority.signTx(Tx.RecordCertificate(anchorDigest)))
