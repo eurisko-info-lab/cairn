@@ -2,7 +2,9 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem, Gossip, HttpNode, HttpSync, Keypair, Node, Provenance, Sync}
+import cairn.systemhandler.{
+  BftFinality, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
+  HttpGossip, HttpNode, HttpSync, Keypair, Node, PeerRegistry, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.runtime.PackLoader
@@ -673,6 +675,45 @@ object Cli:
           val node = Node(home.resolve("nodeA"), ledgerCtx)
           HttpSync.fetchByHash(baseUrl, node, d).map(got => s"fetched ${got.hex}")
         }
+      case List("peer", "list") =>
+        PeerRegistry.load(home).map { d =>
+          if d.peers.isEmpty then "(no peers)"
+          else d.peers.map(p => s"${p.name}\t${p.role.name}\t${p.baseUrl}").mkString("\n")
+        }
+      case List("peer", "add", name, url) =>
+        PeerRegistry.add(home, name, url).map(d => s"peers=${d.peers.size} added $name")
+      case List("peer", "add", name, url, role) =>
+        PeerRegistry.Role.parse(role).flatMap { r =>
+          PeerRegistry.add(home, name, url, r).map(d => s"peers=${d.peers.size} added $name ($role)")
+        }
+      case List("peer", "remove", name) =>
+        PeerRegistry.remove(home, name).map(d => s"peers=${d.peers.size} removed $name")
+      case List("peer", "discover", url) =>
+        HttpGossip.discover(home, List(url)).map { d =>
+          s"discovered ${d.peers.size} peers from $url"
+        }
+      case List("gossip", "once") =>
+        gossipOnce(home, ledgerCtx)
+      case List("gossip", "run", nStr) if nStr.forall(_.isDigit) =>
+        val n = nStr.toInt
+        val root = home.resolve("nodeA").toAbsolutePath.normalize
+        java.nio.file.Files.createDirectories(root)
+        val node = Node(root, ledgerCtx)
+        val daemon = GossipDaemon("nodeA", node, home, defaultAuthorities, intervalMs = 50)
+        val reports = (1 to n).map(_ => daemon.tick())
+        daemon.stop()
+        val reorgs = reports.map(_.reorgs.size).sum
+        Right(s"gossip ticks=$n reorgs=$reorgs lastErrors=${reports.lastOption.map(_.errors.size).getOrElse(0)}")
+      case List("bft", "agree", hex) =>
+        Digest.parse(hex).flatMap { d =>
+          val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+          BftFinality.agreeLocal(replicas, replicas.head, view = 0, seq = 0, d).map { cert =>
+            BftFinality.FinalityCertificate.verify(cert, replicas.map(k => k.name -> k.publicBytes).toMap, 4) match
+              case Left(e)  => s"cert minted but verify failed: $e"
+              case Right(()) =>
+                s"bft finality ${cert.digest.short} for block ${d.short} commits=${cert.commits.size}"
+          }
+        }
       case porcelainCmd :: rest
           if Set("chain", "auth", "branch", "domain", "compose", "catalog",
             "workflow", "recover", "replay", "tx", "light", "porcelain").contains(porcelainCmd) =>
@@ -680,7 +721,7 @@ object Cli:
       case _ =>
         Left(
           "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|" +
-            "serve|pull|fetch-hash|" +
+            "serve|pull|fetch-hash|peer|gossip|bft|" +
             "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
             "repl|lsp|ui] <arg>")
 
@@ -692,10 +733,14 @@ object Cli:
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    val http = HttpNode(node, defaultAuthorities)
+    val http = HttpNode(node, defaultAuthorities, peersRoot = Some(home))
     val bound = http.start(port)
-    System.out.println(s"Cairn HTTP node at http://127.0.0.1:$bound")
-    System.out.println(s"  GET /chain  /heads  /blob/<digest>")
+    // Self-announce so discoverers find us
+    val selfUrl = s"http://127.0.0.1:$bound"
+    PeerRegistry.add(home, "local", selfUrl)
+    System.out.println(s"Cairn HTTP node at $selfUrl")
+    System.out.println(s"  GET /chain  /heads  /blob/<digest>  /peers")
+    System.out.println(s"  POST /peers (announce)  POST /bft/msg (if replica)")
     System.out.println(s"serving $root (CAIRN_HOME=$home)")
     System.out.println("Press Enter to stop.")
     scala.io.StdIn.readLine()
@@ -709,3 +754,14 @@ object Cli:
     HttpSync.pull(baseUrl, node, defaultAuthorities).map { r =>
       s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
     }
+
+  private def gossipOnce(home: Path, ledgerCtx: EffectContext): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    val report = HttpGossip.round("nodeA", node,
+      PeerRegistry.load(home).toOption.toList.flatMap(_.gossipPeers),
+      defaultAuthorities)
+    Right(
+      s"gossip once: pulled=${report.pulled.mkString(",")}" +
+        s" reorgs=${report.reorgs.size} errors=${report.errors.size}")

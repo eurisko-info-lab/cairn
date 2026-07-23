@@ -216,9 +216,12 @@ LeanCore `#check` envelope.
 
 ## Intentional residuals
 
-- **BFT / gossip daemon / peer discovery** — gossip daemon + peer discovery
-  deferred; `BftQuorum` is an in-process research/sim slice (`f < n/3`), not
-  production finality ([distribution.md](distribution.md))
+- **BFT / gossip daemon / peer discovery** — `PeerRegistry` + `GET/POST /peers`,
+  timed `GossipDaemon` over `HttpSync`, and `BftFinality` certificates
+  (`2f+1` signed commits for sealed PoA digests) are implemented. Remaining
+  honesty bounds: directory discovery (not DHT), static replica sets, and
+  BFT as finality-over-PoA rather than a public ledger
+  ([distribution.md](distribution.md))
 - **Separate `grammar.cairn`** — deferred ([bootstrap.md](bootstrap.md))
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in
   `examples/` (need handler crypto/CAS/filesystem); pure packs that need no

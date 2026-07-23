@@ -1,6 +1,6 @@
 # Distribution
 
-What exists after PLAN-2 (M38–M39) and what remains deferred.
+What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 ## Implemented
 
@@ -16,25 +16,41 @@ What exists after PLAN-2 (M38–M39) and what remains deferred.
   every step is an idempotent CAS write (second pull fetches zero).
   **CLI:** `cairn serve [port]` and `cairn pull <baseUrl>` / `cairn fetch-hash
   <baseUrl> <digest>` expose the same transport outside `sbt` (via `bin/cairn`).
-- **Gossip + fork choice** (`systemhandler.Gossip`, M39): round-based digest gossip
-  over real node stores; rule = longest valid chain, ties break on smallest
-  head digest; switching chains emits an EXPLICIT `Reorg(node, from, to,
-  forkPoint)` event — never a silent merge. Three-node convergence and a
-  forked-head reorg are asserted in `WaveGSuite`.
+- **Peer discovery** (`PeerRegistry` + `GET/POST /peers`): directory-based
+  (not DHT). Operators plant peers or nodes announce; `cairn peer discover
+  <url>` merges a remote directory. Gossip peers vs BFT replicas are tagged
+  (`role=gossip|replica`). Persisted as `$CAIRN_HOME/peers.canon`.
+- **HTTP gossip daemon** (`HttpGossip` / `GossipDaemon`): the M39 fork-choice
+  rule (longer chain; tip-digest tie-break) over `HttpSync` on a timer.
+  CLI: `cairn gossip once`, `cairn gossip run N`. In-process `Gossip.converge`
+  remains for transcripts.
+- **BFT finality certificates** (`BftFinality`): signed PrePrepare/Prepare/Commit
+  over Ed25519, `2f+1` quorum, minting a `FinalityCertificate` for an
+  already-sealed PoA block digest. Local agreement is `BftFinality.agreeLocal`;
+  HTTP transport is `POST /bft/msg` + `GET /bft/certs` on replica nodes.
+  CLI smoke: `cairn bft agree <block-digest-hex>`.
 - **Divergence surfacing** (`Sync.compare`): `Same / Ahead / Behind /
   Diverged(atHeight, headA, headB)`.
 - **Light clients** (M35): Merkle inclusion proofs verify "published" and
   "head" membership against a state root without the full state.
 
-## Deferred (design notes, no fake stubs)
+## Honesty bounds
 
-- **Network gossip daemon**: `Gossip` is an in-process simulation over real
-  stores; a daemon would run the same rounds over `HttpSync` on a timer
-  (CLI `serve`/`pull` is the process-boundary first step).
-- **BFT finality (production)**: multi-authority PoA with quorum governance and
-  rotation exists (M36). `BftQuorum` adds an in-process PBFT-lite research/sim
-  (`f < n/3`, authenticated static replica set, round-based delivery,
-  equivocation / quorum-intersection tests) — **not** production finality,
-  peer discovery, or a public ledger.
-- **Peer discovery** and **useful-work market hooks**: unchanged —
-  `RecordCertificate` remains the natural anchor for work receipts.
+| Capability | Bound |
+| --- | --- |
+| Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership |
+| Gossip daemon | Pull-based fork choice; no push epidemic or anti-entropy beyond want/have |
+| BFT finality | Static authenticated replica set (`f < n/3`); certifies PoA block digests — does not replace M36 round-robin sealing |
+| Useful-work market | Still deferred; `RecordCertificate` remains the natural anchor |
+
+## CLI cheat sheet
+
+```bash
+./bin/cairn serve 8743
+./bin/cairn peer add alice http://127.0.0.1:8743
+./bin/cairn peer discover http://127.0.0.1:8743
+./bin/cairn gossip once
+./bin/cairn gossip run 5
+./bin/cairn bft agree <64-hex-block-digest>
+./bin/cairn pull http://127.0.0.1:8743
+```

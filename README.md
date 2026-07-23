@@ -69,7 +69,10 @@ tests               → examples, rosetta, runtime, user
 sbt test                                                          # all acceptance suites + 100k fuzz corpus
 sbt examples/assembly && ./bin/cairn home                         # fat jar + wrapper (no sbt at runtime)
 ./bin/cairn transcript transcripts/mvp.cairn                      # seed $CAIRN_HOME (default ./.cas)
-./bin/cairn serve                                                 # HTTP node: /chain /heads /blob/…
+./bin/cairn serve                                                 # HTTP node: /chain /heads /blob/… /peers
+./bin/cairn peer add alice http://127.0.0.1:8743
+./bin/cairn gossip once                                           # HttpGossip round
+./bin/cairn bft agree <block-digest-hex>                          # 2f+1 finality certificate
 sbt "examples/runMain cairn.examples.Main ui"                     # Web explorer → http://127.0.0.1:8765
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
 sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest

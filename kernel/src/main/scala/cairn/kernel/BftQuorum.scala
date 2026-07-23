@@ -3,13 +3,15 @@ package cairn.kernel
 /** Research / simulation slice of a BFT-shaped quorum protocol.
   *
   * **Honesty bounds (read before using):**
-  * - In-process simulation only — no network, peer discovery, or public ledger.
+  * - Kernel protocol object — in-process by default; network deployment lives
+  *   in system-handler (`BftFinality`: signed HTTP messages + certificates).
   * - Assumes authenticated channels and a static replica set known a priori.
   * - Safety claimed only under `faulty < n/3` (classic quorum intersection).
   * - Liveness assumes partial synchrony after GST (not modeled here): the
   *   simulator runs round-based and always delivers messages in the round.
   * - Elevates existing PoA quorum *shape* toward an explicit BFT experiment;
-  *   does **not** replace M36 PoA sealing or claim mainnet readiness.
+  *   network finality certifies sealed PoA digests — does **not** replace M36
+  *   PoA sealing or claim open-membership mainnet readiness.
   * - No cryptocurrency / tokenomics.
   *
   * Protocol (PBFT-lite): primary proposes → replicas prepare → commit when

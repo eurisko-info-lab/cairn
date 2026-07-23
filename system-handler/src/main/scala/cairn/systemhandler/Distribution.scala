@@ -8,8 +8,16 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 /** HTTP node surface + want/have pull sync (Phase 3 http/network families).
   * Moved from `ledger.Distribution`. Chain-file writes go through
   * [[Filesystem]] on the consumer node (same as [[Sync.pull]]).
+  *
+  * Optional [[peersRoot]] enables `GET/POST /peers` discovery.
+  * Optional [[bft]] enables `POST /bft/msg` for [[BftFinality]] replicas.
   */
-final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
+final class HttpNode(
+    node: Node,
+    authorities: Map[String, Vector[Byte]],
+    peersRoot: Option[java.nio.file.Path] = None,
+    bft: Option[BftReplica] = None,
+):
   private var server: HttpServer | Null = null
 
   def start(port: Int = 0): Int =
@@ -18,6 +26,7 @@ final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
       ex.sendResponseHeaders(code, body.length)
       ex.getResponseBody.write(body)
       ex.close()
+    def readBody(ex: HttpExchange): Array[Byte] = ex.getRequestBody.readAllBytes()
     s.createContext("/chain", ex =>
       reply(ex, 200, node.chainDigests.map(_.hex).mkString("\n").getBytes))
     s.createContext("/blob/", ex =>
@@ -30,6 +39,47 @@ final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
         case Right(st) => reply(ex, 200,
           st.heads.toList.sortBy(_._1).map((b, k) => s"$b ${k.render}").mkString("\n").getBytes)
         case Left(e) => reply(ex, 500, e.getBytes))
+    peersRoot.foreach { root =>
+      s.createContext("/peers", ex =>
+        ex.getRequestMethod match
+          case "GET" =>
+            PeerRegistry.load(root) match
+              case Right(dir) => reply(ex, 200, Canon.encode(dir.canon))
+              case Left(e)    => reply(ex, 500, e.getBytes)
+          case "POST" =>
+            Canon.decode(readBody(ex)).flatMap(PeerRegistry.Peer.fromCanon) match
+              case Left(e) => reply(ex, 400, e.getBytes)
+              case Right(peer) =>
+                PeerRegistry.load(root).flatMap { d =>
+                  val next = d.upsert(peer)
+                  PeerRegistry.save(root, next).map(_ => next)
+                } match
+                  case Right(dir) => reply(ex, 200, Canon.encode(dir.canon))
+                  case Left(e)    => reply(ex, 500, e.getBytes)
+          case other => reply(ex, 405, s"method $other".getBytes))
+    }
+    bft.foreach { replica =>
+      s.createContext("/bft/msg", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)).flatMap(BftFinality.SignedMsg.fromCanon) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(sm) =>
+              replica.receive(sm) match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(out) =>
+                  peersRoot.foreach { root =>
+                    PeerRegistry.load(root).foreach { dir =>
+                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
+                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
+                      }
+                    }
+                  }
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+      )
+      s.createContext("/bft/certs", ex =>
+        reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
+    }
     s.start()
     server = s
     s.getAddress.getPort

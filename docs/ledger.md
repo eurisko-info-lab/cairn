@@ -52,6 +52,6 @@ agreement on the manifest (`domainAgreement` digest). Ungoverned local
 
 ## Out of scope (design hooks only, §6 Phase 5)
 
-Public tokenomics, open mining, BFT finality, peer discovery. See
-[distribution.md](distribution.md) for what exists (pull sync, divergence surfacing)
-and what is deferred.
+Public tokenomics, open mining, and Sybil-resistant open membership remain out
+of scope. Peer discovery (directory), HTTP gossip, and BFT finality certificates
+are implemented — see [distribution.md](distribution.md).
