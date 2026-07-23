@@ -41,6 +41,10 @@ final case class BranchManifest(
     primaryAncestor: Option[String] = None,
     /** Soft cross-domain references (additional ancestors by name). */
     references: List[String] = Nil,
+    /** Digest of the governing [[DomainAgreement]] certificate, if planted
+      * under namespace governance (optional — bootstrap forks may omit it).
+      */
+    domainAgreement: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -54,7 +58,8 @@ final case class BranchManifest(
     "certificates" -> Canon.CList(certificates.map(d => Canon.CStr(d.hex))),
     "primaryAncestor" -> primaryAncestor.fold(Canon.CTag("none", Canon.CStr("")))(n =>
       Canon.CTag("some", Canon.CStr(n))),
-    "references" -> Canon.CList(references.map(Canon.CStr.apply)))
+    "references" -> Canon.CList(references.map(Canon.CStr.apply)),
+    "domainAgreement" -> optDigest(domainAgreement))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -89,7 +94,8 @@ object BranchManifest:
       changeHistory = m.get("changeHistory").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
       certificates = m.get("certificates").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
       primaryAncestor = m.get("primaryAncestor").flatMap(name),
-      references = m.get("references").map(_.asList.map(_.asStr).filter(_.nonEmpty)).getOrElse(Nil))
+      references = m.get("references").map(_.asList.map(_.asStr).filter(_.nonEmpty)).getOrElse(Nil),
+      domainAgreement = m.get("domainAgreement").flatMap(dig))
 
 /** Pure checks for ledger domain ancestry (trunk / primary / references). */
 object DomainBranch:

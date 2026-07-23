@@ -240,9 +240,10 @@ LeanCore `#check` envelope.
   Accepts are journaled across CAS + refs + optional ledger
   (`recoverPendingAccepts`); `reclaimOrphanBlobs` is the mark/sweep reclaim
   path for unreferenced accept blobs (`liveCasRoots`).
-- **Domain ancestry residuals** — transitive primary-cycle detection is in;
-  namespace authority, ownership rules, ancestry-change policy, and evidence
-  tying domain ancestry to language dependencies remain open.
+- **Domain ancestry residuals** — transitive primary-cycle detection and
+  `DomainAgreement` / `plantGoverned` (owner, language digests, `replaces`
+  ancestry-change policy) are in. Peer-attested namespace registries and
+  automatic tying of agreements to PackLoader language digests remain open.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /

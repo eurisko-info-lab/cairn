@@ -234,6 +234,41 @@ class BranchSuite extends munit.FunSuite:
     assert(branches.forkFrom(
       "SDS", primary = Some("LAW"), references = List("CHEMISTRY")).isRight)
 
+  test("DomainAgreement plantGoverned records owner + language evidence; rejects bad replaces"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-domain-agree")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    val lawLang = Digest.of(Canon.CStr("law-lang"))
+    val sdsLang = Digest.of(Canon.CStr("sds-lang"))
+    val a0 = DomainAgreement(
+      child = "SDS",
+      primaryAncestor = Some("LAW"),
+      references = Nil,
+      owner = "alice",
+      childLanguage = Some(sdsLang),
+      ancestorLanguages = List("LAW" -> lawLang),
+      dependencyEvidence = Canon.cstrs(List("cert")),
+      replaces = None)
+    val planted = branches.plantGoverned(a0).fold(e => fail(e), identity)
+    assertEquals(planted.primaryAncestor, Some("LAW"))
+    assert(planted.domainAgreement.contains(a0.digest), planted.domainAgreement)
+    // amendment without replaces is rejected once live agreement exists
+    branches.forkFrom("CHEMISTRY", primary = None).fold(e => fail(e), identity)
+    val chemLang = Digest.of(Canon.CStr("chem-lang"))
+    val noReplace = a0.copy(
+      references = List("CHEMISTRY"),
+      ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
+      replaces = None)
+    assert(branches.plantGoverned(noReplace).isLeft)
+    // proper amendment: cite prior digest, add CHEMISTRY ref
+    val a1 = noReplace.copy(replaces = Some(a0.digest))
+    val amended = branches.plantGoverned(a1).fold(e => fail(e), identity)
+    assertEquals(amended.references, List("CHEMISTRY"))
+    assertEquals(amended.domainAgreement, Some(a1.digest))
+    // owner reassignment rejected
+    assert(branches.plantGoverned(a1.copy(owner = "mallory", replaces = Some(a1.digest))).isLeft)
+
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")
     assert(DomainBranch.wellFormed(

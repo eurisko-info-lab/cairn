@@ -47,7 +47,15 @@ lazy val surface = project.in(file("surface"))
 // Demos / entrypoints — may use the full stack (runtime composition).
 lazy val examples = project.in(file("examples"))
   .dependsOn(surface, user, runtime)
-  .settings(libraryDependencies += munit)
+  .settings(
+    libraryDependencies += munit,
+    assembly / mainClass := Some("cairn.examples.Main"),
+    assembly / assemblyJarName := "cairn.jar",
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", xs @ _*) => MergeStrategy.discard
+      case _ => MergeStrategy.first
+    },
+  )
 
 lazy val tests = project.in(file("tests"))
   .dependsOn(examples, rosetta, runtime, user)

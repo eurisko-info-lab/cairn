@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Standalone Cairn CLI — no sbt required at runtime once the fat jar is built.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+JAR="${CAIRN_JAR:-$ROOT/examples/target/scala-3.3.4/cairn.jar}"
+if [[ ! -f "$JAR" ]]; then
+  echo "missing $JAR — build with: sbt examples/assembly" >&2
+  exit 1
+fi
+exec java -jar "$JAR" "$@"

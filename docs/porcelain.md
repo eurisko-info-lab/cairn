@@ -20,6 +20,15 @@ Charb YAML theme
 ## CLI
 
 ```bash
+# Build a fat jar once, then use the wrapper (no sbt at runtime):
+sbt examples/assembly
+./bin/cairn home
+./bin/cairn transcript transcripts/mvp.cairn
+./bin/cairn serve 8743          # HttpNode on $CAIRN_HOME/nodeA
+./bin/cairn pull http://127.0.0.1:8743
+./bin/cairn porcelain authorization
+
+# Or via sbt (composition root unchanged):
 sbt "examples/runMain cairn.examples.Main chain status"
 sbt "examples/runMain cairn.examples.Main auth check alice"
 sbt "examples/runMain cairn.examples.Main branch list"

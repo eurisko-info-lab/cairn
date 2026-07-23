@@ -67,9 +67,10 @@ tests               → examples, rosetta, runtime, user
 
 ```bash
 sbt test                                                          # all acceptance suites + 100k fuzz corpus
-sbt "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"   # seed $CAIRN_HOME (default ./.cas)
-sbt "examples/runMain cairn.examples.Main home"                      # print CAIRN_HOME / ui root
-sbt "examples/runMain cairn.examples.Main ui"                        # Web explorer → http://127.0.0.1:8765
+sbt examples/assembly && ./bin/cairn home                         # fat jar + wrapper (no sbt at runtime)
+./bin/cairn transcript transcripts/mvp.cairn                      # seed $CAIRN_HOME (default ./.cas)
+./bin/cairn serve                                                 # HTTP node: /chain /heads /blob/…
+sbt "examples/runMain cairn.examples.Main ui"                     # Web explorer → http://127.0.0.1:8765
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
 sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest
 sbt "examples/runMain cairn.examples.Bench"                       # benchmarks

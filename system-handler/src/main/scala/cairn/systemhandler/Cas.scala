@@ -667,7 +667,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeHistory = nextHistory,
       certificates = cur.certificates,
       primaryAncestor = cur.primaryAncestor,
-      references = cur.references)
+      references = cur.references,
+      domainAgreement = cur.domainAgreement)
     val key = putArt(next.artifact)
     refsMkdirs()
     refsWrite(refPath(branch), key.valueHash.hex)
@@ -687,6 +688,52 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     */
   private def primaryOf(known: Set[String])(name: String): Option[String] =
     if known.contains(name) then load(name).primaryAncestor else None
+
+  /** Plant or amend a domain branch under a [[DomainAgreement]].
+    * Validates structural well-formedness, ownership / ancestry-change policy,
+    * stores the agreement certificate in CAS, and records its digest on the
+    * manifest. Local bootstrap without governance still uses [[forkFrom]].
+    */
+  def plantGoverned(
+      agreement: DomainAgreement,
+      module: Option[Module] = None,
+  ): Either[String, BranchManifest] =
+    val known = list().toSet
+    val live: Option[DomainAgreement] =
+      if known.contains(agreement.child) then
+        load(agreement.child).domainAgreement.flatMap { d =>
+          getByDigest(d).toOption.flatMap(a => DomainAgreement.fromCanon(a.body).toOption)
+        }
+      else None
+    for
+      _ <- DomainAgreement.wellFormed(agreement, known, primaryOf(known))
+      _ <- DomainAgreement.allowsTransition(agreement, live)
+      art = agreement.artifact
+      _ = putArt(art)
+      base <-
+        if known.contains(agreement.child) then
+          val cur = load(agreement.child)
+          val next = cur.copy(
+            primaryAncestor = agreement.primaryAncestor,
+            references = agreement.references,
+            domainAgreement = Some(art.digest),
+            certificates = (cur.certificates :+ art.digest).distinct)
+          DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => storeManifest(next))
+        else
+          forkFrom(
+            agreement.child,
+            agreement.primaryAncestor,
+            module = None,
+            agreement.references).map { planted =>
+            storeManifest(planted.copy(
+              domainAgreement = Some(art.digest),
+              certificates = (planted.certificates :+ art.digest).distinct))
+          }
+    yield module match
+      case None    => base
+      case Some(m) =>
+        // importModule → advance preserves domainAgreement
+        importModule(agreement.child, m)
 
   def forkFrom(
       child: String,
@@ -865,7 +912,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           changeHistory = cur.changeHistory,
           certificates = cur.certificates,
           primaryAncestor = cur.primaryAncestor,
-          references = cur.references)
+          references = cur.references,
+          domainAgreement = cur.domainAgreement)
         putArt(marked.artifact) // conflictState recorded; head unchanged
         refsMkdirs()
         refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)

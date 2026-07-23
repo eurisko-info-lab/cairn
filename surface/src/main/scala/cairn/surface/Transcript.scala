@@ -2,7 +2,7 @@ package cairn.surface
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem, Gossip, Keypair, Node, Provenance, Sync}
+import cairn.systemhandler.{CasEffects, DiskCas, EffectContext, Filesystem, Gossip, HttpNode, HttpSync, Keypair, Node, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.runtime.PackLoader
@@ -662,6 +662,17 @@ object Cli:
           System.out.println("Press Enter to stop.")
           scala.io.StdIn.readLine()
           "ui stopped"
+      case List("serve") =>
+        serveHttp(home, 0, ledgerCtx)
+      case List("serve", portStr) if portStr.forall(_.isDigit) =>
+        serveHttp(home, portStr.toInt, ledgerCtx)
+      case List("pull", baseUrl) =>
+        pullHttp(home, baseUrl, ledgerCtx)
+      case List("fetch-hash", baseUrl, hex) =>
+        Digest.parse(hex).flatMap { d =>
+          val node = Node(home.resolve("nodeA"), ledgerCtx)
+          HttpSync.fetchByHash(baseUrl, node, d).map(got => s"fetched ${got.hex}")
+        }
       case porcelainCmd :: rest
           if Set("chain", "auth", "branch", "domain", "compose", "catalog",
             "workflow", "recover", "replay", "tx", "light", "porcelain").contains(porcelainCmd) =>
@@ -669,5 +680,32 @@ object Cli:
       case _ =>
         Left(
           "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|" +
+            "serve|pull|fetch-hash|" +
             "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
             "repl|lsp|ui] <arg>")
+
+  private def defaultAuthorities: Map[String, Vector[Byte]] =
+    val kp = Keypair.dev("dev-authority")
+    Map(kp.name -> kp.publicBytes)
+
+  private def serveHttp(home: Path, port: Int, ledgerCtx: EffectContext): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    val http = HttpNode(node, defaultAuthorities)
+    val bound = http.start(port)
+    System.out.println(s"Cairn HTTP node at http://127.0.0.1:$bound")
+    System.out.println(s"  GET /chain  /heads  /blob/<digest>")
+    System.out.println(s"serving $root (CAIRN_HOME=$home)")
+    System.out.println("Press Enter to stop.")
+    scala.io.StdIn.readLine()
+    http.stop()
+    Right(s"serve stopped (was :$bound)")
+
+  private def pullHttp(home: Path, baseUrl: String, ledgerCtx: EffectContext): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    HttpSync.pull(baseUrl, node, defaultAuthorities).map { r =>
+      s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
+    }

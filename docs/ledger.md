@@ -32,8 +32,14 @@ ancestor plus optional soft refs. `DomainBranch.wellFormed` (Kernel) and
 `Branches.forkFrom` / `referTo` (system-handler) enforce known names,
 non-self / non-overlapping primary∩refs, and **transitive primary-cycle**
 detection via `primaryOf`. Causal `parents` on the same manifest remain
-change-digest edges for merge/LCA — not domain names. Namespace authority,
-ownership rules, and ancestry-change policy remain residual work.
+change-digest edges for merge/LCA — not domain names.
+
+**Namespace governance** uses `DomainAgreement` (certificate body tagged
+`domain-agreement`): owner subject, child/ancestor language digests, dependency
+evidence, and an ancestry-change policy (`replaces` must cite the live agreement
+digest; owner and child name are sticky). `Branches.plantGoverned` stores the
+agreement on the manifest (`domainAgreement` digest). Ungoverned local
+`forkFrom` remains available for bootstrap.
 
 ## Invariants
 

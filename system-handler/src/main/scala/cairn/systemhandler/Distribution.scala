@@ -12,8 +12,8 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 final class HttpNode(node: Node, authorities: Map[String, Vector[Byte]]):
   private var server: HttpServer | Null = null
 
-  def start(): Int =
-    val s = HttpServer.create(InetSocketAddress(0), 0)
+  def start(port: Int = 0): Int =
+    val s = HttpServer.create(InetSocketAddress(port), 0)
     def reply(ex: HttpExchange, code: Int, body: Array[Byte]): Unit =
       ex.sendResponseHeaders(code, body.length)
       ex.getResponseBody.write(body)

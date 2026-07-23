@@ -14,6 +14,8 @@ What exists after PLAN-2 (M38–M39) and what remains deferred.
   byte on arrival (content-addressed re-hash + kernel replay), write the chain
   via `Filesystem`, and RESUME safely — interruption loses nothing because
   every step is an idempotent CAS write (second pull fetches zero).
+  **CLI:** `cairn serve [port]` and `cairn pull <baseUrl>` / `cairn fetch-hash
+  <baseUrl> <digest>` expose the same transport outside `sbt` (via `bin/cairn`).
 - **Gossip + fork choice** (`systemhandler.Gossip`, M39): round-based digest gossip
   over real node stores; rule = longest valid chain, ties break on smallest
   head digest; switching chains emits an EXPLICIT `Reorg(node, from, to,
@@ -27,7 +29,8 @@ What exists after PLAN-2 (M38–M39) and what remains deferred.
 ## Deferred (design notes, no fake stubs)
 
 - **Network gossip daemon**: `Gossip` is an in-process simulation over real
-  stores; a daemon would run the same rounds over `HttpSync` on a timer.
+  stores; a daemon would run the same rounds over `HttpSync` on a timer
+  (CLI `serve`/`pull` is the process-boundary first step).
 - **BFT finality (production)**: multi-authority PoA with quorum governance and
   rotation exists (M36). `BftQuorum` adds an in-process PBFT-lite research/sim
   (`f < n/3`, authenticated static replica set, round-based delivery,
