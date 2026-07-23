@@ -1,23 +1,31 @@
 # Architecture: trust and effect boundaries
 
-Present-tense source of truth for Cairn's Kernel / Core / System / User /
-Runtime split, current test health, and parity against the summarized prior
-projects (§13 of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md)). This file describes
-what *is*, not the history of how it got here.
+Present-tense source of truth for Cairn's container / content / app split
+(and, within that, the Kernel / Core / System / User / Runtime trust tiers),
+current test health, and parity against the summarized prior projects (§13
+of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md)). This file describes what *is*,
+not the history of how it got here.
 
 ## Areas
 
-| Area                 | Responsibility                                                        | Trust status                                     |
-| --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| **Kernel**            | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
-| **Core**              | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
-| **System Interface**  | Define effect operations, resources, requests, responses              | Pure platform contract                            |
-| **System Handler**    | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
-| **User**              | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
-| **Runtime**           | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
+| Area                 | Sub-project           | Responsibility                                                        | Trust status                                     |
+| --------------------- | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| **Kernel**            | shared                | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
+| **Core**              | `content`              | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
+| **System Interface**  | `container`            | Define effect operations, resources, requests, responses              | Pure platform contract                            |
+| **System Handler**    | `container`            | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
+| **User**              | `content`              | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
+| **Runtime**           | `app`                  | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
 
 Purity alone does not place Core outside the TCB. Every Core result used for
 acceptance has an independent Kernel validation path.
+
+`container` and `content` are one-way isolated from each other — neither
+imports the other directly (enforced by `ModuleBoundarySuite`'s "content
+does not import system-handler" / "container does not import content.user
+or content.proof" guards, with a shrinking allowlist for the residual
+`container→core` imports still being untangled). `app` is the only
+sub-project allowed to depend on both.
 
 ## Module graph
 
