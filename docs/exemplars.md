@@ -25,6 +25,12 @@ on demand. It is **never materialized** as checked-in `.cairn` (no `dpki` /
 Compose of Law without PKI, or SDS without Law/PKI, fails. Closed SDS
 amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
 
+**Ledger domain trunk** (same DAG as branch ancestry): `SdsDomainTree.plant`
+forks `PKI` and `CHEMISTRY` off the trunk, `LAW` with primary `PKI`, and
+`SDS` with primary `LAW` + soft reference `CHEMISTRY`. The causal workflow
+plants that tree first; work branches (`sds-author`, `sds-approved`, …) hang
+under `SDS` via `forkFrom` / `underSds`.
+
 ## PKI — on par with GRANITE top-level
 
 `languages/pki.cairn` + `examples/pki` (`Pki` glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
@@ -79,9 +85,9 @@ amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
   *consume* SDS modules/outlines. `PdfMinimal` emits one-page PDF bytes.
   RoundTrip trust gate for text surfaces.
 - Causal workflow: `languages/sds-workflow.cairn` + `causal.cairn` (checked
-  sequence); host `SdsCausalWorkflow` runs effectful Branches/ledger steps
-  and attaches judgment-checked certificates (`sds-certificate` /
-  `certificateKindOk`).
+  sequence); host `SdsCausalWorkflow` plants `SdsDomainTree` then runs
+  effectful Branches/ledger steps under SDS and attaches judgment-checked
+  certificates (`sds-certificate` / `certificateKindOk`).
 - Composition sealing via L5 `Encryption` (X25519 hybrid) to PKI encryption
   certs — confidential ingredients recoverable only with matching private key.
 - Acetone tutorial publishes industrial shadow to the ledger; H-phrases are

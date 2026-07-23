@@ -34,6 +34,12 @@ object SdsCausalWorkflow:
       ledgerPublished: Boolean,
       /** Steps completed by the generic [[WorkflowRunner]]. */
       runnerCompleted: List[String],
+      /** Ledger domain hubs planted (PKI→LAW→SDS + CHEMISTRY). */
+      domainTreeOk: Boolean,
+      sdsPrimary: Option[String],
+      sdsReferences: List[String],
+      /** Work branch `sds-author` hangs under the SDS domain hub. */
+      authorPrimary: Option[String],
   )
 
   def run(work: Path): Report =
@@ -60,6 +66,10 @@ object SdsCausalWorkflow:
       case r if !r.ok => throw RuntimeException(s"EU-CLP conform: ${r.errors.mkString("; ")}")
       case _ => ()
 
+    // Ledger domain hubs before any SDS work branch (PKI→LAW→SDS + CHEMISTRY).
+    val planted = SdsDomainTree.plant(branches).fold(e => throw RuntimeException(e), identity)
+    if !planted.ok then throw RuntimeException("domain tree ancestry mismatch after plant")
+
     // Slots filled by workflow handlers (author→…→publish).
     var industrialTip: Option[SemanticRepository.ValidatedTip] = None
     var rebaseMerged = false
@@ -73,10 +83,15 @@ object SdsCausalWorkflow:
     var ledgerPublished = false
     var alice: Option[Keypair] = None
 
+    def underSdsTip(name: String, tip: SemanticRepository.ValidatedTip): Unit =
+      SdsDomainTree.underSds(branches, name).fold(e => throw RuntimeException(e), identity)
+      branches.commitTip(name, tip)
+
     val runnerSteps = wf.steps.map(s => WorkflowRunner.Step(s.name, s.phase))
     val runner = WorkflowRunner.run(runnerSteps, step => step.name match
       case "author" =>
-        branches.importModule("sds-author", base)
+        SdsDomainTree.underSds(branches, "sds-author", Some(base))
+          .fold(e => throw RuntimeException(e), identity)
         Right(base.digest.short)
       case "shadow" =>
         val shadowCs = parse(
@@ -84,13 +99,15 @@ object SdsCausalWorkflow:
         val tip = SemanticRepository.tipAfter(lang, base, shadowCs)
           .fold(e => throw RuntimeException(e), identity)
         industrialTip = Some(tip)
-        branches.commitTip("sds-industrial", tip)
+        underSdsTip("sds-industrial", tip)
         Right(tip.tipDigest.short)
       case "rebase" =>
         val pctCs = parse("""{ replace cleaner = mixture of ( acetone pct 70 , secretBlend pct 15 ) ; }""")
         val pctTip = SemanticRepository.tipAfter(lang, base, pctCs)
           .fold(e => throw RuntimeException(e), identity)
-        branches.commitTip("sds-base-rev", pctTip)
+        underSdsTip("sds-base-rev", pctTip)
+        SdsDomainTree.underSds(branches, "sds-merged")
+          .fold(e => throw RuntimeException(e), identity)
         rebaseMerged = branches.mergeBranches(lang, "sds-merged", "sds-base-rev", "sds-industrial") match
           case Right(Right(_)) => true
           case Right(Left(_)) => false
@@ -107,7 +124,7 @@ object SdsCausalWorkflow:
         Right(conflictOverlap.mkString(","))
       case "approve" =>
         val tip = industrialTip.getOrElse(throw RuntimeException("shadow before approve"))
-        branches.commitTip("sds-approved", tip)
+        underSdsTip("sds-approved", tip)
         val approved = branches.headModule("sds-approved").fold(e => throw RuntimeException(e), identity)
         approvedDigest = approved.digest
         Right(approvedDigest.short)
@@ -141,7 +158,7 @@ object SdsCausalWorkflow:
               clock = () => 0L)
             capCtx.authorize(putKey, EffectMeta.cas.resource.at(tipDigest.hex)).isRight
           case Left(_) => false
-        branches.commitTip("sds-hist", tip)
+        underSdsTip("sds-hist", tip)
         val tip2 = SemanticRepository.tipAfter(lang, tip.tip, parse(
           """{ add labelShadow = shadow cleanerProduct overrides h319 with "Eye hazard - industrial SDS wording" ; }"""))
           .fold(e => throw RuntimeException(e), identity)
@@ -168,6 +185,14 @@ object SdsCausalWorkflow:
     if runner.completed != wf.steps.map(_.name) then
       throw RuntimeException(s"workflow runner incomplete: ${runner.completed}")
 
+    val hubs = SdsDomainTree.requirePlanted(branches).fold(e => throw RuntimeException(e), identity)
+    val authorMan = branches.load("sds-author")
+    if !authorMan.primaryAncestor.contains("SDS") then
+      throw RuntimeException(s"domain: sds-author primary=${authorMan.primaryAncestor}, expected SDS")
+    // Advances must keep hub ancestry (approve tip under SDS).
+    if !branches.load("sds-approved").primaryAncestor.contains("SDS") then
+      throw RuntimeException("domain: sds-approved lost SDS primary after commitTip")
+
     val industrial = industrialTip.getOrElse(throw RuntimeException("missing industrial tip"))
     Report(
       workflowDigest = SdsWorkflow.causalModule.digest,
@@ -184,4 +209,8 @@ object SdsCausalWorkflow:
       tipSignatureHex = tipSigHex,
       certificateDigests = certificateDigests,
       ledgerPublished = ledgerPublished,
-      runnerCompleted = runner.completed)
+      runnerCompleted = runner.completed,
+      domainTreeOk = hubs.ok,
+      sdsPrimary = hubs.sds.primaryAncestor,
+      sdsReferences = hubs.sds.references,
+      authorPrimary = authorMan.primaryAncestor)

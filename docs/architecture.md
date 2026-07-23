@@ -258,8 +258,10 @@ LeanCore `#check` envelope.
   `causal.cairn` declare the author→…→publish sequence (`workflowStepOk` /
   `workflowPhaseOk`). `languages/sds-certificate.cairn` +
   `workflow-kinds.cairn` declare approval/sign/publication kinds
-  (`certificateKindOk`). `SdsCausalWorkflow` is the thin effectful driver.
-  Residual: CAS/Branches/Ed25519/ledger orchestration stays Scala.
+  (`certificateKindOk`). `SdsCausalWorkflow` plants `SdsDomainTree`
+  (`PKI`/`CHEMISTRY` on trunk, `LAW`←`PKI`, `SDS`←`LAW`+ref `CHEMISTRY`) then
+  runs work branches under `SDS`. Residual: CAS/Branches/Ed25519/ledger
+  orchestration stays Scala.
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches

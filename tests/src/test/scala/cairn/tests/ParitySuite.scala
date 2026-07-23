@@ -86,6 +86,10 @@ class ParitySuite extends munit.FunSuite:
     assertEquals(r.certificateDigests.length, 3)
     assert(r.ledgerPublished)
     assertEquals(r.runnerCompleted, r.workflowSteps)
+    assert(r.domainTreeOk, "PKI→LAW→SDS + CHEMISTRY hubs")
+    assertEquals(r.sdsPrimary, Some("LAW"))
+    assertEquals(r.sdsReferences, List("CHEMISTRY"))
+    assertEquals(r.authorPrimary, Some("SDS"))
 
   test("parity: SDS corpus tutorial capability-constrained editing"):
     import cairn.examples.sds.SdsCorpusTutorial
