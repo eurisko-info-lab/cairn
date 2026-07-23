@@ -268,7 +268,10 @@ class DistributionDaemonSuite extends munit.FunSuite:
       block).fold(e => fail(e), identity)
     val err = bft.receive(vc)
     assert(err.isLeft, err.toString)
-    assert(err.swap.toOption.exists(_.contains("prepare-quorum")), err.toString)
+    assert(
+      err.swap.toOption.exists(e =>
+        e.contains("prepare-quorum") || e.contains("PrePrepare evidence")),
+      err.toString)
 
   test("four HttpNode BftReplicas exchange messages and mint a network certificate"):
     val auth = Keypair.dev("auth")
@@ -309,7 +312,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
       val cert = BftFinality.agreeNetworkRemote(
-        urls, block, replicas.head, polls = 64, pollSleepMs = 30)
+        urls, block, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
@@ -327,7 +331,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val block1 = nodes("r0").chainDigests(1)
       assert(nodes.values.forall(_.chainDigests == nodes("r0").chainDigests))
       val cert1 = BftFinality.agreeNetworkRemote(
-        urls, block1, replicas.head, polls = 64, pollSleepMs = 30)
+        urls, block1, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert1.blockDigest, block1)
       assertEquals(cert1.seq, 1)
@@ -388,7 +393,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }
       val initiator = replicas.find(_.name == "r1").get
       val cert = BftFinality.agreeNetworkRemote(
-        urls, block, initiator, polls = 80, pollSleepMs = 40, maxViews = 4)
+        urls, block, initiator, chainId = block, replicaSet = manifest.replicaSetDigest,
+        polls = 80, pollSleepMs = 40, maxViews = 4)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assert(cert.view >= 1, clues(cert.view))
@@ -444,7 +450,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
       val cert = BftFinality.agreeNetworkRemote(
-        urls, block, kps.head, polls = 64, pollSleepMs = 30)
+        urls, block, kps.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
@@ -627,6 +634,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), successor)
       .fold(e => fail(e), identity)
     val block0 = node.chainDigests.head
+    // Staged future set keeps itself before activation and refuses early heights.
     val pre = BftReplica.certified(
       replicas.head, successor,
       node = Some(node), ledgerAuth = ledgerAuth,
@@ -634,37 +642,36 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val preErr = pre.propose(0, 0, block0)
     assert(preErr.isLeft, preErr.toString)
     assert(preErr.swap.toOption.exists(_.contains("not yet active")), preErr.toString)
+    // Height-driven adoption: same history mtime, tip crosses activation → adopt successor.
+    val live = BftReplica.certified(
+      replicas.head, genesis,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      home = Some(home),
+      stateStore = Some(home.resolve("bft-state.canon"))).fold(e => fail(e), identity)
+    live.propose(0, 0, block0).fold(e => fail(e), identity)
+    assertEquals(live.setDigest, genesis.replicaSetDigest)
+    val histPath = BftFinality.defaultReplicaSetHistoryPath(home)
+    val frozenMtime = java.nio.file.Files.getLastModifiedTime(histPath)
     node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
       .fold(e => fail(e), identity) // tip height becomes 1
+    java.nio.file.Files.setLastModifiedTime(histPath, frozenMtime)
+    live.refreshHistory().fold(e => fail(e), identity)
+    assertEquals(live.setDigest, successor.replicaSetDigest)
     val hist = BftFinality.loadReplicaSetHistory(home).fold(e => fail(e), identity)
     assertEquals(hist.manifests.length, 2)
     assertEquals(hist.activeAt(0).map(_.digest), Right(genesis.digest))
     assertEquals(hist.activeAt(1).map(_.digest), Right(successor.digest))
+    // Constructing with the predecessor at tip≥activation hot-reloads onto the successor.
     val post = BftReplica.certified(
       replicas.head, genesis,
       node = Some(node), ledgerAuth = ledgerAuth,
       home = Some(home)).fold(e => fail(e), identity)
     val block1 = node.chainDigests(1)
-    // Old set may still finalize pre-deactivation heights, but not post-activation ones.
-    val postErr = post.propose(0, 1, block1)
-    assert(postErr.isLeft, postErr.toString)
-    assert(postErr.swap.toOption.exists(_.contains("deactivated")), postErr.toString)
-    // Receive must not emit Commit seals after deactivation either.
-    val primaryId = BftFinality.designatedPrimary(replicas.map(_.name), 0).fold(e => fail(e), identity)
-    val primary = replicas.find(_.name == primaryId.id).get
-    val genesisId = node.chainDigests.head
-    val pp = BftFinality.sign(
-      primary,
-      cairn.kernel.BftQuorum.Msg.PrePrepare(
-        0, 1, BftFinality.valueOfBlock(block1), primaryId),
-      genesis.replicaSetDigest,
-      genesisId)
-      .fold(e => fail(e), identity)
-    val recvErr = post.receive(pp)
-    assert(recvErr.isLeft, recvErr.toString)
-    assert(recvErr.swap.toOption.exists(_.contains("deactivated")), recvErr.toString)
-    assertEquals(post.drainOutbound(), Nil)
+    post.refreshHistory().fold(e => fail(e), identity)
+    assertEquals(post.setDigest, successor.replicaSetDigest)
+    post.propose(0, 1, block1).fold(e => fail(e), identity)
     // Independent verify rejects old-set certs at the successor height.
+    val genesisId = node.chainDigests.head
     val fakeCert = BftFinality.FinalityCertificate(
       block1, 0, 1, Nil, genesis.replicaSetDigest, 1L, block0, genesisId)
     assert(BftFinality.FinalityCertificate.verifyAgainstHistory(
@@ -856,3 +863,224 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(loaded.isLeft, loaded.toString)
     assert(loaded.swap.toOption.exists(_.contains("predecessor")), loaded.toString)
     assert(ValidatedReplicaSetHistory.verify(List(genesis, forged), Ed25519.verify).isLeft)
+
+  test("NewView rejects forged and duplicated ViewChange evidence"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val root = java.nio.file.Files.createTempDirectory("cairn-bft-nv-forge")
+    val node = Node(root, ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val chainId = node.chainDigests.head
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth).fold(e => fail(e), identity)
+    def signedVc(kp: Keypair): BftFinality.SignedMsg =
+      BftFinality.sign(
+        kp,
+        Msg.ViewChange(1, Nil, ReplicaId(kp.name)),
+        manifest.replicaSetDigest,
+        chainId).fold(e => fail(e), identity)
+    val vcs = replicas.take(3).map(signedVc)
+    val evidence = vcs.map(sm =>
+      ViewChangeEvidence(
+        sm.msg.asInstanceOf[Msg.ViewChange], sm.seal, sm.replicaSet, sm.chainId))
+    val primary1 = BftFinality.designatedPrimary(replicas.map(_.name), 1)
+      .fold(e => fail(e), identity)
+    val primaryKp = replicas.find(_.name == primary1.id).get
+    // Duplicate sender.
+    val dup = Msg.NewView(1, Nil, primary1, evidence :+ evidence.head)
+    val dupSm = BftFinality.sign(
+      primaryKp, dup, manifest.replicaSetDigest, chainId).fold(e => fail(e), identity)
+    val dupErr = bft.receive(dupSm)
+    assert(dupErr.isLeft, dupErr.toString)
+    assert(dupErr.swap.toOption.exists(_.contains("duplicate")), dupErr.toString)
+    // Unsigned / empty seal evidence.
+    val forged = Msg.NewView(
+      1, Nil, primary1,
+      evidence.map(_.copy(seal = Vector.empty)))
+    val forgedSm = BftFinality.sign(
+      primaryKp, forged, manifest.replicaSetDigest, chainId).fold(e => fail(e), identity)
+    val forgedErr = bft.receive(forgedSm)
+    assert(forgedErr.isLeft, forgedErr.toString)
+    assert(forgedErr.swap.toOption.exists(_.contains("missing seals")), forgedErr.toString)
+
+  test("prepared-then-primary-fails recovers via view-change with durable prepares"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val homes = replicas.map(k => k.name -> java.nio.file.Files.createTempDirectory(s"cairn-ip-${k.name}")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    replicas.foreach { k =>
+      BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(k.name)), manifest)
+        .fold(e => fail(e), identity)
+    }
+    val bfts = replicas.map { k =>
+      k.name -> BftReplica.certified(
+        k, manifest,
+        node = Some(nodes(k.name)), ledgerAuth = ledgerAuth,
+        certStore = Some(homes(k.name).resolve("bft-certs.canon")),
+        stateStore = Some(homes(k.name).resolve("bft-state.canon")),
+        home = Some(homes(k.name))).fold(e => fail(e), identity)
+    }.toMap
+    def deliverAll(from: String, msgs: List[BftFinality.SignedMsg], exclude: Set[String] = Set.empty): Unit =
+      msgs.foreach { sm =>
+        bfts.foreach { (id, r) =>
+          if id != from && !exclude.contains(id) then
+            r.receive(sm).fold(e => fail(s"$id: $e"), identity)
+        }
+      }
+    // Primary proposes; everyone prepares — then primary is excluded (fails).
+    val out0 = bfts("r0").propose(0, 0, block).fold(e => fail(e), identity)
+    deliverAll("r0", out0)
+    // Exchange prepare/commit follow-ons among honest backups (exclude failed primary).
+    var round = 0
+    var progress = true
+    while round < 16 && progress do
+      progress = false
+      bfts.foreach { (id, r) =>
+        if id != "r0" then
+          val out = r.drainOutbound()
+          if out.nonEmpty then
+            progress = true
+            deliverAll(id, out, exclude = Set("r0"))
+      }
+      round += 1
+    // View-change without the failed primary.
+    val honest = List("r1", "r2", "r3")
+    honest.foreach { id =>
+      val out = bfts(id).requestViewChange(1).fold(e => fail(e), identity)
+      deliverAll(id, out, exclude = Set("r0"))
+    }
+    round = 0
+    progress = true
+    while round < 16 && progress do
+      progress = false
+      honest.foreach { id =>
+        val out = bfts(id).drainOutbound()
+        if out.nonEmpty then
+          progress = true
+          deliverAll(id, out, exclude = Set("r0"))
+      }
+      round += 1
+    val certs = honest.flatMap(id => bfts(id).finalityCerts)
+    assert(certs.exists(_.blockDigest == block), clues(certs.map(c => (c.blockDigest.short, c.view))))
+    // Durable prepare/VC evidence survived the failover path on a backup.
+    val state = Canon.decode(java.nio.file.Files.readAllBytes(homes("r1").resolve("bft-state.canon")))
+      .flatMap(BftFinality.decodeReplicaStateWithReplicaSet)
+      .fold(e => fail(e), identity)
+    assert(
+      state.prepareSeals.nonEmpty || state.viewChangeEvidence.nonEmpty ||
+        state.prePrepareSeals.nonEmpty,
+      state.toString)
+
+  test("restart during failover restores prepare seals and ViewChange votes"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-restart-vc")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
+      .fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    val statePath = home.resolve("bft-state.canon")
+    val bft0 = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      stateStore = Some(statePath),
+      home = Some(home)).fold(e => fail(e), identity)
+    bft0.propose(0, 0, block).fold(e => fail(e), identity)
+    // Quorum of prepares from peers.
+    replicas.tail.foreach { kp =>
+      val prep = BftFinality.sign(
+        kp,
+        Msg.Prepare(0, 0, BftFinality.valueOfBlock(block).digest, ReplicaId(kp.name)),
+        manifest.replicaSetDigest,
+        block).fold(e => fail(e), identity)
+      bft0.receive(prep).fold(e => fail(e), identity)
+    }
+    val vc = bft0.requestViewChange(1).fold(e => fail(e), identity)
+    assert(vc.exists(_.msg.isInstanceOf[Msg.ViewChange]))
+    assert(java.nio.file.Files.exists(statePath))
+    val decoded = Canon.decode(java.nio.file.Files.readAllBytes(statePath))
+      .flatMap(BftFinality.decodeReplicaStateWithReplicaSet)
+      .fold(e => fail(e), identity)
+    assert(decoded.prepareSeals.nonEmpty, decoded.prepareSeals.toString)
+    assert(decoded.viewChangeEvidence.nonEmpty, decoded.viewChangeEvidence.toString)
+    assert(decoded.prePrepareSeals.nonEmpty, decoded.prePrepareSeals.toString)
+    val viewBefore = bft0.currentView
+    val bft1 = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      stateStore = Some(statePath),
+      home = Some(home)).fold(e => fail(e), identity)
+    assertEquals(bft1.currentView, viewBefore)
+    // Restored prepared evidence must still be usable for a further view-change.
+    val again = bft1.requestViewChange(viewBefore + 1)
+    assert(again.isRight, again.toString)
+
+  test("follower adopts certificates then recovers after restart"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val homeA = java.nio.file.Files.createTempDirectory("cairn-adopt-a")
+    val homeB = java.nio.file.Files.createTempDirectory("cairn-adopt-b")
+    val a = Node(homeA.resolve("node"), ledgerCtx)
+    val b = Node(homeB.resolve("node"), ledgerCtx)
+    a.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    Sync.pull(a, b, ledgerAuth, None).fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homeA), manifest)
+      .fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homeB), manifest)
+      .fold(e => fail(e), identity)
+    val block = a.chainDigests.head
+    val cert = BftFinality.agreeForSealedBlock(a, ledgerAuth, replicas, block)
+      .fold(e => fail(e), identity)
+    BftFinality.saveCerts(homeA.resolve("bft-certs.canon"), List(cert)).fold(e => fail(e), identity)
+    BftFinality.advanceCheckpoint(homeA, cert).fold(e => fail(e), identity)
+    // Persist certs before checkpoint on follower, then interrupt before chain write.
+    val intent = BftFinality.AdoptionIntent(
+      a.chainDigests, List(cert.digest), phase = "certs-checkpoint")
+    BftFinality.mergeVerifiedCerts(homeB, List(cert)).fold(e => fail(e), identity)
+    BftFinality.advanceCheckpoint(homeB, cert).fold(e => fail(e), identity)
+    BftFinality.saveAdoptionIntent(homeB, intent).fold(e => fail(e), identity)
+    assert(java.nio.file.Files.exists(BftFinality.defaultAdoptionIntentPath(homeB)))
+    BftFinality.resumeFollowerAdoption(homeB, b).fold(e => fail(e), identity)
+    assertEquals(b.chainDigests, a.chainDigests)
+    assert(!java.nio.file.Files.exists(BftFinality.defaultAdoptionIntentPath(homeB)))
+    val cp = BftFinality.loadCheckpoint(homeB).fold(e => fail(e), identity)
+    assert(cp.exists(_.certificate == cert.digest))
+
+  test("peer URL generations advance monotonically on rebind"):
+    val root = java.nio.file.Files.createTempDirectory("cairn-peer-gen")
+    val kp = Keypair.dev("r0")
+    PeerRegistry.addBound(root, kp, "http://127.0.0.1:1", PeerRegistry.Role.Replica)
+      .fold(e => fail(e), identity)
+    val g0 = PeerRegistry.load(root).fold(e => fail(e), identity).byName("r0").get
+    assertEquals(g0.generation, 0L)
+    PeerRegistry.addBound(root, kp, "http://127.0.0.1:1", PeerRegistry.Role.Replica)
+      .fold(e => fail(e), identity)
+    assertEquals(
+      PeerRegistry.load(root).fold(e => fail(e), identity).byName("r0").get.generation, 0L)
+    PeerRegistry.addBound(root, kp, "http://127.0.0.1:2", PeerRegistry.Role.Replica)
+      .fold(e => fail(e), identity)
+    val g1 = PeerRegistry.load(root).fold(e => fail(e), identity).byName("r0").get
+    assertEquals(g1.generation, 1L)
+    assertEquals(g1.baseUrl, "http://127.0.0.1:2")

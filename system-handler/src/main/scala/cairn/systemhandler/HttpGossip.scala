@@ -47,16 +47,17 @@ object HttpGossip:
       case Right(certs) =>
         BftFinality.loadReplicaSetHistory(home).flatMap { hist =>
           local.blocks.flatMap { blocks =>
-            certs.sortBy(_.height).foldLeft[Either[String, Boolean]](Right(false)) {
-              (acc, cert) =>
-                acc.flatMap { changed =>
-                  if !blocks.exists(_.digest == cert.blockDigest) then Right(changed)
-                  else
-                    BftFinality.FinalityCertificate.verifyAgainstBlocks(
-                      cert, hist, blocks, authorities).flatMap { _ =>
-                      BftFinality.advanceCheckpoint(home, cert).map(cp => changed || cp.certificate == cert.digest)
-                    }
-                }
+            certs.sortBy(_.height).foldLeft[Either[String, List[BftFinality.FinalityCertificate]]](
+              Right(Nil)) { (acc, cert) =>
+              acc.flatMap { ok =>
+                if !blocks.exists(_.digest == cert.blockDigest) then Right(ok)
+                else
+                  BftFinality.FinalityCertificate.verifyAgainstBlocks(
+                    cert, hist, blocks, authorities).map(_ => ok :+ cert)
+              }
+            }.flatMap { verified =>
+              // Certificate sync is independent of chain reorganization.
+              BftFinality.adoptVerifiedCertificates(home, verified)
             }
           }
         }

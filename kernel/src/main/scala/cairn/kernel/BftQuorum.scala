@@ -25,8 +25,9 @@ object BftQuorum:
 
   /** Proof that a replica prepared `valueDigest` at `seq` in `preparedView`.
     * `value` enables re-proposal without relying on local slot memory.
-    * Network path requires a prepare quorum in `prepareVotes`; the in-process
-    * simulator may leave votes empty (local slot quorums already proved it).
+    * Network path requires a signed PrePrepare plus a prepare quorum in
+    * `prepareVotes`; the in-process simulator may leave seals empty (local
+    * slot quorums already proved it).
     */
   final case class PreparedCert(
       seq: Int,
@@ -34,6 +35,18 @@ object BftQuorum:
       preparedView: Int,
       value: Option[Value] = None,
       prepareVotes: List[(ReplicaId, Vector[Byte])] = Nil,
+      prePrepareSeal: Option[Vector[Byte]] = None,
+      prePrepareFrom: Option[ReplicaId] = None,
+  )
+
+  /** Cryptographically sealed ViewChange carried inside a NewView certificate.
+    * The seal is verified by the network layer against `(domain, chainId, replicaSet, vc)`.
+    */
+  final case class ViewChangeEvidence(
+      vc: Msg.ViewChange,
+      seal: Vector[Byte],
+      replicaSet: Digest,
+      chainId: Digest,
   )
 
   enum Msg:
@@ -45,8 +58,8 @@ object BftQuorum:
         newView: Int,
         prepared: List[PreparedCert],
         from: ReplicaId,
-        /** Quorum of ViewChange bodies used to derive `prepared` (may be empty in legacy sim paths). */
-        viewChanges: List[ViewChange] = Nil,
+        /** Quorum of sealed ViewChange envelopes (empty only in the in-process sim). */
+        evidence: List[ViewChangeEvidence] = Nil,
     )
 
   final case class Decision(view: Int, seq: Int, value: Value, commits: List[ReplicaId])
@@ -188,7 +201,11 @@ object BftQuorum:
       val st2 = state.copy(viewChanges = state.viewChanges + (vc.newView -> forView))
       if forView.size >= st2.q && designatedPrimary(replicaIds, vc.newView).contains(st2.id) then
         val selected = selectPrepared(forView.values)
-        (st2, List(Msg.NewView(vc.newView, selected, st2.id, forView.values.toList)))
+        // Sim path: empty seals. Network layer replaces with sealed envelopes before signing.
+        val evidence = forView.values.toList.map { body =>
+          ViewChangeEvidence(body, Vector.empty, Digest.of(Canon.CStr("")), Digest.of(Canon.CStr("")))
+        }
+        (st2, List(Msg.NewView(vc.newView, selected, st2.id, evidence)))
       else (st2, Nil)
 
   def deliverNewView(
@@ -199,15 +216,17 @@ object BftQuorum:
     if state.faulty || nv.newView <= state.view then (state, Nil)
     else if !designatedPrimary(replicaIds, nv.newView).contains(nv.from) then (state, Nil)
     else
-      val evidence =
-        if nv.viewChanges.nonEmpty then nv.viewChanges
+      val bodies =
+        if nv.evidence.nonEmpty then nv.evidence.map(_.vc)
         else state.viewChanges.getOrElse(nv.newView, Map.empty).values.toList
-      if evidence.size < state.q then (state, Nil)
-      else if selectPrepared(evidence).map(p => (p.seq, p.valueDigest, p.preparedView)) !=
+      val senders = bodies.map(_.from)
+      if bodies.size < state.q then (state, Nil)
+      else if senders.length != senders.distinct.length then (state, Nil)
+      else if bodies.exists(_.newView != nv.newView) then (state, Nil)
+      else if selectPrepared(bodies).map(p => (p.seq, p.valueDigest, p.preparedView)) !=
           nv.prepared.map(p => (p.seq, p.valueDigest, p.preparedView)) then (state, Nil)
       else
-        // Merge evidence into local view-change log, advance view, re-propose prepared values.
-        val merged = evidence.foldLeft(state.viewChanges.getOrElse(nv.newView, Map.empty)) { (acc, vc) =>
+        val merged = bodies.foldLeft(state.viewChanges.getOrElse(nv.newView, Map.empty)) { (acc, vc) =>
           acc + (vc.from -> vc)
         }
         val st2 = state.copy(

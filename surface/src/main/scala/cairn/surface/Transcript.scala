@@ -923,7 +923,9 @@ object Cli:
       dir <- PeerRegistry.load(home)
       urls <- PeerRegistry.resolveReplicaUrls(dir, manifest)
       initiator <- localReplicaSigner(home, manifest.ids)
-      cert <- BftFinality.agreeNetworkRemote(urls, block, initiator)
+      genesis <- BftFinality.chainId(node)
+      cert <- BftFinality.agreeNetworkRemote(
+        urls, block, initiator, chainId = genesis, replicaSet = manifest.replicaSetDigest)
       hist <- BftFinality.loadReplicaSetHistory(home)
       _ <- BftFinality.FinalityCertificate.verifyAgainstHistory(cert, hist, node, ledgerAuth)
       _ <- BftFinality.advanceCheckpoint(home, cert)
@@ -1071,7 +1073,9 @@ object Cli:
             }
             urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
             cert <- BftFinality.agreeNetworkRemote(
-              urls, block, replicas.head, polls = 64, pollSleepMs = 30)
+              urls, block, replicas.head,
+              chainId = block, replicaSet = manifest.replicaSetDigest,
+              polls = 64, pollSleepMs = 30)
             _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
               cert, manifest, nodes("r0"), ledgerAuth)
           yield s"bft ok ${cert.digest.short}"

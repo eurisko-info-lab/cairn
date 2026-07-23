@@ -80,14 +80,20 @@ object PeerRegistry:
         case e: CodecError => Left(e.getMessage)
 
     /** Build a peer whose URL is Ed25519-bound to `signer`. */
-    def bound(signer: Signer, baseUrl: String, role: Role = Role.Gossip): Peer =
-      val seal = signer.sign(bindingBytes(signer.name, baseUrl, role, generation = 0L))
+    def bound(
+        signer: Signer,
+        baseUrl: String,
+        role: Role = Role.Gossip,
+        generation: Long = 0L,
+    ): Peer =
+      val seal = signer.sign(bindingBytes(signer.name, baseUrl, role, generation))
       Peer(
         signer.name,
         baseUrl,
         role,
         publicKey = Some(signer.publicBytes),
-        urlSeal = Some(seal))
+        urlSeal = Some(seal),
+        generation = generation)
 
     /** Verify optional URL binding. Replica role always requires a valid seal. */
     def verifyBinding(p: Peer): Either[String, Unit] =
@@ -155,15 +161,22 @@ object PeerRegistry:
       }
     }
 
-  /** Add a peer with URL binding signed by `signer` (name must match). */
+  /** Add a peer with URL binding signed by `signer` (name must match).
+    * Generation is monotonic: same URL/role keeps the prior generation; a URL
+    * or role change advances it so stale sealed announcements lose to fresh ones.
+    */
   def addBound(
       root: Path,
       signer: Signer,
       baseUrl: String,
       role: Role = Role.Gossip,
   ): Either[String, Directory] =
-    val peer = Peer.bound(signer, baseUrl, role)
     load(root).flatMap { d =>
+      val generation = d.byName(signer.name) match
+        case Some(p) if p.baseUrl == baseUrl && p.role == role => p.generation
+        case Some(p) => p.generation + 1L
+        case None    => 0L
+      val peer = Peer.bound(signer, baseUrl, role, generation)
       val next = d.upsert(peer)
       save(root, next).map(_ => next)
     }

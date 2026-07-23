@@ -90,7 +90,8 @@ final class HttpNode(
           Canon.decode(readBody(ex)).flatMap(BftFinality.ProposeRequest.fromCanon) match
             case Left(e) => reply(ex, 400, e.getBytes)
             case Right(req) =>
-              BftFinality.verifyProposeRequest(replica.authorities, req).flatMap { _ =>
+              BftFinality.verifyProposeRequest(
+                replica.authorities, req, Some(replica.chainId), Some(replica.setDigest)).flatMap { _ =>
                 // Sequence is derived from sealed block height on the primary.
                 replica.proposeBlock(req.view, req.block)
               } match
@@ -111,7 +112,8 @@ final class HttpNode(
           Canon.decode(readBody(ex)).flatMap(BftFinality.ViewChangeRequest.fromCanon) match
             case Left(e) => reply(ex, 400, e.getBytes)
             case Right(req) =>
-              BftFinality.verifyViewChangeRequest(replica.authorities, req).flatMap { _ =>
+              BftFinality.verifyViewChangeRequest(
+                replica.authorities, req, Some(replica.chainId), Some(replica.setDigest)).flatMap { _ =>
                 replica.requestViewChange(req.newView)
               } match
                 case Left(e) => reply(ex, 400, e.getBytes)
@@ -206,32 +208,37 @@ object HttpSync:
       }
       // Adopt remote finality certs only after proving them against the candidate
       // chain; never consult `to.chainDigests` before this chain is committed.
-      _ <- checkpointHome match
-        case None => Right(())
+      verifiedCerts <- checkpointHome match
+        case None => Right(Nil)
         case Some(home) =>
           BftFinality.fetchCerts(baseUrl) match
             // `/bft/certs` is optional for ordinary non-BFT HTTP peers.
-            case Left(e) if e.contains("/bft/certs ->") => Right(())
+            case Left(e) if e.contains("/bft/certs ->") => Right(Nil)
             case Left(e) => Left(s"bft cert fetch failed: $e")
             case Right(remoteCerts) =>
               BftFinality.loadReplicaSetHistory(home).flatMap { hist =>
-                remoteCerts.sortBy(_.height).foldLeft[Either[String, Unit]](Right(())) {
-                  (acc, cert) =>
-                    acc.flatMap { _ =>
-                      if !blocks.exists(_.digest == cert.blockDigest) then Right(())
-                      else
-                        BftFinality.FinalityCertificate.verifyAgainstBlocks(
-                          cert, hist, blocks, authorities).flatMap { _ =>
-                          BftFinality.advanceCheckpoint(home, cert).map(_ => ())
-                        }
-                    }
+                remoteCerts.sortBy(_.height).foldLeft[Either[String, List[BftFinality.FinalityCertificate]]](
+                  Right(Nil)) { (acc, cert) =>
+                  acc.flatMap { ok =>
+                    if !blocks.exists(_.digest == cert.blockDigest) then Right(ok)
+                    else
+                      BftFinality.FinalityCertificate.verifyAgainstBlocks(
+                        cert, hist, blocks, authorities).map(_ => ok :+ cert)
+                  }
                 }
               }
-      durableCheckpoint <- checkpointHome match
-        case None => Right(checkpoint)
-        case Some(home) => BftFinality.loadCheckpoint(home).map(_.orElse(checkpoint))
-      _ <- BftFinality.requireExtendsCheckpoint(remoteChain, durableCheckpoint)
-      _ <- to.writeChain(remoteChain)
+      _ <- (checkpointHome, verifiedCerts) match
+        case (Some(home), cs) if cs.nonEmpty || remoteChain != to.chainDigests =>
+          BftFinality.adoptFollowerGeneration(home, to, remoteChain, cs)
+        case (Some(home), _) =>
+          // No new certs and same chain tip: still require checkpoint extension.
+          BftFinality.loadCheckpoint(home).flatMap { durable =>
+            BftFinality.requireExtendsCheckpoint(remoteChain, durable.orElse(checkpoint))
+              .flatMap(_ => to.writeChain(remoteChain))
+          }
+        case (None, _) =>
+          BftFinality.requireExtendsCheckpoint(remoteChain, checkpoint)
+            .flatMap(_ => to.writeChain(remoteChain))
     yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
 
 object IdentityResolvers:
