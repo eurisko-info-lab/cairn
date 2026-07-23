@@ -71,7 +71,7 @@ jobs:
         run: |
           sbt -batch "examples/runMain cairn.examples.Main digests" | tee /tmp/cairn-digests-raw.txt
           grep -E '^(language|  fragment|rosetta) ' /tmp/cairn-digests-raw.txt > /tmp/cairn-digests.txt
-          diff -u tests/golden/digests.txt /tmp/cairn-digests.txt
+          diff -u app/tests/golden/digests.txt /tmp/cairn-digests.txt
       - name: MVP transcript (fresh-checkout reproducibility)
         run: sbt -batch "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"
       - name: MAX transcript (3 nodes, gossip, ports, queries)
@@ -79,6 +79,6 @@ jobs:
       - name: Language files are in sync with the meta surface
         run: |
           sbt -batch "examples/runMain cairn.examples.Main emit-languages"
-          git diff --exit-code languages/
+          git diff --exit-code content/languages/
       - name: Benchmarks (informational)
         run: sbt -batch "examples/runMain cairn.examples.Bench"

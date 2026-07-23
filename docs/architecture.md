@@ -21,31 +21,40 @@ acceptance has an independent Kernel validation path.
 
 ## Module graph
 
+Physical layout now mirrors the trust boundary: three top-level folders —
+**`container/`** (`system-interface`, `system-handler`, `kernel-container`),
+**`content/`** (`core`, `user`, `proof`, `languages/`, `kernel-rewrite`), and
+**`app/`** (`runtime`, `surface`, `rosetta`, `examples`, `tests` — the only
+layer allowed to depend on both container and content) — plus `kernel` at the
+repo root as the one shared foundation both container and content depend on.
+sbt project ids are unchanged by the nesting; only each project's `file(...)`
+base directory moved.
+
 ```text
 kernel                                                # shared: Canon, Artifact,
                                                        # Fragment, Cst, Grammar,
                                                        # GrammarLint, MetaValidate,
                                                        # SurfacePack, Authority,
                                                        # Effects, EffectMeta
-kernel-container    → kernel                          # Merkle, Ledger, BftQuorum,
+container/kernel-container  → kernel                  # Merkle, Ledger, BftQuorum,
                                                        # BranchManifest,
                                                        # ReplicaSetManifest,
                                                        # CertificateAttach,
                                                        # DomainAgreement,
                                                        # IdentityResolver
-kernel-rewrite      → kernel                          # Rename, Rewrite, Checker
-core                → kernel, kernel-rewrite
-system-interface    → kernel, kernel-container
-system-handler      → kernel, kernel-container, core, system-interface
-user                → kernel, core, system-interface   (↛ system-handler)
-runtime             → user, system-handler, core, kernel, system-interface
+content/kernel-rewrite      → kernel                  # Rename, Rewrite, Checker
+content/core                → kernel, kernel-rewrite
+container/system-interface  → kernel, kernel-container
+container/system-handler    → kernel, kernel-container, core, system-interface
+content/user                → kernel, core, system-interface   (↛ system-handler)
+app/runtime                 → user, system-handler, core, kernel, system-interface
 
 # Aggregation above the DAG (not CAS/Meta/authority owners)
-proof               → core, kernel
-rosetta             → proof, core, system-handler
-surface             → proof, runtime, system-handler
-examples            → surface, user, runtime   # demos / host glue
-tests               → examples, rosetta, runtime, user
+content/proof                → core, kernel
+app/rosetta                  → proof, core, system-handler
+app/surface                  → proof, runtime, system-handler
+app/examples                 → surface, user, runtime   # demos / host glue
+app/tests                    → examples, rosetta, runtime, user
 ```
 
 `workbench` and `ledger` (former re-export façades) have been retired outright
@@ -54,7 +63,7 @@ tests               → examples, rosetta, runtime, user
 
 Key prohibition: `user ↛ system-handler`.
 
-### Kernel container/rewrite split (toward a 3-way container/content/app layout)
+### Kernel container/rewrite split and the physical container/content/app move
 
 `kernel` used to be depended on directly by every other project. Grepping real
 usage (not just file naming) showed it splits three ways: 8 files used only by
@@ -66,17 +75,23 @@ accepting it into CAS — the container needs the real composition/lint
 machinery, not just a value type) and `Authority`/`Effects` (because
 `core.PolicyEval` decides access via `Authority`, which itself references
 `Effects.ActionKey`). All three modules keep the `cairn.kernel` package, so
-this was a pure project-boundary + `build.sbt` change with no import rewrites.
+this was a pure project-boundary + `build.sbt` change with no import rewrites
+(slice 1).
 
-This is slice 1 of moving toward a **container** (`system-interface` +
-`system-handler` + `kernel-container`) / **content** (`core` + `user` + `proof`
-+ `languages/*` + `kernel-rewrite`) / **app** (`runtime` + `surface` +
-`rosetta` + `examples` + `tests`, the only layer allowed to depend on both)
-grouping, with `kernel` remaining a shared foundation both container and
-content depend on. Physically moving directories into top-level
-`container/`/`content/`/`app/` folders, adding a module-boundary guard for the
-container/content split, and updating this doc's `## Areas` table are
-follow-up slices, not yet done.
+Slice 2 did the physical move: every project directory except `kernel` now
+lives under `container/`, `content/`, or `app/` per the layout above.
+`languages/` (raw `.cairn` pack sources, not an sbt project) moved to
+`content/languages/`; the PackLoader's language-directory discovery
+(`cairn.systemhandler.Workspace.languageDirs` in `PackFiles.scala`) was
+updated to look under `content/languages` — the authorization resource-path
+naming it rewrites onto (`"languages*"`, matched by
+`core.PolicyEval.packLoaderWorkspace`) stays a symbolic name, intentionally
+decoupled from the physical path, so it did not need to change.
+
+Remaining follow-up (slice 3): add an actual `ModuleBoundarySuite` guard that
+enforces container ⟂ content (no direct cross-imports outside `kernel`/
+`kernel-container`/`app`), and refresh this doc's `## Areas` table to name
+`container`/`content`/`app` directly instead of the pre-split area names.
 
 ## Digests and surfaces
 
@@ -85,7 +100,7 @@ follow-up slices, not yet done.
 - **Artifacts:** Kernel `Artifact` / `ArtifactKind` (including proofs,
   certificates, branch manifests, change-sets, agreement certificates).
 - **Surfaces:** grammar parse/print round-trips; Meta fragment IR; language
-  packs under `languages/` and `user/`.
+  packs under `content/languages/` and `content/user/`.
 - **Ports:** Rosetta projections are obligations, not Kernel-checked host
   proofs — see [rosetta.md](rosetta.md).
 
@@ -323,7 +338,7 @@ LeanCore `#check` envelope.
 
 Full suite: `sbt test`. Language and Rosetta digests: print with
 `sbt "examples/runMain cairn.examples.Main digests"` and compare against the
-checked-in fixture `tests/golden/digests.txt` — CI runs that comparison
+checked-in fixture `app/tests/golden/digests.txt` — CI runs that comparison
 explicitly (`.github/workflows/ci.yml` step **Golden digests**). Digests change
 whenever a language's semantic content changes; update the fixture in the same
 commit. Bootstrap transcripts (`mvp` / `max`, plus adapted imports listed in
@@ -334,7 +349,7 @@ Charb YAML themes promote through [porcelain.md](porcelain.md) (`Plumbing` /
 `deferred`. Exact Charb dispositions are pinned in
 `transcripts/charb/dispositions.tsv`. `emit-languages` regenerates the
 checked-in `.cairn` mirrors for `pki`/`law`/`sds`/`search`/`stlc`/`meta`;
-`git diff --exit-code languages/` must be clean after running it — CI enforces
+`git diff --exit-code content/languages/` must be clean after running it — CI enforces
 this (the language-sync check).
 
 ## Parity vs summarized sources (§13)

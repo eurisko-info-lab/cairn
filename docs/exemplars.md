@@ -5,7 +5,7 @@ against summarized sources (see [docs/architecture.md](architecture.md) for
 the parity matrix). Packs are real code + tests, not name-drops.
 
 **Expression:** PKI, Law, and SDS object languages live in checked-in `.cairn`
-files under [languages/](../languages/) (same meta+grammar surface as
+files under [content/languages/](../content/languages/) (same meta+grammar surface as
 `stlc.cairn` / `meta.cairn`). Scala under `examples/` is host glue (crypto,
 domain gates, tutorials) — not the language definition.
 

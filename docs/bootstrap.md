@@ -15,7 +15,7 @@ step by step, in terms of the layers.
 
 STLC ships as five fragments — `base`, `types`, `lambda`, `booleans`, `typing` —
 each pure data: sorts, constructors (with binder positions), grammar alternatives,
-rewrite rules, judgment rules ([Stlc.scala](../examples/src/main/scala/cairn/examples/stlc/Stlc.scala)).
+rewrite rules, judgment rules ([Stlc.scala](../app/examples/src/main/scala/cairn/examples/stlc/Stlc.scala)).
 
 `Compose.compose("stlc", fragments)` amalgamates them by pushout: shared identical
 definitions unify, same-name-different-definition is a structured `ComposeError`
