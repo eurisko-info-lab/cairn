@@ -33,6 +33,17 @@ object ChangeAlgebra:
       case _ => Nil
     }.toSet
 
+  /** Syntactic APPROXIMATION of commutation — disjoint footprints (no shared
+    * definition name) — used where no base [[Module]] is available to
+    * actually try both orders (graph construction in [[PatchGraph]], the
+    * pairwise predicate exposed by [[SemanticRepository]]). Disjoint names
+    * make non-commutation unlikely but not impossible: a whole-module domain
+    * gate can still reject, or in principle order-dependently accept, a
+    * footprint-disjoint pair. Wherever a base module IS available and the
+    * actual merged result matters, [[Merge.threeWay]] WITNESSES commutation
+    * by literally applying both orders and requiring them to agree, rather
+    * than trusting this predicate alone.
+    */
   def commutes(l: ComposedLanguage, a: Cst, b: Cst): Boolean =
     footprint(l, a).intersect(footprint(l, b)).isEmpty
 
@@ -80,32 +91,58 @@ object ChangeAlgebra:
   * artifact naming both change-sets — never silent, never textual.
   */
 object Merge:
-  final case class Conflict(overlap: Set[String], changeA: Digest, changeB: Digest):
+  /** `witness`, when present, explains a conflict that footprint disjointness
+    * alone didn't predict — either order failed to apply, or the two orders
+    * applied to different results — as opposed to an outright name overlap
+    * (`overlap.nonEmpty`, `witness = None`). Optional and last so every
+    * existing 3-arg `Conflict(overlap, changeA, changeB)` call site is
+    * unaffected.
+    */
+  final case class Conflict(overlap: Set[String], changeA: Digest, changeB: Digest, witness: Option[String] = None):
     def canon: Canon = Canon.cmap(
       "overlap" -> Canon.cstrs(overlap.toList.sorted),
       "changeA" -> Canon.CStr(changeA.hex),
       "changeB" -> Canon.CStr(changeB.hex))
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("merge-conflict", canon))
-    def render: String = s"merge conflict on {${overlap.toList.sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
+    def render: String =
+      if overlap.nonEmpty then s"merge conflict on {${overlap.toList.sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
+      else s"merge conflict between ${changeA.short} and ${changeB.short}: ${witness.getOrElse("order-dependent result")}"
 
+  /** Disjoint-footprint branches merge automatically — but footprint
+    * disjointness (no shared definition NAME) is a syntactic approximation
+    * of commutation, not a proof of it: a whole-module domain gate (SDS's
+    * percentage-sum check, LanguageChecker's structural gate, a judgment
+    * side condition) can still reject the combination, or — in principle —
+    * accept it but produce a different result depending on order, even
+    * though the two change-sets never touch the same name. This WITNESSES
+    * commutation instead of assuming it: both orders are actually applied
+    * against `base`, and the merge only succeeds if both apply cleanly AND
+    * agree on the result. Either failure surfaces as a `Conflict` (never an
+    * exception — a disjoint-footprint pair failing this check is a real,
+    * anticipatable outcome, not a broken invariant).
+    */
   def threeWay(l: ComposedLanguage, base: Module, changeA: Cst, changeB: Cst): Either[Conflict, (Module, Delta.ValidatedChangeSet)] =
     val fa = ChangeAlgebra.footprint(l, changeA)
     val fb = ChangeAlgebra.footprint(l, changeB)
     val overlap = fa.intersect(fb)
-    if overlap.nonEmpty then
-      Left(Conflict(overlap,
-        Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeA)).digest,
-        Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeB)).digest))
+    val digA = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeA)).digest
+    val digB = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeB)).digest
+    if overlap.nonEmpty then Left(Conflict(overlap, digA, digB))
     else
       // canonical order: apply the change-set with the smaller digest first
-      val (first, second) =
-        val da = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeA)).digest.hex
-        val db = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeB)).digest.hex
-        if da <= db then (changeA, changeB) else (changeB, changeA)
-      val merged = ChangeAlgebra.compose(l, first, second)
-      Delta.apply(l, base, merged) match
-        case Right(result) => Right(result)
-        case Left(err)     => throw IllegalStateException(s"disjoint merge failed to apply: $err")
+      val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
+      val canonical = ChangeAlgebra.compose(l, first, second)
+      val reversed = ChangeAlgebra.compose(l, second, first)
+      def conflict(detail: String) = Conflict(overlap, digA, digB, Some(detail))
+      for
+        canonResult <- Delta.apply(l, base, canonical)
+          .left.map(e => conflict(s"disjoint footprints but merge failed to apply: $e"))
+        reversedResult <- Delta.apply(l, base, reversed)
+          .left.map(e => conflict(s"disjoint footprints but reverse order failed to apply: $e"))
+        result <- Either.cond(canonResult._1.digest == reversedResult._1.digest, canonResult,
+          conflict(s"disjoint footprints but order-dependent result: " +
+            s"${canonResult._1.digest.short} vs ${reversedResult._1.digest.short}"))
+      yield result
 
 /** M18: language migrations — revision morphisms between language versions
   * that transport modules and change-sets, kernel-validated against the

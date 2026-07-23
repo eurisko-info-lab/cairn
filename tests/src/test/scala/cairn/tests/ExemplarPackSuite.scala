@@ -673,6 +673,43 @@ class ExemplarPackSuite extends munit.FunSuite:
       merged.get("indSignal").getOrElse(fail("missing indSignal")))
       .fold(e => fail(e), identity)
 
+  test("witnessed commutation: disjoint-footprint edits can still jointly break a whole-document gate, and rebaseShadow reports it as a Conflict instead of crashing"):
+    // acetoneOutline references s1,s2,s3,s9,s11,s14,s16 with numbers
+    // 1,2,3,9,11,14,16 (ascending, distinct) — the outline check in
+    // Sds.validate. s9 and s11 have DISJOINT footprints (different def
+    // names), and each edit below is individually valid against the
+    // unmodified base (renumbering s9 to 10 alone, or s11 to 10 alone, keeps
+    // the outline ascending/distinct) — but applying BOTH gives two sections
+    // numbered 10, which the outline's duplicate check rejects. Footprint
+    // disjointness alone (the old `commutes` check) would have predicted
+    // these merge cleanly; only actually witnessing both orders (or, as
+    // here, running the domain validator on the real merged result) catches
+    // this.
+    import cairn.examples.sds.Chemicals
+    val base = Chemicals.Acetone.thinModule
+    val dl = Delta.deltaOf(Sds.language).fold(e => fail(e.map(_.render).mkString), identity)
+    def renumber(section: String, n: Int): Cst =
+      Parser.parse(dl.grammar,
+        s"""{ replace $section = eu section $n fields ( appearance lang en : "x" ) ; }""")
+        .fold(e => fail(e), identity)
+    val editA = renumber("s9", 10)
+    val editB = renumber("s11", 10)
+    // each edit alone is valid
+    assert(Sds.applySds(base, editA).isRight)
+    assert(Sds.applySds(base, editB).isRight)
+    assertEquals(ChangeAlgebra.footprint(Sds.language, editA), Set("s9"))
+    assertEquals(ChangeAlgebra.footprint(Sds.language, editB), Set("s11"))
+    assert(ChangeAlgebra.commutes(Sds.language, editA, editB), "footprints are disjoint by name")
+    // but the witnessed merge — rebaseShadow's Merge.threeWay + Sds.validate
+    // wiring — catches the jointly-invalid combination and reports it as a
+    // Conflict, not a thrown IllegalStateException
+    val result = Sds.rebaseShadow(base, editA, editB)
+    assert(result.isLeft, result)
+    result.swap.foreach { c =>
+      assert(c.overlap.isEmpty, "no name-level overlap — this is the witnessed, not footprint, case")
+      assert(c.witness.exists(_.contains("invalid")), c.render)
+    }
+
   test("EU-CLP profile language + annex-II module + sectionNumberOk judgment"):
     import cairn.examples.sds.{EuClp, SectionNumbering}
     assert(EuClp.language.constructors.contains("sectionDef"))
