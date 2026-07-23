@@ -77,7 +77,19 @@ object Canon:
       case CTag(t, v) => o.writeByte('T'); str(t); go(v)
     go(c); o.flush(); bo.toByteArray
 
+  /** Maximum nesting depth of compound constructors (list / map / tag) during
+    * [[decode]]. Hostile inputs can chain tags (or nest lists/maps) to colossal
+    * depth; without a bound that recursion attacks the JVM stack. 256 is far
+    * above any legitimate Cairn artifact nesting.
+    */
+  val MaxNestingDepth: Int = 256
+
   def decode(bs: Array[Byte]): Either[String, Canon] =
+    decode(bs, MaxNestingDepth)
+
+  /** Decode with an explicit nesting budget (tests / tighter hosts). */
+  def decode(bs: Array[Byte], maxDepth: Int): Either[String, Canon] =
+    require(maxDepth >= 0, s"maxDepth must be non-negative, got $maxDepth")
     var i = 0
     def fail(msg: String): Nothing = throw new RuntimeException(s"canon decode at $i: $msg")
     def byte(): Int = { if i >= bs.length then fail("eof"); val b = bs(i) & 0xff; i += 1; b }
@@ -108,30 +120,34 @@ object Canon:
         try decoder.decode(ByteBuffer.wrap(bs, i, n)).toString
         catch case _: CharacterCodingException => fail("invalid UTF-8 in string")
       i += n; s
-    def go(): Canon = byte() match
-      case 'I' => CInt(long())
-      case 'S' => CStr(str())
-      case 'B' => val n = count("bytes"); val v = bs.slice(i, i + n).toVector; i += n; CBytes(v)
-      case 'L' => val n = count("list"); CList(List.fill(n)(go()))
-      case 'M' =>
-        val n = count("map")
-        val entries = List.fill(n)((str(), go()))
-        // Direct construction (bypassing the `cmap` smart constructor, which
-        // is unreachable from decoded bytes) previously accepted ANY entry
-        // order and duplicate keys — two different byte sequences could
-        // decode to maps that print/behave identically but aren't `==`, or
-        // worse, a duplicate key could silently vanish under `.asMap`'s
-        // `.toMap` (last-wins) with no record that data was dropped. A
-        // strict ascending check catches both: duplicates fail `keyLt`
-        // (neither `a < b` nor `b < a`), same as any other order violation.
-        for idx <- 1 until entries.length do
-          if !keyLt(entries(idx - 1)._1, entries(idx)._1) then
-            fail(s"map entries not in canonical sorted order (or duplicate key) at entry $idx")
-        CMap(entries)
-      case 'T' => CTag(str(), go())
-      case t   => fail(s"unknown tag byte $t")
+    // `depth` counts compound frames entered (root = 0). Leaves may sit at
+    // `maxDepth`; attempting one more nest fails closed before recursing.
+    def go(depth: Int): Canon =
+      if depth > maxDepth then fail(s"nesting depth exceeds $maxDepth")
+      byte() match
+        case 'I' => CInt(long())
+        case 'S' => CStr(str())
+        case 'B' => val n = count("bytes"); val v = bs.slice(i, i + n).toVector; i += n; CBytes(v)
+        case 'L' => val n = count("list"); CList(List.fill(n)(go(depth + 1)))
+        case 'M' =>
+          val n = count("map")
+          val entries = List.fill(n)((str(), go(depth + 1)))
+          // Direct construction (bypassing the `cmap` smart constructor, which
+          // is unreachable from decoded bytes) previously accepted ANY entry
+          // order and duplicate keys — two different byte sequences could
+          // decode to maps that print/behave identically but aren't `==`, or
+          // worse, a duplicate key could silently vanish under `.asMap`'s
+          // `.toMap` (last-wins) with no record that data was dropped. A
+          // strict ascending check catches both: duplicates fail `keyLt`
+          // (neither `a < b` nor `b < a`), same as any other order violation.
+          for idx <- 1 until entries.length do
+            if !keyLt(entries(idx - 1)._1, entries(idx)._1) then
+              fail(s"map entries not in canonical sorted order (or duplicate key) at entry $idx")
+          CMap(entries)
+        case 'T' => CTag(str(), go(depth + 1))
+        case t   => fail(s"unknown tag byte $t")
     try
-      val c = go()
+      val c = go(0)
       if i != bs.length then Left(s"trailing bytes after canon value ($i of ${bs.length})") else Right(c)
     catch case e: RuntimeException => Left(e.getMessage)
 

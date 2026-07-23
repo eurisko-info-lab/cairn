@@ -95,6 +95,29 @@ class CanonSuite extends munit.FunSuite:
     val bs = Array[Byte]('S'.toByte) ++ rawStr("héllo".getBytes("UTF-8"))
     assertEquals(Canon.decode(bs), Right(CStr("héllo")))
 
+  test("decode rejects nesting deeper than MaxNestingDepth (stack-bomb guard)"):
+    // Tag chain of length MaxNestingDepth+1 around an int — each tag is one
+    // compound frame. Built via encode so the bytes are well-formed; only
+    // depth should fail.
+    def nest(n: Int, inner: Canon = CInt(0)): Canon =
+      (0 until n).foldLeft(inner)((v, i) => CTag(s"t$i", v))
+    val tooDeep = nest(Canon.MaxNestingDepth + 1)
+    val err = Canon.decode(Canon.encode(tooDeep))
+    assert(err.isLeft, err.toString)
+    assert(err.swap.exists(_.contains("nesting depth")), err.toString)
+    // Exactly MaxNestingDepth compound frames around a leaf is still accepted.
+    val atLimit = nest(Canon.MaxNestingDepth)
+    assertEquals(Canon.decode(Canon.encode(atLimit)), Right(atLimit))
+
+  test("decode nesting budget is enforced for lists and maps too"):
+    // maxDepth=1: root compound OK, nested compound rejected.
+    val nestedList = CList(List(CList(List(CInt(1)))))
+    assert(Canon.decode(Canon.encode(nestedList), maxDepth = 1).isLeft)
+    assertEquals(Canon.decode(Canon.encode(CList(List(CInt(1)))), maxDepth = 1),
+      Right(CList(List(CInt(1)))))
+    val nestedMap = Canon.cmap("a" -> Canon.cmap("b" -> CInt(1)))
+    assert(Canon.decode(Canon.encode(nestedMap), maxDepth = 1).isLeft)
+
 class ArtifactSuite extends munit.FunSuite:
   test("artifact round-trip for every kind (S5 acceptance)"):
     for kind <- ArtifactKind.values do
