@@ -3,8 +3,8 @@ package cairn.tests
 import cairn.core.{ChangeAlgebra, Delta, Module, PatchGraph}
 import cairn.examples.stlc.Stlc
 import cairn.kernel.{Cst, Digest}
-import cairn.runtime.WorkflowRunner
-import cairn.systemhandler.{Branches, EffectContext, MemCas}
+import cairn.runtime.{Branches, WorkflowRunner}
+import cairn.systemhandler.{EffectContext, MemCas}
 
 /** Patch DAG + bootstrap import + workflow runner (architecture priorities 4–6). */
 class PatchGraphSuite extends munit.FunSuite:

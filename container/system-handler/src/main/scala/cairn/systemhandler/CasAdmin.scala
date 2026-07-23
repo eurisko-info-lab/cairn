@@ -23,7 +23,7 @@ object CasAdmin:
   final case class GcReport(kept: Int, swept: Int)
   final case class Stats(objects: Int, bytes: Long, byKind: Map[String, Int])
 
-  private[systemhandler] def objectFiles(root: Path): List[Path] =
+  private[cairn] def objectFiles(root: Path): List[Path] =
     val objs = root.resolve("objects")
     if !Files.exists(objs) then Nil
     else Files.walk(objs).iterator.asScala.filter(p => Files.isRegularFile(p) && !p.toString.endsWith(".corrupt")).toList

@@ -3,7 +3,8 @@ package cairn.tests
 import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
-import cairn.systemhandler.{Branches, CasAdminEffects, CasEffects, DiskCas, EffectContext, Provenance, Keypair, Node}
+import cairn.systemhandler.{CasAdminEffects, CasEffects, DiskCas, EffectContext, Provenance, Keypair, Node}
+import cairn.runtime.Branches
 import java.nio.file.Files
 
 /** End-to-end semantic repository spine: Branches + ΔL + ChangeAlgebra +

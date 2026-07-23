@@ -3,7 +3,7 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.kernel.Authority.*
 import cairn.core.{PackCompose, PolicyEval}
-import cairn.runtime.PackLoader
+import cairn.runtime.{Branches, PackLoader}
 import cairn.systemhandler.*
 import java.nio.file.Path
 

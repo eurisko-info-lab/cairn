@@ -189,13 +189,12 @@ class ModuleBoundarySuite extends munit.FunSuite:
 
   test("container→core imports are allowlisted (shrink toward empty)"):
     // Remaining core imports keep systemHandler.dependsOn(core) alive until
-    // Branches/EffectContext factories move to app/runtime and
+    // EffectContext's PolicyEval-calling factories move to app/runtime and
     // AuthorityGate.DefaultProver is deleted in favor of PolicyEvalProver.
-    // MetaActivation moved to app/runtime (zero real callers, trivial win).
+    // MetaActivation and Branches already moved to app/runtime.
     val allowedFiles = Set(
       "AuthorityGate.scala", // DefaultProver → PolicyEval (temporary)
       "EffectContext.scala", // PolicyEval.* factory policies
-      "Cas.scala", // Branches → SemanticRepository/Delta/…
     )
     val hits =
       for
