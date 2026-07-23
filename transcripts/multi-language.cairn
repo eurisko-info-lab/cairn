@@ -1,0 +1,24 @@
+-- Adapted from Marble/Charb language-composition-workflow.yaml + multi-language-matrix.
+-- Original: define L0/L1, compose dirty/clean, verify.
+-- Cairn mapping: load several closed packs from disk and exercise each surface
+-- (compose conflicts stay in Compose / PackLoader suites).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/multi-language.cairn"
+transcript multi-language {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  load-language "languages/search.cairn" ;
+  lang search ;
+  roundtrip "origin \"unknown start state\"" ;
+  roundtrip "intent \"gather evidence\"" ;
+  load-language "languages/minitt.cairn" ;
+  lang minitt ;
+  roundtrip "zero" ;
+  roundtrip "fun x : Nat . x" ;
+  load-language "languages/pki.cairn" ;
+  lang pki ;
+  roundtrip "revoked alice reason \"compromise\" at \"1000\"" ;
+  publish matrix ;
+  fetch matrix ;
+}

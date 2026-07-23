@@ -1,0 +1,17 @@
+-- Adapted from CAIRN-PROMPT Phase 8 / §2c MiniTT pack.
+-- Surface round-trip for the dependent Nat core (checking stays in MiniTTSuite).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/minitt-surface.cairn"
+transcript minitt-surface {
+  load-language "languages/minitt.cairn" ;
+  lang minitt ;
+  roundtrip "Type" ;
+  roundtrip "Nat" ;
+  roundtrip "zero" ;
+  roundtrip "succ ( zero )" ;
+  roundtrip "fun x : Nat . x" ;
+  roundtrip "Pi x : Nat . Nat" ;
+  delta "{ add z = zero ; }" ;
+  delta "{ add one = succ ( zero ) ; }" ;
+  publish minitt-main ;
+  fetch minitt-main ;
+}

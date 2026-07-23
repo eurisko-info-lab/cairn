@@ -1,0 +1,16 @@
+-- Adapted from CAIRN-PROMPT Phase 8 / §2c LeanCore pack (identity-types rung).
+-- Surface round-trip for Eq/refl/subst vocabulary (checking stays in LeanCoreSuite).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/leancore-surface.cairn"
+transcript leancore-surface {
+  load-language "languages/leancore.cairn" ;
+  lang leancore ;
+  roundtrip "Nat" ;
+  roundtrip "zero" ;
+  roundtrip "Eq ( Nat , zero , zero )" ;
+  roundtrip "refl ( zero )" ;
+  roundtrip "fun x : Nat . refl ( x )" ;
+  delta "{ add z = zero ; }" ;
+  delta "{ add rz = refl ( zero ) ; }" ;
+  publish leancore-main ;
+  fetch leancore-main ;
+}

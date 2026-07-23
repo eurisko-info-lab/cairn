@@ -1,0 +1,14 @@
+-- Adapted from Marble/Charb patch-conflict-merge-workflow.yaml (+ max.cairn expectfail).
+-- Original: conflicting patches stay dirty under sequential compose.
+-- Cairn mapping: free ΔL failures are structured (footprint / missing def).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/patch-conflict.cairn"
+transcript patch-conflict {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+  expectfail "not defined" delta "{ replace missing = true ; }" ;
+  delta "{ rename id to ident footprint [both] ; }" ;
+  publish patched ;
+  fetch patched ;
+}

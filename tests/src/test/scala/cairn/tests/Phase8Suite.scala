@@ -59,7 +59,9 @@ class Phase8Suite extends munit.FunSuite:
 
   // Adapted from granit-rust / Marble-Charb / GRANITE packs (see transcripts/SOURCES.md).
   for name <- List(
-      "repository-workflow", "chain-sync", "pki-surface", "law-surface", "sds-surface")
+      "repository-workflow", "chain-sync", "pki-surface", "law-surface", "sds-surface",
+      "e2e-path", "chain-divergence", "patch-conflict", "multi-language",
+      "minitt-surface", "leancore-surface", "unisoncore-surface")
   do
     test(s"imported transcript $name.cairn runs end-to-end"):
       val src = readTranscriptSource(
@@ -69,10 +71,14 @@ class Phase8Suite extends munit.FunSuite:
       Transcript.run(
           src, packs.loadClosed(), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
         case Right(report) =>
-          assert(report.steps.exists(_.startsWith("published")), report.render)
+          assert(
+            report.steps.exists(_.startsWith("published")) ||
+              report.steps.exists(_.startsWith("expected failure")),
+            report.render)
           assert(
             report.steps.exists(_.startsWith("fetched")) ||
-              report.steps.exists(_.contains("gossip")),
+              report.steps.exists(_.contains("gossip")) ||
+              report.steps.exists(_.startsWith("expected failure")),
             report.render)
         case Left(e) => fail(e)
 

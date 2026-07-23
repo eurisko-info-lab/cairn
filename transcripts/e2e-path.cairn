@@ -1,0 +1,18 @@
+-- Adapted from Marble/Charb e2e-path-workflow.yaml
+-- Original: e2e path init→language→object→manifest→publish→resolve→verify→run.
+-- Cairn mapping: load STLC → roundtrip/eval → ΔL → claim → publish/fetch.
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/e2e-path.cairn"
+transcript e2e-path {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  roundtrip "fun x : Bool . x" ;
+  eval "((fun x : Bool . x) true)" expect "true" ;
+  eval "if false then true else false" expect "false" ;
+  delta "{ add id = fun x : Bool . x ; }" ;
+  delta "{ add both = (id true) ; }" ;
+  claim id_true "((fun x : Bool . x) true)" expect "true" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

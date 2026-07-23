@@ -1,0 +1,18 @@
+-- Adapted from CAIRN-PROMPT Phase 8 / §2c Unison Core pack.
+-- Surface round-trip for ADT/match/ability vocabulary (semantics in UnisonCoreSuite).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/unisoncore-surface.cairn"
+transcript unisoncore-surface {
+  load-language "languages/unisoncore.cairn" ;
+  lang unisoncore ;
+  roundtrip "unit" ;
+  roundtrip "Nil" ;
+  roundtrip "None" ;
+  roundtrip "fun x : Unit . unit" ;
+  roundtrip "Cons ( unit , Nil )" ;
+  roundtrip "Some ( unit )" ;
+  roundtrip "match Nil { Nil -> unit ; Cons ( h , t ) -> h }" ;
+  delta "{ add u = unit ; }" ;
+  delta "{ add empty = Nil ; }" ;
+  publish unison-main ;
+  fetch unison-main ;
+}

@@ -1,0 +1,17 @@
+-- Adapted from Marble/Charb chain-divergence-workflow.yaml
+-- Original: detect behind/ahead/diverged chain status across local/global.
+-- Cairn mapping: fan-out publish A → fetch B/C → gossip (competing heads surface
+-- as reorg events; no silent corruption — Phase 6 acceptance shape).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/chain-divergence.cairn"
+transcript chain-divergence {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  node c ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+  fetch main from a to c ;
+  gossip a, b, c ;
+}
