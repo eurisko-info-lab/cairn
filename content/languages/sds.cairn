@@ -17,30 +17,52 @@ language sds {
     ctor fieldLocale : FieldLocale(Name, Lang, Text);
     ctor fieldLocaleRef : FieldLocale(Name, Lang, PhraseRef);
     ctor euSection : SdsObj(Number, Fields);
-    ctor identificationSection : SdsObj(ProductName, Synonyms, RecommendedUse, UsesAdvisedAgainst, SupplierName, EmergencyPhone, LocaleOverlays);
-    ctor hazardsSection : SdsObj(ClassificationSummary, HazardsNotOtherwiseClassified, HazardPhrases, SignalWord, Pictograms, LocaleOverlays);
-    ctor compositionSection : SdsObj(ComponentName, Cas, Ec, Concentration, LocaleOverlays);
-    ctor firstAidSection : SdsObj(GeneralAdvice, Inhalation, SkinContact, EyeContact, Ingestion, LocaleOverlays);
-    ctor firefightingSection : SdsObj(ExtinguishingMedia, UnsuitableExtinguishingMedia, SpecialHazards, FirefighterProtection, LocaleOverlays);
-    ctor accidentalReleaseSection : SdsObj(PersonalPrecautions, EnvironmentalPrecautions, CleanupMethods, LocaleOverlays);
-    ctor handlingStorageSection : SdsObj(Handling, Storage, StorageIncompatibilities, LocaleOverlays);
-    ctor exposureControlsSection : SdsObj(OccupationalExposureLimit, EngineeringControls, EyeProtection, SkinProtection, RespiratoryProtection, LocaleOverlays);
-    ctor physicalChemicalSection : SdsObj(Appearance, Odor, MolecularWeight, MeltingPoint, BoilingPoint, FlashPoint, Density, Solubility, ExplosiveLimits, LocaleOverlays);
-    ctor stabilityReactivitySection : SdsObj(Stability, ConditionsToAvoid, IncompatibleMaterials, HazardousDecomposition, LocaleOverlays);
-    ctor toxicologicalSection : SdsObj(Ld50Oral, Irritation, InhalationEffects, Carcinogenicity, LocaleOverlays);
-    ctor ecologicalSection : SdsObj(Ecotoxicity, Persistence, Bioaccumulation, Mobility, LocaleOverlays);
-    ctor disposalSection : SdsObj(DisposalMethods, WasteClassification, LocaleOverlays);
-    ctor transportSection : SdsObj(UnNumber, ProperShippingName, TransportHazardClass, PackingGroup, LocaleOverlays);
-    ctor regulatorySection : SdsObj(RegulatoryInfo, ReachStatus, UsInventory, LocaleOverlays);
-    ctor otherInformationSection : SdsObj(RevisionDate, OtherInformation, LocaleOverlays);
+    ctor identificationSection : SdsObj(
+      ProductName, Synonyms, RecommendedUse, UsesAdvisedAgainst,
+      SupplierName, EmergencyPhone, LocaleOverlays);
+    ctor hazardsSection : SdsObj(
+      ClassificationSummary, HazardsNotOtherwiseClassified,
+      HazardPhrases, SignalWord, Pictograms, LocaleOverlays);
+    ctor compositionSection : SdsObj(
+      ComponentName, Cas, Ec, Concentration, LocaleOverlays);
+    ctor firstAidSection : SdsObj(
+      GeneralAdvice, Inhalation, SkinContact, EyeContact, Ingestion, LocaleOverlays);
+    ctor firefightingSection : SdsObj(
+      ExtinguishingMedia, UnsuitableExtinguishingMedia, SpecialHazards,
+      FirefighterProtection, LocaleOverlays);
+    ctor accidentalReleaseSection : SdsObj(
+      PersonalPrecautions, EnvironmentalPrecautions, CleanupMethods, LocaleOverlays);
+    ctor handlingStorageSection : SdsObj(
+      Handling, Storage, StorageIncompatibilities, LocaleOverlays);
+    ctor exposureControlsSection : SdsObj(
+      OccupationalExposureLimit, EngineeringControls, EyeProtection,
+      SkinProtection, RespiratoryProtection, LocaleOverlays);
+    ctor physicalChemicalSection : SdsObj(
+      Appearance, Odor, MolecularWeight, MeltingPoint, BoilingPoint,
+      FlashPoint, Density, Solubility, ExplosiveLimits, LocaleOverlays);
+    ctor stabilityReactivitySection : SdsObj(
+      Stability, ConditionsToAvoid, IncompatibleMaterials,
+      HazardousDecomposition, LocaleOverlays);
+    ctor toxicologicalSection : SdsObj(
+      Ld50Oral, Irritation, InhalationEffects, Carcinogenicity, LocaleOverlays);
+    ctor ecologicalSection : SdsObj(
+      Ecotoxicity, Persistence, Bioaccumulation, Mobility, LocaleOverlays);
+    ctor disposalSection : SdsObj(
+      DisposalMethods, WasteClassification, LocaleOverlays);
+    ctor transportSection : SdsObj(
+      UnNumber, ProperShippingName, TransportHazardClass, PackingGroup, LocaleOverlays);
+    ctor regulatorySection : SdsObj(
+      RegulatoryInfo, ReachStatus, UsInventory, LocaleOverlays);
+    ctor otherInformationSection : SdsObj(
+      RevisionDate, OtherInformation, LocaleOverlays);
     ctor outline : SdsObj(Label, Cas, SectionRefs);
     varctor sdsRef;
     judgment translationStateTag {
-      rule ts-official :  |- translationStateTag(officialCorpus);
-      rule ts-reviewed :  |- translationStateTag(humanReviewed);
-      rule ts-aidraft :  |- translationStateTag(aiDraft);
-      rule ts-stale :  |- translationStateTag(staleBecauseSourceChanged);
-      rule ts-rejected :  |- translationStateTag(rejected);
+      rule ts-official :  |- translationStateTag("officialCorpus");
+      rule ts-reviewed :  |- translationStateTag("humanReviewed");
+      rule ts-aidraft :   |- translationStateTag("aiDraft");
+      rule ts-stale :     |- translationStateTag("staleBecauseSourceChanged");
+      rule ts-rejected :  |- translationStateTag("rejected");
     }
   }
 }

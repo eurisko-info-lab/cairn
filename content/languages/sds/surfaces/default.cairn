@@ -122,30 +122,73 @@ surface default for sds {
     syntax sdsObj += substance : tok "substance" str str;
     syntax sdsObj += phrase : tok "phrase" name tok "lang" name tok "text" str;
     syntax sdsObj += corpusPhrase : tok "corpus" tok "phrase" name tok "lang" name tok "text" str;
-    syntax sdsObj += translationState : tok "translation" tok "state" name tok "lang" name tok "from" str tok "as" str;
-    syntax sdsObj += sectionFieldState : tok "field" tok "state" name tok "key" anyident tok "lang" name tok "from" str tok "as" str;
+    syntax sdsObj += translationState : tok "translation" tok "state" name tok "lang" name
+      tok "from" str tok "as" str;
+    syntax sdsObj += sectionFieldState : tok "field" tok "state" name tok "key" anyident tok "lang" name
+      tok "from" str tok "as" str;
     syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
     syntax sdsObj += product : tok "product" str tok "uses" name tok "phrases" tok "(" sepby1 name "," tok ")";
     syntax sdsObj += shadow : tok "shadow" name tok "overrides" name tok "with" str;
     syntax sdsObj += sectionFieldShadow : tok "field" tok "shadow" name tok "overrides" anyident tok "with" str;
     syntax sdsObj += basis : tok "basis" name tok "section" str;
     syntax sdsObj += euSection : tok "eu" tok "section" num tok "fields" tok "(" sepby1 cat sectionField "," tok ")";
-    syntax sdsObj += identificationSection : tok "identification" tok "section" tok "(" tok "productName" str tok "synonyms" str tok "recommendedUse" str tok "usesAdvisedAgainst" str tok "supplierName" str tok "emergencyPhone" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += hazardsSection : tok "hazards" tok "section" tok "(" tok "classificationSummary" str tok "hazardsNotOtherwiseClassified" str tok "hazardPhrases" str tok "signalWord" str tok "pictograms" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += compositionSection : tok "composition" tok "section" tok "(" tok "componentName" str tok "cas" str tok "ec" str tok "concentration" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += firstAidSection : tok "first" tok "aid" tok "section" tok "(" tok "generalAdvice" str tok "inhalation" str tok "skinContact" str tok "eyeContact" str tok "ingestion" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += firefightingSection : tok "firefighting" tok "section" tok "(" tok "extinguishingMedia" str tok "unsuitableExtinguishingMedia" str tok "specialHazards" str tok "firefighterProtection" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += accidentalReleaseSection : tok "accidental" tok "release" tok "section" tok "(" tok "personalPrecautions" str tok "environmentalPrecautions" str tok "cleanupMethods" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += handlingStorageSection : tok "handling" tok "storage" tok "section" tok "(" tok "handling" str tok "storage" str tok "storageIncompatibilities" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += exposureControlsSection : tok "exposure" tok "controls" tok "section" tok "(" tok "occupationalExposureLimit" str tok "engineeringControls" str tok "eyeProtection" str tok "skinProtection" str tok "respiratoryProtection" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += physicalChemicalSection : tok "physical" tok "chemical" tok "section" tok "(" tok "appearance" str tok "odor" str tok "molecularWeight" str tok "meltingPoint" str tok "boilingPoint" str tok "flashPoint" str tok "density" str tok "solubility" str tok "explosiveLimits" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += stabilityReactivitySection : tok "stability" tok "reactivity" tok "section" tok "(" tok "stability" str tok "conditionsToAvoid" str tok "incompatibleMaterials" str tok "hazardousDecomposition" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += toxicologicalSection : tok "toxicological" tok "section" tok "(" tok "ld50Oral" str tok "irritation" str tok "inhalationEffects" str tok "carcinogenicity" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += ecologicalSection : tok "ecological" tok "section" tok "(" tok "ecotoxicity" str tok "persistence" str tok "bioaccumulation" str tok "mobility" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += disposalSection : tok "disposal" tok "section" tok "(" tok "disposalMethods" str tok "wasteClassification" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += transportSection : tok "transport" tok "section" tok "(" tok "unNumber" str tok "properShippingName" str tok "transportHazardClass" str tok "packingGroup" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += regulatorySection : tok "regulatory" tok "section" tok "(" tok "regulatoryInfo" str tok "reachStatus" str tok "usInventory" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
-    syntax sdsObj += otherInformationSection : tok "other" tok "information" tok "section" tok "(" tok "revisionDate" str tok "otherInformation" str tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += identificationSection : tok "identification" tok "section" tok "("
+      tok "productName" str tok "synonyms" str tok "recommendedUse" str
+      tok "usesAdvisedAgainst" str tok "supplierName" str tok "emergencyPhone" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += hazardsSection : tok "hazards" tok "section" tok "("
+      tok "classificationSummary" str tok "hazardsNotOtherwiseClassified" str
+      tok "hazardPhrases" str tok "signalWord" str tok "pictograms" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += compositionSection : tok "composition" tok "section" tok "("
+      tok "componentName" str tok "cas" str tok "ec" str tok "concentration" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += firstAidSection : tok "first" tok "aid" tok "section" tok "("
+      tok "generalAdvice" str tok "inhalation" str tok "skinContact" str
+      tok "eyeContact" str tok "ingestion" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += firefightingSection : tok "firefighting" tok "section" tok "("
+      tok "extinguishingMedia" str tok "unsuitableExtinguishingMedia" str
+      tok "specialHazards" str tok "firefighterProtection" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += accidentalReleaseSection : tok "accidental" tok "release" tok "section" tok "("
+      tok "personalPrecautions" str tok "environmentalPrecautions" str tok "cleanupMethods" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += handlingStorageSection : tok "handling" tok "storage" tok "section" tok "("
+      tok "handling" str tok "storage" str tok "storageIncompatibilities" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += exposureControlsSection : tok "exposure" tok "controls" tok "section" tok "("
+      tok "occupationalExposureLimit" str tok "engineeringControls" str
+      tok "eyeProtection" str tok "skinProtection" str tok "respiratoryProtection" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += physicalChemicalSection : tok "physical" tok "chemical" tok "section" tok "("
+      tok "appearance" str tok "odor" str tok "molecularWeight" str
+      tok "meltingPoint" str tok "boilingPoint" str tok "flashPoint" str
+      tok "density" str tok "solubility" str tok "explosiveLimits" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += stabilityReactivitySection : tok "stability" tok "reactivity" tok "section" tok "("
+      tok "stability" str tok "conditionsToAvoid" str tok "incompatibleMaterials" str
+      tok "hazardousDecomposition" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += toxicologicalSection : tok "toxicological" tok "section" tok "("
+      tok "ld50Oral" str tok "irritation" str tok "inhalationEffects" str tok "carcinogenicity" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += ecologicalSection : tok "ecological" tok "section" tok "("
+      tok "ecotoxicity" str tok "persistence" str tok "bioaccumulation" str tok "mobility" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += disposalSection : tok "disposal" tok "section" tok "("
+      tok "disposalMethods" str tok "wasteClassification" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += transportSection : tok "transport" tok "section" tok "("
+      tok "unNumber" str tok "properShippingName" str
+      tok "transportHazardClass" str tok "packingGroup" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += regulatorySection : tok "regulatory" tok "section" tok "("
+      tok "regulatoryInfo" str tok "reachStatus" str tok "usInventory" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
+    syntax sdsObj += otherInformationSection : tok "other" tok "information" tok "section" tok "("
+      tok "revisionDate" str tok "otherInformation" str
+      tok "locales" tok "(" opt sepby1 cat fieldLocale "," tok ")" tok ")";
     syntax sdsObj += outline : tok "outline" str str tok "sections" tok "(" opt sepby1 name "," tok ")";
     syntax component += component : name tok "pct" num;
     syntax sectionField += sectionField : anyident tok "lang" name tok ":" str;
