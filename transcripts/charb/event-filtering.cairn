@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `event-filtering-workflow.yaml`
 -- Source-file: event-filtering-workflow.yaml
+-- Source-sha256: dcd48210e6e4ed7f31278d8fd5b2ed5b34369627db38cd0799e472c0cbbfcfe1
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Tests chain event filtering by kind
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript event-filtering {

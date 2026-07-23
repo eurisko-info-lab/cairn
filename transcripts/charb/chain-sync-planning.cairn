@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-sync-planning-workflow.yaml`
 -- Source-file: chain-sync-planning-workflow.yaml
+-- Source-sha256: bfda3f38de759606f8738a9b7634fbaf5b05a22513171ac1f15378c7145dabc0
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: chain sync --check and --dry-run report pending global changes before an actual sync
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-sync-planning {

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `publish-registry-workflow.yaml`
 -- Source-file: publish-registry-workflow.yaml
+-- Source-sha256: 72560c59271297715519b0632f43be30db07b1e820ce712ea3cc15c064b5307d
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Publication registry listing, inspection, and status summary
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript publish-registry {

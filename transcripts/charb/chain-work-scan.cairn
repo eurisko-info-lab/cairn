@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-work-scan-workflow.yaml`
 -- Source-file: chain-work-scan-workflow.yaml
+-- Source-sha256: 85dca2bb50aa3df14b89698cd40aff186e20aa662e46acbfd35028cd813a9461
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Scans verification targets and generates bounded chain work requests
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-scan {

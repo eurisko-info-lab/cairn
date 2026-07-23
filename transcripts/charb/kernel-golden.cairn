@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `kernel-golden-workflow.yaml`
 -- Source-file: kernel-golden-workflow.yaml
+-- Source-sha256: ebb8bd46021103fbed3f7083667915b6643de75f72d1918da650478fddaaf5e1
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Complete golden regression: init → language → objects → manifest → lock → verify
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript kernel-golden {

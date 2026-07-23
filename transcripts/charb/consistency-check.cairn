@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `consistency-check-workflow.yaml`
 -- Source-file: consistency-check-workflow.yaml
+-- Source-sha256: b29cb0ffe941fabc5b9f66417a40e13623fe9f1169076d6b65db97ee7b9e5054
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Unified consistency validator across audit, governance, and snapshot
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript consistency-check {

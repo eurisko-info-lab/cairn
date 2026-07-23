@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `network-mempool-phase3-workflow.yaml`
 -- Source-file: network-mempool-phase3-workflow.yaml
+-- Source-sha256: 2f977865b0402999c28aa9c0a8876ceff0c47831db411a685665dce56728ac74
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Phase 3 networking/mempool command coverage
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript network-mempool-phase3 {

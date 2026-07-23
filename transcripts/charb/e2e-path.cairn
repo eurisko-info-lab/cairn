@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `e2e-path-workflow.yaml`
 -- Source-file: e2e-path-workflow.yaml
+-- Source-sha256: 0115d9cef6c19d9f5d70b4ad7b1f3e112d5332777765ef6201c1d5ddda615444
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: One-shot kernel demo: e2e path through full lifecycle, then run object
 -- Rich sibling adaptation also under transcripts/.
 transcript e2e-path {

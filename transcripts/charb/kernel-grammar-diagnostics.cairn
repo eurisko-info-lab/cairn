@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `kernel-grammar-diagnostics-workflow.yaml`
 -- Source-file: kernel-grammar-diagnostics-workflow.yaml
+-- Source-sha256: 4698daad996db31e9ec89363025417c4a25592d2eed51ed705278b7bb2f2b88a
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Kernel and grammar diagnostics command coverage
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript kernel-grammar-diagnostics {

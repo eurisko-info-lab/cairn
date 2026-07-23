@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `object-run-commit-registry-workflow.yaml`
 -- Source-file: object-run-commit-registry-workflow.yaml
+-- Source-sha256: eb7f3e98793f272603c79cc527443089755093de35d4e7864877f5c139724cf8
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Object/run/commit registry listing, inspection, and status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript object-run-commit-registry {

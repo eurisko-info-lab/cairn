@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `crypto-registry-workflow.yaml`
 -- Source-file: crypto-registry-workflow.yaml
+-- Source-sha256: 6c6142f7ca7ff93d754b3fb641650e687206729726a1f21aa09a63254c0535e7
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Crypto backend registry listing, inspection, and promotion status
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript crypto-registry {

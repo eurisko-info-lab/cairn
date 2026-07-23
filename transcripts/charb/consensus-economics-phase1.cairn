@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `consensus-economics-phase1-workflow.yaml`
 -- Source-file: consensus-economics-phase1-workflow.yaml
+-- Source-sha256: 53581335ac25bf7356808e318475f9e15d6e7912d69303766e3f83e468345b28
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Phase 1 consensus/economics command coverage
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript consensus-economics-phase1 {

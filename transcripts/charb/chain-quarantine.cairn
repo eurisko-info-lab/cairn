@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-quarantine-workflow.yaml`
 -- Source-file: chain-quarantine-workflow.yaml
+-- Source-sha256: a181d28e3c4c02bba85ff37e91242a47ba8b9b1c3358c4ee96893b6d05d9dda9
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: chain repair separates malformed transport rows from semantically invalid rows and exposes both via quarantine commands
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript chain-quarantine {

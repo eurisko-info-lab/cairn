@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `key-sbom-capability-registry-workflow.yaml`
 -- Source-file: key-sbom-capability-registry-workflow.yaml
+-- Source-sha256: c974742e62fbbf4c57f7357da3736e31c4a7e8652f99a7c5d41c80684702568b
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Registry listing, inspection, and status summaries for key, SBOM, and capability governance state
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript key-sbom-capability-registry {

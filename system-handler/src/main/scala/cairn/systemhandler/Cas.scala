@@ -695,26 +695,34 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       references: List[String] = Nil,
   ): Either[String, BranchManifest] =
     val known = list().toSet
-    val refs = references.distinct.filterNot(r => primary.contains(r) || r == child)
-    val draft = BranchManifest(
-      child, None, Nil, primaryAncestor = primary, references = refs)
-    DomainBranch.wellFormed(draft, known, primaryOf(known)).flatMap { _ =>
-      if known.contains(child) then
-        val cur = load(child)
-        if cur.primaryAncestor == primary && cur.references == refs then
-          module match
-            case None    => Right(cur)
-            case Some(m) => Right(importModule(child, m))
+    // Reject malformed proposals rather than silently normalizing them — same
+    // posture as Canon decode / ΔL apply (repairing would hide caller bugs).
+    if references.exists(_ == child) then
+      Left(s"domain: '$child' cannot reference itself")
+    else if primary.exists(p => references.contains(p)) then
+      Left(s"domain: primary ancestor '${primary.get}' must not also appear in references")
+    else if references.length != references.distinct.length then
+      Left(s"domain: references contain duplicates: ${references.mkString(",")}")
+    else
+      val draft = BranchManifest(
+        child, None, Nil, primaryAncestor = primary, references = references)
+      DomainBranch.wellFormed(draft, known, primaryOf(known)).flatMap { _ =>
+        if known.contains(child) then
+          val cur = load(child)
+          if cur.primaryAncestor == primary && cur.references == references then
+            module match
+              case None    => Right(cur)
+              case Some(m) => Right(importModule(child, m))
+          else
+            Left(
+              s"domain: branch '$child' already exists " +
+                s"(primary=${cur.primaryAncestor}, refs=${cur.references})")
         else
-          Left(
-            s"domain: branch '$child' already exists " +
-              s"(primary=${cur.primaryAncestor}, refs=${cur.references})")
-      else
-        storeManifest(draft)
-        module match
-          case None    => Right(load(child))
-          case Some(m) => Right(importModule(child, m))
-    }
+          storeManifest(draft)
+          module match
+            case None    => Right(load(child))
+            case Some(m) => Right(importModule(child, m))
+      }
 
   /** Add a soft cross-domain reference (not the primary ancestor). */
   def referTo(branch: String, other: String): Either[String, BranchManifest] =

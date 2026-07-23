@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-sync-workflow.yaml`
 -- Source-file: chain-sync-workflow.yaml
+-- Source-sha256: d27ad6fd71e4992ea625d3a6094549774f53118c2ad04e6f6bf67c5152f3d842
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Distributed state: chain attach → publish → chain sync → chain status (strict) → verify
 -- Rich sibling adaptation also under transcripts/.
 transcript chain-sync {

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `hash-artifacts-workflow.yaml`
 -- Source-file: hash-artifacts-workflow.yaml
+-- Source-sha256: 02c8ac0aca92a04e83600e05a7a4b41191bb346764fc79e58aba2682ea45befb
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Verify canonical artifact hashes and roots from persisted repo state
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript hash-artifacts {

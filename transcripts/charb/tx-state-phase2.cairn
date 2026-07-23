@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `tx-state-phase2-workflow.yaml`
 -- Source-file: tx-state-phase2-workflow.yaml
+-- Source-sha256: b7c433498cc48b0bcfc907432f5a4ca886e42ce72a26915a9532c749552f8efb
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Phase 2 tx/state transition command coverage
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript tx-state-phase2 {

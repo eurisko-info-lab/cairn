@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `runner-registry-workflow.yaml`
 -- Source-file: runner-registry-workflow.yaml
+-- Source-sha256: eb0e70dbd246bfd15aebe4b4f8eced69748ce62e96f824e24829c0b93f239cf2
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Runner registry listing, inspection, and selection
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript runner-registry {

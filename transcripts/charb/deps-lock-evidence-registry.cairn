@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `deps-lock-evidence-registry-workflow.yaml`
 -- Source-file: deps-lock-evidence-registry-workflow.yaml
+-- Source-sha256: 06d802ea07087da466f3f6cd972f2b54db62206e4c9d602aad6cd24bc016a032
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Deps/lock/evidence registry listing, inspection, and status summary
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript deps-lock-evidence-registry {

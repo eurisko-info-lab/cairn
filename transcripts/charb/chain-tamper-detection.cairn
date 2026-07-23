@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-tamper-detection-workflow.yaml`
 -- Source-file: chain-tamper-detection-workflow.yaml
+-- Source-sha256: 2bebdd4adc317880acfb7789af40382ce173ed9fa2bc119de8e5b999697a86b0
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Rich chain status diagnostics with snapshot reporting
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-tamper-detection {

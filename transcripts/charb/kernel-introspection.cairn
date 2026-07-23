@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `kernel-introspection-workflow.yaml`
 -- Source-file: kernel-introspection-workflow.yaml
+-- Source-sha256: 37daefa99bb1455dbf28f7c9cd9e82b8c2db4e7315ce46fc286ac800cfebd95b
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Enhanced kernel inspection with event counts and diagnostics
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript kernel-introspection {

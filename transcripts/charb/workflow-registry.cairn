@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `workflow-registry-workflow.yaml`
 -- Source-file: workflow-registry-workflow.yaml
+-- Source-sha256: 91acddefcdbb2e66f4a481b1b0ffd0a3138e44827a70851f3db60dce4271b321
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Workflow registry listing, inspection, and quorum status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript workflow-registry {

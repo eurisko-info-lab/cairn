@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `malformed-generated-commands-workflow.yaml`
 -- Source-file: malformed-generated-commands-workflow.yaml
+-- Source-sha256: 6b9d08dcbe4d9a6155b8ae86a4c8ec681d12605175227a20fa6f4d9ed5c8427e
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Generated malformed namespace rejection coverage
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript malformed-generated-commands {

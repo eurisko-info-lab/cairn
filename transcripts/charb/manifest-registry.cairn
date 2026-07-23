@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `manifest-registry-workflow.yaml`
 -- Source-file: manifest-registry-workflow.yaml
+-- Source-sha256: e0c0c0074c5fb33bb7f622cd78c29c1f2805779335a1f194580d4e36f88e88f9
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Manifest registry listing, inspection, and status summary
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript manifest-registry {

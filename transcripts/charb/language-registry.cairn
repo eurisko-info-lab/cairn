@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `language-registry-workflow.yaml`
 -- Source-file: language-registry-workflow.yaml
+-- Source-sha256: bd882bccfff67b86119768beeb6f0f71cb631ba453bc769b99aeb19d041b5cbc
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Language list and status commands over persisted language index
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript language-registry {

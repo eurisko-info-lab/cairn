@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `patch-conflict-merge-workflow.yaml`
 -- Source-file: patch-conflict-merge-workflow.yaml
+-- Source-sha256: bbbb5a94f5c9ca91e0f42d10873f292838ec44273861c857a48ee93ddb0dc11a
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Conflicting patches: composeSequentially stays dirty, preferLeft resolves clean
 -- Rich sibling adaptation also under transcripts/.
 transcript patch-conflict-merge {

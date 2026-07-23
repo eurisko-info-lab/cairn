@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-maintenance-workflow.yaml`
 -- Source-file: chain-maintenance-workflow.yaml
+-- Source-sha256: 48b83690b90939d8614b2d706b869b384ac39e64aa7d812aa8cbb6a2e8717405
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Chain maintenance views report timeline, compare, stats, and compact results
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-maintenance {

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `stake-registry-workflow.yaml`
 -- Source-file: stake-registry-workflow.yaml
+-- Source-sha256: 2c562e3942702860d7345664d09d9f460cf578532295da2ee2806487cdb54b6d
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Stake registry listing, inspection, and status summary
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript stake-registry {

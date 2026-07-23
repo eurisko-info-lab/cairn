@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `replay-history-switch-and-diff-workflow.yaml`
 -- Source-file: replay-history-switch-and-diff-workflow.yaml
+-- Source-sha256: f76db5e5095a36180006d1c6792505c23bb28effade11a4951e38b3151588c24
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: audit and governance replay history can be switched and diffed in one scenario
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript replay-history-switch-and-diff {

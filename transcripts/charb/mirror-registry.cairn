@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `mirror-registry-workflow.yaml`
 -- Source-file: mirror-registry-workflow.yaml
+-- Source-sha256: b304491fdd78759090e9a07d0d09f2633dd29d3402d07f8ff0db1a96b16e72a0
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Mirror policy check registry listing, inspection, and status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript mirror-registry {

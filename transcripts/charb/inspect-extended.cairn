@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `inspect-extended-workflow.yaml`
 -- Source-file: inspect-extended-workflow.yaml
+-- Source-sha256: d57519bc8f18653be7484ff9cdc9a8562714df8933381234e44827a302710364
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Inspect proof and inspect patches commands for drill-down visibility
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript inspect-extended {

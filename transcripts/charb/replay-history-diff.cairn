@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `replay-history-diff-workflow.yaml`
 -- Source-file: replay-history-diff-workflow.yaml
+-- Source-sha256: 3c89d66a7eb48dae701877327e8d26752854e1fca770757b90a101225eb13370
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: History diff commands compare recorded replay root entries
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript replay-history-diff {

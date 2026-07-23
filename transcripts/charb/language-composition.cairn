@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `language-composition-workflow.yaml`
 -- Source-file: language-composition-workflow.yaml
+-- Source-sha256: 863455ddbb54ef96b1ac0be6980132302bf0e24d482c14ec85c518fe1983c927
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Language pushout: define L0/L1 → compose dirty → compose clean with discharge → verify
 -- Rich sibling adaptation also under transcripts/.
 transcript language-composition {

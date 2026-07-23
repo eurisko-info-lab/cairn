@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `provenance-registry-workflow.yaml`
 -- Source-file: provenance-registry-workflow.yaml
+-- Source-sha256: 031f2b8430938cffafa1077df37836f8cb59077fb033f57cec272303de6c77e2
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Provenance impact registry listing, inspection, and status summary
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript provenance-registry {

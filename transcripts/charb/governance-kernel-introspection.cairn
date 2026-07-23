@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `governance-kernel-introspection-workflow.yaml`
 -- Source-file: governance-kernel-introspection-workflow.yaml
+-- Source-sha256: 4576cf4d58f51956b3f2bfd1c3a1d0b65a24c2c286261e4f013cae6a62324d63
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Object integrity, chain inspection, governance replay root, and kernel status
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript governance-kernel-introspection {

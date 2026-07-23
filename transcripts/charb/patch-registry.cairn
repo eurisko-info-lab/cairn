@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `patch-registry-workflow.yaml`
 -- Source-file: patch-registry-workflow.yaml
+-- Source-sha256: 007a13dba04fc5fd43eeefde494ebc5cde6538dff792a10e01e1339ddeadfcca
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Patch registry listing, inspection, and status summary
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript patch-registry {

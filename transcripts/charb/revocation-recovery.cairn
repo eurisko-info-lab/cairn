@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `revocation-recovery-workflow.yaml`
 -- Source-file: revocation-recovery-workflow.yaml
+-- Source-sha256: 25035c244435a6da1598f9404a1d69842e38024a7d2d9de8c4cb0790633235a5
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Publish → revoke → supersede → range resolve skips revoked → lock → evidence reuse
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript revocation-recovery {

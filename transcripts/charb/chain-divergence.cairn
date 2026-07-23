@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-divergence-workflow.yaml`
 -- Source-file: chain-divergence-workflow.yaml
+-- Source-sha256: 7facc4807a626de33fbe4ed91b7e83a59d5df2b836a5517b4a692a12d56f6415
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Chain status divergence detection across in-sync, behind, ahead, and diverged states
 -- Rich sibling adaptation also under transcripts/.
 transcript chain-divergence {

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `cert-payload-workflow.yaml`
 -- Source-file: cert-payload-workflow.yaml
+-- Source-sha256: f53acd17e13382fa71948b09b0436f9af41814370eefc6edc7f55812f4950dff
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Certificate payload emission and strict-parser diagnostics
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript cert-payload {

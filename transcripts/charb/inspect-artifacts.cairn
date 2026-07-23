@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `inspect-artifacts-workflow.yaml`
 -- Source-file: inspect-artifacts-workflow.yaml
+-- Source-sha256: fc3a37131b82a65f4abb72930d00f36a2981a95620fa027ddd391b6d84b0ccc3
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Inspect persisted manifest/lock/language metadata
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript inspect-artifacts {

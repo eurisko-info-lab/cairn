@@ -20,17 +20,18 @@ CAIRN-PROMPT §7: *Transcripts are CI.*
 ## Full Charb suite (`transcripts/charb/` — **85**/85)
 
 Every `*-workflow.yaml` under a Charb transcripts checkout (pass `--source`)
-has a Cairn port:
+has a Cairn port. Counts below are **generated** from
+`transcripts/charb/dispositions.tsv` — do not hand-edit.
 
 | Kind | Count | Mechanism |
 | --- | --- | --- |
-| Rich / thin runnable | ~44 | publish/fetch, gossip, PKI, `expectfail` |
-| **Porcelain-promoted** | ~28 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
-| Still `deferred` | ~13 | §8 out of scope or no plumbing yet |
+| Rich / thin runnable | 44 | publish/fetch, gossip, PKI, `expectfail` |
+| **Porcelain-promoted** | 33 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
+| Still `deferred` | 8 | §8 out of scope or no plumbing yet |
 
 Regenerate: `python3 scripts/gen-charb-transcripts.py --source DIR`
-(or `--pin-only` to refresh `dispositions.tsv` from existing ports).
-Pinned dispositions: `transcripts/charb/dispositions.tsv`.
+(or `--pin-only` to refresh dispositions while preserving source hashes;
+`--update-docs` syncs this section). Pinned source revision: `f1c8dbdf387595ae5505e8ef0090c05fd595aa70`.
 
 ## granit-rust (`transcripts/granit-rust/`)
 
@@ -44,13 +45,7 @@ Pinned dispositions: `transcripts/charb/dispositions.tsv`.
 SDS causal workflow (commitTip / merge / certificates) remains partly
 Scala-hosted in `SdsCausalWorkflow`, but **domain trunk planting** is now a
 transcript: `transcripts/sds-domain-journey.cairn` uses `fork-from` / `refer`.
-Regenerate Charb ports with an explicit source dir:
 
-```bash
-python3 scripts/gen-charb-transcripts.py --source /path/to/charb/transcripts
-# or refresh pinned dispositions only:
-python3 scripts/gen-charb-transcripts.py --pin-only
-```
-
-Exact per-workflow disposition lives in `transcripts/charb/dispositions.tsv`
-(CI asserts exact match, not mere count thresholds).
+Charb import identity is pinned in `transcripts/charb/SOURCE.rev` (Git revision)
+and per-workflow SHA-256 columns in `dispositions.tsv` / transcript headers.
+Exact dispositions are CI-enforced (no mere count thresholds).

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `multi-language-matrix-workflow.yaml`
 -- Source-file: multi-language-matrix-workflow.yaml
+-- Source-sha256: 587c988f50a9571444240ec86ccd03931497f9a0523b576adf9a7d9b658ba390
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Language-agnostic governance: 4 languages defined, 2 pairwise compositions, strict verify
 -- Rich sibling adaptation also under transcripts/.
 transcript multi-language-matrix {

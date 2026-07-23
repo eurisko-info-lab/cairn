@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `branch-variant-registry-workflow.yaml`
 -- Source-file: branch-variant-registry-workflow.yaml
+-- Source-sha256: de4800d46c8213bcdfe3cc7db0cf4e969f9012a3ff628d4ff542b9446fd752b5
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Branch and variant registry listing, inspection, and status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript branch-variant-registry {

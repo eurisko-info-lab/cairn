@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `audit-replay-workflow.yaml`
 -- Source-file: audit-replay-workflow.yaml
+-- Source-sha256: 9f2e06da89c2ce33a7e562f54a12b75725bcc3e6791c375236b2dabf780b60ce
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Chain event replay with hash accumulator and tamper detection
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript audit-replay {

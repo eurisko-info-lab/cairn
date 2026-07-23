@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `tamper-regression-workflow.yaml`
 -- Source-file: tamper-regression-workflow.yaml
+-- Source-sha256: 9afd5cdb4ef5bcacd985260c1e19285eca06033ee88b019b68f8b8a421f3eca8
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Patch creation, merging, and conflict detection workflow
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript tamper-regression {

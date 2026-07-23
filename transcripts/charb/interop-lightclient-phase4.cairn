@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `interop-lightclient-phase4-workflow.yaml`
 -- Source-file: interop-lightclient-phase4-workflow.yaml
+-- Source-sha256: cea5e308138c1985aab5cf0c2e460df17d80176a3c8129db41be27ae30eec2fa
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Phase 4 interop/light-client command coverage
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript interop-lightclient-phase4 {

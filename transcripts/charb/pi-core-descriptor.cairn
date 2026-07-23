@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `pi-core-descriptor-workflow.yaml`
 -- Source-file: pi-core-descriptor-workflow.yaml
+-- Source-sha256: 98a126f589b41f7ec4bb47b2a0e4aebc2297398abc74553651cfbf31f5548d19
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Complete pi-core workflow: init → language define → verify
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript pi-core-descriptor {

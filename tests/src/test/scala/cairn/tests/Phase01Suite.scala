@@ -221,6 +221,19 @@ class BranchSuite extends munit.FunSuite:
     assertEquals(withChem.primaryAncestor, Some("LAW"))
     assertEquals(withChem.references, List("CHEMISTRY"))
 
+  test("forkFrom rejects self-ref / primary∩refs / duplicate refs (no silent normalize)"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-fork-strict")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    assert(branches.forkFrom("SDS", primary = Some("LAW"), references = List("SDS")).isLeft)
+    assert(branches.forkFrom("SDS", primary = Some("LAW"), references = List("LAW")).isLeft)
+    assert(branches.forkFrom(
+      "SDS", primary = Some("LAW"), references = List("CHEMISTRY", "CHEMISTRY")).isLeft)
+    assert(branches.forkFrom("CHEMISTRY", primary = None).isRight)
+    assert(branches.forkFrom(
+      "SDS", primary = Some("LAW"), references = List("CHEMISTRY")).isRight)
+
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")
     assert(DomainBranch.wellFormed(

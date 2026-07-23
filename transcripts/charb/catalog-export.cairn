@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `catalog-export-workflow.yaml`
 -- Source-file: catalog-export-workflow.yaml
+-- Source-sha256: d86019e68c6b7400f1ea4b06e692fb5c4effa68315e834ef8bd6db856ab96ce5
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Catalog JSON and TSV export coverage for documentation and web tooling
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript catalog-export {

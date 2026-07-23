@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `verify-diagnostics-workflow.yaml`
 -- Source-file: verify-diagnostics-workflow.yaml
+-- Source-sha256: 8981ca1aeb7a1c7d542f329319dc6c112c093cda01254fd5209639e6f121d9c5
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Verify status and inspect diagnostic commands over a populated repo
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript verify-diagnostics {

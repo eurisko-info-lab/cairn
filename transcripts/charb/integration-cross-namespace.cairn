@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `integration-cross-namespace-workflow.yaml`
 -- Source-file: integration-cross-namespace-workflow.yaml
+-- Source-sha256: 14fd8ec6d33312678e7378b44ce550aafc913f750b6bc7b69b9bf1098d99d55a
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Cross-namespace integration workflow with persisted state checks
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript integration-cross-namespace {

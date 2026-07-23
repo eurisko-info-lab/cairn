@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `malformed-namespace-commands-workflow.yaml`
 -- Source-file: malformed-namespace-commands-workflow.yaml
+-- Source-sha256: 06632420898f8b99e21bf676ad6636532ae8663237b1bd7d6ac75ebccb20f936
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Malformed namespace command rejection messages
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript malformed-namespace-commands {

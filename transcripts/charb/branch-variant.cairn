@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `branch-variant-workflow.yaml`
 -- Source-file: branch-variant-workflow.yaml
+-- Source-sha256: 8620d9b6cf938b76e068f762f298c6a1ab09f4454249da0f22cd86615a332b5e
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: History workflow: publish baseline → branch → variant → commit record → patch apply → verify
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript branch-variant {

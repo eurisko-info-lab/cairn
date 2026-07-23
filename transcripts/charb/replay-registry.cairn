@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `replay-registry-workflow.yaml`
 -- Source-file: replay-registry-workflow.yaml
+-- Source-sha256: 70dec2e85b4ea979a98ea9e92ebb59359e24f54399a63286e77aa00d961e3a8f
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Replay root listing and inspection across audit and governance accumulators
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript replay-registry {

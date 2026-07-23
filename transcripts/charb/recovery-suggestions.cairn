@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `recovery-suggestions-workflow.yaml`
 -- Source-file: recovery-suggestions-workflow.yaml
+-- Source-sha256: 5bc004e1edfd0e9383376520e678c82864cd44cecba25598a9be5cc91b7b4376
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Tests recovery suggestions in consistency check
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript recovery-suggestions {

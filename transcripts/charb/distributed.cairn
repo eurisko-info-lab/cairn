@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `distributed-workflow.yaml`
 -- Source-file: distributed-workflow.yaml
+-- Source-sha256: f601019c9676ecfd9ea99156c71a84433e0849cf0b984c7ca24d4f56d68aab29
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Multi-party quorum evaluation for workflow steps
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript distributed {

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-json-export-workflow.yaml`
 -- Source-file: chain-json-export-workflow.yaml
+-- Source-sha256: 7f1d7e49ea3c45ee1aafea8cf48d2b0c3645a72fb4723ff8dde9595624e51c6c
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Chain events export as JSON for tool integration
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript chain-json-export {

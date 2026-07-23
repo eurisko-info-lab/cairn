@@ -100,6 +100,35 @@ class Phase8Suite extends munit.FunSuite:
         parts(0) -> parts(1)
       }.toMap
 
+  private lazy val dispositionHashes: Map[String, String] =
+    val candidates =
+      List("transcripts/charb/dispositions.tsv", "../transcripts/charb/dispositions.tsv")
+        .map(java.nio.file.Path.of(_))
+    val path = candidates.find(java.nio.file.Files.isRegularFile(_)).getOrElse(
+      fail("transcripts/charb/dispositions.tsv missing"))
+    val text = Filesystem.run(Fs.Request.Read(Fs.Path(path.toString)), fsCtx) match
+      case Right(Fs.Response.Text(s)) => s
+      case other => fail(s"read dispositions: $other")
+    text.linesIterator
+      .map(_.trim).filter(l => l.nonEmpty && !l.startsWith("#"))
+      .map { line =>
+        val parts = line.split("\t", 3)
+        require(parts.length >= 3 && parts(2).nonEmpty,
+          s"missing source sha256 for ${parts.lift(0).getOrElse("?")}: run gen with --source")
+        parts(0) -> parts(2)
+      }.toMap
+
+  test("Charb dispositions pin source sha256 and SOURCES.md counts match ledger"):
+    assertEquals(dispositionHashes.size, 85)
+    assert(dispositionHashes.values.forall(_.matches("[0-9a-f]{64}")), "expected sha256 hex")
+    val src = readTranscriptSource(
+      List("transcripts/SOURCES.md", "../transcripts/SOURCES.md"),
+      "SOURCES.md missing")
+    val counts = expectedDispositions.values.groupBy(identity).view.mapValues(_.size).toMap
+    assert(src.contains(s"| Rich / thin runnable | ${counts("runnable")} |"), src)
+    assert(src.contains(s"| **Porcelain-promoted** | ${counts("porcelain")} |"), src)
+    assert(src.contains(s"| Still `deferred` | ${counts("deferred")} |"), src)
+
   test("all Charb YAML ports under transcripts/charb/ run"):
     val dirCandidates =
       List("transcripts/charb", "../transcripts/charb").map(java.nio.file.Path.of(_))

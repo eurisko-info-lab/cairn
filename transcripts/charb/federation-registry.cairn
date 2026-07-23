@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `federation-registry-workflow.yaml`
 -- Source-file: federation-registry-workflow.yaml
+-- Source-sha256: ff5333980c2ef7e61c7385f0107ff905def01aa21f6fde5e93cb45504fa75593
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Federation trust registry listing, inspection, and status summary
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript federation-registry {

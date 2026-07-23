@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `replay-history-workflow.yaml`
 -- Source-file: replay-history-workflow.yaml
+-- Source-sha256: 9841e82e849e0a895e3eea7d653ca06695916b812d4b5cad2196048ae204e194
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Audit root history and governance replay history are recorded and inspectable
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript replay-history {

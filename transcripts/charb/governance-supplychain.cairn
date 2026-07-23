@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `governance-supplychain-workflow.yaml`
 -- Source-file: governance-supplychain-workflow.yaml
+-- Source-sha256: 1387dba15dc08cf19f28997160dd89edb5c71e1848a9cd5306e782d924f9e3bc
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Real state-backed supply-chain governance command flow
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript governance-supplychain {

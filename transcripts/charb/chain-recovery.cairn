@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-recovery-workflow.yaml`
 -- Source-file: chain-recovery-workflow.yaml
+-- Source-sha256: 68c27745b2d1be7d61e9360c478d751fbf9834a23da9d4c1bffed84196932280
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Reconcile and reset-to-global commands recover local cache state from a shared global chain
 -- Thin Cairn mapping of the Charb theme (not a CLI clone).
 transcript chain-recovery {

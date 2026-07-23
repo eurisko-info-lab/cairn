@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `chain-repair-workflow.yaml`
 -- Source-file: chain-repair-workflow.yaml
+-- Source-sha256: c18fcf56f5e822f7240260edf7788deb934e501b5fb7a8b00c41d41396a187bf
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Repair quarantines malformed chain rows and refreshes snapshot state
 -- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript chain-repair {

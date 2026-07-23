@@ -34,7 +34,7 @@ sbt "examples/runMain cairn.examples.Main light verify"
 sbt "examples/runMain cairn.examples.Main porcelain authorization"
 ```
 
-## Promoted Charb themes (~33)
+## Promoted Charb themes (33)
 
 See `Porcelain.promotedThemes` and `scripts/gen-charb-transcripts.py` (`PORCELAIN`).
 Each maps to `Plumbing.charbTheme` (auth, chain status/export/compare, branch/domain,
@@ -52,7 +52,7 @@ steps use), `Sync.compare` (mirror), and `Provenance.index` joined with
 `Branches.list`/`load` (object/run/commit) — not new engines, just names nobody
 had given them yet.
 
-## Still deferred (~8)
+## Still deferred (8)
 
 §8 out of scope or no engine yet — these need a genuinely new domain concept,
 not just a listing over something that exists: work-market (chain-work-scan/
@@ -62,5 +62,5 @@ quorum publication, not stake-weighted consensus), network-mempool-phase3
 (transport exists via `HttpNode`/`Gossip`; a pending-tx pool does not — txs
 apply directly), compliance-registry (no drift-tracking type), deps-lock-
 evidence-registry (`Provenance` tracks build inputs, not package deps/lockfiles).
-Regenerate with `python3 scripts/gen-charb-transcripts.py` after extending
+Regenerate with `python3 scripts/gen-charb-transcripts.py --source DIR` (then `--update-docs`).
 plumbing.

@@ -1,5 +1,7 @@
 -- Ported from Marble/Charb `compliance-registry-workflow.yaml`
 -- Source-file: compliance-registry-workflow.yaml
+-- Source-sha256: 4a4c34a77b401d4a4fa4c353ecdaf2f6ab6acbd160b0e20c05ac73bd1961c2b3
+-- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Compliance report registry listing, inspection, and drift status summary
 -- Deferred: needs new plumbing or stays §8 out of scope.
 transcript compliance-registry {
