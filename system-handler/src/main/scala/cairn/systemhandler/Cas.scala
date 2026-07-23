@@ -764,6 +764,14 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               for
                 art <- getByDigest(d).left.map(e => s"domain-audit: $e")
                 sealedAg <- SealedDomainAgreement.fromCanon(art.body)
+                _ <- Either.cond(
+                  m.primaryAncestor == sealedAg.agreement.primaryAncestor, (),
+                  s"domain-audit: '$name' manifest primary ${m.primaryAncestor} " +
+                    s"!= agreement ${sealedAg.agreement.primaryAncestor}")
+                _ <- Either.cond(
+                  m.references == sealedAg.agreement.references, (),
+                  s"domain-audit: '$name' manifest refs ${m.references} " +
+                    s"!= agreement ${sealedAg.agreement.references}")
                 gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
                   load(p).domainAgreement.flatMap { pd =>
                     getByDigest(pd).toOption
@@ -1013,14 +1021,22 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             case Some(m) => Right(importModule(child, m))
       }
 
-  /** Add a soft cross-domain reference (not the primary ancestor). */
+  /** Add a soft cross-domain reference (not the primary ancestor).
+    *
+    * Governed branches must amend via [[plantGoverned]] — direct mutation would
+    * desync the branch manifest from its sealed [[DomainAgreement]].
+    */
   def referTo(branch: String, other: String): Either[String, BranchManifest] =
     val known = list().toSet
     if !known.contains(branch) then Left(s"domain: branch '$branch' does not exist")
     else if !known.contains(other) then Left(s"domain: reference '$other' is not a known branch")
     else
       val cur = load(branch)
-      if cur.primaryAncestor.contains(other) then
+      if cur.domainAgreement.isDefined then
+        Left(
+          s"domain: '$branch' is governed — amend references via plantGoverned " +
+            "(referTo would desync the sealed DomainAgreement)")
+      else if cur.primaryAncestor.contains(other) then
         Left(s"domain: '$other' is already the primary ancestor of '$branch'")
       else if cur.references.contains(other) then Right(cur)
       else

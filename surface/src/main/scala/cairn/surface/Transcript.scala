@@ -767,7 +767,8 @@ object Cli:
               kp, manifest,
               node = Some(node), ledgerAuth = ledgerAuth,
               certStore = Some(home.resolve("bft-certs.canon")),
-              stateStore = Some(home.resolve("bft-state.canon")))
+              stateStore = Some(home.resolve("bft-state.canon")),
+              home = Some(home))
           yield Some(bft)
       http = HttpNode(node, ledgerAuth, peersRoot = Some(home), bft = bftOpt)
       bound = http.start(port)
@@ -804,7 +805,7 @@ object Cli:
         }
       }
       _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
-      cert <- BftFinality.agreeNetworkRemote(urls, view = 0, seq = 0, block)
+      cert <- BftFinality.agreeNetworkRemote(urls, block)
       _ <- BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
@@ -933,10 +934,8 @@ object Cli:
                 }
               }
             }
-            primaryId <- BftFinality.designatedPrimary(ids, 0)
-            primary = replicas.find(_.name == primaryId.id).get
             urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-            cert <- BftFinality.agreeNetwork(primary, urls, 0, 0, block, polls = 64, pollSleepMs = 30)
+            cert <- BftFinality.agreeNetworkRemote(urls, block, polls = 64, pollSleepMs = 30)
             _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
               cert, manifest, nodes("r0"), ledgerAuth)
           yield s"bft ok ${cert.digest.short}"

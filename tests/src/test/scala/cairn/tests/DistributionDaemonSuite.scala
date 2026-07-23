@@ -184,7 +184,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
         val bft = BftReplica.certified(
           replicas.find(_.name == id).get, manifest,
           node = Some(nodes(id)), ledgerAuth = ledgerAuth,
-          certStore = Some(peersRoot.resolve("bft-certs.canon")))
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
           .fold(e => fail(e), identity)
         val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
         https += http
@@ -204,9 +205,27 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val cert = BftFinality.agreeNetwork(primary, urls, view = 0, seq = 0, block, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
+      assertEquals(cert.seq, 0)
       assert(cert.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(4))
       assertEquals(
         BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
+        Right(()))
+      // Continuous finality: second block on the same running durable replicas.
+      ids.foreach { id =>
+        nodes(id).append(
+          auth, ledgerAuth,
+          List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
+          .fold(e => fail(e), identity)
+      }
+      val block1 = nodes("r0").chainDigests(1)
+      assert(nodes.values.forall(_.chainDigests == nodes("r0").chainDigests))
+      val cert1 = BftFinality.agreeNetworkRemote(urls, block1, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      assertEquals(cert1.blockDigest, block1)
+      assertEquals(cert1.seq, 1)
+      assertEquals(cert1.height, 1L)
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert1, manifest, nodes("r0"), ledgerAuth),
         Right(()))
     finally https.foreach(_.stop())
 
@@ -256,9 +275,10 @@ class DistributionDaemonSuite extends munit.FunSuite:
         }
       }
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-      val cert = BftFinality.agreeNetworkRemote(urls, 0, 0, block, polls = 64, pollSleepMs = 30)
+      val cert = BftFinality.agreeNetworkRemote(urls, block, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
+      assertEquals(cert.seq, 0)
       assertEquals(
         BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
         Right(()))
@@ -305,6 +325,9 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assertEquals(reloaded.seals, sealedM.seals)
     ReplicaSetManifest.verifySeals(reloaded, Ed25519.verify).fold(e => fail(e), identity)
     assertEquals(ReplicaSetManifest.activeAt(List(sealedM), 0), Right(sealedM))
+    val validated = ValidatedReplicaSetHistory.verify(List(sealedM), Ed25519.verify)
+      .fold(e => fail(e), identity)
+    assertEquals(validated.activeAt(0), Right(sealedM))
 
   test("corrupt bft-state.canon refuses further operate (fail closed)"):
     val auth = Keypair.dev("auth")
@@ -420,14 +443,13 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val pre = BftReplica.certified(
       replicas.head, future,
       node = Some(node), ledgerAuth = ledgerAuth).fold(e => fail(e), identity)
-    val block = node.chainDigests.head
-    val preErr = pre.propose(0, 0, block)
+    val block0 = node.chainDigests.head
+    val preErr = pre.propose(0, 0, block0)
     assert(preErr.isLeft, preErr.toString)
     assert(preErr.swap.toOption.exists(_.contains("not yet active")), preErr.toString)
 
     val genesis = BftFinality.sealReplicaSet(replicas, activationHeight = 0L).fold(e => fail(e), identity)
     BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis).fold(e => fail(e), identity)
-    // Amend at height 1 with predecessor quorum; then grow tip to 1 so genesis deactivates.
     val draft = ReplicaSetManifest.of(
       replicas.map(k => k.name -> k.publicBytes),
       replaces = Some(genesis.digest),
@@ -445,13 +467,55 @@ class DistributionDaemonSuite extends munit.FunSuite:
     node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
       .fold(e => fail(e), identity) // tip height becomes 1
     val hist = BftFinality.loadReplicaSetHistory(home).fold(e => fail(e), identity)
-    assertEquals(hist.length, 2)
-    assertEquals(ReplicaSetManifest.activeAt(hist, 0).map(_.digest), Right(genesis.digest))
-    assertEquals(ReplicaSetManifest.activeAt(hist, 1).map(_.digest), Right(successor.digest))
+    assertEquals(hist.manifests.length, 2)
+    assertEquals(hist.activeAt(0).map(_.digest), Right(genesis.digest))
+    assertEquals(hist.activeAt(1).map(_.digest), Right(successor.digest))
     val post = BftReplica.certified(
       replicas.head, genesis,
       node = Some(node), ledgerAuth = ledgerAuth,
       home = Some(home)).fold(e => fail(e), identity)
-    val postErr = post.propose(0, 0, block)
+    val block1 = node.chainDigests(1)
+    // Old set may still finalize pre-deactivation heights, but not post-activation ones.
+    val postErr = post.propose(0, 1, block1)
     assert(postErr.isLeft, postErr.toString)
     assert(postErr.swap.toOption.exists(_.contains("deactivated")), postErr.toString)
+    // Receive must not emit Commit seals after deactivation either.
+    val primaryId = BftFinality.designatedPrimary(replicas.map(_.name), 0).fold(e => fail(e), identity)
+    val primary = replicas.find(_.name == primaryId.id).get
+    val pp = BftFinality.sign(
+      primary,
+      cairn.kernel.BftQuorum.Msg.PrePrepare(
+        0, 1, BftFinality.valueOfBlock(block1), primaryId))
+      .fold(e => fail(e), identity)
+    val recvErr = post.receive(pp)
+    assert(recvErr.isLeft, recvErr.toString)
+    assert(recvErr.swap.toOption.exists(_.contains("deactivated")), recvErr.toString)
+    assertEquals(post.drainOutbound(), Nil)
+    // Independent verify rejects old-set certs at the successor height.
+    val fakeCert = BftFinality.FinalityCertificate(
+      block1, 0, 1, Nil, genesis.replicaSetDigest, 1L, block0)
+    assert(BftFinality.FinalityCertificate.verifyAgainstHistory(
+      fakeCert, hist, node, ledgerAuth).isLeft)
+
+  test("forged replica-set history without predecessor quorum is rejected"):
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-forged-hist")
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val genesis = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis)
+      .fold(e => fail(e), identity)
+    val forgedDraft = ReplicaSetManifest.of(
+      a.map(k => k.name -> k.publicBytes),
+      replaces = Some(genesis.digest),
+      activationHeight = 1L).fold(e => fail(e), identity)
+    // Member seals only — no predecessorApprovals.
+    val forged = ReplicaSetManifest.seal(
+      forgedDraft,
+      a.map(k => k.name -> ((msg: Array[Byte]) => k.sign(msg)))).fold(e => fail(e), identity)
+    val histPath = BftFinality.defaultReplicaSetHistoryPath(home)
+    java.nio.file.Files.write(
+      histPath,
+      Canon.encode(Canon.CList(List(genesis.canon, forged.canon))))
+    val loaded = BftFinality.loadReplicaSetHistory(home)
+    assert(loaded.isLeft, loaded.toString)
+    assert(loaded.swap.toOption.exists(_.contains("predecessor")), loaded.toString)
+    assert(ValidatedReplicaSetHistory.verify(List(genesis, forged), Ed25519.verify).isLeft)

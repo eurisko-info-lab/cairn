@@ -231,29 +231,21 @@ object ReplicaSetManifest:
         else
           verifyPredecessorApprovals(proposed, prev, verify)
 
-  /** Resolve the active replica set at a ledger height.
-    *
-    * History must be ordered by increasing [[activationHeight]]. The active
-    * set is the latest entry with `activationHeight <= height`; that entry's
-    * successor (if any) deactivates it at the successor's activation height.
-    */
+  /** Prefer [[ValidatedReplicaSetHistory.activeAt]] after [[ValidatedReplicaSetHistory.verify]]. */
   def activeAt(
       history: List[ReplicaSetManifest],
       height: Long,
   ): Either[String, ReplicaSetManifest] =
+    // Structural-only path for callers that already verified transitions.
     if history.isEmpty then Left("replica-set: empty history")
     else
       val ordered = history.sortBy(_.activationHeight)
-      val heightsOk = ordered.sliding(2).forall {
-        case a :: b :: Nil => a.activationHeight < b.activationHeight
-        case _             => true
-      }
-      if !heightsOk then Left("replica-set: history activation heights must be strictly increasing")
-      else
-        ordered.filter(_.activationHeight <= height).lastOption match
-          case Some(m) => Right(m)
-          case None =>
-            Left(s"replica-set: no set active at height $height (earliest=${ordered.head.activationHeight})")
+      ordered.filter(_.activationHeight <= height).lastOption match
+        case Some(m) => Right(m)
+        case None =>
+          Left(
+            s"replica-set: no set active at height $height " +
+              s"(earliest=${ordered.head.activationHeight})")
 
   /** Deactivation height of `m` given ordered history (successor activation, or none). */
   def deactivationHeight(
@@ -264,3 +256,53 @@ object ReplicaSetManifest:
     ordered.indexWhere(_.digest == m.digest) match
       case i if i >= 0 && i + 1 < ordered.length => Some(ordered(i + 1).activationHeight)
       case _ => None
+
+/** Replay-verified linear history of replica-set manifests.
+  *
+  * Construct only via [[ValidatedReplicaSetHistory.verify]] — never from a
+  * raw file decode alone.
+  */
+final case class ValidatedReplicaSetHistory private (manifests: List[ReplicaSetManifest]):
+  def activeAt(height: Long): Either[String, ReplicaSetManifest] =
+    if manifests.isEmpty then Left("replica-set: empty history")
+    else
+      manifests.filter(_.activationHeight <= height).lastOption match
+        case Some(m) => Right(m)
+        case None =>
+          Left(
+            s"replica-set: no set active at height $height " +
+              s"(earliest=${manifests.head.activationHeight})")
+
+  def deactivationHeight(m: ReplicaSetManifest): Option[Long] =
+    ReplicaSetManifest.deactivationHeight(manifests, m)
+
+object ValidatedReplicaSetHistory:
+  /** Replay genesis + adjacent transitions (replaces, height, predecessor quorum, seals). */
+  def verify(
+      history: List[ReplicaSetManifest],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, ValidatedReplicaSetHistory] =
+    if history.isEmpty then Left("replica-set: empty history")
+    else
+      val ordered = history.sortBy(_.activationHeight)
+      if ordered.map(_.digest).distinct.length != ordered.length then
+        Left("replica-set: history contains duplicate digests")
+      else
+        ordered.headOption match
+          case None => Left("replica-set: empty history")
+          case Some(genesis) =>
+            for
+              _ <- ReplicaSetManifest.allowsTransition(genesis, None, None, verify)
+              _ <- ReplicaSetManifest.verifySeals(genesis, verify)
+              _ <- ordered.sliding(2).foldLeft[Either[String, Unit]](Right(())) {
+                case (acc, pred :: succ :: Nil) =>
+                  acc.flatMap { _ =>
+                    for
+                      _ <- ReplicaSetManifest.verifySeals(succ, verify)
+                      _ <- ReplicaSetManifest.allowsTransition(
+                        succ, Some(pred), Some(pred.digest), verify)
+                    yield ()
+                  }
+                case (acc, _) => acc
+              }
+            yield ValidatedReplicaSetHistory(ordered)

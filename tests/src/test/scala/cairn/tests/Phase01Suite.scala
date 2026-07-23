@@ -471,6 +471,28 @@ class BranchSuite extends munit.FunSuite:
       def unmetRequires(name: String, packs: Map[String, List[Fragment]]) = Set.empty
     assert(branches.auditGoverned("LAW", idents, emptyPacks).isLeft)
 
+  test("referTo refuses governed branches"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-refer-governed")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val owner = Keypair.dev("law-owner")
+    val idents = idsOf(owner)
+    val lang = Digest.of(Canon.CStr("law-lang"))
+    val lawAg = DomainAgreement(
+      child = "LAW",
+      primaryAncestor = None,
+      references = Nil,
+      owner = owner.name,
+      childLanguage = Some(lang),
+      ancestorLanguages = Nil,
+      dependencyEvidence = deps(lang))
+    branches.plantGoverned(lawAg, idents, ownerSealOf(owner, lawAg), LangIdx)
+      .fold(e => fail(e), identity)
+    branches.forkFrom("CHEMISTRY", primary = None).fold(e => fail(e), identity)
+    val err = branches.referTo("LAW", "CHEMISTRY")
+    assert(err.isLeft, err.toString)
+    assert(err.swap.toOption.exists(_.contains("governed")), err.toString)
+
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")
     assert(DomainBranch.wellFormed(

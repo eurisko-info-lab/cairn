@@ -88,10 +88,10 @@ final class HttpNode(
             case Left(e) => reply(ex, 400, e.getBytes)
             case Right(body) =>
               try
-                val view = body.field("view").asInt.toInt
-                val seq = body.field("seq").asInt.toInt
+                val view = body.asMap.get("view").map(_.asInt.toInt).getOrElse(0)
                 Digest.parse(body.field("block").asStr).flatMap { block =>
-                  replica.propose(view, seq, block)
+                  // Sequence is derived from sealed block height on the primary.
+                  replica.proposeBlock(view, block)
                 } match
                   case Left(e) => reply(ex, 400, e.getBytes)
                   case Right(out) =>
