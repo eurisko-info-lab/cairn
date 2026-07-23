@@ -710,7 +710,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   ): Either[String, BranchManifest] =
     val known = list().toSet
     val (ownerName, ownerSig) = ownerSeal
-    val liveE: Either[String, Option[DomainAgreement]] =
+    val liveE: Either[String, Option[SealedDomainAgreement]] =
       if !known.contains(agreement.child) then Right(None)
       else
         load(agreement.child).domainAgreement match
@@ -720,19 +720,31 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               case Left(e) =>
                 Left(s"domain-agreement: cannot load live ${d.short}: $e")
               case Right(art) =>
-                DomainAgreement.fromCanon(art.body) match
+                SealedDomainAgreement.fromCanon(art.body) match
                   case Left(e) =>
                     Left(s"domain-agreement: cannot decode live ${d.short}: $e")
-                  case Right(ag) => Right(Some(ag))
+                  case Right(sealedAg) =>
+                    // Re-verify embedded seals against the resolver (fail closed).
+                    val gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
+                      load(p).domainAgreement.flatMap { pd =>
+                        getByDigest(pd).toOption
+                          .flatMap(a => SealedDomainAgreement.fromCanon(a.body).toOption)
+                          .map(_.agreement.owner)
+                      }
+                    }
+                    SealedDomainAgreement.verify(sealedAg, identities, verify, gName).map(_ => Some(sealedAg))
     for
-      live <- liveE
+      liveSealed <- liveE
+      live = liveSealed.map(_.agreement)
       ownerPk <- identities.require(agreement.owner)
       _ <- DomainAgreement.authenticateOwner(agreement, ownerName, ownerPk, ownerSig, verify)
       _ <- DomainAgreement.wellFormed(agreement, known, primaryOf(known))
       _ <- verifyLanguageEvidence(agreement, knownLanguages)
       _ <- verifyAncestorDelegation(agreement, known, identities, grantorSeal, verify)
-      _ <- DomainAgreement.allowsTransition(agreement, live)
-      art = agreement.artifact
+      _ <- DomainAgreement.allowsTransition(
+        agreement, live, liveSealedDigest = liveSealed.map(_.digest))
+      sealedAg = agreement.seal(ownerSig, grantorSeal.map(_._2))
+      art = sealedAg.artifact
       _ = putArt(art)
       certDigests = art.digest :: agreement.ancestorDelegation.toList
       base <-
@@ -801,7 +813,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         for
           delDig <- agreement.ancestorDelegation.toRight(
             "domain-agreement: plant under primary requires ancestorDelegation")
-          primaryAg <- load(p).domainAgreement match
+          primarySealed <- load(p).domainAgreement match
             case None =>
               Left(
                 s"domain-agreement: primary '$p' must be governed before children " +
@@ -811,17 +823,22 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 case Left(e) =>
                   Left(s"domain-agreement: primary '$p' agreement ${d.short} unloadable: $e")
                 case Right(art) =>
-                  DomainAgreement.fromCanon(art.body).left.map(e =>
+                  SealedDomainAgreement.fromCanon(art.body).left.map(e =>
                     s"domain-agreement: primary '$p' agreement decode: $e")
+          primaryAg = primarySealed.agreement
           delArt <- getByDigest(delDig).left.map(e =>
             s"domain-delegation: cannot load ${delDig.short}: $e")
-          del <- DomainAncestorDelegation.fromCanon(delArt.body).left.map(e =>
+          sealedDel <- SealedDomainAncestorDelegation.fromCanon(delArt.body).left.map(e =>
             s"domain-delegation: cannot decode ${delDig.short}: $e")
+          del = sealedDel.delegation
           _ <- DomainAncestorDelegation.matches(del, agreement, primaryAg.owner)
           sealPair <- grantorSeal.toRight(
             "domain-agreement: plant under primary requires grantorSeal")
           (gName, gSig) = sealPair
+          _ <- Either.cond(gSig == sealedDel.grantorSeal, (),
+            "domain-delegation: grantorSeal does not match sealed delegation artifact")
           gPk <- identities.require(primaryAg.owner)
+          _ <- SealedDomainAncestorDelegation.verify(sealedDel, gPk, verify)
           _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSig, verify)
         yield ()
 

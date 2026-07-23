@@ -174,7 +174,7 @@ class DeltaSuite extends munit.FunSuite:
 class BranchSuite extends munit.FunSuite:
   private val casCtx = EffectContext.forBranches()
 
-  /** Put a primary-owner delegation; return agreement + grantor (name, seal). */
+  /** Put a sealed primary-owner delegation; return agreement + grantor (name, seal). */
   private def mintDelegation(
       cas: DiskCas,
       claim: DomainAgreement,
@@ -186,9 +186,10 @@ class BranchSuite extends munit.FunSuite:
       grantor = grantor.name,
       grantee = claim.owner,
       claimDigest = claim.claimDigest)
-    CasEffects.put(cas, del.artifact, casCtx).fold(e => fail(e.toString), identity)
     val seal = Ed25519.sign(grantor.privateKey, Canon.encode(del.canon))
-    (claim.copy(ancestorDelegation = Some(del.digest)), (grantor.name, seal))
+    val sealedDel = del.seal(seal)
+    CasEffects.put(cas, sealedDel.artifact, casCtx).fold(e => fail(e.toString), identity)
+    (claim.copy(ancestorDelegation = Some(sealedDel.digest)), (grantor.name, seal))
 
   private def ownerSealOf(kp: Keypair, ag: DomainAgreement): (String, Vector[Byte]) =
     (kp.name, Ed25519.sign(kp.privateKey, Canon.encode(ag.canon)))
@@ -288,7 +289,18 @@ class BranchSuite extends munit.FunSuite:
     val planted = branches.plantGoverned(
       a0, idents, ownerSealOf(alice, a0), grantorSeal = Some(gSeal0)).fold(e => fail(e), identity)
     assertEquals(planted.primaryAncestor, Some("LAW"))
-    assert(planted.domainAgreement.contains(a0.digest), planted.domainAgreement)
+    assert(planted.domainAgreement.isDefined, planted.domainAgreement)
+    val liveDig0 = planted.domainAgreement.get
+    // Manifest cites the sealed envelope, not the unsigned body digest.
+    assert(liveDig0 != a0.digest)
+    val sealedLive = CasEffects.get(cas, liveDig0, casCtx).flatMap { art =>
+      SealedDomainAgreement.fromCanon(art.body)
+    }.fold(e => fail(e.toString), identity)
+    assertEquals(sealedLive.agreement.digest, a0.digest)
+    assert(sealedLive.ownerSeal.nonEmpty)
+    assert(sealedLive.grantorSeal.exists(_.nonEmpty))
+    SealedDomainAgreement.verify(sealedLive, idents, Ed25519.verify, Some(lawOwner.name))
+      .fold(e => fail(e), identity)
     assert(planted.certificates.contains(a0.ancestorDelegation.get))
     // Seal under a different key for the grantor name fails against the resolver
     val attacker = Keypair.dev("attacker")
@@ -315,13 +327,14 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
       replaces = None)
     assert(branches.plantGoverned(noReplace, idents, ownerSealOf(alice, noReplace)).isLeft)
-    val claim1 = noReplace.copy(replaces = Some(a0.digest))
+    val claim1 = noReplace.copy(replaces = Some(liveDig0))
     val (a1, gSeal1) = mintDelegation(cas, claim1, lawOwner)
     val amended = branches.plantGoverned(
       a1, idents, ownerSealOf(alice, a1), grantorSeal = Some(gSeal1)).fold(e => fail(e), identity)
     assertEquals(amended.references, List("CHEMISTRY"))
-    assertEquals(amended.domainAgreement, Some(a1.digest))
-    val badOwner = a1.copy(owner = "mallory", replaces = Some(a1.digest))
+    assert(amended.domainAgreement.isDefined)
+    assert(amended.domainAgreement.get != a1.digest)
+    val badOwner = a1.copy(owner = "mallory", replaces = Some(amended.domainAgreement.get))
     assert(branches.plantGoverned(
       badOwner, idents, ("mallory", Vector.empty), grantorSeal = Some(gSeal1)).isLeft)
 
@@ -356,7 +369,8 @@ class BranchSuite extends munit.FunSuite:
     val (a0, gSeal0) = mintDelegation(cas, claim0, lawOwner)
     branches.plantGoverned(a0, idents, ownerSealOf(alice, a0), grantorSeal = Some(gSeal0))
       .fold(e => fail(e), identity)
-    val agr = a0.digest
+    val liveDig0 = branches.load("SDS").domainAgreement.get
+    val agr = liveDig0
     val obj = dir.resolve("objects").resolve(agr.hex.take(2)).resolve(agr.hex.drop(2))
     assert(java.nio.file.Files.exists(obj), s"expected CAS object at $obj")
     java.nio.file.Files.delete(obj)
@@ -374,7 +388,7 @@ class BranchSuite extends munit.FunSuite:
     val claim1 = claim0.copy(
       references = List("CHEMISTRY"),
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
-      replaces = Some(a0.digest))
+      replaces = Some(liveDig0))
     val (a1, gSeal1) = mintDelegation(cas, claim1, lawOwner)
     val err = branches.plantGoverned(a1, idents, ownerSealOf(alice, a1), grantorSeal = Some(gSeal1))
     assert(err.isLeft, err.toString)

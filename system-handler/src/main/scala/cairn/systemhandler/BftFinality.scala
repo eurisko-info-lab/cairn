@@ -22,7 +22,14 @@ import java.nio.charset.StandardCharsets
 object BftFinality:
   import BftQuorum.*
 
-  /** Canonical identity of a replica set: digest of sorted replica names. */
+  /** Canonical identity of a replica set: digest of sorted (id, publicKey) pairs. */
+  def replicaSetDigest(authorities: Map[String, Vector[Byte]]): Digest =
+    Digest.of(Canon.CList(
+      authorities.toList.sortBy(_._1).map { (id, pk) =>
+        Canon.cmap("id" -> Canon.CStr(id), "publicKey" -> Canon.CBytes(pk))
+      }))
+
+  /** @deprecated Prefer [[replicaSetDigest(Map)]] — names alone do not bind keys. */
   def replicaSetDigest(replicaIds: List[String]): Digest =
     Digest.of(Canon.cstrs(replicaIds.sorted))
 
@@ -184,7 +191,7 @@ object BftFinality:
         val ids = cert.commits.map(_._1.id)
         if cert.replicaSet != expectedReplicaSet then
           Left(s"bft finality: replicaSet ${cert.replicaSet.short} != expected ${expectedReplicaSet.short}")
-        else if replicaSetDigest(authorities.keys.toList) != expectedReplicaSet then
+        else if replicaSetDigest(authorities) != expectedReplicaSet then
           Left("bft finality: authorities do not match certificate replicaSet")
         else if ids.length != ids.distinct.length then
           Left(s"bft finality: duplicate replica commits: ${ids.mkString(",")}")
@@ -260,7 +267,7 @@ object BftFinality:
   ): Either[String, FinalityCertificate] =
     val ids = replicas.map(k => ReplicaId(k.name))
     val auth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = replicaSetDigest(replicas.map(_.name))
+    val setDig = replicaSetDigest(auth)
     val value = valueOfBlock(blockDigest)
     val primaryId = ReplicaId(primary.name)
     var states: Map[ReplicaId, ReplicaState] =
@@ -331,7 +338,11 @@ object BftFinality:
 
   def loadReplicaSet(path: java.nio.file.Path): Either[String, ReplicaSetManifest] =
     if !java.nio.file.Files.exists(path) then Left(s"missing replica-set manifest at $path")
-    else Canon.decode(java.nio.file.Files.readAllBytes(path)).flatMap(ReplicaSetManifest.fromCanon)
+    else
+      Canon.decode(java.nio.file.Files.readAllBytes(path)).flatMap(ReplicaSetManifest.fromCanon)
+        .flatMap { m =>
+          ReplicaSetManifest.verifySeals(m, Ed25519.verify).map(_ => m)
+        }
 
   def saveReplicaSet(path: java.nio.file.Path, m: ReplicaSetManifest): Either[String, Unit] =
     try
@@ -551,28 +562,46 @@ final class BftReplica(
   /** Keyed by (view, seq, valueDigestHex, replicaId) — never overwrite peers. */
   private val commitSeals =
     scala.collection.mutable.Map.empty[(Int, Int, String, String), Vector[Byte]]
-  private var certificates: List[FinalityCertificate] =
-    certStore.flatMap(BftFinality.loadCerts(_).toOption).getOrElse(Nil)
+  private var certificates: List[FinalityCertificate] = Nil
   private var blockMeta: Map[Digest, (Long, Digest)] = Map.empty
+  /** Non-empty when a durable store exists but could not be restored safely. */
+  private var restoreError: Option[String] = None
 
-  // Restore durable protocol state if present.
-  stateStore.foreach { path =>
+  certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
+      BftFinality.loadCerts(path) match
+        case Right(cs) => certificates = cs
+        case Left(e)   => restoreError = Some(s"bft-certs restore failed: $e")
+  }
+
+  // Restore durable protocol state if present — fail closed on corruption.
+  stateStore.foreach { path =>
+    if java.nio.file.Files.exists(path) && restoreError.isEmpty then
       Canon.decode(java.nio.file.Files.readAllBytes(path)).flatMap(BftFinality.decodeReplicaState) match
         case Right((st, seals, meta)) if st.id.id == keypair.name && st.n == n =>
           state = st
           commitSeals ++= seals
           blockMeta = meta
-        case _ => ()
+        case Right((st, _, _)) =>
+          restoreError = Some(
+            s"bft-state identity mismatch: file has ${st.id.id}/n=${st.n}, " +
+              s"replica is ${keypair.name}/n=$n")
+        case Left(e) =>
+          restoreError = Some(s"bft-state restore failed: $e")
   }
 
   def id: ReplicaId = ReplicaId(keypair.name)
-  def setDigest: Digest = replicaSetDigest(replicaIds)
+  def setDigest: Digest = replicaSetDigest(authorities)
   def drainOutbound(): List[SignedMsg] =
     val xs = outbound.toList
     outbound.clear()
     xs
   def finalityCerts: List[FinalityCertificate] = certificates
+
+  private def refuseIfCorrupt[A](op: => Either[String, A]): Either[String, A] =
+    restoreError match
+      case Some(e) => Left(s"bft: refusing to operate after failed state restore ($e)")
+      case None    => op
 
   /** Bind ledger evidence for a block before / while agreeing. */
   def noteSealedBlock(blockDigest: Digest, height: Long, parent: Digest): Unit =
@@ -581,63 +610,67 @@ final class BftReplica(
 
   /** Primary-only: sign and locally deliver a PrePrepare for a sealed block. */
   def propose(view: Int, seq: Int, blockDigest: Digest): Either[String, List[SignedMsg]] =
-    for
-      primary <- designatedPrimary(replicaIds, view)
-      _ <- Either.cond(primary.id == keypair.name, (),
-        s"bft: this replica ${keypair.name} is not primary for view $view (${primary.id})")
-      _ <- (node, ledgerAuth.nonEmpty) match
-        case (Some(n), true) =>
-          requireSealedBlock(n, ledgerAuth, blockDigest).map { (b, h) =>
-            noteSealedBlock(blockDigest, h, b.parent)
-          }
-        case _ =>
-          if blockMeta.contains(blockDigest) then Right(())
-          else Left(s"bft: block ${blockDigest.short} not noted as sealed")
-      pp <- sign(keypair, Msg.PrePrepare(view, seq, valueOfBlock(blockDigest), primary))
-      out <- receive(pp)
-    yield pp :: out
+    refuseIfCorrupt {
+      for
+        primary <- designatedPrimary(replicaIds, view)
+        _ <- Either.cond(primary.id == keypair.name, (),
+          s"bft: this replica ${keypair.name} is not primary for view $view (${primary.id})")
+        _ <- (node, ledgerAuth.nonEmpty) match
+          case (Some(n), true) =>
+            requireSealedBlock(n, ledgerAuth, blockDigest).map { (b, h) =>
+              noteSealedBlock(blockDigest, h, b.parent)
+            }
+          case _ =>
+            if blockMeta.contains(blockDigest) then Right(())
+            else Left(s"bft: block ${blockDigest.short} not noted as sealed")
+        pp <- sign(keypair, Msg.PrePrepare(view, seq, valueOfBlock(blockDigest), primary))
+        out <- receive(pp)
+      yield pp :: out
+    }
 
   def receive(sm: SignedMsg): Either[String, List[SignedMsg]] =
-    val primaryOk = sm.msg match
-      case Msg.PrePrepare(view, _, _, from) =>
-        designatedPrimary(replicaIds, view).exists(_ == from)
-      case _ => true
-    if !primaryOk then Left(s"bft: PrePrepare from non-primary ${msgFrom(sm.msg).id}")
-    else BftFinality.verify(authorities, sm).flatMap { _ =>
-      val bind: Either[String, Unit] = sm.msg match
-        case Msg.PrePrepare(_, _, value, _) =>
-          Digest.parse(new String(value.bytes.toArray, StandardCharsets.US_ASCII)) match
-            case Left(e) => Left(e)
-            case Right(blockDig) =>
-              (node, ledgerAuth.nonEmpty) match
-                case (Some(n), true) =>
-                  requireSealedBlock(n, ledgerAuth, blockDig).map { (b, h) =>
-                    noteSealedBlock(blockDig, h, b.parent)
-                  }
-                case _ =>
-                  if blockMeta.contains(blockDig) then Right(())
-                  else Left(s"bft: block ${blockDig.short} not noted as sealed")
-        case _ => Right(())
-      bind.map { _ =>
-        sm.msg match
-          case Msg.Commit(view, seq, d, from) =>
-            commitSeals((view, seq, d.hex, from.id)) = sm.seal
-          case _ => ()
-        val (st2, out) = deliver(state, sm.msg)
-        state = st2
-        val signedOut = out.flatMap { m =>
-          BftFinality.sign(keypair, m).toOption.toList.map { s =>
-            m match
-              case Msg.Commit(view, seq, d, from) =>
-                commitSeals((view, seq, d.hex, from.id)) = s.seal
-              case _ => ()
-            s
+    refuseIfCorrupt {
+      val primaryOk = sm.msg match
+        case Msg.PrePrepare(view, _, _, from) =>
+          designatedPrimary(replicaIds, view).exists(_ == from)
+        case _ => true
+      if !primaryOk then Left(s"bft: PrePrepare from non-primary ${msgFrom(sm.msg).id}")
+      else BftFinality.verify(authorities, sm).flatMap { _ =>
+        val bind: Either[String, Unit] = sm.msg match
+          case Msg.PrePrepare(_, _, value, _) =>
+            Digest.parse(new String(value.bytes.toArray, StandardCharsets.US_ASCII)) match
+              case Left(e) => Left(e)
+              case Right(blockDig) =>
+                (node, ledgerAuth.nonEmpty) match
+                  case (Some(n), true) =>
+                    requireSealedBlock(n, ledgerAuth, blockDig).map { (b, h) =>
+                      noteSealedBlock(blockDig, h, b.parent)
+                    }
+                  case _ =>
+                    if blockMeta.contains(blockDig) then Right(())
+                    else Left(s"bft: block ${blockDig.short} not noted as sealed")
+          case _ => Right(())
+        bind.map { _ =>
+          sm.msg match
+            case Msg.Commit(view, seq, d, from) =>
+              commitSeals((view, seq, d.hex, from.id)) = sm.seal
+            case _ => ()
+          val (st2, out) = deliver(state, sm.msg)
+          state = st2
+          val signedOut = out.flatMap { m =>
+            BftFinality.sign(keypair, m).toOption.toList.map { s =>
+              m match
+                case Msg.Commit(view, seq, d, from) =>
+                  commitSeals((view, seq, d.hex, from.id)) = s.seal
+                case _ => ()
+              s
+            }
           }
+          outbound ++= signedOut
+          tryMintCertificates()
+          persistState()
+          signedOut
         }
-        outbound ++= signedOut
-        tryMintCertificates()
-        persistState()
-        signedOut
       }
     }
 

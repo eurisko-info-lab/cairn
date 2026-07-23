@@ -98,7 +98,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(cert.commits.size >= BftQuorum.quorumSize(4))
     assertEquals(cert.commits.map(_._1.id).distinct.length, cert.commits.length)
     val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(_.name))
+    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
     assertEquals(BftFinality.FinalityCertificate.verify(cert, bftAuth, setDig), Right(()))
 
   test("BftFinality certificate rejects duplicate replica commits"):
@@ -115,7 +115,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val (id0, seal0) = cert.commits.head
     val duped = cert.copy(commits = List.fill(3)((id0, seal0)))
     val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(_.name))
+    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
     assert(BftFinality.FinalityCertificate.verify(duped, bftAuth, setDig).isLeft)
 
   test("BftFinality certificate rejects under-quorum commits"):
@@ -131,7 +131,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     val thin = cert.copy(commits = cert.commits.take(1))
     val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
-    val setDig = BftFinality.replicaSetDigest(replicas.map(_.name))
+    val setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
     assert(BftFinality.FinalityCertificate.verify(thin, bftAuth, setDig).isLeft)
 
   test("BftFinality rejects agreeing over a non-chain digest"):
@@ -151,7 +151,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
     val ids = replicas.map(_.name)
-    val setDig = BftFinality.replicaSetDigest(ids)
+    val setDig = BftFinality.replicaSetDigest(bftAuth)
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-bft-$id")).toMap
     // Identical sealed tip on every replica node
     val nodes = homes.map { (id, home) =>
@@ -205,8 +205,13 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val kps = ids.map { id =>
       Keypair.loadOrCreate(homes(id), id).fold(e => fail(e), identity)
     }
-    val manifest = ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
+    val unsigned = ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
       .fold(e => fail(e), identity)
+    val manifest = ReplicaSetManifest.seal(
+      unsigned,
+      kps.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
+      .fold(e => fail(e), identity)
+    ReplicaSetManifest.verifySeals(manifest, Ed25519.verify).fold(e => fail(e), identity)
     // Every home gets the same certified public-key set (no remote private keys).
     ids.foreach { id =>
       BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(id)), manifest)
@@ -255,3 +260,47 @@ class DistributionDaemonSuite extends munit.FunSuite:
       // State files persisted
       assert(java.nio.file.Files.exists(homes("r0").resolve("bft-state.canon")))
     finally https.foreach(_.stop())
+
+  test("replica-set digest binds public keys, not names alone"):
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val b = List("r0", "r1", "r2", "r3").map(id => Keypair.dev(s"$id-alt").copy(name = id))
+    // Same ids, different key material → different digests
+    val digA = BftFinality.replicaSetDigest(a.map(k => k.name -> k.publicBytes).toMap)
+    val digB = BftFinality.replicaSetDigest(b.map(k => k.name -> k.publicBytes).toMap)
+    assert(digA != digB)
+    val namesOnly = BftFinality.replicaSetDigest(a.map(_.name))
+    assert(digA != namesOnly)
+    val mA = ReplicaSetManifest.of(a.map(k => k.name -> k.publicBytes)).fold(e => fail(e), identity)
+    val mB = ReplicaSetManifest.of(b.map(k => k.name -> k.publicBytes)).fold(e => fail(e), identity)
+    assertEquals(mA.replicaSetDigest, digA)
+    assert(mA.replicaSetDigest != mB.replicaSetDigest)
+    // Sealed artifact round-trips member seals
+    val sealedM = ReplicaSetManifest.seal(
+      mA,
+      a.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
+      .fold(e => fail(e), identity)
+    assert(sealedM.seals.nonEmpty)
+    val reloaded = ReplicaSetManifest.fromCanon(sealedM.canon).fold(e => fail(e), identity)
+    assertEquals(reloaded.seals, sealedM.seals)
+    ReplicaSetManifest.verifySeals(reloaded, Ed25519.verify).fold(e => fail(e), identity)
+
+  test("corrupt bft-state.canon refuses further operate (fail closed)"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-corrupt")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
+    val ids = replicas.map(_.name)
+    val statePath = home.resolve("bft-state.canon")
+    java.nio.file.Files.write(statePath, "not-valid-canon".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val bft = BftReplica(
+      replicas.head, bftAuth, ids,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      stateStore = Some(statePath))
+    val block = node.chainDigests.head
+    val err = bft.propose(0, 0, block)
+    assert(err.isLeft, err.toString)
+    assert(err.swap.toOption.exists(_.contains("refusing to operate")), err.toString)

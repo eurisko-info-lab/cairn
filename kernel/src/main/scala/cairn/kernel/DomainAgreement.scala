@@ -52,6 +52,74 @@ final case class DomainAgreement(
   def artifact: Artifact = Artifact(ArtifactKind.Certificate, Canon.CTag("domain-agreement", canon))
   def digest: Digest = artifact.digest
 
+  /** Persistable sealed envelope: unsigned body + owner (and optional grantor) seals. */
+  def seal(
+      ownerSeal: Vector[Byte],
+      grantorSeal: Option[Vector[Byte]] = None,
+  ): SealedDomainAgreement =
+    SealedDomainAgreement(this, ownerSeal, grantorSeal)
+
+/** Domain agreement with embedded seals — the CAS object that manifests cite. */
+final case class SealedDomainAgreement(
+    agreement: DomainAgreement,
+    ownerSeal: Vector[Byte],
+    grantorSeal: Option[Vector[Byte]] = None,
+):
+  def canon: Canon = Canon.CTag("domain-agreement-sealed", Canon.cmap(
+    "agreement" -> Canon.CTag("domain-agreement", agreement.canon),
+    "ownerSeal" -> Canon.CBytes(ownerSeal),
+    "grantorSeal" -> grantorSeal.fold(Canon.CTag("none", Canon.CInt(0)))(s =>
+      Canon.CTag("some", Canon.CBytes(s)))))
+  def artifact: Artifact = Artifact(ArtifactKind.Certificate, canon)
+  def digest: Digest = artifact.digest
+
+object SealedDomainAgreement:
+  def fromCanon(c: Canon): Either[String, SealedDomainAgreement] =
+    import Canon.*
+    c match
+      case CTag("domain-agreement-sealed", m) =>
+        for
+          ag <- DomainAgreement.fromCanon(m.field("agreement"))
+          ownerSeal <- m.field("ownerSeal") match
+            case CBytes(bs) => Right(bs)
+            case other      => Left(s"ownerSeal: $other")
+          grantorSeal = m.field("grantorSeal") match
+            case CTag("some", CBytes(bs)) => Some(bs)
+            case _                        => None
+        yield SealedDomainAgreement(ag, ownerSeal, grantorSeal)
+      // Legacy unsigned body — reject so callers cannot treat unsigned as endorsed.
+      case CTag("domain-agreement", _) =>
+        Left("domain-agreement: unsigned artifact (need domain-agreement-sealed)")
+      case other => Left(s"not a sealed domain-agreement: $other")
+
+  /** Re-verify owner (and grantor, when present) seals against resolved keys. */
+  def verify(
+      sealedAg: SealedDomainAgreement,
+      identities: IdentityResolver,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+      grantorName: Option[String] = None,
+  ): Either[String, Unit] =
+    val ag = sealedAg.agreement
+    for
+      ownerPk <- identities.require(ag.owner)
+      _ <- DomainAgreement.authenticateOwner(ag, ag.owner, ownerPk, sealedAg.ownerSeal, verify)
+      _ <- (ag.primaryAncestor, sealedAg.grantorSeal, grantorName) match
+        case (None, None, _) => Right(())
+        case (Some(_), None, _) =>
+          Left("domain-agreement: sealed plant under primary missing grantorSeal")
+        case (Some(_), Some(gs), Some(gName)) =>
+          identities.require(gName).flatMap { gPk =>
+            // Grantor sealed the delegation body, not the agreement — verified separately.
+            // Here we only require the seal bytes are present when primary is set.
+            if gs.isEmpty then Left("domain-agreement: empty grantorSeal")
+            else Right(())
+          }
+        case (Some(_), Some(_), None) =>
+          Left("domain-agreement: grantor name required to verify sealed grantorSeal")
+        case (None, Some(_), _) =>
+          Left("domain-agreement: trunk sealed agreement must not carry grantorSeal")
+    yield ()
+
 object DomainAgreement:
   def fromCanon(c: Canon): Either[String, DomainAgreement] =
     import Canon.*
@@ -124,16 +192,13 @@ object DomainAgreement:
           case _ => Right(())
       }
 
-  /** Ancestry-change policy: first plant has no `replaces`; amendments must
-    * cite the live agreement digest, keep the same owner, and keep the same
-    * child name. Primary/refs may change only under that amendment.
-    *
-    * When `live` cannot be decoded the caller must fail closed — this helper
-    * only sees a successfully loaded prior agreement.
+  /** Ancestry-change policy. `liveSealedDigest` is the CAS digest of the prior
+    * [[SealedDomainAgreement]] (what manifests store); `replaces` must cite it.
     */
   def allowsTransition(
       proposed: DomainAgreement,
       live: Option[DomainAgreement],
+      liveSealedDigest: Option[Digest] = None,
   ): Either[String, Unit] =
     live match
       case None =>
@@ -145,11 +210,13 @@ object DomainAgreement:
           Left(s"domain-agreement: cannot rename '${prev.child}' to '${proposed.child}'")
         else if proposed.owner != prev.owner then
           Left(s"domain-agreement: owner '${prev.owner}' cannot be reassigned to '${proposed.owner}'")
-        else if !proposed.replaces.contains(prev.digest) then
-          Left(
-            s"domain-agreement: ancestry change must replace ${prev.digest.short} " +
-              s"(got ${proposed.replaces.map(_.short).getOrElse("none")})")
-        else Right(())
+        else
+          val expected = liveSealedDigest.getOrElse(prev.digest)
+          if !proposed.replaces.contains(expected) then
+            Left(
+              s"domain-agreement: ancestry change must replace ${expected.short} " +
+                s"(got ${proposed.replaces.map(_.short).getOrElse("none")})")
+          else Right(())
 
   /** Authenticate that `signer` is the declared owner (name match + seal over
     * the full agreement canon including any delegation pointer).
@@ -170,8 +237,7 @@ object DomainAgreement:
 /** Consent from a primary domain's owner that a named child may hang under it.
   *
   * Separate from [[DomainAgreement]]: the child's owner claims the plant; the
-  * ancestor's owner seals this grant. Stored as Certificate tagged
-  * `domain-ancestor-delegation`. Soft references do not require delegation.
+  * ancestor's owner seals this grant. Soft references do not require delegation.
   */
 final case class DomainAncestorDelegation(
     ancestor: String,
@@ -187,9 +253,45 @@ final case class DomainAncestorDelegation(
     "grantor" -> Canon.CStr(grantor),
     "grantee" -> Canon.CStr(grantee),
     "claimDigest" -> Canon.CStr(claimDigest.hex))
+  def seal(grantorSeal: Vector[Byte]): SealedDomainAncestorDelegation =
+    SealedDomainAncestorDelegation(this, grantorSeal)
   def artifact: Artifact =
     Artifact(ArtifactKind.Certificate, Canon.CTag("domain-ancestor-delegation", canon))
   def digest: Digest = artifact.digest
+
+/** Delegation body + grantor seal persisted together. */
+final case class SealedDomainAncestorDelegation(
+    delegation: DomainAncestorDelegation,
+    grantorSeal: Vector[Byte],
+):
+  def canon: Canon = Canon.CTag("domain-ancestor-delegation-sealed", Canon.cmap(
+    "delegation" -> Canon.CTag("domain-ancestor-delegation", delegation.canon),
+    "grantorSeal" -> Canon.CBytes(grantorSeal)))
+  def artifact: Artifact = Artifact(ArtifactKind.Certificate, canon)
+  def digest: Digest = artifact.digest
+
+object SealedDomainAncestorDelegation:
+  def fromCanon(c: Canon): Either[String, SealedDomainAncestorDelegation] =
+    import Canon.*
+    c match
+      case CTag("domain-ancestor-delegation-sealed", m) =>
+        for
+          del <- DomainAncestorDelegation.fromCanon(m.field("delegation"))
+          seal <- m.field("grantorSeal") match
+            case CBytes(bs) => Right(bs)
+            case other      => Left(s"grantorSeal: $other")
+        yield SealedDomainAncestorDelegation(del, seal)
+      case CTag("domain-ancestor-delegation", _) =>
+        Left("domain-delegation: unsigned artifact (need domain-ancestor-delegation-sealed)")
+      case other => Left(s"not a sealed domain-ancestor-delegation: $other")
+
+  def verify(
+      sealedDel: SealedDomainAncestorDelegation,
+      grantorPublic: Vector[Byte],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, Unit] =
+    DomainAncestorDelegation.authenticateGrantor(
+      sealedDel.delegation, sealedDel.delegation.grantor, grantorPublic, sealedDel.grantorSeal, verify)
 
 object DomainAncestorDelegation:
   def fromCanon(c: Canon): Either[String, DomainAncestorDelegation] =

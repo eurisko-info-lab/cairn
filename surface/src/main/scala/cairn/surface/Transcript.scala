@@ -3,7 +3,7 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systemhandler.{
-  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
+  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Ed25519, Filesystem, Gossip, GossipDaemon,
   HttpGossip, HttpNode, HttpSync, Keypair, Node, PeerRegistry, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
@@ -806,15 +806,19 @@ object Cli:
       _ <- BftFinality.FinalityCertificate.verify(cert, manifest.authorities, manifest.replicaSetDigest)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
-  /** Create local keypairs for each name and write a certified replica-set.canon. */
+  /** Create local keypairs for each name and write a sealed replica-set.canon. */
   private def bftReplicaSetInit(home: Path, names: List[String]): Either[String, String] =
     for
       kps <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
         acc.flatMap(ks => Keypair.loadOrCreate(home, n).map(ks :+ _))
       }
-      manifest <- ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
-      _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
-    yield s"replica-set ${manifest.digest.short} n=${manifest.n} ids=${manifest.ids.mkString(",")}"
+      unsigned <- ReplicaSetManifest.of(kps.map(k => k.name -> k.publicBytes))
+      sealedM <- ReplicaSetManifest.seal(
+        unsigned,
+        kps.map(k => k.name -> ((msg: Array[Byte]) => Ed25519.sign(k.privateKey, msg))))
+      _ <- ReplicaSetManifest.verifySeals(sealedM, Ed25519.verify)
+      _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), sealedM)
+    yield s"replica-set ${sealedM.digest.short} n=${sealedM.n} ids=${sealedM.ids.mkString(",")}"
 
   /** In-process lab agreement bound to a local sealed block (not network). */
   private def bftAgreeLocal(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
@@ -829,7 +833,7 @@ object Cli:
       }
       cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
       auth = replicas.map(k => k.name -> k.publicBytes).toMap
-      setDig = BftFinality.replicaSetDigest(replicas.map(_.name))
+      setDig = BftFinality.replicaSetDigest(replicas.map(k => k.name -> k.publicBytes).toMap)
       _ <- BftFinality.FinalityCertificate.verify(cert, auth, setDig)
     yield s"bft local finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
@@ -894,7 +898,7 @@ object Cli:
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     val bftAuth = replicas.map(k => k.name -> k.publicBytes).toMap
     val ids = replicas.map(_.name)
-    val setDig = BftFinality.replicaSetDigest(ids)
+    val setDig = BftFinality.replicaSetDigest(bftAuth)
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
     val seeded: Either[String, Map[String, Node]] =
       ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
