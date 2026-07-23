@@ -16,6 +16,23 @@ Single-node proof-of-authority publication spine (§6 Phase 5, §4.9).
   height, seal, every tx, and the claimed state root must all validate), `replay`
   (whole chain from genesis). Signature verification is injected as a pure function.
 
+## Domain trunk
+
+The ledger is also the **root of domains** — analogous to DNS TLDs (`.org`,
+`.com`). Branch manifests record that tree separately from causal change digests:
+
+| Field | Meaning |
+| ----- | ------- |
+| `primaryAncestor = None` | Branch hangs on the global trunk (e.g. `LAW`, `CHEMISTRY`) |
+| `primaryAncestor = Some(name)` | Strongest binding to one parent domain (e.g. `SDS` → `LAW`) |
+| `references` | Soft links to other domains (e.g. `SDS` also refers to `CHEMISTRY`) |
+
+A branch may therefore have many ancestors via references, or a single strongest
+ancestor plus optional soft refs. `DomainBranch.wellFormed` (Kernel) and
+`Branches.forkFrom` / `referTo` (system-handler) enforce known names and
+non-self / non-overlapping primary∩refs. Causal `parents` on the same manifest
+remain change-digest edges for merge/LCA — not domain names.
+
 ## Invariants
 
 - The ledger records **hashes, heads, identities, certificates** — never artifact

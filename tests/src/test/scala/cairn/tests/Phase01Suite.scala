@@ -188,3 +188,48 @@ class BranchSuite extends munit.FunSuite:
     assertEquals(m.head, Some(k2))
     assertEquals(m.history, List(k1))
     assertEquals(branches2.list(), List("main"))
+
+  test("domain trunk: LAW off ledger; SDS primary=LAW + refer CHEMISTRY"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-domain")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val mLaw = Module(List("law" -> Stlc.tru))
+    val mChem = Module(List("chem" -> Stlc.fls))
+    val mSds = Module(List("sds" -> Stlc.tru))
+    val law = branches.forkFrom("LAW", primary = None, module = Some(mLaw))
+      .fold(e => fail(e), identity)
+    assertEquals(law.primaryAncestor, None)
+    assertEquals(law.references, Nil)
+    val chem = branches.forkFrom("CHEMISTRY", primary = None, module = Some(mChem))
+      .fold(e => fail(e), identity)
+    assertEquals(chem.primaryAncestor, None)
+    val sds = branches.forkFrom(
+        "SDS", primary = Some("LAW"), module = Some(mSds), references = List("CHEMISTRY"))
+      .fold(e => fail(e), identity)
+    assertEquals(sds.primaryAncestor, Some("LAW"))
+    assertEquals(sds.references, List("CHEMISTRY"))
+    // advance preserves domain ancestry
+    val k = CasEffects.put(cas, Module(List("sds2" -> Stlc.fls)).artifact, casCtx)
+      .fold(e => fail(e.toString), identity)
+    val advanced = branches.advance("SDS", k)
+    assertEquals(advanced.primaryAncestor, Some("LAW"))
+    assertEquals(advanced.references, List("CHEMISTRY"))
+    // soft ref can be added later
+    val onlyLaw = branches.forkFrom("TAX", primary = Some("LAW")).fold(e => fail(e), identity)
+    assertEquals(onlyLaw.references, Nil)
+    val withChem = branches.referTo("TAX", "CHEMISTRY").fold(e => fail(e), identity)
+    assertEquals(withChem.primaryAncestor, Some("LAW"))
+    assertEquals(withChem.references, List("CHEMISTRY"))
+
+  test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
+    val known = Set("LAW", "CHEMISTRY")
+    assert(DomainBranch.wellFormed(
+      BranchManifest("SDS", None, Nil, primaryAncestor = Some("LAW"), references = List("CHEMISTRY")),
+      known).isRight)
+    assert(DomainBranch.wellFormed(
+      BranchManifest("SDS", None, Nil, primaryAncestor = Some("MISSING")), known).isLeft)
+    assert(DomainBranch.wellFormed(
+      BranchManifest("LAW", None, Nil, primaryAncestor = Some("LAW")), known).isLeft)
+    assert(DomainBranch.wellFormed(
+      BranchManifest("SDS", None, Nil, primaryAncestor = Some("LAW"), references = List("LAW")),
+      known).isLeft)

@@ -171,11 +171,17 @@ acceptance** — plants a module tip without a ValidatedChangeSet; it is not the
 ordinary ΔL path. Loaded histories are replay-checked before merge.
 
 `BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
-`changeHistory`, `conflictState` (CAS digests). Refs `.change` / `.changes`
-sidecars remain write-through caches; `loadChangeHistory` / `loadChange`
-prefer manifest digests. `mergeBranches` prefers `PatchGraph` DAG LCA when
-change-set digests form an explicit parent graph, falling back to shared
-module-result digests, then merges divergent suffixes.
+`changeHistory`, `conflictState` (CAS digests), plus **domain ancestry**:
+`primaryAncestor` (strongest binding, or `None` = hang off the ledger trunk)
+and `references` (soft cross-domain ancestors). The ledger / blockchain is the
+global trunk of domains (like DNS roots); e.g. `LAW` off the trunk, `SDS`
+with primary `LAW` and a reference to `CHEMISTRY`. Kernel `DomainBranch.wellFormed`
+checks names; `Branches.forkFrom` / `referTo` plant and extend that graph.
+Refs `.change` / `.changes` sidecars remain write-through caches;
+`loadChangeHistory` / `loadChange` prefer manifest digests. `mergeBranches`
+prefers `PatchGraph` DAG LCA when change-set digests form an explicit parent
+graph, falling back to shared module-result digests, then merges divergent
+suffixes.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
 `Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via

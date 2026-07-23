@@ -665,11 +665,67 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       acceptedChange = acceptedChange.orElse(cur.acceptedChange),
       conflictState = conflictState,
       changeHistory = nextHistory,
-      certificates = cur.certificates)
+      certificates = cur.certificates,
+      primaryAncestor = cur.primaryAncestor,
+      references = cur.references)
     val key = putArt(next.artifact)
     refsMkdirs()
     refsWrite(refPath(branch), key.valueHash.hex)
     next
+
+  /** Persist domain ancestry on a branch ref (head / history unchanged). */
+  private def storeManifest(m: BranchManifest): BranchManifest =
+    val key = putArt(m.artifact)
+    refsMkdirs()
+    refsWrite(refPath(m.branch), key.valueHash.hex)
+    m
+
+  /** Pull a domain branch off the ledger trunk (`primary = None`) or off an
+    * existing primary ancestor. Soft [[references]] name additional ancestors
+    * (e.g. SDS primary=LAW, references=CHEMISTRY). Optionally seeds a tip via
+    * [[importModule]]; domain fields survive subsequent advances.
+    */
+  def forkFrom(
+      child: String,
+      primary: Option[String],
+      module: Option[Module] = None,
+      references: List[String] = Nil,
+  ): Either[String, BranchManifest] =
+    val known = list().toSet
+    val refs = references.distinct.filterNot(r => primary.contains(r) || r == child)
+    val draft = BranchManifest(
+      child, None, Nil, primaryAncestor = primary, references = refs)
+    DomainBranch.wellFormed(draft, known).flatMap { _ =>
+      if known.contains(child) then
+        val cur = load(child)
+        if cur.primaryAncestor == primary && cur.references == refs then
+          module match
+            case None    => Right(cur)
+            case Some(m) => Right(importModule(child, m))
+        else
+          Left(
+            s"domain: branch '$child' already exists " +
+              s"(primary=${cur.primaryAncestor}, refs=${cur.references})")
+      else
+        storeManifest(draft)
+        module match
+          case None    => Right(load(child))
+          case Some(m) => Right(importModule(child, m))
+    }
+
+  /** Add a soft cross-domain reference (not the primary ancestor). */
+  def referTo(branch: String, other: String): Either[String, BranchManifest] =
+    val known = list().toSet
+    if !known.contains(branch) then Left(s"domain: branch '$branch' does not exist")
+    else if !known.contains(other) then Left(s"domain: reference '$other' is not a known branch")
+    else
+      val cur = load(branch)
+      if cur.primaryAncestor.contains(other) then
+        Left(s"domain: '$other' is already the primary ancestor of '$branch'")
+      else if cur.references.contains(other) then Right(cur)
+      else
+        val next = cur.copy(references = cur.references :+ other)
+        DomainBranch.wellFormed(next, known).map(_ => storeManifest(next))
 
   def list(): List[String] =
     if !refsExists(refsDir) then Nil
@@ -796,7 +852,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
           cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
           changeHistory = cur.changeHistory,
-          certificates = cur.certificates)
+          certificates = cur.certificates,
+          primaryAncestor = cur.primaryAncestor,
+          references = cur.references)
         putArt(marked.artifact) // conflictState recorded; head unchanged
         refsMkdirs()
         refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
