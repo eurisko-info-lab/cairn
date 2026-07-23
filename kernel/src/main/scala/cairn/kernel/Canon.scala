@@ -1,7 +1,9 @@
 package cairn.kernel
 
 import java.io.{ByteArrayOutputStream, DataOutputStream}
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets.UTF_8
+import java.nio.charset.{CharacterCodingException, CodingErrorAction}
 
 /** L0 canonical value model (S2).
   *
@@ -81,17 +83,51 @@ object Canon:
     def byte(): Int = { if i >= bs.length then fail("eof"); val b = bs(i) & 0xff; i += 1; b }
     def int(): Int = { val v = (byte() << 24) | (byte() << 16) | (byte() << 8) | byte(); v }
     def long(): Long = (int().toLong << 32) | (int().toLong & 0xffffffffL)
-    def str(): String =
+    // A negative count is never legitimate encoder output — `List.fill`
+    // silently treats a negative count as zero rather than failing, which
+    // would turn a corrupted length prefix into a silently-truncated,
+    // successfully-decoded value instead of a rejection. Every element
+    // `go()`/entry can produce consumes at least 1 byte (its own tag byte,
+    // at minimum), so `n` can never legitimately exceed the bytes left.
+    def count(label: String): Int =
       val n = int()
-      if n < 0 || i + n > bs.length then fail("bad string length")
-      val s = new String(bs, i, n, UTF_8); i += n; s
+      if n < 0 then fail(s"negative $label count")
+      if n > bs.length - i then fail(s"$label count exceeds remaining bytes")
+      n
+    // Permissive UTF-8 decoding (`new String(bytes, ..., UTF_8)`) silently
+    // replaces malformed/unmappable byte sequences with U+FFFD rather than
+    // failing — meaning distinct malformed inputs can decode to the SAME
+    // string, breaking the "same bytes <=> same value" canonicity this
+    // format exists to guarantee. Report, don't replace.
+    def str(): String =
+      val n = count("string")
+      val decoder = UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+      val s =
+        try decoder.decode(ByteBuffer.wrap(bs, i, n)).toString
+        catch case _: CharacterCodingException => fail("invalid UTF-8 in string")
+      i += n; s
     def go(): Canon = byte() match
       case 'I' => CInt(long())
       case 'S' => CStr(str())
-      case 'B' => val n = int(); if n < 0 || i + n > bs.length then fail("bad bytes length")
-                  val v = bs.slice(i, i + n).toVector; i += n; CBytes(v)
-      case 'L' => val n = int(); CList(List.fill(n)(go()))
-      case 'M' => val n = int(); CMap(List.fill(n)((str(), go())))
+      case 'B' => val n = count("bytes"); val v = bs.slice(i, i + n).toVector; i += n; CBytes(v)
+      case 'L' => val n = count("list"); CList(List.fill(n)(go()))
+      case 'M' =>
+        val n = count("map")
+        val entries = List.fill(n)((str(), go()))
+        // Direct construction (bypassing the `cmap` smart constructor, which
+        // is unreachable from decoded bytes) previously accepted ANY entry
+        // order and duplicate keys — two different byte sequences could
+        // decode to maps that print/behave identically but aren't `==`, or
+        // worse, a duplicate key could silently vanish under `.asMap`'s
+        // `.toMap` (last-wins) with no record that data was dropped. A
+        // strict ascending check catches both: duplicates fail `keyLt`
+        // (neither `a < b` nor `b < a`), same as any other order violation.
+        for idx <- 1 until entries.length do
+          if !keyLt(entries(idx - 1)._1, entries(idx)._1) then
+            fail(s"map entries not in canonical sorted order (or duplicate key) at entry $idx")
+        CMap(entries)
       case 'T' => CTag(str(), go())
       case t   => fail(s"unknown tag byte $t")
     try

@@ -33,14 +33,67 @@ class CanonSuite extends munit.FunSuite:
     intercept[IllegalArgumentException](Canon.cmap("x" -> CInt(1), "x" -> CInt(2)))
 
   test("golden digest is stable (S2/S3 acceptance)"):
-    // Locked fixture: any change to canonical encoding must be deliberate.
-    assertEquals(Digest.of(CStr("cairn")).hex.take(8), Digest.of(CStr("cairn")).hex.take(8))
-    assertEquals(Digest.of(sample), Digest.of(sample))
-    assert(Digest.of(CStr("cairn")) != Digest.of(CStr("cairn ")))
+    // Locked fixtures — real hex values pinned from the current encoding,
+    // not a value compared against itself (that would pass unconditionally
+    // no matter how the encoding changed). Any accidental change to
+    // Canon.encode's byte format now fails this test; a deliberate change
+    // must update these constants explicitly.
+    assertEquals(Digest.of(CStr("cairn")).hex,
+      "adea0b37cbada05d1a123b3d1aa798f6d726c19f95ef01697f2cd470858bf89f")
+    assertEquals(Digest.of(CStr("cairn ")).hex,
+      "6405a0592901a1d1088e7e735c5b83134e78f89cd789289eb685fff59b882f2e")
+    assertEquals(Digest.of(sample).hex,
+      "80d9a51a9edef428c25413ed6403800ed6ca6d046aab6590bc2aebacae74e7a7")
 
   test("trailing bytes rejected"):
     val bs = Canon.encode(CInt(1)) ++ Array[Byte](0)
     assert(Canon.decode(bs).isLeft)
+
+  // Raw byte builders — decode hardening needs to construct byte sequences
+  // no production encoder can produce (negative counts, out-of-order/
+  // duplicate map keys, malformed UTF-8), so these bypass Canon.encode
+  // entirely rather than going through it.
+  private def i32(n: Int): Array[Byte] =
+    Array((n >>> 24).toByte, (n >>> 16).toByte, (n >>> 8).toByte, n.toByte)
+  private def rawStr(bytes: Array[Byte]): Array[Byte] = i32(bytes.length) ++ bytes
+  private def rawInt(v: Long): Array[Byte] = i32((v >>> 32).toInt) ++ i32(v.toInt)
+
+  test("decode rejects a negative list count"):
+    val bs = Array[Byte]('L'.toByte) ++ i32(-1)
+    assert(Canon.decode(bs).isLeft)
+
+  test("decode rejects a negative map count"):
+    val bs = Array[Byte]('M'.toByte) ++ i32(-1)
+    assert(Canon.decode(bs).isLeft)
+
+  test("decode rejects a list/map count exceeding the remaining bytes"):
+    assert(Canon.decode(Array[Byte]('L'.toByte) ++ i32(1_000_000)).isLeft)
+    assert(Canon.decode(Array[Byte]('M'.toByte) ++ i32(1_000_000)).isLeft)
+
+  test("decode rejects map entries out of canonical sorted order"):
+    // "y" then "x" — valid entries individually, wrong order
+    val bs = Array[Byte]('M'.toByte) ++ i32(2) ++
+      rawStr("y".getBytes("UTF-8")) ++ Array[Byte]('I'.toByte) ++ rawInt(1) ++
+      rawStr("x".getBytes("UTF-8")) ++ Array[Byte]('I'.toByte) ++ rawInt(2)
+    assert(Canon.decode(bs).isLeft)
+
+  test("decode rejects duplicate map keys (bypassing cmap's own guard)"):
+    val bs = Array[Byte]('M'.toByte) ++ i32(2) ++
+      rawStr("x".getBytes("UTF-8")) ++ Array[Byte]('I'.toByte) ++ rawInt(1) ++
+      rawStr("x".getBytes("UTF-8")) ++ Array[Byte]('I'.toByte) ++ rawInt(2)
+    assert(Canon.decode(bs).isLeft)
+
+  test("decode rejects malformed UTF-8 in a string (no silent U+FFFD replacement)"):
+    // 0xC3 alone is a lead byte for a 2-byte sequence with no continuation
+    // byte — malformed. Java's permissive String(bytes, UTF_8) constructor
+    // would silently turn this into a replacement character; decode must not.
+    val bad = Array[Byte](0xC3.toByte)
+    val bs = Array[Byte]('S'.toByte) ++ rawStr(bad)
+    assert(Canon.decode(bs).isLeft)
+
+  test("decode accepts well-formed multi-byte UTF-8"):
+    val bs = Array[Byte]('S'.toByte) ++ rawStr("héllo".getBytes("UTF-8"))
+    assertEquals(Canon.decode(bs), Right(CStr("héllo")))
 
 class ArtifactSuite extends munit.FunSuite:
   test("artifact round-trip for every kind (S5 acceptance)"):
