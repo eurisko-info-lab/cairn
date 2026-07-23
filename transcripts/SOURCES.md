@@ -22,12 +22,11 @@ CAIRN-PROMPT §7: *Transcripts are CI.*
 Every `*-workflow.yaml` under
 `~/Projects/all-git-repos/pi-forall/charb/transcripts/` has a Cairn port:
 
-- **Runnable thin mapping** (~44): publish/fetch, gossip, PKI surface, or
-  `expectfail` ΔL — closest Cairn theme, not a Marble CLI clone.
-- **`deferred "…"`** (~41): honest coverage for Marble-only CLI
-  (authorization roles, tokenomics, registry SBOM, light-client phases, …).
-  Same idea as granit-rust’s `expect rejected` stubs, but succeeds with an
-  explicit deferral log line.
+| Kind | Count | Mechanism |
+| --- | --- | --- |
+| Rich / thin runnable | ~44 | publish/fetch, gossip, PKI, `expectfail` |
+| **Porcelain-promoted** | ~28 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
+| Still `deferred` | ~13 | §8 out of scope or no plumbing yet |
 
 Regenerate: `python3 scripts/gen-charb-transcripts.py`
 
@@ -38,7 +37,8 @@ Regenerate: `python3 scripts/gen-charb-transcripts.py`
 | `repository-workflow.cairn` | thin runnable (rich sibling at `../repository-workflow.cairn`) |
 | `ledger-settlement.cairn` | `deferred` — tokenomics out of Cairn PoA scope (§8) |
 
-## Still host/Scala (not transcript DSL)
+## Still host/Scala
 
-Full SDS causal + domain trunk (`SdsDomainTree` / `SdsCausalWorkflow`) — needs
-`forkFrom` transcript steps before it can leave Scala.
+Full SDS causal + domain trunk planting in transcripts — `forkFrom` porcelain
+step is the next promotion target (`integration-cross-namespace` already shows
+domain ancestry via `domain show`).

@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `chain-work-reward-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-reward-workflow.yaml
 -- Description: Applies completed verification work rewards to chain account reputation and quota
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-reward {
-  deferred "Charb/Marble CLI: Applies completed verification work rewards to chain account reputation and quota — no Cairn transcript equivalent yet" ;
+  deferred "Charb/Marble CLI: Applies completed verification work rewards to chain account reputation and quota — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
 }

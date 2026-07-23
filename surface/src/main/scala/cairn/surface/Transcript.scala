@@ -23,6 +23,7 @@ import java.nio.file.Path
   *   publish BRANCH ;                  publish language+module, set head
   *   fetch BRANCH ;                    second node pulls + verifies by hash
   *   deferred "REASON" ;               honest coverage stub (no Cairn equivalent yet)
+  *   porcelain THEME ;                 run Plumbing.charbTheme (promoted Charb name)
   */
 object Transcript:
   val grammar: GrammarSpec = GrammarSpec(
@@ -31,7 +32,7 @@ object Transcript:
       keywords = List("transcript", "lang", "roundtrip", "eval", "expect",
         "delta", "claim", "publish", "fetch", "node", "on", "from", "to",
         "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language",
-        "deferred"),
+        "deferred", "porcelain"),
       puncts = List("{", "}", ";", ","),
       lineComment = Some("--"),
       identContExtra = "_'-"),
@@ -57,6 +58,7 @@ object Transcript:
         ConstructorSpec("port", List(Elem.Tok("port"), Elem.NameLeaf, Elem.Tok("expect-tests-pass"), Elem.Tok(";"))),
         ConstructorSpec("query", List(Elem.Tok("query"), Elem.StrLeaf, Elem.Tok("expect"), Elem.NumLeaf, Elem.Tok(";"))),
         ConstructorSpec("deferred", List(Elem.Tok("deferred"), Elem.StrLeaf, Elem.Tok(";"))),
+        ConstructorSpec("porcelain", List(Elem.Tok("porcelain"), Elem.NameLeaf, Elem.Tok(";"))),
         ConstructorSpec("expectfail", List(Elem.Tok("expectfail"), Elem.StrLeaf, Elem.Cat("step")))))),
     precCategories = Nil,
     printRules = List(
@@ -93,6 +95,8 @@ object Transcript:
         PrintSeg.Lit("expect"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("deferred", List(
         PrintSeg.Lit("deferred"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("porcelain", List(
+        PrintSeg.Lit("porcelain"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("expectfail", List(
         PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
@@ -390,6 +394,13 @@ object Transcript:
             case Right(_)  => Left(s"step succeeded but was expected to fail with ...$substring...")
         case Cst.Node("deferred", List(Cst.Leaf(reason))) =>
           log += s"deferred: $reason"; Right(())
+        case Cst.Node("porcelain", List(Cst.Leaf(theme))) =>
+          val home = workDir
+          val e = Porcelain.env(home, packLoader, ledgerCtx)
+          Plumbing.charbTheme(theme, e).map { out =>
+            log += s"porcelain $theme"
+            out.linesIterator.foreach(line => log += s"  $line")
+          }
         case other => Left(s"unknown transcript step: ${other.render}")
 
     val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>
@@ -598,5 +609,12 @@ object Cli:
           System.out.println("Press Enter to stop.")
           scala.io.StdIn.readLine()
           "ui stopped"
+      case porcelainCmd :: rest
+          if Set("chain", "auth", "branch", "domain", "compose", "catalog",
+            "workflow", "recover", "replay", "tx", "light", "porcelain").contains(porcelainCmd) =>
+        Porcelain.dispatch(porcelainCmd :: rest, home, packLoader, ledgerCtx)
       case _ =>
-        Left("usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|repl|lsp|ui] <arg>")
+        Left(
+          "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|" +
+            "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
+            "repl|lsp|ui] <arg>")

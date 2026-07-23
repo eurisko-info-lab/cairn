@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `incentive-positive-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/incentive-positive-workflow.yaml
 -- Description: Complete multi-version workflow: v1.0 → v2.0 with revocation/supersession
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript incentive-positive {
-  deferred "Charb/Marble CLI: Complete multi-version workflow: v1.0 → v2.0 with revocation/supersession — no Cairn transcript equivalent yet" ;
+  porcelain incentive-positive ;
 }

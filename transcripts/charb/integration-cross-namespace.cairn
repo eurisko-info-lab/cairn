@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `integration-cross-namespace-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/integration-cross-namespace-workflow.yaml
 -- Description: Cross-namespace integration workflow with persisted state checks
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript integration-cross-namespace {
-  deferred "Charb/Marble CLI: Cross-namespace integration workflow with persisted state checks — no Cairn transcript equivalent yet" ;
+  porcelain integration-cross-namespace ;
 }

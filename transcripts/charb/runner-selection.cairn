@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `runner-selection-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/runner-selection-workflow.yaml
 -- Description: Runner lifecycle: register → object put → select by capabilities → run object → verify
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript runner-selection {
-  deferred "Charb/Marble CLI: Runner lifecycle: register → object put → select by capabilities → run object → verify — no Cairn transcript equivalent yet" ;
+  porcelain runner-selection ;
 }

@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `compose-registry-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/compose-registry-workflow.yaml
 -- Description: Composed language registry listing, inspection, and status
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript compose-registry {
-  deferred "Charb/Marble CLI: Composed language registry listing, inspection, and status — no Cairn transcript equivalent yet" ;
+  porcelain compose-registry ;
 }

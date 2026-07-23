@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `chain-work-scan-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-scan-workflow.yaml
 -- Description: Scans verification targets and generates bounded chain work requests
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-scan {
-  deferred "Charb/Marble CLI: Scans verification targets and generates bounded chain work requests — no Cairn transcript equivalent yet" ;
+  deferred "Charb/Marble CLI: Scans verification targets and generates bounded chain work requests — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
 }

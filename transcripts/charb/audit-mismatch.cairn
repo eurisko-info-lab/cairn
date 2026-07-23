@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `audit-mismatch-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/audit-mismatch-workflow.yaml
 -- Description: Audit replay enhanced diagnostics for malformed chain rows
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript audit-mismatch {
-  deferred "Charb/Marble CLI: Audit replay enhanced diagnostics for malformed chain rows — no Cairn transcript equivalent yet" ;
+  porcelain audit-mismatch ;
 }

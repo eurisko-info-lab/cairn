@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `strict-governance-publish-integration-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-governance-publish-integration-workflow.yaml
 -- Description: Governance + publish flow with strict verification and replay diagnostics
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript strict-governance-publish-integration {
-  deferred "Charb/Marble CLI: Governance + publish flow with strict verification and replay diagnostics — no Cairn transcript equivalent yet" ;
+  porcelain strict-governance-publish-integration ;
 }

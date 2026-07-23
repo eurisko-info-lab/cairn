@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `replay-root-switching-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/replay-root-switching-workflow.yaml
 -- Description: history entries can be promoted and rolled back for both audit and governance replay roots
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript replay-root-switching {
-  deferred "Charb/Marble CLI: history entries can be promoted and rolled back for both audit and governance replay roots — no Cairn transcript equivalent yet" ;
+  porcelain replay-root-switching ;
 }

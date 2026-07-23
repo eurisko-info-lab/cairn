@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `distributed-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/distributed-workflow.yaml
 -- Description: Multi-party quorum evaluation for workflow steps
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript distributed {
-  deferred "Charb/Marble CLI: Multi-party quorum evaluation for workflow steps — no Cairn transcript equivalent yet" ;
+  porcelain distributed ;
 }

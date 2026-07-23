@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `chain-repair-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-repair-workflow.yaml
 -- Description: Repair quarantines malformed chain rows and refreshes snapshot state
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript chain-repair {
-  deferred "Charb/Marble CLI: Repair quarantines malformed chain rows and refreshes snapshot state — no Cairn transcript equivalent yet" ;
+  porcelain chain-repair ;
 }

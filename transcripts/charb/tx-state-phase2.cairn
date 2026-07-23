@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `tx-state-phase2-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/tx-state-phase2-workflow.yaml
 -- Description: Phase 2 tx/state transition command coverage
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript tx-state-phase2 {
-  deferred "Charb/Marble CLI: Phase 2 tx/state transition command coverage — no Cairn transcript equivalent yet" ;
+  porcelain tx-state-phase2 ;
 }

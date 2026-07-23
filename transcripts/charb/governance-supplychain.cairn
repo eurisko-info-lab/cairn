@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `governance-supplychain-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/governance-supplychain-workflow.yaml
 -- Description: Real state-backed supply-chain governance command flow
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Deferred: needs new plumbing or stays §8 out of scope.
 transcript governance-supplychain {
-  deferred "Charb/Marble CLI: Real state-backed supply-chain governance command flow — no Cairn transcript equivalent yet" ;
+  deferred "Charb/Marble CLI: Real state-backed supply-chain governance command flow — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
 }

@@ -4,7 +4,7 @@ import cairn.systemhandler.{EffectContext, Filesystem, Keypair, Node}
 import cairn.runtime.PackLoader
 import cairn.kernel.*
 import cairn.core.*
-import cairn.surface.Transcript
+import cairn.surface.{Porcelain, Transcript}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.examples.stlc.Stlc
 import scala.jdk.CollectionConverters.*
@@ -95,6 +95,7 @@ class Phase8Suite extends munit.FunSuite:
     assertEquals(files.length, 85, s"expected 85 Charb ports, found ${files.length}")
     var deferred = 0
     var runnable = 0
+    var porcelain = 0
     for f <- files do
       val src = Filesystem.run(Fs.Request.Read(Fs.Path(f.toString)), fsCtx) match
         case Right(Fs.Response.Text(s)) => s
@@ -105,14 +106,28 @@ class Phase8Suite extends munit.FunSuite:
         case Right(report) =>
           val ok =
             report.steps.exists(_.startsWith("deferred:")) ||
+              report.steps.exists(_.startsWith("porcelain ")) ||
               report.steps.exists(_.startsWith("published")) ||
               report.steps.exists(_.startsWith("expected failure"))
           assert(ok, report.render)
           if report.steps.exists(_.startsWith("deferred:")) then deferred += 1
+          else if report.steps.exists(_.startsWith("porcelain ")) then porcelain += 1
           else runnable += 1
         case Left(e) => fail(s"${f.getFileName}: $e")
-    assert(deferred >= 40, s"deferred=$deferred")
-    assert(runnable >= 40, s"runnable=$runnable")
+    assert(deferred <= 15, s"deferred=$deferred (expected ≤15 after porcelain)")
+    assert(porcelain >= 25, s"porcelain=$porcelain")
+    assertEquals(runnable + porcelain + deferred, 85)
+
+  test("porcelain CLI auth check and chain status"):
+    val home = java.nio.file.Files.createTempDirectory("cairn-porcelain")
+    assert(Porcelain.dispatch(List("auth", "check", "alice"), home, packs, ledgerCtx)
+      .exists(_.contains("ALLOW")))
+    assert(Porcelain.dispatch(List("chain", "status"), home, packs, ledgerCtx)
+      .exists(_.contains("chain status")))
+    assert(Porcelain.dispatch(List("porcelain", "authorization"), home, packs, ledgerCtx)
+      .exists(_.contains("auth check")))
+    assert(Porcelain.dispatch(List("catalog", "export"), home, packs, ledgerCtx)
+      .exists(_.contains("catalog export")))
 
   test("granit-rust ledger-settlement is honestly deferred"):
     val src = readTranscriptSource(

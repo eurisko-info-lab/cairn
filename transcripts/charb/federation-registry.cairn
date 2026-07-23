@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `federation-registry-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/federation-registry-workflow.yaml
 -- Description: Federation trust registry listing, inspection, and status summary
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Deferred: needs new plumbing or stays §8 out of scope.
 transcript federation-registry {
-  deferred "Charb/Marble CLI: Federation trust registry listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+  deferred "Charb/Marble CLI: Federation trust registry listing, inspection, and status summary — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
 }

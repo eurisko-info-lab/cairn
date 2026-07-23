@@ -19,9 +19,46 @@ RICH = {
     "multi-language-matrix",
 }
 
+# Themes satisfied by surface.Plumbing / Porcelain (promoted off deferred).
+PORCELAIN = {
+    "authorization",
+    "strict-assumptions-governance",
+    "branch-variant-registry",
+    "catalog-export",
+    "key-sbom-capability-registry",
+    "chain-json-export",
+    "governance-kernel-introspection",
+    "chain-recovery-negative",
+    "consistency-batch-mixed-failures",
+    "chain-repair",
+    "recovery-suggestions",
+    "strict-governance-recovery-negative",
+    "compose-registry",
+    "integration-cross-namespace",
+    "interop-lightclient-phase4",
+    "replay-history-diff",
+    "replay-history-switch-and-diff",
+    "replay-root-switching",
+    "audit-registry",
+    "audit-mismatch",
+    "runner-registry",
+    "runner-selection",
+    "workflow-registry",
+    "distributed",
+    "strict-governance-publish-integration",
+    "governance-real-features",
+    "tx-state-phase2",
+    "incentive-positive",
+}
+
 
 def esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def porcelain_body(name: str) -> str:
+    return f"""  porcelain {name} ;
+"""
 
 
 def thin_publish(name=None):
@@ -144,18 +181,33 @@ def main() -> int:
             )
             body = f"{header}{note}transcript {name} {{\n{fn(name)}}}\n"
             runnable += 1
-        else:
-            reason = esc(f"Charb/Marble CLI: {desc} — no Cairn transcript equivalent yet")
+        elif name in PORCELAIN:
             body = (
                 f"{header}"
-                f"-- Honest deferred coverage (granit-rust used expect-rejected stubs).\n"
+                f"-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.\n"
+                f"transcript {name} {{\n"
+                f"{porcelain_body(name)}"
+                f"}}\n"
+            )
+            runnable += 1
+        else:
+            reason = esc(
+                f"Charb/Marble CLI: {desc} — §8 out of scope or no Cairn plumbing yet "
+                f"(see docs/porcelain.md)"
+            )
+            body = (
+                f"{header}"
+                f"-- Deferred: needs new plumbing or stays §8 out of scope.\n"
                 f"transcript {name} {{\n"
                 f'  deferred "{reason}" ;\n'
                 f"}}\n"
             )
             deferred += 1
         (OUT / f"{name}.cairn").write_text(body)
-    print(f"wrote {runnable + deferred} under {OUT} (runnable={runnable} deferred={deferred})")
+    print(
+        f"wrote {runnable + deferred} under {OUT} "
+        f"(runnable={runnable} deferred={deferred} porcelain={len(PORCELAIN)})"
+    )
     return 0
 
 

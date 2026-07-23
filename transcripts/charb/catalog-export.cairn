@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `catalog-export-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/catalog-export-workflow.yaml
 -- Description: Catalog JSON and TSV export coverage for documentation and web tooling
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript catalog-export {
-  deferred "Charb/Marble CLI: Catalog JSON and TSV export coverage for documentation and web tooling — no Cairn transcript equivalent yet" ;
+  porcelain catalog-export ;
 }

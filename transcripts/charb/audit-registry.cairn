@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `audit-registry-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/audit-registry-workflow.yaml
 -- Description: Audit chain log listing, inspection, and status summary
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript audit-registry {
-  deferred "Charb/Marble CLI: Audit chain log listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+  porcelain audit-registry ;
 }

@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `chain-work-adjudication-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-work-adjudication-workflow.yaml
 -- Description: Adjudicates one shared work request across multiple users and updates reputation by correctness
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Deferred: needs new plumbing or stays §8 out of scope.
 transcript chain-work-adjudication {
-  deferred "Charb/Marble CLI: Adjudicates one shared work request across multiple users and updates reputation by correctness — no Cairn transcript equivalent yet" ;
+  deferred "Charb/Marble CLI: Adjudicates one shared work request across multiple users and updates reputation by correctness — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
 }

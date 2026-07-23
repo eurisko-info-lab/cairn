@@ -1,7 +1,7 @@
 -- Ported from Marble/Charb `strict-governance-recovery-negative-workflow.yaml`
 -- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-governance-recovery-negative-workflow.yaml
 -- Description: Negative replay-inspect precondition followed by recovery
--- Honest deferred coverage (granit-rust used expect-rejected stubs).
+-- Porcelain/plumbing promotion (docs/porcelain.md); not a Marble CLI clone.
 transcript strict-governance-recovery-negative {
-  deferred "Charb/Marble CLI: Negative replay-inspect precondition followed by recovery — no Cairn transcript equivalent yet" ;
+  porcelain strict-governance-recovery-negative ;
 }
