@@ -79,7 +79,7 @@ class ModuleBoundarySuite extends munit.FunSuite:
 
   test("no PackAccess.get/install or AuthorityGate.forFamily/default escape hatches"):
     val roots = List(
-      "kernel", "container/kernel-container", "content/kernel-rewrite",
+      "kernel", "container/kernel-container", "content/kernel-rewrite", "contracts",
       "container/system-interface", "container/system-handler", "app/runtime",
       "content/core", "content/user", "app/surface", "app/examples",
       "app/rosetta", "content/proof", "app/tests"
@@ -180,6 +180,11 @@ class ModuleBoundarySuite extends munit.FunSuite:
       importViolations(Path.of("container/system-handler/src/main/scala"), "system-handler", banned) ++
         importViolations(Path.of("container/system-interface/src/main/scala"), "system-interface", banned) ++
         importViolations(Path.of("container/kernel-container/src/main/scala"), "kernel-container", banned)
+    assert(hits.isEmpty, hits.mkString("\n"))
+
+  test("contracts is a pure leaf like kernel — no container/content imports"):
+    val banned = List("cairn.systemhandler", "cairn.core", "cairn.user", "cairn.proof", "cairn.runtime")
+    val hits = importViolations(Path.of("contracts/src/main/scala"), "contracts", banned)
     assert(hits.isEmpty, hits.mkString("\n"))
 
   test("container→core imports are allowlisted (shrink toward empty)"):

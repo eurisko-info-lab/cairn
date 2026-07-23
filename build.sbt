@@ -23,13 +23,23 @@ lazy val kernelRewrite = project.in(file("content/kernel-rewrite"))
   .dependsOn(kernel)
   .settings(libraryDependencies += munit)
 
+// Shared effect-contract vocabulary (Cas/Filesystem/Process/.../PackAccess/
+// AuthorizationProver) — depended on by both container (implements) and
+// content (references PackAccess), so it lives beside kernel rather than
+// under container/. Package cairn.systeminterface unchanged.
+lazy val contracts = project.in(file("contracts"))
+  .dependsOn(kernel)
+  .settings(libraryDependencies += munit)
+
 // MIGRATION-PLAN.md Phase 1: System Interface vs Handler.
+// Now holds only LedgerTransport (needs kernelContainer's SignedTx/Block);
+// every other effect contract moved to `contracts`.
 lazy val systemInterface = project.in(file("container/system-interface"))
   .dependsOn(kernel, kernelContainer)
   .settings(libraryDependencies += munit)
 
 lazy val systemHandler = project.in(file("container/system-handler"))
-  .dependsOn(kernel, kernelContainer, core, systemInterface)
+  .dependsOn(kernel, kernelContainer, core, systemInterface, contracts)
   .settings(libraryDependencies += munit)
 
 // MIGRATION-PLAN.md Phase 2: pure proposal machinery.
@@ -39,12 +49,12 @@ lazy val core = project.in(file("content/core"))
 
 // MIGRATION-PLAN.md Phase 6: User — languages/policies/workflows; never imports handlers.
 lazy val user = project.in(file("content/user"))
-  .dependsOn(kernel, core, systemInterface)
+  .dependsOn(kernel, core, contracts)
   .settings(libraryDependencies += munit)
 
 // MIGRATION-PLAN.md Phase 8: composition root (PackLoader, CLI wiring).
 lazy val runtime = project.in(file("app/runtime"))
-  .dependsOn(user, systemHandler, core, kernel, systemInterface)
+  .dependsOn(user, systemHandler, core, kernel, systemInterface, contracts)
   .settings(libraryDependencies += munit)
 
 lazy val proof = project.in(file("content/proof"))
@@ -78,6 +88,6 @@ lazy val tests = project.in(file("app/tests"))
 
 lazy val root = project.in(file("."))
   .aggregate(
-    kernel, kernelContainer, kernelRewrite, core, systemInterface, systemHandler,
-    user, runtime, proof, rosetta, surface, examples, tests)
+    kernel, kernelContainer, kernelRewrite, contracts, core, systemInterface,
+    systemHandler, user, runtime, proof, rosetta, surface, examples, tests)
   .settings(publish / skip := true)

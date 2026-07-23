@@ -12,7 +12,8 @@ not the history of how it got here.
 | --------------------- | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
 | **Kernel**            | shared                | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
 | **Core**              | `content`              | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
-| **System Interface**  | `container`            | Define effect operations, resources, requests, responses              | Pure platform contract                            |
+| **Contracts**         | shared                | Effect Request/Response/Error schemas (Cas/Filesystem/Process/…), `PackAccess`, `AuthorizationProver` | Pure platform contract |
+| **System Interface**  | `container`            | `LedgerTransport` contract only (needs kernel-container's `SignedTx`/`Block`) | Pure platform contract             |
 | **System Handler**    | `container`            | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
 | **User**              | `content`              | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
 | **Runtime**           | `app`                  | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
@@ -44,6 +45,11 @@ kernel                                                # shared: Canon, Artifact,
                                                        # GrammarLint, MetaValidate,
                                                        # SurfacePack, Authority,
                                                        # Effects, EffectMeta
+contracts                   → kernel                  # shared: Cas, Clock, Effects,
+                                                       # ExternalBackend, Filesystem,
+                                                       # Lsp, PackAccess, Process,
+                                                       # Random, Terminal, Workspace,
+                                                       # AuthorizationProver
 container/kernel-container  → kernel                  # Merkle, Ledger, BftQuorum,
                                                        # BranchManifest,
                                                        # ReplicaSetManifest,
@@ -52,10 +58,10 @@ container/kernel-container  → kernel                  # Merkle, Ledger, BftQuo
                                                        # IdentityResolver
 content/kernel-rewrite      → kernel                  # Rename, Rewrite, Checker
 content/core                → kernel, kernel-rewrite
-container/system-interface  → kernel, kernel-container
-container/system-handler    → kernel, kernel-container, core, system-interface
-content/user                → kernel, core, system-interface   (↛ system-handler)
-app/runtime                 → user, system-handler, core, kernel, system-interface
+container/system-interface  → kernel, kernel-container            # LedgerTransport only
+container/system-handler    → kernel, kernel-container, core, system-interface, contracts
+content/user                → kernel, core, contracts   (↛ system-handler, ↛ container/*)
+app/runtime                 → user, system-handler, core, kernel, system-interface, contracts
 
 # Aggregation above the DAG (not CAS/Meta/authority owners)
 content/proof                → core, kernel
@@ -98,8 +104,15 @@ decoupled from the physical path, so it did not need to change.
 
 Remaining follow-up (slice 3): finish neutralizing the container/content cut:
 
-1. Move effect schemas to a shared `contracts` project (today still under
-   `container/system-interface`); drop `kernelContainer` from its dependsOn.
+1. **Done.** 12 of `system-interface`'s 13 files (everything except
+   `LedgerTransport`) moved to a shared `contracts` project depending only
+   on `kernel`; `content/user` now depends on `contracts` instead of
+   `container/system-interface`. `LedgerTransport` stayed behind in
+   `system-interface` (still needs `kernel-container`'s `SignedTx`/`Block`,
+   which are co-located with `Merkle`-dependent `LedgerState`/`LedgerKernel`
+   — hoisting them out to drop `system-interface`'s `kernelContainer`
+   dependency entirely is a separate, deliberately deferred step so it
+   doesn't collide with in-flight `Ledger.scala` work).
 2. Keep [[cairn.systeminterface.AuthorizationProver]] as the shared prove
    contract — [[AuthorityGate]] already depends on it; delete the temporary
    `AuthorityGate.DefaultProver` once all composition roots inject
