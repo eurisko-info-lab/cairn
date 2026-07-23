@@ -1,0 +1,10 @@
+-- Ported from Marble/Charb `malformed-namespace-commands-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/malformed-namespace-commands-workflow.yaml
+-- Description: Malformed namespace command rejection messages
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript malformed-namespace-commands {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+}

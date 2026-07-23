@@ -1,0 +1,16 @@
+-- Ported from Marble/Charb `event-filtering-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/event-filtering-workflow.yaml
+-- Description: Tests chain event filtering by kind
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript event-filtering {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  node c ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+  fetch main from a to c ;
+  gossip a, b, c ;
+}

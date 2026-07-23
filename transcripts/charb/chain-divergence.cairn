@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `chain-divergence-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-divergence-workflow.yaml
+-- Description: Chain status divergence detection across in-sync, behind, ahead, and diverged states
+-- Rich sibling adaptation also under transcripts/.
+transcript chain-divergence {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

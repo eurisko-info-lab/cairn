@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `manifest-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/manifest-registry-workflow.yaml
+-- Description: Manifest registry listing, inspection, and status summary
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript manifest-registry {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

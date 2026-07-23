@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `verify-diagnostics-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/verify-diagnostics-workflow.yaml
+-- Description: Verify status and inspect diagnostic commands over a populated repo
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript verify-diagnostics {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

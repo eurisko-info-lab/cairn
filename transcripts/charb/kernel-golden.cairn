@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `kernel-golden-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/kernel-golden-workflow.yaml
+-- Description: Complete golden regression: init → language → objects → manifest → lock → verify
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript kernel-golden {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `chain-quarantine-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-quarantine-workflow.yaml
+-- Description: chain repair separates malformed transport rows from semantically invalid rows and exposes both via quarantine commands
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript chain-quarantine {
+  deferred "Charb/Marble CLI: chain repair separates malformed transport rows from semantically invalid rows and exposes both via quarantine commands — no Cairn transcript equivalent yet" ;
+}

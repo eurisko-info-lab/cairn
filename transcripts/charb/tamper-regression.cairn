@@ -1,0 +1,10 @@
+-- Ported from Marble/Charb `tamper-regression-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/tamper-regression-workflow.yaml
+-- Description: Patch creation, merging, and conflict detection workflow
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript tamper-regression {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+}

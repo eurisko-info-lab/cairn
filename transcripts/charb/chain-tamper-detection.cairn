@@ -1,0 +1,10 @@
+-- Ported from Marble/Charb `chain-tamper-detection-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-tamper-detection-workflow.yaml
+-- Description: Rich chain status diagnostics with snapshot reporting
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript chain-tamper-detection {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+}

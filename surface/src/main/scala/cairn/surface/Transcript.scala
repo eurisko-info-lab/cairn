@@ -22,6 +22,7 @@ import java.nio.file.Path
   *   claim NAME "SRC" expect "SRC" ;   test-certified claim over the module
   *   publish BRANCH ;                  publish language+module, set head
   *   fetch BRANCH ;                    second node pulls + verifies by hash
+  *   deferred "REASON" ;               honest coverage stub (no Cairn equivalent yet)
   */
 object Transcript:
   val grammar: GrammarSpec = GrammarSpec(
@@ -29,7 +30,8 @@ object Transcript:
     tokens = TokenSpec(
       keywords = List("transcript", "lang", "roundtrip", "eval", "expect",
         "delta", "claim", "publish", "fetch", "node", "on", "from", "to",
-        "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language"),
+        "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language",
+        "deferred"),
       puncts = List("{", "}", ";", ","),
       lineComment = Some("--"),
       identContExtra = "_'-"),
@@ -54,6 +56,7 @@ object Transcript:
         ConstructorSpec("gossip", List(Elem.Tok("gossip"), Elem.SepBy1(Elem.NameLeaf, ","), Elem.Tok(";"))),
         ConstructorSpec("port", List(Elem.Tok("port"), Elem.NameLeaf, Elem.Tok("expect-tests-pass"), Elem.Tok(";"))),
         ConstructorSpec("query", List(Elem.Tok("query"), Elem.StrLeaf, Elem.Tok("expect"), Elem.NumLeaf, Elem.Tok(";"))),
+        ConstructorSpec("deferred", List(Elem.Tok("deferred"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("expectfail", List(Elem.Tok("expectfail"), Elem.StrLeaf, Elem.Cat("step")))))),
     precCategories = Nil,
     printRules = List(
@@ -88,6 +91,8 @@ object Transcript:
       PrintRule("query", List(
         PrintSeg.Lit("query"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space,
         PrintSeg.Lit("expect"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("deferred", List(
+        PrintSeg.Lit("deferred"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("expectfail", List(
         PrintSeg.Lit("expectfail"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1)))),
     top = "transcript")
@@ -383,6 +388,8 @@ object Transcript:
               log += s"expected failure: ...${substring}..."; Right(())
             case Left(err) => Left(s"failed with wrong message: $err (wanted ...$substring...)")
             case Right(_)  => Left(s"step succeeded but was expected to fail with ...$substring...")
+        case Cst.Node("deferred", List(Cst.Leaf(reason))) =>
+          log += s"deferred: $reason"; Right(())
         case other => Left(s"unknown transcript step: ${other.render}")
 
     val result = steps.foldLeft[Either[String, Unit]](Right(())) { (acc, step) =>

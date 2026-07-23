@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `inspect-extended-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/inspect-extended-workflow.yaml
+-- Description: Inspect proof and inspect patches commands for drill-down visibility
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript inspect-extended {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

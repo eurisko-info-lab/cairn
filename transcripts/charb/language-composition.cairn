@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `language-composition-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/language-composition-workflow.yaml
+-- Description: Language pushout: define L0/L1 → compose dirty → compose clean with discharge → verify
+-- Rich sibling adaptation also under transcripts/.
+transcript language-composition {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

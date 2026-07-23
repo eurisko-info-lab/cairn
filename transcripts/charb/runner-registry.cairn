@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `runner-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/runner-registry-workflow.yaml
+-- Description: Runner registry listing, inspection, and selection
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript runner-registry {
+  deferred "Charb/Marble CLI: Runner registry listing, inspection, and selection — no Cairn transcript equivalent yet" ;
+}

@@ -1,0 +1,10 @@
+-- Ported from Marble/Charb `malformed-generated-commands-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/malformed-generated-commands-workflow.yaml
+-- Description: Generated malformed namespace rejection coverage
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript malformed-generated-commands {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+}

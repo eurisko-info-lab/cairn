@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `inspect-artifacts-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/inspect-artifacts-workflow.yaml
+-- Description: Inspect persisted manifest/lock/language metadata
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript inspect-artifacts {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

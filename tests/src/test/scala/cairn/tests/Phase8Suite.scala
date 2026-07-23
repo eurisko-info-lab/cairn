@@ -7,6 +7,7 @@ import cairn.core.*
 import cairn.surface.Transcript
 import cairn.systeminterface.Filesystem as Fs
 import cairn.examples.stlc.Stlc
+import scala.jdk.CollectionConverters.*
 
 /** Phase 8 acceptance (S46–S47): transcript DSL runs the MVP end-to-end;
   * PKI pack with generic ΔPKI + Ed25519 chain validation + trust anchors.
@@ -81,6 +82,48 @@ class Phase8Suite extends munit.FunSuite:
               report.steps.exists(_.startsWith("expected failure")),
             report.render)
         case Left(e) => fail(e)
+
+  test("all Charb YAML ports under transcripts/charb/ run"):
+    val dirCandidates =
+      List("transcripts/charb", "../transcripts/charb").map(java.nio.file.Path.of(_))
+    val dir = dirCandidates.find(java.nio.file.Files.isDirectory(_)).getOrElse(
+      fail("transcripts/charb/ missing"))
+    val files =
+      java.nio.file.Files.list(dir).iterator().asScala
+        .filter(p => p.getFileName.toString.endsWith(".cairn"))
+        .toList.sortBy(_.getFileName.toString)
+    assertEquals(files.length, 85, s"expected 85 Charb ports, found ${files.length}")
+    var deferred = 0
+    var runnable = 0
+    for f <- files do
+      val src = Filesystem.run(Fs.Request.Read(Fs.Path(f.toString)), fsCtx) match
+        case Right(Fs.Response.Text(s)) => s
+        case other => fail(s"read ${f.getFileName}: $other")
+      val work = java.nio.file.Files.createTempDirectory(s"cairn-charb-${f.getFileName}")
+      Transcript.run(
+          src, packs.loadClosed(), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
+        case Right(report) =>
+          val ok =
+            report.steps.exists(_.startsWith("deferred:")) ||
+              report.steps.exists(_.startsWith("published")) ||
+              report.steps.exists(_.startsWith("expected failure"))
+          assert(ok, report.render)
+          if report.steps.exists(_.startsWith("deferred:")) then deferred += 1
+          else runnable += 1
+        case Left(e) => fail(s"${f.getFileName}: $e")
+    assert(deferred >= 40, s"deferred=$deferred")
+    assert(runnable >= 40, s"runnable=$runnable")
+
+  test("granit-rust ledger-settlement is honestly deferred"):
+    val src = readTranscriptSource(
+      List("transcripts/granit-rust/ledger-settlement.cairn",
+        "../transcripts/granit-rust/ledger-settlement.cairn"),
+      "ledger-settlement.cairn missing")
+    val work = java.nio.file.Files.createTempDirectory("cairn-ledger-settlement")
+    Transcript.run(src, Map.empty, work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
+      case Right(report) =>
+        assert(report.steps.exists(_.startsWith("deferred:")), report.render)
+      case Left(e) => fail(e)
 
   // ---- PKI (S47) ----
   val root = Keypair.dev("root")

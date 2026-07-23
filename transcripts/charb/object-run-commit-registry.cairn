@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `object-run-commit-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/object-run-commit-registry-workflow.yaml
+-- Description: Object/run/commit registry listing, inspection, and status summary
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript object-run-commit-registry {
+  deferred "Charb/Marble CLI: Object/run/commit registry listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+}

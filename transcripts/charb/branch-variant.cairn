@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `branch-variant-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/branch-variant-workflow.yaml
+-- Description: History workflow: publish baseline → branch → variant → commit record → patch apply → verify
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript branch-variant {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

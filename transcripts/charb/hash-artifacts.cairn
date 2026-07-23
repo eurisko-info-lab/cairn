@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `hash-artifacts-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/hash-artifacts-workflow.yaml
+-- Description: Verify canonical artifact hashes and roots from persisted repo state
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript hash-artifacts {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

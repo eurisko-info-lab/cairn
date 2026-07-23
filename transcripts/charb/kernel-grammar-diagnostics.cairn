@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `kernel-grammar-diagnostics-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/kernel-grammar-diagnostics-workflow.yaml
+-- Description: Kernel and grammar diagnostics command coverage
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript kernel-grammar-diagnostics {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  roundtrip "fun x : Bool . x" ;
+  eval "true" expect "true" ;
+  publish tip ;
+  fetch tip ;
+}

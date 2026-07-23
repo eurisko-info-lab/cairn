@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `e2e-path-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/e2e-path-workflow.yaml
+-- Description: One-shot kernel demo: e2e path through full lifecycle, then run object
+-- Rich sibling adaptation also under transcripts/.
+transcript e2e-path {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

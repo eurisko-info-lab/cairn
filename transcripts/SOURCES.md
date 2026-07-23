@@ -1,30 +1,44 @@
 # Transcript sources
 
-CAIRN-PROMPT §7: *Transcripts are CI.* Cairn already ships `mvp` / `max` /
-`search-board`. Additional fixtures below were **adapted** from prior projects
-cited in CAIRN-PROMPT §13 — not byte-copied (different CLIs / DSLs).
+CAIRN-PROMPT §7: *Transcripts are CI.*
+
+## Native / rich adaptations (`transcripts/*.cairn`)
 
 | Cairn transcript | Prior art | Mapping |
 | --- | --- | --- |
-| `repository-workflow.cairn` | `~/Downloads/granit-rust/examples/transcripts/repository-workflow.transcript` | repo/commit/publish → STLC ΔL + claim + PoA publish/fetch |
-| `chain-sync.cairn` | Marble/Charb `chain-sync-workflow.yaml` (+ granit-rust charb-import stub) | chain attach/sync → two nodes + fetch + gossip |
-| `chain-divergence.cairn` | Marble/Charb `chain-divergence-workflow.yaml` | divergence detection → fan-out fetch + gossip |
-| `e2e-path.cairn` | Marble/Charb `e2e-path-workflow.yaml` | one-shot lifecycle → STLC eval/ΔL/claim/publish/fetch |
-| `patch-conflict.cairn` | Marble/Charb `patch-conflict-merge-workflow.yaml` | dirty merge → structured `expectfail` on ΔL |
-| `multi-language.cairn` | Marble/Charb `language-composition` / `multi-language-matrix` | pushout matrix → load several packs + surface checks |
-| `pki-surface.cairn` | `~/GRANITE/examples/pki/` (Phase 8) | cert/revocation surface + free ΔPKI; crypto validation stays in Scala suites |
-| `law-surface.cairn` | `~/GRANITE/examples/law/` | statute surface + free ΔLaw |
-| `sds-surface.cairn` | `~/GRANITE/examples/sds/` | thin SDS object surface + free ΔSDS |
-| `minitt-surface.cairn` | CAIRN-PROMPT §2c MiniTT | dependent Nat surface + free Δ |
-| `leancore-surface.cairn` | CAIRN-PROMPT §2c LeanCore | Eq/refl surface + free Δ |
-| `unisoncore-surface.cairn` | CAIRN-PROMPT §2c Unison Core | ADT/match surface + free Δ |
+| `mvp.cairn` / `max.cairn` | CAIRN-PROMPT phases | STLC eval/ΔL/claim/publish/fetch/gossip/ports |
+| `search-board.cairn` | Search exemplar | Fact–Intent board on CAS + ledger |
+| `repository-workflow.cairn` | granit-rust `repository-workflow.transcript` | repo/commit/publish → STLC ΔL + PoA |
+| `chain-sync.cairn` | Charb `chain-sync-workflow.yaml` | attach/sync → two nodes + fetch + gossip |
+| `chain-divergence.cairn` | Charb `chain-divergence-workflow.yaml` | fan-out fetch + gossip |
+| `e2e-path.cairn` | Charb `e2e-path-workflow.yaml` | lifecycle → eval/ΔL/claim/publish/fetch |
+| `patch-conflict.cairn` | Charb `patch-conflict-merge-workflow.yaml` | `expectfail` on ΔL |
+| `multi-language.cairn` | Charb language-composition / matrix | load several packs + surfaces |
+| `pki` / `law` / `sds-surface.cairn` | GRANITE Phase 8 | domain surfaces + free ΔL |
+| `minitt` / `leancore` / `unisoncore-surface.cairn` | CAIRN-PROMPT §2c | hosted-language surfaces |
 
-**Not ported yet** (wrong shape for today’s transcript DSL, or already covered
-by host tutorials / Scala suites):
+## Full Charb suite (`transcripts/charb/` — **85**/85)
 
-- Most of Charb’s ~85 YAML workflows (`authorization`, tokenomics, registry
-  SBOM, …) — CLI/governance economics; granit-rust imported many as
-  `expect rejected` stubs
-- granit-rust `ledger-settlement` (token balances / task commit-reveal)
-- Full SDS causal + domain trunk (`SdsCausalWorkflow`) — needs `forkFrom` steps
-  in the transcript language before it can leave Scala
+Every `*-workflow.yaml` under
+`~/Projects/all-git-repos/pi-forall/charb/transcripts/` has a Cairn port:
+
+- **Runnable thin mapping** (~44): publish/fetch, gossip, PKI surface, or
+  `expectfail` ΔL — closest Cairn theme, not a Marble CLI clone.
+- **`deferred "…"`** (~41): honest coverage for Marble-only CLI
+  (authorization roles, tokenomics, registry SBOM, light-client phases, …).
+  Same idea as granit-rust’s `expect rejected` stubs, but succeeds with an
+  explicit deferral log line.
+
+Regenerate: `python3 scripts/gen-charb-transcripts.py`
+
+## granit-rust (`transcripts/granit-rust/`)
+
+| File | Status |
+| --- | --- |
+| `repository-workflow.cairn` | thin runnable (rich sibling at `../repository-workflow.cairn`) |
+| `ledger-settlement.cairn` | `deferred` — tokenomics out of Cairn PoA scope (§8) |
+
+## Still host/Scala (not transcript DSL)
+
+Full SDS causal + domain trunk (`SdsDomainTree` / `SdsCausalWorkflow`) — needs
+`forkFrom` transcript steps before it can leave Scala.

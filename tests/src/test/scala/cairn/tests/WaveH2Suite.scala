@@ -517,6 +517,6 @@ class WaveH2Suite extends munit.FunSuite:
 
   test("M49: transcript v2 grammar round-trips and lints clean"):
     assertEquals(GrammarLint.errors(Transcript.grammar), Nil)
-    val src = """transcript t { node a ; publish main on a ; expectfail "boom" eval "true" expect "false" ; }"""
+    val src = """transcript t { node a ; publish main on a ; deferred "todo" ; expectfail "boom" eval "true" expect "false" ; }"""
     val cst = Parser.parse(Transcript.grammar, src).fold(e => fail(e), identity)
     RoundTrip.check(Transcript.grammar, cst).fold(e => fail(e), identity)

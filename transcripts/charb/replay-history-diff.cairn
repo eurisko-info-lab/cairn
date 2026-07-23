@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `replay-history-diff-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/replay-history-diff-workflow.yaml
+-- Description: History diff commands compare recorded replay root entries
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript replay-history-diff {
+  deferred "Charb/Marble CLI: History diff commands compare recorded replay root entries — no Cairn transcript equivalent yet" ;
+}

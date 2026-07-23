@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `authorization-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/authorization-workflow.yaml
+-- Description: Role grants and authorization checks for chain actions
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript authorization {
+  deferred "Charb/Marble CLI: Role grants and authorization checks for chain actions — no Cairn transcript equivalent yet" ;
+}

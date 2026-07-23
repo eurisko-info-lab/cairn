@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `consensus-economics-phase1-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/consensus-economics-phase1-workflow.yaml
+-- Description: Phase 1 consensus/economics command coverage
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript consensus-economics-phase1 {
+  deferred "Charb/Marble CLI: Phase 1 consensus/economics command coverage — no Cairn transcript equivalent yet" ;
+}

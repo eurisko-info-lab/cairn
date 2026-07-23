@@ -1,0 +1,16 @@
+-- Ported from Marble/Charb `chain-singleton-enforcement-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-singleton-enforcement-workflow.yaml
+-- Description: Attach, re-attach, and sync enforce a stable global chain identity
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript chain-singleton-enforcement {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  node c ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+  fetch main from a to c ;
+  gossip a, b, c ;
+}

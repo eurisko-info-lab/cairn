@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `governance-kernel-introspection-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/governance-kernel-introspection-workflow.yaml
+-- Description: Object integrity, chain inspection, governance replay root, and kernel status
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript governance-kernel-introspection {
+  deferred "Charb/Marble CLI: Object integrity, chain inspection, governance replay root, and kernel status — no Cairn transcript equivalent yet" ;
+}

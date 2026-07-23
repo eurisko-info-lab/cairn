@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `e2e-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/e2e-registry-workflow.yaml
+-- Description: E2E status and inspect commands for per-package path visibility
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript e2e-registry {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

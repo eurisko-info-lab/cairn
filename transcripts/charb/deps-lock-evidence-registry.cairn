@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `deps-lock-evidence-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/deps-lock-evidence-registry-workflow.yaml
+-- Description: Deps/lock/evidence registry listing, inspection, and status summary
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript deps-lock-evidence-registry {
+  deferred "Charb/Marble CLI: Deps/lock/evidence registry listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+}

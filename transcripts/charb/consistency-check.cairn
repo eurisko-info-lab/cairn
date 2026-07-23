@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `consistency-check-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/consistency-check-workflow.yaml
+-- Description: Unified consistency validator across audit, governance, and snapshot
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript consistency-check {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

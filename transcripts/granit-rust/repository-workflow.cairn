@@ -1,0 +1,11 @@
+-- Ported from ~/Downloads/granit-rust/examples/transcripts/repository-workflow.transcript
+-- Rich adaptation: see ../repository-workflow.cairn
+transcript repository-workflow {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

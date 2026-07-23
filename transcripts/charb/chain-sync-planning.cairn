@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `chain-sync-planning-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-sync-planning-workflow.yaml
+-- Description: chain sync --check and --dry-run report pending global changes before an actual sync
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript chain-sync-planning {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

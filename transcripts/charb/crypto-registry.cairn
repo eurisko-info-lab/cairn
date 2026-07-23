@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `crypto-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/crypto-registry-workflow.yaml
+-- Description: Crypto backend registry listing, inspection, and promotion status
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript crypto-registry {
+  load-language "languages/pki.cairn" ;
+  lang pki ;
+  roundtrip "revoked alice reason \"compromise\" at \"1000\"" ;
+  delta "{ add soft = revoked alice reason \"compromise\" at \"1000\" ; }" ;
+  publish trust ;
+  fetch trust ;
+}

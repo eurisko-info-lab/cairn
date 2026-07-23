@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `interop-lightclient-phase4-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/interop-lightclient-phase4-workflow.yaml
+-- Description: Phase 4 interop/light-client command coverage
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript interop-lightclient-phase4 {
+  deferred "Charb/Marble CLI: Phase 4 interop/light-client command coverage — no Cairn transcript equivalent yet" ;
+}

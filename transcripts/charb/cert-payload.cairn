@@ -1,0 +1,12 @@
+-- Ported from Marble/Charb `cert-payload-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/cert-payload-workflow.yaml
+-- Description: Certificate payload emission and strict-parser diagnostics
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript cert-payload {
+  load-language "languages/pki.cairn" ;
+  lang pki ;
+  roundtrip "revoked alice reason \"compromise\" at \"1000\"" ;
+  delta "{ add soft = revoked alice reason \"compromise\" at \"1000\" ; }" ;
+  publish trust ;
+  fetch trust ;
+}

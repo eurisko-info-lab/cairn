@@ -1,0 +1,10 @@
+-- Ported from Marble/Charb `patch-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/patch-registry-workflow.yaml
+-- Description: Patch registry listing, inspection, and status summary
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript patch-registry {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  expectfail "footprint mismatch" delta "{ rename id to ident footprint [] ; }" ;
+}

@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `compliance-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/compliance-registry-workflow.yaml
+-- Description: Compliance report registry listing, inspection, and drift status summary
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript compliance-registry {
+  deferred "Charb/Marble CLI: Compliance report registry listing, inspection, and drift status summary — no Cairn transcript equivalent yet" ;
+}

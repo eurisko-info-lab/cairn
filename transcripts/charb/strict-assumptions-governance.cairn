@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `strict-assumptions-governance-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/strict-assumptions-governance-workflow.yaml
+-- Description: Governance flow with strict-assumptions verification
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript strict-assumptions-governance {
+  deferred "Charb/Marble CLI: Governance flow with strict-assumptions verification — no Cairn transcript equivalent yet" ;
+}

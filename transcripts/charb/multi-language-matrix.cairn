@@ -1,0 +1,13 @@
+-- Ported from Marble/Charb `multi-language-matrix-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/multi-language-matrix-workflow.yaml
+-- Description: Language-agnostic governance: 4 languages defined, 2 pairwise compositions, strict verify
+-- Rich sibling adaptation also under transcripts/.
+transcript multi-language-matrix {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+}

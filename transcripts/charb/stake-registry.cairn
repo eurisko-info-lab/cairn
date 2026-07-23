@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `stake-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/stake-registry-workflow.yaml
+-- Description: Stake registry listing, inspection, and status summary
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript stake-registry {
+  deferred "Charb/Marble CLI: Stake registry listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+}

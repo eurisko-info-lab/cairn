@@ -1,0 +1,5 @@
+-- Ported from ~/Downloads/granit-rust/examples/transcripts/ledger-settlement.transcript
+-- Token balances / commit-reveal tasks are out of Cairn PoA scope (CAIRN-PROMPT §8).
+transcript ledger-settlement {
+  deferred "granit-rust ledger-settlement (tokenomics / task commit-reveal) — out of Cairn scope" ;
+}

@@ -1,0 +1,16 @@
+-- Ported from Marble/Charb `verbose-audit-replay-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/verbose-audit-replay-workflow.yaml
+-- Description: Tests verbose event-by-event audit replay output
+-- Thin Cairn mapping of the Charb theme (not a CLI clone).
+transcript verbose-audit-replay {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  node c ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+  fetch main from a to c ;
+  gossip a, b, c ;
+}

@@ -1,0 +1,7 @@
+-- Ported from Marble/Charb `mirror-registry-workflow.yaml`
+-- Source: ~/Projects/all-git-repos/pi-forall/charb/transcripts/mirror-registry-workflow.yaml
+-- Description: Mirror policy check registry listing, inspection, and status summary
+-- Honest deferred coverage (granit-rust used expect-rejected stubs).
+transcript mirror-registry {
+  deferred "Charb/Marble CLI: Mirror policy check registry listing, inspection, and status summary — no Cairn transcript equivalent yet" ;
+}
