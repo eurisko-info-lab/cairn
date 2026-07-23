@@ -25,7 +25,8 @@ object BftQuorum:
 
   /** Proof that a replica prepared `valueDigest` at `seq` in `preparedView`.
     * `value` enables re-proposal without relying on local slot memory.
-    * `prepareVotes` are distinct Prepare seals (network); empty in the in-process sim.
+    * Network path requires a prepare quorum in `prepareVotes`; the in-process
+    * simulator may leave votes empty (local slot quorums already proved it).
     */
   final case class PreparedCert(
       seq: Int,

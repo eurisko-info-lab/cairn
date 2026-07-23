@@ -236,6 +236,39 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(BftFinality.FinalityCertificate.verifyAgainstChain(forgedH, manifest, node, ledgerAuth).isLeft)
     val forgedP = cert.copy(parent = Digest.of(Canon.CStr("fake-parent")))
     assert(BftFinality.FinalityCertificate.verifyAgainstChain(forgedP, manifest, node, ledgerAuth).isLeft)
+    assertEquals(cert.chainId, block)
+    val forgedChain = cert.copy(chainId = Digest.of(Canon.CStr("other-chain")))
+    assert(BftFinality.FinalityCertificate.verifyAgainstChain(
+      forgedChain, manifest, node, ledgerAuth).isLeft)
+
+  test("ViewChange rejects prepared claims without prepare-quorum evidence"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val root = java.nio.file.Files.createTempDirectory("cairn-bft-bare-pc")
+    val node = Node(root, ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth).fold(e => fail(e), identity)
+    val bare = PreparedCert(
+      seq = 0,
+      valueDigest = BftFinality.valueOfBlock(block).digest,
+      preparedView = 0,
+      value = Some(BftFinality.valueOfBlock(block)),
+      prepareVotes = Nil)
+    val vc = BftFinality.sign(
+      replicas(1),
+      Msg.ViewChange(1, List(bare), ReplicaId("r1")),
+      manifest.replicaSetDigest,
+      block).fold(e => fail(e), identity)
+    val err = bft.receive(vc)
+    assert(err.isLeft, err.toString)
+    assert(err.swap.toOption.exists(_.contains("prepare-quorum")), err.toString)
 
   test("four HttpNode BftReplicas exchange messages and mint a network certificate"):
     val auth = Keypair.dev("auth")
@@ -559,7 +592,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       cairn.kernel.BftQuorum.Msg.Prepare(
         0, 0, BftFinality.valueOfBlock(block).digest,
         cairn.kernel.BftQuorum.ReplicaId(peer.name)),
-      manifest.replicaSetDigest)
+      manifest.replicaSetDigest,
+      block)
       .fold(e => fail(e), identity)
     val err = bft.receive(prep)
     home.toFile.setWritable(true)
@@ -618,11 +652,13 @@ class DistributionDaemonSuite extends munit.FunSuite:
     // Receive must not emit Commit seals after deactivation either.
     val primaryId = BftFinality.designatedPrimary(replicas.map(_.name), 0).fold(e => fail(e), identity)
     val primary = replicas.find(_.name == primaryId.id).get
+    val genesisId = node.chainDigests.head
     val pp = BftFinality.sign(
       primary,
       cairn.kernel.BftQuorum.Msg.PrePrepare(
         0, 1, BftFinality.valueOfBlock(block1), primaryId),
-      genesis.replicaSetDigest)
+      genesis.replicaSetDigest,
+      genesisId)
       .fold(e => fail(e), identity)
     val recvErr = post.receive(pp)
     assert(recvErr.isLeft, recvErr.toString)
@@ -630,7 +666,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assertEquals(post.drainOutbound(), Nil)
     // Independent verify rejects old-set certs at the successor height.
     val fakeCert = BftFinality.FinalityCertificate(
-      block1, 0, 1, Nil, genesis.replicaSetDigest, 1L, block0)
+      block1, 0, 1, Nil, genesis.replicaSetDigest, 1L, block0, genesisId)
     assert(BftFinality.FinalityCertificate.verifyAgainstHistory(
       fakeCert, hist, node, ledgerAuth).isLeft)
 
