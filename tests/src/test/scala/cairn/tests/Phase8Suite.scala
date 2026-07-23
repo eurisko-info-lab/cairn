@@ -57,6 +57,25 @@ class Phase8Suite extends munit.FunSuite:
       case Left(e)  => assert(e.contains("eval mismatch"), e)
       case Right(r) => fail(s"expected failure, got ${r.render}")
 
+  // Adapted from granit-rust / Marble-Charb / GRANITE packs (see transcripts/SOURCES.md).
+  for name <- List(
+      "repository-workflow", "chain-sync", "pki-surface", "law-surface", "sds-surface")
+  do
+    test(s"imported transcript $name.cairn runs end-to-end"):
+      val src = readTranscriptSource(
+        List(s"transcripts/$name.cairn", s"../transcripts/$name.cairn"),
+        s"transcripts/$name.cairn not found")
+      val work = java.nio.file.Files.createTempDirectory(s"cairn-$name")
+      Transcript.run(
+          src, packs.loadClosed(), work, Map.empty, packs, ledgerCtx, processCtx, fsCtx) match
+        case Right(report) =>
+          assert(report.steps.exists(_.startsWith("published")), report.render)
+          assert(
+            report.steps.exists(_.startsWith("fetched")) ||
+              report.steps.exists(_.contains("gossip")),
+            report.render)
+        case Left(e) => fail(e)
+
   // ---- PKI (S47) ----
   val root = Keypair.dev("root")
   val alice = Keypair.dev("alice")

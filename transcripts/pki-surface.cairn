@@ -1,0 +1,15 @@
+-- Adapted from GRANITE PKI pack / CAIRN-PROMPT Phase 8 (PKI minimal).
+-- Source pack: ~/GRANITE/examples/pki/ — surface round-trip + free ΔPKI shape.
+-- Live Ed25519 chain validation stays in PkiTutorial / Phase8Suite (needs keys).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/pki-surface.cairn"
+transcript pki-surface {
+  load-language "languages/pki.cairn" ;
+  lang pki ;
+  roundtrip "cert alice key \"ab\" issuer root sig \"cd\" from \"0\" until \"9999\"" ;
+  roundtrip "revoked alice reason \"compromise\" at \"1000\"" ;
+  delta "{ add root = cert root key \"aa\" issuer root sig \"bb\" from \"0\" until \"9999\" ; }" ;
+  delta "{ add alice = cert alice key \"ab\" issuer root sig \"cd\" from \"0\" until \"9999\" ; }" ;
+  delta "{ add soft = revoked alice reason \"compromise\" at \"1000\" ; }" ;
+  publish trust ;
+  fetch trust ;
+}

@@ -275,9 +275,9 @@ Full suite: `sbt test`. Golden digests for every shipped language and Rosetta
 artifact: `sbt "examples/runMain cairn.examples.Main digests"` — checked
 against the values recorded in CI (`.github/workflows/ci.yml`), not frozen
 here, since they change whenever a language's semantic content changes.
-Both bootstrap transcripts (`sbt "examples/runMain cairn.examples.Main
-transcript transcripts/mvp.cairn"` and `.../max.cairn`) exercise the full
-publish/fetch/gossip/query path end to end. `emit-languages` regenerates the
+Bootstrap transcripts (`mvp` / `max`, plus adapted imports listed in
+`transcripts/SOURCES.md`) exercise the publish/fetch/gossip/query path end to
+end via `sbt "examples/runMain cairn.examples.Main transcript transcripts/…"`. `emit-languages` regenerates the
 checked-in `.cairn` mirrors for `pki`/`law`/`sds`/`search`/`stlc`/`meta`;
 `git diff --exit-code languages/` must be clean after running it — CI enforces
 this (the language-sync check).

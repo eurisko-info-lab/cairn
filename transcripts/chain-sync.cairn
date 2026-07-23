@@ -1,0 +1,16 @@
+-- Adapted from Marble/Charb chain-sync-workflow
+--   (~/Projects/all-git-repos/pi-forall/charb/transcripts/chain-sync-workflow.yaml
+--    and granit-rust charb-import/chain/chain-sync-workflow.transcript).
+-- Original: repo attach → publish → chain sync → status.
+-- Cairn mapping: two ledger nodes, publish on A, pull/fetch to B, gossip A,B.
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/chain-sync.cairn"
+transcript chain-sync {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  delta "{ add tip = fun x : Bool . x ; }" ;
+  publish main on a ;
+  fetch main from a to b ;
+  gossip a, b ;
+}

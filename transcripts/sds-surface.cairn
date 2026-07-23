@@ -1,0 +1,18 @@
+-- Adapted from GRANITE SDS flagship / CAIRN-PROMPT Phase 8 (thin slice).
+-- Source: ~/GRANITE/examples/sds/ — substance/phrase/product surface + ΔSDS add.
+-- Causal domain trunk + sealing stay in SdsCausalWorkflow / SdsTutorial (host).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/sds-surface.cairn"
+transcript sds-surface {
+  load-language "languages/sds.cairn" ;
+  lang sds ;
+  roundtrip "substance \"67-64-1\" \"Acetone\"" ;
+  roundtrip "corpus phrase h225 lang en text \"Highly flammable liquid and vapour\"" ;
+  roundtrip "phrase prodName lang en text \"Acetone Cleaner\"" ;
+  delta "{ add acetone = substance \"67-64-1\" \"Acetone\" ; }" ;
+  delta "{ add h225 = corpus phrase h225 lang en text \"Highly flammable liquid and vapour\" ; }" ;
+  delta "{ add cleaner = mixture of ( acetone pct 100 ) ; }" ;
+  delta "{ add cleanerProduct = product \"Acetone Cleaner\" uses cleaner phrases ( h225 ) ; }" ;
+  delta "{ add regBasis = basis cleanerProduct section \"3\" ; }" ;
+  publish sds-main ;
+  fetch sds-main ;
+}

@@ -1,0 +1,17 @@
+-- Adapted from ~/Downloads/granit-rust/examples/transcripts/repository-workflow.transcript
+-- Original: blockchain/repo/add language/commit/branch/merge/publish/assert.
+-- Cairn mapping: STLC module edits + claim + PoA publish/fetch (no tokenomics).
+-- Run: sbt "examples/runMain cairn.examples.Main transcript transcripts/repository-workflow.cairn"
+transcript repository-workflow {
+  load-language "languages/stlc.cairn" ;
+  lang stlc ;
+  node a ;
+  node b ;
+  roundtrip "fun x : Bool . x" ;
+  eval "((fun x : Bool . x) true)" expect "true" ;
+  delta "{ add id = fun x : Bool . x ; add both = (id true) ; }" ;
+  delta "{ add factorialZero = true ; }" ;
+  claim id_true "((fun x : Bool . x) true)" expect "true" ;
+  publish main on a ;
+  fetch main from a to b ;
+}
