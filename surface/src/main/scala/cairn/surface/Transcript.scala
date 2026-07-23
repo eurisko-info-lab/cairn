@@ -734,7 +734,16 @@ object Cli:
             "repl|lsp|ui] <arg>")
 
   private def defaultAuthorities(home: Path): Either[String, Map[String, Vector[Byte]]] =
-    Keystore.loadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
+    keystoreLoadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
+
+  /** Require CAIRN_KEYSTORE_SECRET or lab plaintext; never silently invent keys over failures. */
+  private def keystoreLoadOrCreate(home: Path, name: String): Either[String, Keypair] =
+    Keystore.envSecret match
+      case Some(sec) => Keystore.loadOrCreate(home, name, Some(sec))
+      case None if Keystore.allowPlaintext => Keystore.loadOrCreate(home, name, None)
+      case None =>
+        Left(
+          "keystore: set CAIRN_KEYSTORE_SECRET (or CAIRN_KEYSTORE_PLAINTEXT=1 for lab)")
 
   private def serveHttp(
       home: Path,
@@ -753,7 +762,7 @@ object Cli:
         else
           for
             manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
-            kp <- Keystore.loadOrCreate(home, replicaName)
+            kp <- keystoreLoadOrCreate(home, replicaName)
             bft <- BftReplica.certified(
               kp, manifest,
               node = Some(node), ledgerAuth = ledgerAuth,
@@ -803,7 +812,7 @@ object Cli:
   private def bftReplicaSetInit(home: Path, names: List[String]): Either[String, String] =
     for
       kps <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
-        acc.flatMap(ks => Keystore.loadOrCreate(home, n).map(ks :+ _))
+        acc.flatMap(ks => keystoreLoadOrCreate(home, n).map(ks :+ _))
       }
       sealedM <- BftFinality.sealReplicaSet(kps)
       _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), sealedM)
@@ -818,7 +827,7 @@ object Cli:
     for
       ledgerAuth <- defaultAuthorities(home)
       replicas <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
-        acc.flatMap(ks => Keystore.loadOrCreate(home, n).map(ks :+ _))
+        acc.flatMap(ks => keystoreLoadOrCreate(home, n).map(ks :+ _))
       }
       cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
       manifest <- BftFinality.sealReplicaSet(replicas)

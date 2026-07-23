@@ -7,8 +7,10 @@ package cairn.kernel
   * swapping a key under the same id changes the digest. Seals are persisted in
   * the artifact so the CAS object is self-authenticating against the member set.
   *
-  * Amendments cite the predecessor sealed artifact digest via [[replaces]] and
-  * become active at [[activationHeight]] on the ledger (see [[allowsTransition]]).
+  * Amendments cite the predecessor sealed artifact digest via [[replaces]],
+  * carry [[predecessorApprovals]] (quorum of the old set), become active at
+  * [[activationHeight]], and deactivate when a successor's activation height is
+  * reached (see [[activeAt]] / [[allowsTransition]]).
   *
   * Stored as [[ArtifactKind.Certificate]] tagged `replica-set-manifest`.
   * `n` must be a valid classic size ([[BftQuorum.validReplicaCount]]).
@@ -21,6 +23,8 @@ final case class ReplicaSetManifest(
     replaces: Option[Digest] = None,
     /** Ledger height at which this set becomes active (0 = genesis / immediate). */
     activationHeight: Long = 0L,
+    /** Seals from the predecessor set over [[bodyCanon]] (quorum of old n). */
+    predecessorApprovals: List[(String, Vector[Byte])] = Nil,
 ):
   def ids: List[String] = replicas.map(_._1)
   def authorities: Map[String, Vector[Byte]] = replicas.toMap
@@ -42,6 +46,9 @@ final case class ReplicaSetManifest(
     "body" -> bodyCanon,
     "seals" -> Canon.CList(seals.sortBy(_._1).map { (id, seal) =>
       Canon.cmap("id" -> Canon.CStr(id), "seal" -> Canon.CBytes(seal))
+    }),
+    "predecessorApprovals" -> Canon.CList(predecessorApprovals.sortBy(_._1).map { (id, seal) =>
+      Canon.cmap("id" -> Canon.CStr(id), "seal" -> Canon.CBytes(seal))
     })))
   def artifact: Artifact = Artifact(ArtifactKind.Certificate, canon)
   def digest: Digest = artifact.digest
@@ -52,12 +59,9 @@ object ReplicaSetManifest:
     c match
       case CTag("replica-set-manifest", body) =>
         try
-          // Current: { body: { replicas, replaces, activationHeight }, seals }
-          // Legacy A: { replicas: CList, seals? }
-          // Legacy B: bare CList of {id, publicKey}
-          val (reps, replaces, height, seals) = body match
+          val (reps, replaces, height, seals, preds) = body match
             case CList(xs) =>
-              (parseReplicaRows(xs), None, 0L, Nil)
+              (parseReplicaRows(xs), None, 0L, Nil, Nil)
             case m =>
               m.asMap.get("body") match
                 case Some(b) =>
@@ -73,7 +77,10 @@ object ReplicaSetManifest:
                   val seals = m.asMap.get("seals") match
                     case Some(CList(xs)) => parseSealRows(xs)
                     case _               => Nil
-                  (parseReplicaRows(rows), rep, h, seals)
+                  val preds = m.asMap.get("predecessorApprovals") match
+                    case Some(CList(xs)) => parseSealRows(xs)
+                    case _               => Nil
+                  (parseReplicaRows(rows), rep, h, seals, preds)
                 case None =>
                   val rows = m.field("replicas") match
                     case CList(xs) => xs
@@ -81,8 +88,8 @@ object ReplicaSetManifest:
                   val seals = m.asMap.get("seals") match
                     case Some(CList(xs)) => parseSealRows(xs)
                     case _               => Nil
-                  (parseReplicaRows(rows), None, 0L, seals)
-          val draft = ReplicaSetManifest(reps, seals, replaces, height)
+                  (parseReplicaRows(rows), None, 0L, seals, Nil)
+          val draft = ReplicaSetManifest(reps, seals, replaces, height, preds)
           wellFormed(draft).map(_ => draft)
         catch case e: CodecError => Left(e.getMessage)
       case other => Left(s"not a replica-set-manifest: $other")
@@ -114,20 +121,22 @@ object ReplicaSetManifest:
       Left("replica-set: empty public key")
     else if m.seals.map(_._1).distinct.length != m.seals.length then
       Left("replica-set: duplicate seals")
+    else if m.predecessorApprovals.map(_._1).distinct.length != m.predecessorApprovals.length then
+      Left("replica-set: duplicate predecessorApprovals")
     else if m.activationHeight < 0 then
       Left("replica-set: activationHeight must be >= 0")
     else Right(())
 
-  /** Build an unsigned genesis manifest (caller must [[seal]] before trusting it). */
   def of(
       replicas: List[(String, Vector[Byte])],
       replaces: Option[Digest] = None,
       activationHeight: Long = 0L,
+      predecessorApprovals: List[(String, Vector[Byte])] = Nil,
   ): Either[String, ReplicaSetManifest] =
-    val m = ReplicaSetManifest(replicas.sortBy(_._1), Nil, replaces, activationHeight)
+    val m = ReplicaSetManifest(
+      replicas.sortBy(_._1), Nil, replaces, activationHeight, predecessorApprovals)
     wellFormed(m).map(_ => m)
 
-  /** Attach a full set of member seals over [[bodyCanon]]. */
   def seal(
       unsigned: ReplicaSetManifest,
       signers: List[(String, Array[Byte] => Vector[Byte])],
@@ -143,7 +152,38 @@ object ReplicaSetManifest:
       val next = unsigned.copy(seals = seals.sortBy(_._1))
       wellFormed(next).map(_ => next)
 
-  /** Verify every member seal against the manifest's own public keys. */
+  /** Attach predecessor-set quorum approvals over [[bodyCanon]] (unchecked crypto). */
+  def withPredecessorApprovals(
+      m: ReplicaSetManifest,
+      approvals: List[(String, Vector[Byte])],
+  ): Either[String, ReplicaSetManifest] =
+    val next = m.copy(predecessorApprovals = approvals.sortBy(_._1))
+    wellFormed(next).map(_ => next)
+
+  /** Structural + cryptographic check of predecessor quorum (caller supplies verify). */
+  def verifyPredecessorApprovals(
+      m: ReplicaSetManifest,
+      predecessor: ReplicaSetManifest,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, Unit] =
+    val q = BftQuorum.quorumSize(predecessor.n)
+    val ids = m.predecessorApprovals.map(_._1)
+    if ids.length != ids.distinct.length then
+      Left("replica-set: duplicate predecessorApprovals")
+    else if ids.exists(id => !predecessor.authorities.contains(id)) then
+      Left("replica-set: predecessorApprovals cite unknown old replica")
+    else if ids.distinct.length < q then
+      Left(s"replica-set: predecessorApprovals ${ids.distinct.length} < old quorum $q")
+    else
+      val payload = Canon.encode(m.bodyCanon)
+      m.predecessorApprovals.foldLeft[Either[String, Unit]](Right(())) { case (acc, (id, seal)) =>
+        acc.flatMap { _ =>
+          val pk = predecessor.authorities(id)
+          if verify(pk, payload, seal) then Right(())
+          else Left(s"replica-set: bad predecessorApproval from '$id'")
+        }
+      }
+
   def verifySeals(
       m: ReplicaSetManifest,
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
@@ -163,19 +203,20 @@ object ReplicaSetManifest:
         }
       }
 
-  /** Amendment policy (mirrors [[DomainAgreement.allowsTransition]]).
-    *
-    * `liveArtifactDigest` is the CAS/file digest of the prior sealed manifest.
-    */
+  /** Amendment policy: replaces + activationHeight + predecessor quorum. */
   def allowsTransition(
       proposed: ReplicaSetManifest,
       live: Option[ReplicaSetManifest],
       liveArtifactDigest: Option[Digest] = None,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean =
+        (_, _, _) => true,
   ): Either[String, Unit] =
     live match
       case None =>
         if proposed.replaces.isDefined then
           Left("replica-set: genesis must not set replaces")
+        else if proposed.predecessorApprovals.nonEmpty then
+          Left("replica-set: genesis must not carry predecessorApprovals")
         else Right(())
       case Some(prev) =>
         val expected = liveArtifactDigest.getOrElse(prev.digest)
@@ -187,4 +228,39 @@ object ReplicaSetManifest:
           Left(
             s"replica-set: activationHeight ${proposed.activationHeight} must exceed " +
               s"predecessor ${prev.activationHeight}")
-        else Right(())
+        else
+          verifyPredecessorApprovals(proposed, prev, verify)
+
+  /** Resolve the active replica set at a ledger height.
+    *
+    * History must be ordered by increasing [[activationHeight]]. The active
+    * set is the latest entry with `activationHeight <= height`; that entry's
+    * successor (if any) deactivates it at the successor's activation height.
+    */
+  def activeAt(
+      history: List[ReplicaSetManifest],
+      height: Long,
+  ): Either[String, ReplicaSetManifest] =
+    if history.isEmpty then Left("replica-set: empty history")
+    else
+      val ordered = history.sortBy(_.activationHeight)
+      val heightsOk = ordered.sliding(2).forall {
+        case a :: b :: Nil => a.activationHeight < b.activationHeight
+        case _             => true
+      }
+      if !heightsOk then Left("replica-set: history activation heights must be strictly increasing")
+      else
+        ordered.filter(_.activationHeight <= height).lastOption match
+          case Some(m) => Right(m)
+          case None =>
+            Left(s"replica-set: no set active at height $height (earliest=${ordered.head.activationHeight})")
+
+  /** Deactivation height of `m` given ordered history (successor activation, or none). */
+  def deactivationHeight(
+      history: List[ReplicaSetManifest],
+      m: ReplicaSetManifest,
+  ): Option[Long] =
+    val ordered = history.sortBy(_.activationHeight)
+    ordered.indexWhere(_.digest == m.digest) match
+      case i if i >= 0 && i + 1 < ordered.length => Some(ordered(i + 1).activationHeight)
+      case _ => None

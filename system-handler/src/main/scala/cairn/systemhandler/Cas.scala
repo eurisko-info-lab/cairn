@@ -4,6 +4,7 @@ import cairn.kernel.*
 import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
+import cairn.systeminterface.PackAccess
 import java.nio.file.{Files, Path}
 
 /** MIGRATION-PLAN.md Phase 1: the System Handler half of the old
@@ -696,17 +697,114 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * primary, `grantorSeal` is required and the grantor key is likewise resolved
     * (primary agreement owner).
     *
-    * When `knownLanguages` is non-empty, child/ancestor language digests and
-    * every digest in `dependencyEvidence` must appear in that set.
+    * `knownLanguages` is **mandatory** (non-empty): derive it from
+    * [[PackAccess.loadClosed]] via the PackAccess overload.
     */
   def plantGoverned(
       agreement: DomainAgreement,
       identities: IdentityResolver,
       ownerSeal: (String, Vector[Byte]),
+      knownLanguages: Set[Digest],
       module: Option[Module] = None,
       grantorSeal: Option[(String, Vector[Byte])] = None,
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean = Ed25519.verify,
-      knownLanguages: Set[Digest] = Set.empty,
+  ): Either[String, BranchManifest] =
+    if knownLanguages.isEmpty then
+      Left("domain-agreement: language index required (derive from PackAccess.loadClosed)")
+    else
+      plantGovernedChecked(
+        agreement, identities, ownerSeal, module, grantorSeal, verify, knownLanguages)
+
+  /** Prefer this entrypoint: language digests come from loaded packs. */
+  def plantGoverned(
+      agreement: DomainAgreement,
+      identities: IdentityResolver,
+      ownerSeal: (String, Vector[Byte]),
+      packs: PackAccess,
+  ): Either[String, BranchManifest] =
+    val idx = packs.loadClosed().values.map(_.digest).toSet
+    if idx.isEmpty then
+      Left("domain-agreement: PackAccess.loadClosed returned no languages")
+    else
+      plantGoverned(agreement, identities, ownerSeal, idx)
+
+  def plantGoverned(
+      agreement: DomainAgreement,
+      identities: IdentityResolver,
+      ownerSeal: (String, Vector[Byte]),
+      packs: PackAccess,
+      grantorSeal: (String, Vector[Byte]),
+  ): Either[String, BranchManifest] =
+    val idx = packs.loadClosed().values.map(_.digest).toSet
+    if idx.isEmpty then
+      Left("domain-agreement: PackAccess.loadClosed returned no languages")
+    else
+      plantGoverned(
+        agreement, identities, ownerSeal, idx,
+        grantorSeal = Some(grantorSeal))
+
+  /** Audit the complete sealed agreement + delegation graph for `child`. */
+  def auditGoverned(
+      child: String,
+      identities: IdentityResolver,
+      packs: PackAccess,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean = Ed25519.verify,
+  ): Either[String, Unit] =
+    val idx = packs.loadClosed().values.map(_.digest).toSet
+    if idx.isEmpty then Left("domain-audit: PackAccess.loadClosed returned no languages")
+    else if !list().contains(child) then Left(s"domain-audit: unknown branch '$child'")
+    else
+      def walk(name: String, seen: Set[String]): Either[String, Unit] =
+        if seen.contains(name) then Left(s"domain-audit: cycle at '$name'")
+        else
+          val m = load(name)
+          m.domainAgreement match
+            case None => Left(s"domain-audit: '$name' is not governed")
+            case Some(d) =>
+              for
+                art <- getByDigest(d).left.map(e => s"domain-audit: $e")
+                sealedAg <- SealedDomainAgreement.fromCanon(art.body)
+                gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
+                  load(p).domainAgreement.flatMap { pd =>
+                    getByDigest(pd).toOption
+                      .flatMap(a => SealedDomainAgreement.fromCanon(a.body).toOption)
+                      .map(_.agreement.owner)
+                  }
+                }
+                _ <- SealedDomainAgreement.verify(sealedAg, identities, verify, gName)
+                _ <- verifyLanguageEvidence(sealedAg.agreement, idx)
+                _ <- sealedAg.agreement.primaryAncestor match
+                  case None => Right(())
+                  case Some(p) =>
+                    for
+                      delDig <- sealedAg.agreement.ancestorDelegation.toRight(
+                        s"domain-audit: '$name' missing ancestorDelegation")
+                      delArt <- getByDigest(delDig).left.map(e => s"domain-audit: $e")
+                      sealedDel <- SealedDomainAncestorDelegation.fromCanon(delArt.body)
+                      primaryDig <- load(p).domainAgreement.toRight(
+                        s"domain-audit: primary '$p' ungoverned")
+                      primaryArt <- getByDigest(primaryDig).left.map(e => s"domain-audit: $e")
+                      primarySealed <- SealedDomainAgreement.fromCanon(primaryArt.body)
+                      gPk <- identities.require(primarySealed.agreement.owner)
+                      _ <- SealedDomainAncestorDelegation.verify(sealedDel, gPk, verify)
+                      _ <- DomainAncestorDelegation.matches(
+                        sealedDel.delegation, sealedAg.agreement, primarySealed.agreement.owner)
+                      _ <- walk(p, seen + name)
+                    yield ()
+                _ <- sealedAg.agreement.references.foldLeft[Either[String, Unit]](Right(())) {
+                  (acc, ref) => acc.flatMap(_ => walk(ref, seen + name))
+                }
+              yield ()
+      walk(child, Set.empty)
+
+  private def plantGovernedChecked(
+      agreement: DomainAgreement,
+      identities: IdentityResolver,
+      ownerSeal: (String, Vector[Byte]),
+      module: Option[Module],
+      grantorSeal: Option[(String, Vector[Byte])],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+      knownLanguages: Set[Digest],
   ): Either[String, BranchManifest] =
     val known = list().toSet
     val (ownerName, ownerSig) = ownerSeal
@@ -724,7 +822,6 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                   case Left(e) =>
                     Left(s"domain-agreement: cannot decode live ${d.short}: $e")
                   case Right(sealedAg) =>
-                    // Re-verify embedded seals against the resolver (fail closed).
                     val gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
                       load(p).domainAgreement.flatMap { pd =>
                         getByDigest(pd).toOption

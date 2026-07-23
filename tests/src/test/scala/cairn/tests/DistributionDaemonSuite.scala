@@ -6,6 +6,7 @@ import cairn.systemhandler.*
 /** Peer discovery, HTTP gossip daemon, and BFT finality certificates. */
 class DistributionDaemonSuite extends munit.FunSuite:
   private val ledgerCtx = EffectContext.forLedger()
+  private val ksSecret = Some("cairn-test-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
 
   test("PeerRegistry round-trips and merges by lastSeen"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-peers")
@@ -215,14 +216,14 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val ids = List("r0", "r1", "r2", "r3")
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-mp-$id")).toMap
     val kps = ids.map { id =>
-      Keystore.loadOrCreate(homes(id), id).fold(e => fail(e), identity)
+      Keystore.loadOrCreate(homes(id), id, ksSecret).fold(e => fail(e), identity)
     }
     val manifest = BftFinality.sealReplicaSet(kps).fold(e => fail(e), identity)
     ids.foreach { id =>
       BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(id)), manifest)
         .fold(e => fail(e), identity)
       val foreign = ids.find(_ != id).get
-      assert(Keystore.load(homes(id), foreign).isLeft, s"$id should not hold $foreign's key")
+      assert(Keystore.load(homes(id), foreign, ksSecret).isLeft, s"$id should not hold $foreign's key")
     }
     val nodes = homes.map { (id, home) =>
       val n = Node(home.resolve("node"), ledgerCtx)
@@ -235,7 +236,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     try
       val ports = ids.map { id =>
         val home = homes(id)
-        val kp = Keystore.load(home, id).fold(e => fail(e), identity)
+        val kp = Keystore.load(home, id, ksSecret).fold(e => fail(e), identity)
         val bft = BftReplica.certified(
           kp, manifest,
           node = Some(nodes(id)), ledgerAuth = ledgerAuth,
@@ -272,19 +273,38 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(mA.replicaSetDigest != mB.replicaSetDigest)
     val mapOnly = BftFinality.replicaSetDigest(a.map(k => k.name -> k.publicBytes).toMap)
     assert(mA.replicaSetDigest != mapOnly)
-    val amended = ReplicaSetManifest.of(
+    val draft = ReplicaSetManifest.of(
       a.map(k => k.name -> k.publicBytes),
       replaces = Some(mA.digest),
       activationHeight = 10L).fold(e => fail(e), identity)
-    assert(amended.replicaSetDigest != mA.replicaSetDigest)
+    assert(draft.replicaSetDigest != mA.replicaSetDigest)
+    // Without predecessor quorum approvals, amendment is refused.
+    assert(ReplicaSetManifest.allowsTransition(draft, Some(mA), Some(mA.digest), Ed25519.verify).isLeft)
+    val payload = Canon.encode(draft.bodyCanon)
+    val approvals = a.take(3).map(k => k.name -> k.sign(payload)) // quorum of 4 is 3
+    val amended = ReplicaSetManifest.withPredecessorApprovals(draft, approvals)
+      .fold(e => fail(e), identity)
     assertEquals(
-      ReplicaSetManifest.allowsTransition(amended, Some(mA), Some(mA.digest)),
+      ReplicaSetManifest.allowsTransition(amended, Some(mA), Some(mA.digest), Ed25519.verify),
       Right(()))
-    assert(ReplicaSetManifest.allowsTransition(amended.copy(activationHeight = 0), Some(mA), Some(mA.digest)).isLeft)
+    assert(ReplicaSetManifest.allowsTransition(
+      amended.copy(activationHeight = 0), Some(mA), Some(mA.digest), Ed25519.verify).isLeft)
+    // Disjoint membership still needs old-set quorum (not new-set only).
+    val disjointDraft = ReplicaSetManifest.of(
+      b.map(k => k.name -> k.publicBytes),
+      replaces = Some(mA.digest),
+      activationHeight = 10L).fold(e => fail(e), identity)
+    val badApprovals = b.take(3).map(k => k.name -> k.sign(Canon.encode(disjointDraft.bodyCanon)))
+    val disjoint = ReplicaSetManifest.withPredecessorApprovals(disjointDraft, badApprovals)
+      .fold(e => fail(e), identity)
+    assert(
+      ReplicaSetManifest.allowsTransition(disjoint, Some(mA), Some(mA.digest), Ed25519.verify).isLeft,
+      "new-set seals must not count as predecessorApprovals")
     val sealedM = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
     val reloaded = ReplicaSetManifest.fromCanon(sealedM.canon).fold(e => fail(e), identity)
     assertEquals(reloaded.seals, sealedM.seals)
     ReplicaSetManifest.verifySeals(reloaded, Ed25519.verify).fold(e => fail(e), identity)
+    assertEquals(ReplicaSetManifest.activeAt(List(sealedM), 0), Right(sealedM))
 
   test("corrupt bft-state.canon refuses further operate (fail closed)"):
     val auth = Keypair.dev("auth")
@@ -304,7 +324,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val block = node.chainDigests.head
     val err = bft.propose(0, 0, block)
     assert(err.isLeft, err.toString)
-    assert(err.swap.toOption.exists(_.contains("refusing to operate")), err.toString)
+    assert(err.swap.toOption.exists(_.contains("durable I/O failure")), err.toString)
 
   test("Keystore encrypts private keys at rest when a secret is supplied"):
     val kp = Keypair.dev("enc-r0")
@@ -318,6 +338,120 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assertEquals(loaded.sign("ping".getBytes), kp.sign("ping".getBytes))
     assert(Keystore.fromCanon(sealedC, None).isLeft)
     val home = java.nio.file.Files.createTempDirectory("cairn-ks")
-    Keystore.save(home, kp).fold(e => fail(e), identity)
-    val round = Keystore.load(home, "enc-r0").fold(e => fail(e), identity)
+    Keystore.saveCreate(home, kp, ksSecret).fold(e => fail(e), identity)
+    val round = Keystore.load(home, "enc-r0", ksSecret).fold(e => fail(e), identity)
     assertEquals(round.sign("pong".getBytes), kp.sign("pong".getBytes))
+
+  test("Keystore never overwrites on wrong/missing secret and refuses plaintext by default"):
+    val home = java.nio.file.Files.createTempDirectory("cairn-ks-nooverwrite")
+    val kp = Keypair.dev("r0")
+    Keystore.saveCreate(home, kp, ksSecret).fold(e => fail(e), identity)
+    val before = java.nio.file.Files.readAllBytes(Keystore.path(home, "r0")).toVector
+    // Wrong secret: load fails and loadOrCreate must not replace the file.
+    val wrong = Some("wrong-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    assert(Keystore.load(home, "r0", wrong).isLeft)
+    assert(Keystore.loadOrCreate(home, "r0", wrong).isLeft)
+    val after = java.nio.file.Files.readAllBytes(Keystore.path(home, "r0")).toVector
+    assertEquals(after, before)
+    // Create-only: second save refused.
+    assert(Keystore.saveCreate(home, kp, ksSecret).isLeft)
+    // Plaintext refused without CAIRN_KEYSTORE_PLAINTEXT.
+    assert(Keystore.toCanonE(Keypair.dev("x"), None).isLeft)
+
+  test("DurableIo permission failure is surfaced (no silent success)"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-durable-perm")
+    val target = dir.resolve("nested").resolve("state.canon")
+    // Make parent read-only after creating it so createDirectories of nested fails... 
+    // Instead: write then make directory non-writable and try consensus write.
+    java.nio.file.Files.createDirectories(dir.resolve("nested"))
+    DurableIo.writeConsensus(target, Array[Byte](1, 2, 3)).fold(e => fail(e), identity)
+    dir.resolve("nested").toFile.setWritable(false)
+    dir.toFile.setWritable(false)
+    val err = DurableIo.writeConsensus(target, Array[Byte](4, 5, 6))
+    // Restore perms for cleanup
+    dir.toFile.setWritable(true)
+    dir.resolve("nested").toFile.setWritable(true)
+    assert(err.isLeft, err.toString)
+
+  test("BftReplica fails closed when state write fails before exposing votes"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-writefail")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val stateDir = home.resolve("statedir")
+    java.nio.file.Files.createDirectories(stateDir)
+    val statePath = stateDir.resolve("bft-state.canon")
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      stateStore = Some(statePath)).fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    bft.propose(0, 0, block).fold(e => fail(e), identity)
+    assert(java.nio.file.Files.exists(statePath))
+    stateDir.toFile.setWritable(false)
+    home.toFile.setWritable(false)
+    val peer = replicas(1)
+    val prep = BftFinality.sign(
+      peer,
+      cairn.kernel.BftQuorum.Msg.Prepare(
+        0, 0, BftFinality.valueOfBlock(block).digest,
+        cairn.kernel.BftQuorum.ReplicaId(peer.name)))
+      .fold(e => fail(e), identity)
+    val err = bft.receive(prep)
+    home.toFile.setWritable(true)
+    stateDir.toFile.setWritable(true)
+    assert(err.isLeft, err.toString)
+    assert(err.swap.toOption.exists(_.contains("durable")), err.toString)
+    assert(bft.propose(0, 1, block).isLeft)
+
+  test("pre-activation and post-deactivation refuse operate"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-activation")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val future = BftFinality.sealReplicaSet(replicas, activationHeight = 5L).fold(e => fail(e), identity)
+    val pre = BftReplica.certified(
+      replicas.head, future,
+      node = Some(node), ledgerAuth = ledgerAuth).fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    val preErr = pre.propose(0, 0, block)
+    assert(preErr.isLeft, preErr.toString)
+    assert(preErr.swap.toOption.exists(_.contains("not yet active")), preErr.toString)
+
+    val genesis = BftFinality.sealReplicaSet(replicas, activationHeight = 0L).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis).fold(e => fail(e), identity)
+    // Amend at height 1 with predecessor quorum; then grow tip to 1 so genesis deactivates.
+    val draft = ReplicaSetManifest.of(
+      replicas.map(k => k.name -> k.publicBytes),
+      replaces = Some(genesis.digest),
+      activationHeight = 1L).fold(e => fail(e), identity)
+    val payload = Canon.encode(draft.bodyCanon)
+    val approvals = replicas.take(3).map(k => k.name -> k.sign(payload))
+    val amendedBody = ReplicaSetManifest.withPredecessorApprovals(draft, approvals)
+      .fold(e => fail(e), identity)
+    val successor = ReplicaSetManifest.seal(
+      amendedBody,
+      replicas.map(k => k.name -> ((msg: Array[Byte]) => k.sign(msg))))
+      .fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), successor)
+      .fold(e => fail(e), identity)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
+      .fold(e => fail(e), identity) // tip height becomes 1
+    val hist = BftFinality.loadReplicaSetHistory(home).fold(e => fail(e), identity)
+    assertEquals(hist.length, 2)
+    assertEquals(ReplicaSetManifest.activeAt(hist, 0).map(_.digest), Right(genesis.digest))
+    assertEquals(ReplicaSetManifest.activeAt(hist, 1).map(_.digest), Right(successor.digest))
+    val post = BftReplica.certified(
+      replicas.head, genesis,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      home = Some(home)).fold(e => fail(e), identity)
+    val postErr = post.propose(0, 0, block)
+    assert(postErr.isLeft, postErr.toString)
+    assert(postErr.swap.toOption.exists(_.contains("deactivated")), postErr.toString)

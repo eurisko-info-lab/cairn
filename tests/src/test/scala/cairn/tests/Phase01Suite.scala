@@ -195,6 +195,15 @@ class BranchSuite extends munit.FunSuite:
 
   private def deps(ds: Digest*): Canon = DomainAgreement.dependencyEvidenceOf(ds.toList)
 
+  private val LangIdx: Set[Digest] = Set(
+    Digest.of(Canon.CStr("root")),
+    Digest.of(Canon.CStr("cert")),
+    Digest.of(Canon.CStr("law-lang")),
+    Digest.of(Canon.CStr("sds-lang")),
+    Digest.of(Canon.CStr("chem-lang")),
+    Digest.of(Canon.CStr("known-lang")),
+    Digest.of(Canon.CStr("unknown-lang")))
+
   private def idsOf(kps: Keypair*): IdentityResolver =
     IdentityResolver.bootstrapOnly(kps.map(k => k.name -> k.publicBytes).toMap)
 
@@ -274,7 +283,7 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = Nil,
       dependencyEvidence = deps(Digest.of(Canon.CStr("root"))),
       replaces = None)
-    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg)).fold(e => fail(e), identity)
+    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg), LangIdx).fold(e => fail(e), identity)
     val lawLang = Digest.of(Canon.CStr("law-lang"))
     val sdsLang = Digest.of(Canon.CStr("sds-lang"))
     val claim0 = DomainAgreement(
@@ -288,7 +297,7 @@ class BranchSuite extends munit.FunSuite:
       replaces = None)
     val (a0, gSeal0) = mintDelegation(branches, claim0, lawOwner, idents)
     val planted = branches.plantGoverned(
-      a0, idents, ownerSealOf(alice, a0), grantorSeal = Some(gSeal0)).fold(e => fail(e), identity)
+      a0, idents, ownerSealOf(alice, a0), LangIdx, grantorSeal = Some(gSeal0)).fold(e => fail(e), identity)
     assertEquals(planted.primaryAncestor, Some("LAW"))
     assert(planted.domainAgreement.isDefined, planted.domainAgreement)
     val liveDig0 = planted.domainAgreement.get
@@ -310,8 +319,8 @@ class BranchSuite extends munit.FunSuite:
       Ed25519.sign(attacker.privateKey, Canon.encode(
         DomainAncestorDelegation("LAW", "SDS", lawOwner.name, alice.name, claim0.claimDigest).canon)))
     assert(branches.plantGoverned(
-      a0, idents, ownerSealOf(alice, a0), grantorSeal = Some(forged)).isLeft)
-    assert(branches.plantGoverned(claim0, idents, ownerSealOf(alice, claim0)).isLeft)
+      a0, idents, ownerSealOf(alice, a0), LangIdx, grantorSeal = Some(forged)).isLeft)
+    assert(branches.plantGoverned(claim0, idents, ownerSealOf(alice, claim0), LangIdx).isLeft)
     val chemAg = DomainAgreement(
       child = "CHEMISTRY",
       primaryAncestor = None,
@@ -321,23 +330,23 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = Nil,
       dependencyEvidence = deps(Digest.of(Canon.CStr("root"))),
       replaces = None)
-    branches.plantGoverned(chemAg, idents, ownerSealOf(lawOwner, chemAg)).fold(e => fail(e), identity)
+    branches.plantGoverned(chemAg, idents, ownerSealOf(lawOwner, chemAg), LangIdx).fold(e => fail(e), identity)
     val chemLang = Digest.of(Canon.CStr("chem-lang"))
     val noReplace = claim0.copy(
       references = List("CHEMISTRY"),
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
       replaces = None)
-    assert(branches.plantGoverned(noReplace, idents, ownerSealOf(alice, noReplace)).isLeft)
+    assert(branches.plantGoverned(noReplace, idents, ownerSealOf(alice, noReplace), LangIdx).isLeft)
     val claim1 = noReplace.copy(replaces = Some(liveDig0))
     val (a1, gSeal1) = mintDelegation(branches, claim1, lawOwner, idents)
     val amended = branches.plantGoverned(
-      a1, idents, ownerSealOf(alice, a1), grantorSeal = Some(gSeal1)).fold(e => fail(e), identity)
+      a1, idents, ownerSealOf(alice, a1), LangIdx, grantorSeal = Some(gSeal1)).fold(e => fail(e), identity)
     assertEquals(amended.references, List("CHEMISTRY"))
     assert(amended.domainAgreement.isDefined)
     assert(amended.domainAgreement.get != a1.digest)
     val badOwner = a1.copy(owner = "mallory", replaces = Some(amended.domainAgreement.get))
     assert(branches.plantGoverned(
-      badOwner, idents, ("mallory", Vector.empty), grantorSeal = Some(gSeal1)).isLeft)
+      badOwner, idents, ("mallory", Vector.empty), LangIdx, grantorSeal = Some(gSeal1)).isLeft)
 
   test("DomainAgreement plantGoverned fails closed when live agreement is unloadable"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-domain-failclosed")
@@ -355,7 +364,7 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = Nil,
       dependencyEvidence = deps(Digest.of(Canon.CStr("root"))),
       replaces = None)
-    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg)).fold(e => fail(e), identity)
+    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg), LangIdx).fold(e => fail(e), identity)
     val lawLang = Digest.of(Canon.CStr("law-lang"))
     val sdsLang = Digest.of(Canon.CStr("sds-lang"))
     val claim0 = DomainAgreement(
@@ -368,7 +377,7 @@ class BranchSuite extends munit.FunSuite:
       dependencyEvidence = deps(Digest.of(Canon.CStr("cert"))),
       replaces = None)
     val (a0, gSeal0) = mintDelegation(branches, claim0, lawOwner, idents)
-    branches.plantGoverned(a0, idents, ownerSealOf(alice, a0), grantorSeal = Some(gSeal0))
+    branches.plantGoverned(a0, idents, ownerSealOf(alice, a0), LangIdx, grantorSeal = Some(gSeal0))
       .fold(e => fail(e), identity)
     val liveDig0 = branches.load("SDS").domainAgreement.get
     val agr = liveDig0
@@ -384,14 +393,14 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = Nil,
       dependencyEvidence = deps(Digest.of(Canon.CStr("root"))),
       replaces = None)
-    branches.plantGoverned(chemAg, idents, ownerSealOf(lawOwner, chemAg)).fold(e => fail(e), identity)
+    branches.plantGoverned(chemAg, idents, ownerSealOf(lawOwner, chemAg), LangIdx).fold(e => fail(e), identity)
     val chemLang = Digest.of(Canon.CStr("chem-lang"))
     val claim1 = claim0.copy(
       references = List("CHEMISTRY"),
       ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
       replaces = Some(liveDig0))
     val (a1, gSeal1) = mintDelegation(branches, claim1, lawOwner, idents)
-    val err = branches.plantGoverned(a1, idents, ownerSealOf(alice, a1), grantorSeal = Some(gSeal1))
+    val err = branches.plantGoverned(a1, idents, ownerSealOf(alice, a1), LangIdx, grantorSeal = Some(gSeal1))
     assert(err.isLeft, err.toString)
     assert(err.swap.toOption.exists(_.contains("cannot load live")), err.toString)
 
@@ -412,7 +421,7 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = List("LAW" -> Digest.of(Canon.CStr("law-lang"))),
       dependencyEvidence = deps(Digest.of(Canon.CStr("cert"))))
     val (a, seal) = mintDelegation(branches, claim, lawOwner, idents)
-    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), grantorSeal = Some(seal)).isLeft)
+    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), LangIdx, grantorSeal = Some(seal)).isLeft)
     val lawAg = DomainAgreement(
       child = "LAW",
       primaryAncestor = None,
@@ -421,12 +430,12 @@ class BranchSuite extends munit.FunSuite:
       childLanguage = Some(Digest.of(Canon.CStr("law-lang"))),
       ancestorLanguages = Nil,
       dependencyEvidence = deps(Digest.of(Canon.CStr("root"))))
-    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg)).fold(e => fail(e), identity)
+    branches.plantGoverned(lawAg, idents, ownerSealOf(lawOwner, lawAg), LangIdx).fold(e => fail(e), identity)
     val mallory = Keypair.dev("mallory")
     val badSeal = (lawOwner.name, Ed25519.sign(mallory.privateKey, Canon.encode(
       DomainAncestorDelegation("LAW", "SDS", lawOwner.name, alice.name, claim.claimDigest).canon)))
-    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), grantorSeal = Some(badSeal)).isLeft)
-    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), grantorSeal = Some(seal)).isRight)
+    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), LangIdx, grantorSeal = Some(badSeal)).isLeft)
+    assert(branches.plantGoverned(a, idents, ownerSealOf(alice, a), LangIdx, grantorSeal = Some(seal)).isRight)
 
   test("DomainAgreement rejects unknown language digests when an index is supplied"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-domain-lang")
@@ -445,10 +454,22 @@ class BranchSuite extends munit.FunSuite:
       ancestorLanguages = Nil,
       dependencyEvidence = deps(known))
     assert(branches.plantGoverned(
-      ag, idents, ownerSealOf(owner, ag), knownLanguages = Set(known)).isLeft)
+      ag, idents, ownerSealOf(owner, ag), Set(known)).isLeft)
     val ok = ag.copy(childLanguage = Some(known), dependencyEvidence = deps(known))
     assert(branches.plantGoverned(
-      ok, idents, ownerSealOf(owner, ok), knownLanguages = Set(known)).isRight)
+      ok, idents, ownerSealOf(owner, ok), Set(known)).isRight)
+    // auditGoverned requires a non-empty PackAccess index; empty packs fail closed.
+    val emptyPacks = new cairn.systeminterface.PackAccess:
+      def requireOwn(name: String) = Nil
+      def requireClosed(name: String, surface: String = "default") =
+        throw RuntimeException("unused")
+      def requireSurface(lang: String, surface: String = "default") =
+        throw RuntimeException("unused")
+      def surfacesFor(lang: String) = Map.empty
+      def loadRaw() = Map.empty
+      def loadClosed() = Map.empty
+      def unmetRequires(name: String, packs: Map[String, List[Fragment]]) = Set.empty
+    assert(branches.auditGoverned("LAW", idents, emptyPacks).isLeft)
 
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")

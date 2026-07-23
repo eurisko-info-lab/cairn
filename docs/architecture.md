@@ -218,10 +218,11 @@ LeanCore `#check` envelope.
 
 - **BFT / gossip daemon / peer discovery** — `PeerRegistry` + `GET/POST /peers`,
   timed `GossipDaemon` over `HttpSync`, and `BftFinality` certificates
-  (`2f+1` signed commits for sealed PoA digests) are implemented. Remaining
-  honesty bounds: directory discovery (not DHT), static replica sets, and
-  BFT as finality-over-PoA rather than a public ledger
-  ([distribution.md](distribution.md))
+  (`2f+1` signed commits for sealed PoA digests) are implemented. Replica-set
+  amendments carry predecessor quorum + activation height with durable history;
+  vote persistence is fail-closed via `DurableIo.writeConsensus`. Remaining
+  honesty bounds: directory discovery (not DHT), and BFT as finality-over-PoA
+  rather than a public ledger ([distribution.md](distribution.md))
 - **Separate `grammar.cairn`** — deferred ([bootstrap.md](bootstrap.md))
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in
   `examples/` (need handler crypto/CAS/filesystem); pure packs that need no
@@ -245,10 +246,11 @@ LeanCore `#check` envelope.
   path for unreferenced accept blobs (`liveCasRoots`).
 - **Domain ancestry residuals** — transitive primary-cycle detection,
   `DomainAgreement` / `plantGoverned` (required owner seal via
-  `IdentityResolver`, language digests against an optional pack index,
-  `replaces`, fail-closed live load), and primary-owner
-  `DomainAncestorDelegation` are in. Peer-attested namespace registries,
-  open BFT membership, and a useful-work market remain open.
+  `IdentityResolver`, **mandatory** language index from `PackAccess` or
+  explicit digests, `replaces`, fail-closed live load),
+  `Branches.auditGoverned`, and primary-owner `DomainAncestorDelegation` are
+  in. Peer-attested namespace registries, open BFT membership, and a
+  useful-work market remain open.
 - **Effect-interface pinning** — `ActionKey` is digest-bound via
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
