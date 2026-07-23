@@ -686,11 +686,9 @@ object Cli:
           else d.peers.map(p => s"${p.name}\t${p.role.name}\t${p.baseUrl}").mkString("\n")
         }
       case List("peer", "add", name, url) =>
-        PeerRegistry.add(home, name, url).map(d => s"peers=${d.peers.size} added $name")
+        peerAdd(home, name, url, PeerRegistry.Role.Gossip)
       case List("peer", "add", name, url, role) =>
-        PeerRegistry.Role.parse(role).flatMap { r =>
-          PeerRegistry.add(home, name, url, r).map(d => s"peers=${d.peers.size} added $name ($role)")
-        }
+        PeerRegistry.Role.parse(role).flatMap(r => peerAdd(home, name, url, r))
       case List("peer", "remove", name) =>
         PeerRegistry.remove(home, name).map(d => s"peers=${d.peers.size} removed $name")
       case List("peer", "discover", url) =>
@@ -850,7 +848,11 @@ object Cli:
         if !withBft then Right(None)
         else
           for
-            manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
+            hist <- BftFinality.loadReplicaSetHistory(home)
+            tipHeight =
+              val digs = node.chainDigests
+              if digs.isEmpty then 0L else (digs.length - 1).toLong
+            manifest <- hist.activeAt(tipHeight)
             kp <- keystoreLoadOrCreate(home, replicaName)
             bft <- BftReplica.certified(
               kp, manifest,
@@ -864,7 +866,11 @@ object Cli:
       selfUrl = s"http://127.0.0.1:$bound"
       role = if withBft then PeerRegistry.Role.Replica else PeerRegistry.Role.Gossip
       pk = bftOpt.map(_.keypair.publicBytes)
-      _ <- PeerRegistry.add(home, replicaName, selfUrl, role, publicKey = pk)
+      _ <- bftOpt match
+        case Some(bft) =>
+          PeerRegistry.addBound(home, bft.keypair, selfUrl, role)
+        case None =>
+          PeerRegistry.add(home, replicaName, selfUrl, role, publicKey = pk)
     yield
       System.out.println(s"Cairn HTTP node at $selfUrl")
       System.out.println(s"  GET /chain  /heads  /blob/<digest>  /peers")
@@ -878,14 +884,42 @@ object Cli:
       http.stop()
       s"serve stopped (was :$bound)"
 
-  /** Network agreement: ask the designated primary to propose (no remote private keys). */
+  /** Plant a peer; if a local keystore key matches `name`, bind the URL with a seal. */
+  private def peerAdd(
+      home: Path,
+      name: String,
+      url: String,
+      role: PeerRegistry.Role,
+  ): Either[String, String] =
+    keystoreSecret match
+      case Right(sec) =>
+        Keystore.load(home, name, sec) match
+          case Right(kp) =>
+            PeerRegistry.addBound(home, kp, url, role).map { d =>
+              s"peers=${d.peers.size} added $name (${role.name}, bound)"
+            }
+          case Left(_) =>
+            if role == PeerRegistry.Role.Replica then
+              Left(s"peer add: replica '$name' requires a local keystore key to sign the URL")
+            else
+              PeerRegistry.add(home, name, url, role).map(d =>
+                s"peers=${d.peers.size} added $name (${role.name})")
+      case Left(_) if role == PeerRegistry.Role.Replica =>
+        Left("peer add: replica role requires CAIRN_KEYSTORE_SECRET and a local key")
+      case Left(_) =>
+        PeerRegistry.add(home, name, url, role).map(d =>
+          s"peers=${d.peers.size} added $name (${role.name})")
+
+  /** Network agreement: ask the designated primary to propose (signed by a local replica key). */
   private def bftAgree(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
     for
       ledgerAuth <- defaultAuthorities(home)
-      manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
+      proved <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
+      height = proved._2
+      manifest <- BftFinality.loadActiveReplicaSet(home, height)
       dir <- PeerRegistry.load(home)
       urls <- manifest.ids.foldLeft[Either[String, Map[String, String]]](Right(Map.empty)) { (acc, id) =>
         acc.flatMap { m =>
@@ -893,11 +927,23 @@ object Cli:
             .map(url => m + (id -> url))
         }
       }
-      _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
-      cert <- BftFinality.agreeNetworkRemote(urls, block)
+      initiator <- localReplicaSigner(home, manifest.ids)
+      cert <- BftFinality.agreeNetworkRemote(urls, block, initiator)
       hist <- BftFinality.loadReplicaSetHistory(home)
       _ <- BftFinality.FinalityCertificate.verifyAgainstHistory(cert, hist, node, ledgerAuth)
+      _ <- BftFinality.advanceCheckpoint(home, cert)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
+
+  /** First local keystore identity that is a member of the replica set. */
+  private def localReplicaSigner(home: Path, ids: List[String]): Either[String, Keypair] =
+    keystoreSecret.flatMap { sec =>
+      ids.foldLeft[Either[String, Keypair]](Left("bft: no local replica key in keystore")) { (acc, id) =>
+        acc match
+          case Right(kp) => Right(kp)
+          case Left(_)   => Keystore.load(home, id, sec)
+      }.left.map(_ =>
+        s"bft: need a local keystore key for one of ${ids.mkString(",")}")
+    }
 
   /** Create local keypairs for each name and write a sealed replica-set.canon. */
   private def bftReplicaSetInit(home: Path, names: List[String]): Either[String, String] =
@@ -920,7 +966,7 @@ object Cli:
       replicas <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
         acc.flatMap(ks => keystoreLoadOrCreate(home, n).map(ks :+ _))
       }
-      cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
+      cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, block)
       manifest <- BftFinality.sealReplicaSet(replicas)
       _ <- BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth)
     yield s"bft local finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
@@ -929,23 +975,26 @@ object Cli:
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    defaultAuthorities(home).flatMap { auth =>
-      HttpSync.pull(baseUrl, node, auth).map { r =>
-        s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
-      }
-    }
+    for
+      auth <- defaultAuthorities(home)
+      checkpoint <- BftFinality.loadCheckpoint(home)
+      r <- HttpSync.pull(baseUrl, node, auth, checkpoint, Some(home))
+    yield s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
 
   private def gossipOnce(home: Path, ledgerCtx: EffectContext): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    defaultAuthorities(home).map { auth =>
-      val report = HttpGossip.round("nodeA", node,
+    for
+      auth <- defaultAuthorities(home)
+      checkpoint <- BftFinality.loadCheckpoint(home)
+    yield
+      val report = HttpGossip.round(
+        "nodeA", node,
         PeerRegistry.load(home).toOption.toList.flatMap(_.gossipPeers),
-        auth)
+        auth, checkpoint, Some(home))
       s"gossip once: pulled=${report.pulled.mkString(",")}" +
         s" reorgs=${report.reorgs.size} errors=${report.errors.size}"
-    }
 
   /** Packaged-executable smoke: two-node HTTP gossip + four-node BFT certificate. */
   private def smokeDistribution(ledgerCtx: EffectContext): Either[String, String] =
@@ -985,7 +1034,6 @@ object Cli:
   ): Either[String, String] =
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     BftFinality.sealReplicaSet(replicas).flatMap { manifest =>
-      val bftAuth = manifest.authorities
       val ids = manifest.ids
       val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
       val seeded: Either[String, Map[String, Node]] =
@@ -1017,15 +1065,18 @@ object Cli:
             _ <- ids.foldLeft[Either[String, Unit]](Right(())) { (acc, id) =>
               acc.flatMap { _ =>
                 ids.foldLeft[Either[String, Unit]](Right(())) { (acc2, peer) =>
-                  acc2.flatMap(_ =>
-                    PeerRegistry.add(
-                      homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
-                      PeerRegistry.Role.Replica, publicKey = Some(bftAuth(peer))).map(_ => ()))
+                  acc2.flatMap { _ =>
+                    val kp = replicas.find(_.name == peer).get
+                    PeerRegistry.addBound(
+                      homes(id), kp, s"http://127.0.0.1:${ports(peer)}",
+                      PeerRegistry.Role.Replica).map(_ => ())
+                  }
                 }
               }
             }
             urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-            cert <- BftFinality.agreeNetworkRemote(urls, block, polls = 64, pollSleepMs = 30)
+            cert <- BftFinality.agreeNetworkRemote(
+              urls, block, replicas.head, polls = 64, pollSleepMs = 30)
             _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
               cert, manifest, nodes("r0"), ledgerAuth)
           yield s"bft ok ${cert.digest.short}"

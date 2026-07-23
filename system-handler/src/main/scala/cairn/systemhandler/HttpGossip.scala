@@ -8,8 +8,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** Multi-peer gossip over [[HttpSync]] — the network form of [[Gossip]].
   *
-  * Fork choice matches in-process gossip: prefer longer chains; ties break on
-  * smallest tip digest. Each round pulls from the winning remote via HTTP.
+  * Fork choice: prefer longer chains; ties break on smallest tip digest —
+  * but never adopt a chain that excludes the local [[BftFinality.FinalizedCheckpoint]].
   */
 object HttpGossip:
   final case class Reorg(localName: String, fromHead: Option[Digest], toHead: Digest, via: String, forkPoint: Int)
@@ -27,10 +27,12 @@ object HttpGossip:
     catch case e: Exception => Left(e.getMessage)
 
   /** Rank whether `theirs` should replace `mine` under the gossip fork rule. */
-  def shouldAdopt(mine: List[Digest], theirs: List[Digest]): Boolean =
-    theirs.length > mine.length ||
-      (theirs.length == mine.length && theirs != mine &&
-        theirs.lastOption.map(_.hex).getOrElse("") < mine.lastOption.map(_.hex).getOrElse("~"))
+  def shouldAdopt(
+      mine: List[Digest],
+      theirs: List[Digest],
+      checkpoint: Option[BftFinality.FinalizedCheckpoint] = None,
+  ): Boolean =
+    BftFinality.shouldAdoptChain(mine, theirs, checkpoint)
 
   /** One gossip round: pick the best remote chain among `peers` and pull if it wins. */
   def round(
@@ -38,6 +40,8 @@ object HttpGossip:
       local: Node,
       peers: List[PeerRegistry.Peer],
       authorities: Map[String, Vector[Byte]],
+      checkpoint: Option[BftFinality.FinalizedCheckpoint] = None,
+      checkpointHome: Option[java.nio.file.Path] = None,
   ): RoundReport =
     val mine = local.chainDigests
     val errors = List.newBuilder[String]
@@ -46,15 +50,19 @@ object HttpGossip:
         case Left(e) =>
           errors += s"${p.name}: $e"
           None
-        case Right(chain) if shouldAdopt(mine, chain) =>
+        case Right(chain) if shouldAdopt(mine, chain, checkpoint) =>
           Some((p, chain))
-        case Right(_) => None
+        case Right(chain) =>
+          BftFinality.requireExtendsCheckpoint(chain, checkpoint) match
+            case Left(e) => errors += s"${p.name}: $e"
+            case Right(_) => ()
+          None
     }.sortBy((p, chain) => (-chain.length, chain.lastOption.map(_.hex).getOrElse("")))
 
     ranked.headOption match
       case None => RoundReport(Nil, Nil, errors.result())
       case Some((from, theirChain)) =>
-        HttpSync.pull(from.baseUrl, local, authorities) match
+        HttpSync.pull(from.baseUrl, local, authorities, checkpoint, checkpointHome) match
           case Left(e) =>
             RoundReport(Nil, Nil, errors.result() :+ s"pull ${from.name}: $e")
           case Right(_) =>
@@ -106,7 +114,10 @@ final class GossipDaemon(
 
   def tick(): HttpGossip.RoundReport =
     val peers = PeerRegistry.load(peersRoot).toOption.toList.flatMap(_.gossipPeers)
-    val report = HttpGossip.round(localName, local, peers, authorities)
+    val checkpoint = BftFinality.loadCheckpoint(peersRoot).toOption.flatten
+    val report = HttpGossip.round(
+      localName, local, peers, authorities,
+      checkpoint = checkpoint, checkpointHome = Some(peersRoot))
     lastReport.set(report)
     report
 

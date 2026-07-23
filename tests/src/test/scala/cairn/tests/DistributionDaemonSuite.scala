@@ -11,7 +11,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
   test("PeerRegistry round-trips and merges by lastSeen"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-peers")
     PeerRegistry.add(dir, "a", "http://127.0.0.1:1").fold(e => fail(e), identity)
-    PeerRegistry.add(dir, "b", "http://127.0.0.1:2", PeerRegistry.Role.Replica)
+    val replica = Keypair.dev("b")
+    PeerRegistry.addBound(dir, replica, "http://127.0.0.1:2", PeerRegistry.Role.Replica)
       .fold(e => fail(e), identity)
     val loaded = PeerRegistry.load(dir).fold(e => fail(e), identity)
     assertEquals(loaded.peers.size, 2)
@@ -20,6 +21,45 @@ class DistributionDaemonSuite extends munit.FunSuite:
       PeerRegistry.Peer("a", "http://127.0.0.1:99", lastSeenEpochMs = System.currentTimeMillis() + 1000)))
     val merged = PeerRegistry.merge(loaded, remote)
     assertEquals(merged.byName("a").map(_.baseUrl), Some("http://127.0.0.1:99"))
+    // Poisoned replica URL without a valid seal is rejected.
+    val poison = PeerRegistry.Peer(
+      "b", "http://evil.example:9", PeerRegistry.Role.Replica,
+      publicKey = Some(replica.publicBytes),
+      lastSeenEpochMs = System.currentTimeMillis() + 5000)
+    val merged2 = PeerRegistry.merge(loaded, PeerRegistry.Directory(List(poison)))
+    assertEquals(merged2.byName("b").map(_.baseUrl), Some("http://127.0.0.1:2"))
+
+  test("Keystore uses PBKDF2 and still loads legacy SHA-256 seals"):
+    val kp = Keypair.dev("kdf-r0")
+    val secret = Some("test-keystore-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val sealedC = Keystore.toCanon(kp, secret)
+    sealedC match
+      case Canon.CTag("keypair-sealed", m) =>
+        assertEquals(m.field("kdf").asStr, "pbkdf2-hmac-sha256")
+        assert(m.field("salt") match
+          case Canon.CBytes(bs) => bs.nonEmpty
+          case _ => false)
+        assert(m.field("iterations").asInt >= 10000)
+      case _ => fail(s"expected keypair-sealed, got $sealedC")
+    val loaded = Keystore.fromCanon(sealedC, secret).fold(e => fail(e), identity)
+    assertEquals(loaded.sign("ping".getBytes), kp.sign("ping".getBytes))
+    // Legacy unsalted SHA-256 format (no kdf/salt fields).
+    val legacyKey = java.security.MessageDigest.getInstance("SHA-256").digest(secret.get)
+    val nonce = new Array[Byte](12)
+    java.security.SecureRandom().nextBytes(nonce)
+    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(
+      javax.crypto.Cipher.ENCRYPT_MODE,
+      new javax.crypto.spec.SecretKeySpec(legacyKey, "AES"),
+      new javax.crypto.spec.GCMParameterSpec(128, nonce))
+    val ct = cipher.doFinal(kp.privateBytes.toArray)
+    val legacy = Canon.CTag("keypair-sealed", Canon.cmap(
+      "name" -> Canon.CStr(kp.name),
+      "public" -> Canon.CBytes(kp.publicBytes),
+      "privateNonce" -> Canon.CBytes(nonce.toVector),
+      "privateCiphertext" -> Canon.CBytes(ct.toVector)))
+    val legacyLoaded = Keystore.fromCanon(legacy, secret).fold(e => fail(e), identity)
+    assertEquals(legacyLoaded.sign("pong".getBytes), kp.sign("pong".getBytes))
 
   test("HttpGossip: longer remote chain is adopted over HTTP"):
     val auth = Keypair.dev("auth")
@@ -96,6 +136,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val cert = BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 1, block)
       .fold(e => fail(e), identity)
     assertEquals(cert.blockDigest, block)
+    assertEquals(cert.seq, 0) // derived from height, ignores caller seq=1
+    assertEquals(cert.height, 0L)
     assert(cert.commits.size >= BftQuorum.quorumSize(4))
     assertEquals(cert.commits.map(_._1.id).distinct.length, cert.commits.length)
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
@@ -166,7 +208,6 @@ class DistributionDaemonSuite extends munit.FunSuite:
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
-    val bftAuth = manifest.authorities
     val ids = manifest.ids
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-bft-$id")).toMap
     val nodes = homes.map { (id, home) =>
@@ -193,10 +234,10 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }.toMap
       ids.foreach { id =>
         ids.foreach { peer =>
-          PeerRegistry.add(
-            homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
-            PeerRegistry.Role.Replica,
-            publicKey = Some(bftAuth(peer))).fold(e => fail(e), identity)
+          PeerRegistry.addBound(
+            homes(id), replicas.find(_.name == peer).get,
+            s"http://127.0.0.1:${ports(peer)}",
+            PeerRegistry.Role.Replica).fold(e => fail(e), identity)
         }
       }
       val primaryId = BftFinality.designatedPrimary(ids, view = 0).fold(e => fail(e), identity)
@@ -219,7 +260,8 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }
       val block1 = nodes("r0").chainDigests(1)
       assert(nodes.values.forall(_.chainDigests == nodes("r0").chainDigests))
-      val cert1 = BftFinality.agreeNetworkRemote(urls, block1, polls = 64, pollSleepMs = 30)
+      val cert1 = BftFinality.agreeNetworkRemote(
+        urls, block1, replicas.head, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert1.blockDigest, block1)
       assertEquals(cert1.seq, 1)
@@ -227,6 +269,12 @@ class DistributionDaemonSuite extends munit.FunSuite:
       assertEquals(
         BftFinality.FinalityCertificate.verifyAgainstChain(cert1, manifest, nodes("r0"), ledgerAuth),
         Right(()))
+      // Slot compaction: finalized seq 0 is dropped from durable state after mint.
+      val stateBytes = java.nio.file.Files.readAllBytes(homes("r0").resolve("bft-state.canon"))
+      val (st, seals, _) = Canon.decode(stateBytes).flatMap(BftFinality.decodeReplicaState)
+        .fold(e => fail(e), identity)
+      assert(!st.slots.keys.exists { case (_, seq) => seq <= 0 }, st.slots.keys.toString)
+      assert(!seals.keys.exists { case (_, seq, _, _) => seq <= 0 }, seals.keys.toString)
     finally https.foreach(_.stop())
 
   test("multi-home provisioning: distinct keys + replica-set.canon + remote propose"):
@@ -268,14 +316,15 @@ class DistributionDaemonSuite extends munit.FunSuite:
       }.toMap
       ids.foreach { id =>
         ids.foreach { peer =>
-          PeerRegistry.add(
-            homes(id), peer, s"http://127.0.0.1:${ports(peer)}",
-            PeerRegistry.Role.Replica,
-            publicKey = Some(manifest.authorities(peer))).fold(e => fail(e), identity)
+          PeerRegistry.addBound(
+            homes(id), kps.find(_.name == peer).get,
+            s"http://127.0.0.1:${ports(peer)}",
+            PeerRegistry.Role.Replica).fold(e => fail(e), identity)
         }
       }
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
-      val cert = BftFinality.agreeNetworkRemote(urls, block, polls = 64, pollSleepMs = 30)
+      val cert = BftFinality.agreeNetworkRemote(
+        urls, block, kps.head, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
@@ -623,6 +672,43 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assertEquals(successor.activationHeight, 5L)
     val hist = BftFinality.loadReplicaSetHistory(coord).fold(e => fail(e), identity)
     assertEquals(hist.manifests.map(_.digest), List(genesis.digest, successor.digest))
+
+  test("finalized checkpoint blocks gossip/pull from dropping certified blocks"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val homeA = java.nio.file.Files.createTempDirectory("cairn-cp-a")
+    val homeB = java.nio.file.Files.createTempDirectory("cairn-cp-b")
+    val a = Node(homeA.resolve("node"), ledgerCtx)
+    val b = Node(homeB.resolve("node"), ledgerCtx)
+    a.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    // Divergent longer chain under a different bootstrap authority.
+    val bob = Keypair.dev("bob")
+    val bobAuth = Map(bob.name -> bob.publicBytes)
+    b.append(bob, bobAuth, List(bob.signTx(Tx.RegisterIdentity(bob.name, bob.publicBytes))))
+      .fold(e => fail(e), identity)
+    b.append(bob, bobAuth, List(bob.signTx(Tx.RegisterIdentity("carol", bob.publicBytes))))
+      .fold(e => fail(e), identity)
+    assert(b.chainDigests.length > a.chainDigests.length)
+    assert(a.chainDigests.head != b.chainDigests.head)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val cert = BftFinality.agreeForSealedBlock(a, ledgerAuth, replicas, a.chainDigests.head)
+      .fold(e => fail(e), identity)
+    assertEquals(cert.seq.toLong, cert.height)
+    BftFinality.advanceCheckpoint(homeA, cert).fold(e => fail(e), identity)
+    val cp = BftFinality.loadCheckpoint(homeA).fold(e => fail(e), identity)
+    assert(cp.isDefined)
+    assert(BftFinality.requireExtendsCheckpoint(b.chainDigests, cp).isLeft)
+    assert(!HttpGossip.shouldAdopt(a.chainDigests, b.chainDigests, cp))
+    assert(Sync.pull(b, a, ledgerAuth, cp).isLeft)
+    // Same-prefix extension still allowed.
+    Sync.pull(a, b, ledgerAuth, None).fold(e => fail(e), identity)
+    assertEquals(b.chainDigests, a.chainDigests)
+    b.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    assert(HttpGossip.shouldAdopt(a.chainDigests, b.chainDigests, cp))
+    Sync.pull(b, a, ledgerAuth, cp).fold(e => fail(e), identity)
+    assertEquals(a.chainDigests, b.chainDigests)
 
   test("forged replica-set history without predecessor quorum is rejected"):
     val home = java.nio.file.Files.createTempDirectory("cairn-bft-forged-hist")

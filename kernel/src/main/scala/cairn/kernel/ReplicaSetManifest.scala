@@ -113,6 +113,10 @@ object ReplicaSetManifest:
   def wellFormed(m: ReplicaSetManifest): Either[String, Unit] =
     val ids = m.ids
     if ids.isEmpty then Left("replica-set: empty")
+    else if ids.exists(id => !validReplicaId(id)) then
+      Left(
+        s"replica-set: invalid replica id(s): " +
+          ids.filterNot(validReplicaId).mkString(","))
     else if ids.length != ids.distinct.length then
       Left(s"replica-set: duplicate ids: ${ids.mkString(",")}")
     else if !BftQuorum.validReplicaCount(ids.length) then
@@ -126,6 +130,12 @@ object ReplicaSetManifest:
     else if m.activationHeight < 0 then
       Left("replica-set: activationHeight must be >= 0")
     else Right(())
+
+  /** Safe path component: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`. */
+  def validReplicaId(id: String): Boolean =
+    id.nonEmpty && id.length <= 64 &&
+      id.charAt(0).isLetterOrDigit &&
+      id.forall(c => c.isLetterOrDigit || c == '.' || c == '_' || c == '-')
 
   def of(
       replicas: List[(String, Vector[Byte])],

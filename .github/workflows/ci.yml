@@ -33,6 +33,40 @@ jobs:
           ./bin/cairn peer list | grep -q a
           ./bin/cairn smoke distribution | tee /tmp/cairn-smoke-dist.txt
           grep -q 'smoke distribution ok' /tmp/cairn-smoke-dist.txt
+      - name: Multi-home ceremony via bin/cairn
+        run: |
+          export CAIRN_KEYSTORE_SECRET='ci-ceremony-secret'
+          XCHG=$(mktemp -d)
+          declare -A HOMES
+          for id in r0 r1 r2 r3; do
+            HOMES[$id]=$(mktemp -d)
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set keygen "$id"
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set export-pubkey "$id" "$XCHG/$id.pubkey.canon"
+          done
+          COORD="${HOMES[r0]}"
+          for id in r0 r1 r2 r3; do
+            CAIRN_HOME="$COORD" ./bin/cairn bft replica-set import-pubkey "$XCHG/$id.pubkey.canon"
+          done
+          CAIRN_HOME="$COORD" ./bin/cairn bft replica-set assemble r0 r1 r2 r3
+          CAIRN_HOME="$COORD" ./bin/cairn bft replica-set export-draft "$XCHG/draft.canon"
+          for id in r0 r1 r2 r3; do
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set import-draft "$XCHG/draft.canon"
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set seal "$id"
+            cp "${HOMES[$id]}/ceremony/seals/$id.canon" "$XCHG/$id.seal.canon"
+          done
+          for id in r0 r1 r2 r3; do
+            CAIRN_HOME="$COORD" ./bin/cairn bft replica-set import-seal "$XCHG/$id.seal.canon"
+          done
+          CAIRN_HOME="$COORD" ./bin/cairn bft replica-set finalize
+          CAIRN_HOME="$COORD" ./bin/cairn bft replica-set export "$XCHG/replica-set.bundle.canon"
+          for id in r1 r2 r3; do
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set install "$XCHG/replica-set.bundle.canon"
+            CAIRN_HOME="${HOMES[$id]}" ./bin/cairn bft replica-set status | tee "/tmp/cairn-cer-$id.txt"
+            grep -q 'n=4' "/tmp/cairn-cer-$id.txt"
+          done
+          CAIRN_HOME="$COORD" ./bin/cairn bft replica-set status | tee /tmp/cairn-cer-coord.txt
+          grep -q 'n=4' /tmp/cairn-cer-coord.txt
+          echo 'ceremony via bin/cairn ok'
       - name: Golden digests (languages + Rosetta)
         run: |
           sbt -batch "examples/runMain cairn.examples.Main digests" | tee /tmp/cairn-digests-raw.txt

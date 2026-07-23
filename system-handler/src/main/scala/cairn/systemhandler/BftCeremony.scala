@@ -30,11 +30,20 @@ object BftCeremony:
   def draftPath(home: Path): Path = ceremonyRoot(home).resolve("draft.canon")
 
   def pubkeyPath(home: Path, id: String): Path =
-    pubkeysDir(home).resolve(s"$id.canon")
+    safeUnder(pubkeysDir(home), id)
   def sealPath(home: Path, id: String): Path =
-    sealsDir(home).resolve(s"$id.canon")
+    safeUnder(sealsDir(home), id)
   def approvalPath(home: Path, id: String): Path =
-    approvalsDir(home).resolve(s"$id.canon")
+    safeUnder(approvalsDir(home), id)
+
+  private def safeUnder(dir: Path, id: String): Path =
+    if !ReplicaSetManifest.validReplicaId(id) then
+      throw IllegalArgumentException(s"ceremony: invalid replica id '$id'")
+    val dest = dir.resolve(s"$id.canon").toAbsolutePath.normalize
+    val root = dir.toAbsolutePath.normalize
+    if !dest.startsWith(root) then
+      throw IllegalArgumentException(s"ceremony: path escapes root for id '$id'")
+    dest
 
   def pubkeyCanon(id: String, publicKey: Vector[Byte]): Canon =
     Canon.CTag(PubkeyTag, Canon.cmap(
@@ -91,16 +100,19 @@ object BftCeremony:
                 acc.flatMap(hs => ReplicaSetManifest.fromCanon(row).map(hs :+ _))
               }
             case other => Left(s"replica-set-bundle: bad history $other")
-          _ <- ValidatedReplicaSetHistory.verify(hist, Ed25519.verify)
+          vh <- ValidatedReplicaSetHistory.verify(hist, Ed25519.verify)
           _ <- Either.cond(
-            hist.exists(_.digest == tip.digest), (),
-            "replica-set-bundle: tip not present in history")
-        yield (tip, hist)
+            vh.manifests.nonEmpty && vh.manifests.last.digest == tip.digest, (),
+            s"replica-set-bundle: tip ${tip.digest.short} must be history tip " +
+              s"(last=${vh.manifests.lastOption.map(_.digest.short).getOrElse("none")})")
+        yield (tip, vh.manifests)
       case other => Left(s"not a replica-set-bundle: $other")
 
   /** Create exactly one local replica identity (create-only keystore). */
   def keygen(home: Path, name: String, secret: Option[Array[Byte]]): Either[String, Keypair] =
-    Keystore.loadOrCreate(home, name, secret)
+    if !ReplicaSetManifest.validReplicaId(name) then
+      Left(s"ceremony: invalid replica id '$name'")
+    else Keystore.loadOrCreate(home, name, secret)
 
   /** Write this host's public key for out-of-band exchange. */
   def exportPubkey(
@@ -260,7 +272,11 @@ object BftCeremony:
         (id, seal, dig) = parsed
         _ <- Either.cond(dig == expected, (),
           s"ceremony: contribution body ${dig.short} != draft ${expected.short}")
-        dest = destDir.resolve(s"$id.canon")
+        dest = destDir.resolve(s"$id.canon").toAbsolutePath.normalize
+        _ <- Either.cond(
+          ReplicaSetManifest.validReplicaId(id) &&
+            dest.startsWith(destDir.toAbsolutePath.normalize), (),
+          s"ceremony: invalid contribution id '$id'")
         _ <- DurableIo.writeAtomic(dest, Canon.encode(contributionCanon(tag, id, seal, dig)))
       yield (id, dest)
 
@@ -326,7 +342,12 @@ object BftCeremony:
       _ <- DurableIo.writeAtomic(out, Canon.encode(bundleCanon(tip, hist.manifests)))
     yield out
 
-  /** Install a bundle (or a bare sealed manifest) into this home. */
+  /** Install a bundle (or a bare sealed manifest) into this home.
+    *
+    * Writes a single canonical `replica-set-bundle.canon` first (atomic), then
+    * materializes history + tip caches from it so a crash cannot leave tip/history
+    * pointing at different generations without a recoverable bundle.
+    */
   def installBundle(home: Path, from: Path): Either[String, ReplicaSetManifest] =
     if !Files.exists(from) then Left(s"ceremony: missing install source $from")
     else
@@ -334,18 +355,19 @@ object BftCeremony:
         case c @ Canon.CTag(BundleTag, _) =>
           parseBundle(c).flatMap { parsed =>
             val (tip, hist) = parsed
+            val bundlePath = home.resolve("replica-set-bundle.canon")
             for
+              _ <- DurableIo.writeConsensus(bundlePath, Canon.encode(bundleCanon(tip, hist)))
               _ <- DurableIo.writeConsensus(
                 BftFinality.defaultReplicaSetHistoryPath(home),
                 Canon.encode(Canon.CList(hist.map(_.canon))))
               _ <- DurableIo.writeConsensus(
                 BftFinality.defaultReplicaSetPath(home),
                 Canon.encode(tip.canon))
-              _ <- BftFinality.loadReplicaSetHistory(home) // re-verify on disk
+              _ <- BftFinality.loadReplicaSetHistory(home)
             yield tip
           }
         case c =>
-          // Bare sealed manifest — saveReplicaSet enforces transition rules.
           ReplicaSetManifest.fromCanon(c).flatMap { m =>
             BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), m).map(_ => m)
           }

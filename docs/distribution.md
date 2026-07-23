@@ -19,7 +19,10 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 - **Peer discovery** (`PeerRegistry` + `GET/POST /peers`): directory-based
   (not DHT). Operators plant peers or nodes announce; `cairn peer discover
   <url>` merges a remote directory. Gossip peers vs BFT replicas are tagged
-  (`role=gossip|replica`). Persisted as `$CAIRN_HOME/peers.canon`.
+  (`role=gossip|replica`). Replica (and any keyed) entries carry an Ed25519
+  `urlSeal` over `(name, baseUrl, role)` so announced URLs cannot be silently
+  redirected. Unsigned gossip plants remain for operator-local directories.
+  Persisted as `$CAIRN_HOME/peers.canon`.
 - **HTTP gossip daemon** (`HttpGossip` / `GossipDaemon`): the M39 fork-choice
   rule (longer chain; tip-digest tie-break) over `HttpSync` on a timer.
   CLI: `cairn gossip once`, `cairn gossip run N`. In-process `Gossip.converge`
@@ -32,9 +35,11 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   **replay-valid sealed PoA block** on the local chain. Height/parent are
   re-checked via `FinalityCertificate.verifyAgainstChain`.
   Seal collection is keyed by `(view, seq, digest, replicaId)` so peer commits
-  do not overwrite each other. HTTP: `POST /bft/msg` + `GET /bft/certs` on
-  `cairn serve replica <name> [port]`. Network CLI: `cairn bft agree <hex>`
-  against registered replicas; lab: `cairn bft agree local <hex>`.
+  do not overwrite each other. HTTP: `POST /bft/msg`, authenticated
+  `POST /bft/propose` / `POST /bft/view-change` (replica-signed requests), and
+  `GET /bft/certs` on `cairn serve replica <name> [port]`. Network CLI:
+  `cairn bft agree <hex>` signs with a local replica keystore key; lab:
+  `cairn bft agree local <hex>`.
 - **Replica-set governance**: sealed `replica-set.canon` plus durable history in
   `replica-set-history.canon`. Load paths replay-verify genesis + adjacent
   transitions (`ValidatedReplicaSetHistory`). Amendments require `replaces`, a
@@ -42,24 +47,31 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   from the old set. `activeAt(height)` resolves the live set; predecessors
   deactivate when a successor activates. Every propose/receive/sign and
   certificate verify checks membership at the block height. Packaged
-  `serve replica` loads history from `$CAIRN_HOME`.
+  `serve replica` resolves `history.activeAt(chainTipHeight)` (not merely the
+  latest configured tip). Running replicas hot-reload history when the on-disk
+  file changes.
 - **Membership ceremony** (`BftCeremony` / `cairn bft replica-set …`): per-machine
   `keygen`, pubkey export/import, draft assemble, member `seal`, predecessor
   `approve`, `finalize`, and bundle `export`/`install` — private keys never leave
-  their home. `init` remains a single-home lab shortcut.
-- **Continuous finality**: BFT `seq` is the sealed block height (not a fixed
-  `0`). Replicas persist a finalized high-water mark so consecutive blocks
-  advance through distinct slots on durable processes.
+  their home. Bundle tip must equal history tip; install writes
+  `replica-set-bundle.canon` first. Replica ids are path-safe. `init` remains a
+  single-home lab shortcut.
+- **Continuous finality**: BFT `seq` is the sealed block height (enforced in
+  certificate verify). Replicas persist a finalized high-water mark and a durable
+  `finalized-checkpoint.canon`; gossip and pull refuse chains that exclude it.
+  After minting, durable `bft-state.canon` **compacts** slots and commit seals
+  with `seq ≤ high-water`.
 - **Durable vote persistence**: `bft-state.canon` / certs use
   `DurableIo.writeConsensus` (temp + fsync + atomic rename; no non-atomic
   fallback). Parent-directory fsync is best-effort on filesystems that refuse
   directory opens. State is persisted **before** outbound signatures are
   exposed; any write failure enters a permanent fail-closed state.
 - **Keystore** (`Keystore` / `Signer`): private keys under
-  `$CAIRN_HOME/replicas/<name>.canon` as `keypair-sealed` (AES-GCM; key =
-  SHA-256 of `CAIRN_KEYSTORE_SECRET` — suitable for machine secrets, not a
-  salted password KDF). Create-only (never overwrite on decrypt/decode
-  failure). Plaintext refused unless `CAIRN_KEYSTORE_PLAINTEXT=1` (lab only).
+  `$CAIRN_HOME/replicas/<name>.canon` as `keypair-sealed` (AES-GCM; key from
+  PBKDF2-HMAC-SHA256 of `CAIRN_KEYSTORE_SECRET` with per-file salt + iterations).
+  Legacy unsalted SHA-256 seals still decrypt when `kdf` is absent. Create-only
+  (never overwrite on decrypt/decode failure). Plaintext refused unless
+  `CAIRN_KEYSTORE_PLAINTEXT=1` (lab only).
 - **Divergence surfacing** (`Sync.compare`): `Same / Ahead / Behind /
   Diverged(atHeight, headA, headB)`.
 - **Light clients** (M35): Merkle inclusion proofs verify "published" and
@@ -69,11 +81,11 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 | Capability | Bound |
 | --- | --- |
-| Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership |
-| Gossip daemon | Pull-based fork choice; no push epidemic or anti-entropy beyond want/have |
-| BFT finality | Classic `n=3f+1` only; certifies replay-valid sealed PoA blocks. Authority is a sealed `replica-set.canon` (+ replay-verified history) of public keys — not unsigned peer gossip. Amendments need predecessor quorum + activation height. Active-set checked on propose/receive/sign, mint, and independent verify. `seq` = block height for continuous finality. Each process holds only its own private key behind `Keystore`; proposers use `POST /bft/propose`. Durable slot/view state in `bft-state.canon` (fail-closed on I/O errors). |
+| Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership. Replica URLs are Ed25519-bound; unsigned gossip plants remain operator-trust. |
+| Gossip daemon | Pull-based fork choice (length, tip-hex) **constrained by finalized checkpoint**; no push epidemic |
+| BFT finality | Classic `n=3f+1`; certifies replay-valid sealed PoA blocks. `seq` must equal block height. Active set is `history.activeAt(height)`. Durable checkpoint constrains gossip/pull. **View-change**: timeout → ViewChange(+prepared proofs) → NewView → new primary re-proposes; current view is durable. Propose/view-change HTTP requires a replica seal. Each process holds only its own private key behind `Keystore`. Slot state is compacted past the finalized high-water. |
 | Domain governance | Owner + grantor seals resolved via `IdentityResolver`. Language digests are mandatory (`PackAccess.loadClosed` or explicit index); `Branches.auditGoverned` walks the sealed agreement/delegation graph and asserts manifest≡agreement ancestry/refs. Governed `referTo` is rejected — amend via `plantGoverned`. |
-| Keystore | Encrypted at rest by default (`CAIRN_KEYSTORE_SECRET` → SHA-256 → AES). Create-only paths; wrong secret never replaces identity files. Not a password-stretching KDF. |
+| Keystore | Encrypted at rest by default (`CAIRN_KEYSTORE_SECRET` → PBKDF2-HMAC-SHA256 → AES-GCM). Legacy SHA-256 seals still load. Create-only paths; wrong secret never replaces identity files. |
 | Useful-work market | Still deferred; `RecordCertificate` remains the natural anchor |
 
 ## Operational layers
@@ -81,8 +93,8 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 1. **Content distribution** — HTTP blobs + replay-checked chain pull (real)
 2. **Convergence** — peer directory + HTTP gossip + deterministic fork choice (functional alpha)
 3. **Finality** — quorum certificates over sealed blocks; height-bound seq;
-   membership history on the packaged serve path; multi-home CLI ceremony
-   (`bft replica-set keygen|…|finalize|install`)
+   checkpoint-constrained fork choice; membership history + ceremony;
+   view-change / primary failover on propose timeout.
 
 ## CLI cheat sheet
 
@@ -120,7 +132,7 @@ export CAIRN_KEYSTORE_SECRET='…'          # required for durable replica keys
 ./bin/cairn peer discover http://127.0.0.1:8743
 ./bin/cairn gossip once
 ./bin/cairn gossip run 5
-./bin/cairn bft agree <64-hex-block-digest>        # asks primary /bft/propose (no remote sk)
+./bin/cairn bft agree <64-hex-block-digest>        # signed /bft/propose via local replica key
 ./bin/cairn bft agree local <64-hex-block-digest>  # in-process lab
 ./bin/cairn smoke distribution                     # packaged two-node gossip + four-node BFT
 ./bin/cairn pull http://127.0.0.1:8743

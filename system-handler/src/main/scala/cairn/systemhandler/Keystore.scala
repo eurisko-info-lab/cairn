@@ -1,10 +1,12 @@
 package cairn.systemhandler
 
 import cairn.kernel.*
+import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.security.{MessageDigest, SecureRandom}
 import javax.crypto.Cipher
-import javax.crypto.spec.{GCMParameterSpec, SecretKeySpec}
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.{GCMParameterSpec, PBEKeySpec, SecretKeySpec}
 
 /** Signing capability without exposing raw private-key material at call sites. */
 trait Signer:
@@ -19,10 +21,16 @@ trait Signer:
   * - Never overwrite on decrypt, decode, or permission failure.
   * - Refuse plaintext by default (`CAIRN_KEYSTORE_PLAINTEXT=1` for lab only).
   * - Encrypted form (`keypair-sealed`) requires `CAIRN_KEYSTORE_SECRET`.
+  * - New seals use PBKDF2-HMAC-SHA256 (salt + iterations); legacy
+    *   SHA-256(secret) files still decrypt when `kdf` is absent.
   */
 object Keystore:
   private val GcmNonceBytes = 12
   private val GcmTagBits = 128
+  private val SaltBytes = 16
+  private val DefaultKdf = "pbkdf2-hmac-sha256"
+  private val DefaultIterations = 210_000
+  private val LegacyKdf = "sha256"
   private val random = new SecureRandom()
 
   def envSecret: Option[Array[Byte]] =
@@ -32,22 +40,62 @@ object Keystore:
     Option(System.getenv("CAIRN_KEYSTORE_PLAINTEXT")).exists(v =>
       v == "1" || v.equalsIgnoreCase("true"))
 
-  private def aesKey(secret: Array[Byte]): Array[Byte] =
-    MessageDigest.getInstance("SHA-256").digest(secret)
+  /** Derive a 256-bit AES key. Legacy path is unsalted SHA-256(secret). */
+  private def deriveKey(
+      secret: Array[Byte],
+      kdf: String,
+      salt: Array[Byte],
+      iterations: Int,
+  ): Either[String, Array[Byte]] =
+    kdf match
+      case `LegacyKdf` | "sha-256" =>
+        Right(MessageDigest.getInstance("SHA-256").digest(secret))
+      case `DefaultKdf` =>
+        if salt.isEmpty then Left("keystore: pbkdf2 requires salt")
+        else if iterations < 10_000 then Left(s"keystore: iterations $iterations too low")
+        else
+          try
+            val chars = new String(secret, StandardCharsets.UTF_8).toCharArray
+            val spec = new PBEKeySpec(chars, salt, iterations, 256)
+            val skf = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            Right(skf.generateSecret(spec).getEncoded)
+          catch case e: Exception =>
+            Left(s"keystore: KDF failed: ${e.getMessage}")
+      case other => Left(s"keystore: unknown kdf '$other'")
 
-  private def encryptPrivate(secret: Array[Byte], priv: Array[Byte]): (Array[Byte], Array[Byte]) =
-    val nonce = new Array[Byte](GcmNonceBytes)
-    random.nextBytes(nonce)
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-    cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(aesKey(secret), "AES"),
-      new GCMParameterSpec(GcmTagBits, nonce))
-    (nonce, cipher.doFinal(priv))
+  private def encryptPrivate(
+      secret: Array[Byte],
+      priv: Array[Byte],
+  ): Either[String, (Array[Byte], Array[Byte], Array[Byte], Int)] =
+    val salt = new Array[Byte](SaltBytes)
+    random.nextBytes(salt)
+    val iterations = DefaultIterations
+    deriveKey(secret, DefaultKdf, salt, iterations).map { key =>
+      val nonce = new Array[Byte](GcmNonceBytes)
+      random.nextBytes(nonce)
+      val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+      cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"),
+        new GCMParameterSpec(GcmTagBits, nonce))
+      (salt, nonce, cipher.doFinal(priv), iterations)
+    }
 
-  private def decryptPrivate(secret: Array[Byte], nonce: Array[Byte], ct: Array[Byte]): Array[Byte] =
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-    cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKey(secret), "AES"),
-      new GCMParameterSpec(GcmTagBits, nonce))
-    cipher.doFinal(ct)
+  private def decryptPrivate(
+      secret: Array[Byte],
+      kdf: String,
+      salt: Array[Byte],
+      iterations: Int,
+      nonce: Array[Byte],
+      ct: Array[Byte],
+  ): Either[String, Array[Byte]] =
+    deriveKey(secret, kdf, salt, iterations).flatMap { key =>
+      try
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
+          new GCMParameterSpec(GcmTagBits, nonce))
+        Right(cipher.doFinal(ct))
+      catch case e: Exception =>
+        Left(s"keystore: decrypt failed (wrong secret?): ${e.getMessage}")
+    }
 
   def path(root: Path, name: String): Path =
     root.resolve("replicas").resolve(s"$name.canon")
@@ -111,12 +159,16 @@ object Keystore:
   def toCanonE(kp: Keypair, secret: Option[Array[Byte]]): Either[String, Canon] =
     secret match
       case Some(sec) =>
-        val (nonce, ct) = encryptPrivate(sec, kp.privateBytes.toArray)
-        Right(Canon.CTag("keypair-sealed", Canon.cmap(
-          "name" -> Canon.CStr(kp.name),
-          "public" -> Canon.CBytes(kp.publicBytes),
-          "privateNonce" -> Canon.CBytes(nonce.toVector),
-          "privateCiphertext" -> Canon.CBytes(ct.toVector))))
+        encryptPrivate(sec, kp.privateBytes.toArray).map { (salt, nonce, ct, iterations) =>
+          Canon.CTag("keypair-sealed", Canon.cmap(
+            "name" -> Canon.CStr(kp.name),
+            "public" -> Canon.CBytes(kp.publicBytes),
+            "kdf" -> Canon.CStr(DefaultKdf),
+            "salt" -> Canon.CBytes(salt.toVector),
+            "iterations" -> Canon.CInt(iterations),
+            "privateNonce" -> Canon.CBytes(nonce.toVector),
+            "privateCiphertext" -> Canon.CBytes(ct.toVector)))
+        }
       case None if allowPlaintext =>
         Right(Keypair.canon(kp))
       case None =>
@@ -146,11 +198,15 @@ object Keystore:
           case Some(sec) =>
             (m.field("public"), m.field("privateNonce"), m.field("privateCiphertext")) match
               case (CBytes(pub), CBytes(nonce), CBytes(ct)) =>
-                try
-                  val priv = decryptPrivate(sec, nonce.toArray, ct.toArray).toVector
-                  Right(Keypair.fromEncoded(m.field("name").asStr, pub, priv))
-                catch case e: Exception =>
-                  Left(s"keystore: decrypt failed (wrong secret?): ${e.getMessage}")
+                val fields = m.asMap
+                val kdf = fields.get("kdf").map(_.asStr).getOrElse(LegacyKdf)
+                val salt = fields.get("salt") match
+                  case Some(CBytes(bs)) => bs.toArray
+                  case _                => Array.emptyByteArray
+                val iterations = fields.get("iterations").map(_.asInt.toInt).getOrElse(0)
+                decryptPrivate(sec, kdf, salt, iterations, nonce.toArray, ct.toArray).map { priv =>
+                  Keypair.fromEncoded(m.field("name").asStr, pub, priv.toVector)
+                }
               case _ => Left("keypair-sealed: bad fields")
       case CTag("keypair", _) =>
         if allowPlaintext then Keypair.fromCanon(c)

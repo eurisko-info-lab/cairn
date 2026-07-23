@@ -45,6 +45,8 @@ object BftFinality:
     case Msg.PrePrepare(_, _, _, from) => from
     case Msg.Prepare(_, _, _, from)    => from
     case Msg.Commit(_, _, _, from)     => from
+    case Msg.ViewChange(_, _, from)    => from
+    case Msg.NewView(_, _, from)       => from
 
   final case class SignedMsg(msg: Msg, signer: ReplicaId, seal: Vector[Byte]):
     def payload: Array[Byte] = Canon.encode(msgCanon(msg))
@@ -66,6 +68,23 @@ object BftFinality:
           }
         case other => Left(s"not a bft-signed message: $other")
 
+  private def preparedCanon(ps: List[PreparedCert]): Canon =
+    Canon.CList(ps.map { p =>
+      Canon.cmap(
+        "seq" -> Canon.CInt(p.seq),
+        "digest" -> Canon.CStr(p.valueDigest.hex),
+        "preparedView" -> Canon.CInt(p.preparedView))
+    })
+
+  private def parsePrepared(c: Canon): List[PreparedCert] =
+    import Canon.*
+    c.asList.map { row =>
+      PreparedCert(
+        row.field("seq").asInt.toInt,
+        Digest(row.field("digest").asStr),
+        row.field("preparedView").asInt.toInt)
+    }
+
   def msgCanon(msg: Msg): Canon = msg match
     case Msg.PrePrepare(view, seq, value, from) =>
       Canon.CTag("pre-prepare", Canon.cmap(
@@ -84,6 +103,16 @@ object BftFinality:
         "view" -> Canon.CInt(view),
         "seq" -> Canon.CInt(seq),
         "digest" -> Canon.CStr(d.hex),
+        "from" -> Canon.CStr(from.id)))
+    case Msg.ViewChange(newView, prepared, from) =>
+      Canon.CTag("view-change", Canon.cmap(
+        "newView" -> Canon.CInt(newView),
+        "prepared" -> preparedCanon(prepared),
+        "from" -> Canon.CStr(from.id)))
+    case Msg.NewView(newView, prepared, from) =>
+      Canon.CTag("new-view", Canon.cmap(
+        "newView" -> Canon.CInt(newView),
+        "prepared" -> preparedCanon(prepared),
         "from" -> Canon.CStr(from.id)))
 
   def parseMsg(c: Canon): Either[String, Msg] =
@@ -110,6 +139,16 @@ object BftFinality:
           m.field("seq").asInt.toInt,
           Digest(m.field("digest").asStr),
           ReplicaId(m.field("from").asStr)))
+      case CTag("view-change", m) =>
+        Right(Msg.ViewChange(
+          m.field("newView").asInt.toInt,
+          parsePrepared(m.field("prepared")),
+          ReplicaId(m.field("from").asStr)))
+      case CTag("new-view", m) =>
+        Right(Msg.NewView(
+          m.field("newView").asInt.toInt,
+          parsePrepared(m.field("prepared")),
+          ReplicaId(m.field("from").asStr)))
       case other => Left(s"unknown bft msg: $other")
     catch case e: CodecError => Left(e.getMessage)
 
@@ -129,6 +168,101 @@ object BftFinality:
       case Some(pk) =>
         if Ed25519.verify(pk, sm.payload, sm.seal) then Right(())
         else Left(s"bad bft seal from ${sm.signer.id}")
+
+  /** Authenticated request to ask a primary to propose a sealed block. */
+  final case class ProposeRequest(view: Int, block: Digest, signer: ReplicaId, seal: Vector[Byte]):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap(
+      "view" -> Canon.CInt(view),
+      "block" -> Canon.CStr(block.hex)))
+    def canon: Canon = Canon.CTag("bft-propose-req", Canon.cmap(
+      "view" -> Canon.CInt(view),
+      "block" -> Canon.CStr(block.hex),
+      "signer" -> Canon.CStr(signer.id),
+      "seal" -> Canon.CBytes(seal)))
+
+  object ProposeRequest:
+    def sign(signer: Signer, block: Digest, view: Int = 0): ProposeRequest =
+      val payload = Canon.encode(Canon.cmap(
+        "view" -> Canon.CInt(view),
+        "block" -> Canon.CStr(block.hex)))
+      ProposeRequest(view, block, ReplicaId(signer.name), signer.sign(payload))
+
+    def fromCanon(c: Canon): Either[String, ProposeRequest] =
+      import Canon.*
+      c match
+        case CTag("bft-propose-req", m) =>
+          Digest.parse(m.field("block").asStr).flatMap { block =>
+            m.field("seal") match
+              case CBytes(bs) =>
+                Right(ProposeRequest(
+                  m.asMap.get("view").map(_.asInt.toInt).getOrElse(0),
+                  block,
+                  ReplicaId(m.field("signer").asStr),
+                  bs))
+              case other => Left(s"bad propose seal: $other")
+          }
+        case other => Left(s"not a bft-propose-req: $other")
+
+  def verifyProposeRequest(
+      authorities: Map[String, Vector[Byte]],
+      req: ProposeRequest,
+  ): Either[String, Unit] =
+    authorities.get(req.signer.id) match
+      case None => Left(s"unknown bft replica '${req.signer.id}'")
+      case Some(pk) =>
+        if Ed25519.verify(pk, req.payload, req.seal) then Right(())
+        else Left(s"bad propose seal from ${req.signer.id}")
+
+  /** Authenticated request to trigger a view-change on a replica. */
+  final case class ViewChangeRequest(newView: Int, signer: ReplicaId, seal: Vector[Byte]):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap("newView" -> Canon.CInt(newView)))
+    def canon: Canon = Canon.CTag("bft-view-change-req", Canon.cmap(
+      "newView" -> Canon.CInt(newView),
+      "signer" -> Canon.CStr(signer.id),
+      "seal" -> Canon.CBytes(seal)))
+
+  object ViewChangeRequest:
+    def sign(signer: Signer, newView: Int): ViewChangeRequest =
+      val payload = Canon.encode(Canon.cmap("newView" -> Canon.CInt(newView)))
+      ViewChangeRequest(newView, ReplicaId(signer.name), signer.sign(payload))
+
+    def fromCanon(c: Canon): Either[String, ViewChangeRequest] =
+      import Canon.*
+      c match
+        case CTag("bft-view-change-req", m) =>
+          m.field("seal") match
+            case CBytes(bs) =>
+              Right(ViewChangeRequest(
+                m.field("newView").asInt.toInt,
+                ReplicaId(m.field("signer").asStr),
+                bs))
+            case other => Left(s"bad view-change seal: $other")
+        case other => Left(s"not a bft-view-change-req: $other")
+
+  def verifyViewChangeRequest(
+      authorities: Map[String, Vector[Byte]],
+      req: ViewChangeRequest,
+  ): Either[String, Unit] =
+    authorities.get(req.signer.id) match
+      case None => Left(s"unknown bft replica '${req.signer.id}'")
+      case Some(pk) =>
+        if Ed25519.verify(pk, req.payload, req.seal) then Right(())
+        else Left(s"bad view-change seal from ${req.signer.id}")
+
+  /** Drop slots / seals at or below the finalized high-water; drop meta for certified blocks. */
+  def compactFinalized(
+      state: BftQuorum.ReplicaState,
+      commitSeals: Map[(Int, Int, String, String), Vector[Byte]],
+      blockMeta: Map[Digest, (Long, Digest)],
+      certificates: List[FinalityCertificate],
+      finalizedHighWater: Long,
+  ): (BftQuorum.ReplicaState, Map[(Int, Int, String, String), Vector[Byte]], Map[Digest, (Long, Digest)]) =
+    val hw = finalizedHighWater.toInt
+    val slots = state.slots.filter { case ((_, seq), _) => seq > hw }
+    val seals = commitSeals.filter { case ((_, seq, _, _), _) => seq > hw }
+    val certified = certificates.map(_.blockDigest).toSet
+    val meta = blockMeta.filterNot { case (d, _) => certified.contains(d) }
+    (state.copy(slots = slots), seals, meta)
 
   /** Seal a genesis replica-set from in-process keypairs (lab / tests). */
   def sealReplicaSet(
@@ -210,6 +344,9 @@ object BftFinality:
       val n = authorities.size
       if !BftQuorum.validReplicaCount(n) then
         Left(s"bft finality: n=$n is not a valid 3f+1 size")
+      else if cert.seq.toLong != cert.height then
+        Left(
+          s"bft finality: certificate sequence ${cert.seq} does not equal block height ${cert.height}")
       else
         val q = quorumSize(n)
         val ids = cert.commits.map(_._1.id)
@@ -291,7 +428,9 @@ object BftFinality:
           LedgerKernel.replay(authorities, bs.take(idx + 1), Ed25519.verify).map(_ => (block, idx.toLong))
     }
 
-  /** In-process agreement bound to a replay-valid sealed block on `node`. */
+  /** In-process agreement bound to a replay-valid sealed block on `node`.
+    * Sequence is always the sealed block height (caller `seq` is ignored).
+    */
   def agreeForSealedBlock(
       node: Node,
       ledgerAuth: Map[String, Vector[Byte]],
@@ -301,8 +440,20 @@ object BftFinality:
       blockDigest: Digest,
   ): Either[String, FinalityCertificate] =
     requireSealedBlock(node, ledgerAuth, blockDigest).flatMap { (block, height) =>
-      agreeLocalProven(replicas, view, seq, blockDigest, height, block.parent)
+      seqForHeight(height).flatMap { derived =>
+        agreeLocalProven(replicas, view, derived, blockDigest, height, block.parent)
+      }
     }
+
+  /** Prefer [[agreeForSealedBlock(Node, Map, List, Digest, Int)]] — seq is height-bound. */
+  def agreeForSealedBlock(
+      node: Node,
+      ledgerAuth: Map[String, Vector[Byte]],
+      replicas: List[Keypair],
+      blockDigest: Digest,
+      view: Int = 0,
+  ): Either[String, FinalityCertificate] =
+    agreeForSealedBlock(node, ledgerAuth, replicas, view, seq = 0, blockDigest)
 
   /** Agree when the caller already proved the block (height/parent known). */
   def agreeLocalProven(
@@ -400,6 +551,102 @@ object BftFinality:
   def saveCerts(path: java.nio.file.Path, certs: List[FinalityCertificate]): Either[String, Unit] =
     DurableIo.writeConsensus(path, Canon.encode(Canon.CList(certs.map(_.canon))))
 
+  /** Durable finalized ledger checkpoint — chain adoption must extend this block. */
+  final case class FinalizedCheckpoint(
+      block: Digest,
+      height: Long,
+      certificate: Digest,
+      replicaSet: Digest,
+  ):
+    def canon: Canon = Canon.CTag("bft-checkpoint", Canon.cmap(
+      "block" -> Canon.CStr(block.hex),
+      "height" -> Canon.CInt(height),
+      "certificate" -> Canon.CStr(certificate.hex),
+      "replicaSet" -> Canon.CStr(replicaSet.hex)))
+
+  object FinalizedCheckpoint:
+    def fromCanon(c: Canon): Either[String, FinalizedCheckpoint] =
+      c match
+        case Canon.CTag("bft-checkpoint", m) =>
+          try
+            Right(FinalizedCheckpoint(
+              Digest(m.field("block").asStr),
+              m.field("height").asInt,
+              Digest(m.field("certificate").asStr),
+              Digest(m.field("replicaSet").asStr)))
+          catch case e: CodecError => Left(e.getMessage)
+        case other => Left(s"not bft-checkpoint: $other")
+
+    def fromCertificate(cert: FinalityCertificate): FinalizedCheckpoint =
+      FinalizedCheckpoint(cert.blockDigest, cert.height, cert.digest, cert.replicaSet)
+
+    /** Highest-height certificate wins; ties prefer larger certificate digest hex. */
+    def bestOf(certs: List[FinalityCertificate]): Option[FinalizedCheckpoint] =
+      certs.sortBy(c => (c.height, c.digest.hex)).lastOption.map(fromCertificate)
+
+  def defaultCheckpointPath(home: java.nio.file.Path): java.nio.file.Path =
+    home.resolve("finalized-checkpoint.canon")
+
+  def loadCheckpoint(home: java.nio.file.Path): Either[String, Option[FinalizedCheckpoint]] =
+    val path = defaultCheckpointPath(home)
+    if !java.nio.file.Files.exists(path) then Right(None)
+    else
+      Canon.decode(java.nio.file.Files.readAllBytes(path))
+        .flatMap(FinalizedCheckpoint.fromCanon).map(Some(_))
+
+  def saveCheckpoint(home: java.nio.file.Path, cp: FinalizedCheckpoint): Either[String, Unit] =
+    DurableIo.writeConsensus(defaultCheckpointPath(home), Canon.encode(cp.canon))
+
+  /** Advance durable checkpoint when `cert` is strictly higher (or first). */
+  def advanceCheckpoint(
+      home: java.nio.file.Path,
+      cert: FinalityCertificate,
+  ): Either[String, FinalizedCheckpoint] =
+    val next = FinalizedCheckpoint.fromCertificate(cert)
+    loadCheckpoint(home).flatMap {
+      case None => saveCheckpoint(home, next).map(_ => next)
+      case Some(cur) if next.height > cur.height =>
+        saveCheckpoint(home, next).map(_ => next)
+      case Some(cur) if next.height == cur.height && next.block == cur.block =>
+        Right(cur)
+      case Some(cur) if next.height == cur.height && next.block != cur.block =>
+        Left(
+          s"bft checkpoint: conflicting finality at height ${cur.height} " +
+            s"(have ${cur.block.short}, got ${next.block.short})")
+      case Some(cur) => Right(cur)
+    }
+
+  /** Proposed chain must contain the finalized block at its certified height. */
+  def requireExtendsCheckpoint(
+      chain: List[Digest],
+      checkpoint: Option[FinalizedCheckpoint],
+  ): Either[String, Unit] =
+    checkpoint match
+      case None => Right(())
+      case Some(cp) =>
+        if cp.height < 0 then Left(s"bft checkpoint: negative height ${cp.height}")
+        else if chain.length <= cp.height then
+          Left(
+            s"bft checkpoint: chain length ${chain.length} does not reach " +
+              s"finalized height ${cp.height} (${cp.block.short})")
+        else if chain(cp.height.toInt) != cp.block then
+          Left(
+            s"bft checkpoint: chain[${cp.height}]=${chain(cp.height.toInt).short} " +
+              s"!= finalized ${cp.block.short}")
+        else Right(())
+
+  /** Gossip/pull ranking: longer wins, tip-hex tie-break — but never below checkpoint. */
+  def shouldAdoptChain(
+      mine: List[Digest],
+      theirs: List[Digest],
+      checkpoint: Option[FinalizedCheckpoint],
+  ): Boolean =
+    requireExtendsCheckpoint(theirs, checkpoint).isRight &&
+      (theirs.length > mine.length ||
+        (theirs.length == mine.length && theirs != mine &&
+          theirs.lastOption.map(_.hex).getOrElse("") <
+            mine.lastOption.map(_.hex).getOrElse("~")))
+
   def loadReplicaSet(path: java.nio.file.Path): Either[String, ReplicaSetManifest] =
     if !java.nio.file.Files.exists(path) then Left(s"missing replica-set manifest at $path")
     else
@@ -407,6 +654,19 @@ object BftFinality:
         .flatMap { m =>
           ReplicaSetManifest.verifySeals(m, Ed25519.verify).map(_ => m)
         }
+
+  /** Tip of validated history when present; otherwise `replica-set.canon`. */
+  def loadReplicaSetTip(home: java.nio.file.Path): Either[String, ReplicaSetManifest] =
+    if java.nio.file.Files.exists(defaultReplicaSetHistoryPath(home)) then
+      loadReplicaSetHistory(home).map(_.manifests.last)
+    else loadReplicaSet(defaultReplicaSetPath(home))
+
+  /** Membership that is live at `height` (not merely the latest configured tip). */
+  def loadActiveReplicaSet(
+      home: java.nio.file.Path,
+      height: Long,
+  ): Either[String, ReplicaSetManifest] =
+    loadReplicaSetHistory(home).flatMap(_.activeAt(height))
 
   def defaultReplicaSetPath(home: java.nio.file.Path): java.nio.file.Path =
     home.resolve("replica-set.canon")
@@ -452,6 +712,7 @@ object BftFinality:
       _ <- DurableIo.writeConsensus(
         defaultReplicaSetHistoryPath(home),
         Canon.encode(Canon.CList(newHistory.map(_.canon))))
+      // Derived cache of history tip (history file is authoritative).
       _ <- DurableIo.writeConsensus(path, Canon.encode(m.canon))
     yield ()
 
@@ -501,6 +762,7 @@ object BftFinality:
     Canon.CTag("bft-replica-state", Canon.cmap(
       "id" -> Canon.CStr(state.id.id),
       "n" -> Canon.CInt(state.n),
+      "view" -> Canon.CInt(state.view),
       "slots" -> Canon.CList(slots),
       "commitSeals" -> Canon.CList(seals),
       "blockMeta" -> Canon.CList(meta)))
@@ -512,6 +774,7 @@ object BftFinality:
         try
           val id = ReplicaId(m.field("id").asStr)
           val n = m.field("n").asInt.toInt
+          val view = m.asMap.get("view").map(_.asInt.toInt).getOrElse(0)
           val slots = m.field("slots").asList.map { row =>
             val view = row.field("view").asInt.toInt
             val seq = row.field("seq").asInt.toInt
@@ -540,7 +803,7 @@ object BftFinality:
             Digest(row.field("block").asStr) ->
               (row.field("height").asInt, Digest(row.field("parent").asStr))
           }.toMap
-          Right((ReplicaState(id, n, faulty = false, slots), seals, meta))
+          Right((ReplicaState(id, n, faulty = false, view = view, slots = slots), seals, meta))
         catch case e: CodecError => Left(e.getMessage)
       case other => Left(s"not bft-replica-state: $other")
 
@@ -572,18 +835,18 @@ object BftFinality:
         }
     catch case e: Exception => Left(e.getMessage)
 
-  /** Ask the designated primary to propose (initiator needs no primary private key).
+  /** Ask the designated primary to propose (initiator needs a replica key, not the primary's).
     * Sequence is derived from block height on the primary — callers do not pick slots.
     */
   def propose(
       primaryUrl: String,
       blockDigest: Digest,
+      initiator: Signer,
       view: Int = 0,
   ): Either[String, Unit] =
     try
-      val body = Canon.encode(Canon.cmap(
-        "view" -> Canon.CInt(view),
-        "block" -> Canon.CStr(blockDigest.hex)))
+      val req = ProposeRequest.sign(initiator, blockDigest, view)
+      val body = Canon.encode(req.canon)
       val resp = client.send(
         HttpRequest.newBuilder(URI.create(s"$primaryUrl/bft/propose"))
           .header("Content-Type", "application/octet-stream")
@@ -594,15 +857,16 @@ object BftFinality:
       else Left(s"POST $primaryUrl/bft/propose -> ${resp.statusCode()}: ${new String(resp.body())}")
     catch case e: Exception => Left(e.getMessage)
 
-  /** @deprecated Prefer [[propose(String, Digest, Int)]] — seq is height-bound. */
+  /** @deprecated Prefer [[propose(String, Digest, Signer, Int)]] — seq is height-bound. */
   def propose(
       primaryUrl: String,
       view: Int,
       seq: Int,
       blockDigest: Digest,
+      initiator: Signer,
   ): Either[String, Unit] =
     // Still accepted for labs; primary ignores seq and re-derives from height.
-    propose(primaryUrl, blockDigest, view)
+    propose(primaryUrl, blockDigest, initiator, view)
 
   /** Broadcast PrePrepare from a local primary keypair, then poll for a cert.
     * `seq` must equal the sealed block's ledger height.
@@ -629,32 +893,78 @@ object BftFinality:
       cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
     yield cert
 
-  /** Deployable path: ask the primary to propose (seq = height); poll for the cert. */
+  /** Deployable path: ask the primary to propose; on timeout, run view-change and retry. */
   def agreeNetworkRemote(
       replicaUrls: Map[String, String],
       blockDigest: Digest,
+      initiator: Signer,
       view: Int = 0,
       polls: Int = 64,
       pollSleepMs: Long = 30,
+      maxViews: Int = 4,
   ): Either[String, FinalityCertificate] =
     val ids = replicaUrls.keys.toList
-    for
-      primaryId <- designatedPrimary(ids, view)
-      primaryUrl <- replicaUrls.get(primaryId.id).toRight(s"bft: no URL for primary ${primaryId.id}")
-      _ <- propose(primaryUrl, blockDigest, view)
-      cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
-    yield cert
+    def attempt(v: Int, remaining: Int): Either[String, FinalityCertificate] =
+      if remaining <= 0 then Left(s"bft network: no certificate after $maxViews views")
+      else
+        designatedPrimary(ids, v).flatMap { primaryId =>
+          replicaUrls.get(primaryId.id).toRight(s"bft: no URL for primary ${primaryId.id}").flatMap {
+            primaryUrl =>
+              propose(primaryUrl, blockDigest, initiator, v) match
+                case Left(_) =>
+                  // Primary unreachable — request view-change then retry.
+                  requestNetworkViewChange(replicaUrls, v + 1, initiator).flatMap { _ =>
+                    Thread.sleep(pollSleepMs * 2)
+                    attempt(v + 1, remaining - 1)
+                  }
+                case Right(()) =>
+                  pollCert(replicaUrls, blockDigest, polls, pollSleepMs) match
+                    case Right(c) => Right(c)
+                    case Left(_) =>
+                      requestNetworkViewChange(replicaUrls, v + 1, initiator).flatMap { _ =>
+                        Thread.sleep(pollSleepMs * 2)
+                        attempt(v + 1, remaining - 1)
+                      }
+          }
+        }
+    attempt(view, maxViews)
 
-  /** @deprecated Prefer [[agreeNetworkRemote(Map, Digest, Int, Int, Long)]]. */
+  /** Broadcast a view-change request to every replica (each builds its own prepared proof). */
+  def requestNetworkViewChange(
+      replicaUrls: Map[String, String],
+      newView: Int,
+      initiator: Signer,
+  ): Either[String, Unit] =
+    try
+      val req = ViewChangeRequest.sign(initiator, newView)
+      val body = Canon.encode(req.canon)
+      replicaUrls.toList.foldLeft[Either[String, Unit]](Right(())) { case (acc, (name, url)) =>
+        acc.flatMap { _ =>
+          try
+            val resp = client.send(
+              HttpRequest.newBuilder(URI.create(s"$url/bft/view-change"))
+                .header("Content-Type", "application/octet-stream")
+                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                .build(),
+              HttpResponse.BodyHandlers.ofByteArray())
+            if resp.statusCode() == 200 then Right(())
+            else Left(s"$name: POST $url/bft/view-change -> ${resp.statusCode()}: ${new String(resp.body())}")
+          catch case e: Exception => Left(s"$name: ${e.getMessage}")
+        }
+      }
+    catch case e: Exception => Left(e.getMessage)
+
+  /** @deprecated Prefer [[agreeNetworkRemote(Map, Digest, Signer, Int, Int, Long)]]. */
   def agreeNetworkRemote(
       replicaUrls: Map[String, String],
       view: Int,
       seq: Int,
       blockDigest: Digest,
+      initiator: Signer,
       polls: Int,
       pollSleepMs: Long,
   ): Either[String, FinalityCertificate] =
-    agreeNetworkRemote(replicaUrls, blockDigest, view, polls, pollSleepMs)
+    agreeNetworkRemote(replicaUrls, blockDigest, initiator, view, polls, pollSleepMs)
 
   private def pollCert(
       replicaUrls: Map[String, String],
@@ -686,19 +996,20 @@ object BftFinality:
   */
 final class BftReplica private (
     val keypair: Keypair,
-    val manifest: ReplicaSetManifest,
-    val history: ValidatedReplicaSetHistory,
+    private var manifest: ReplicaSetManifest,
+    private var history: ValidatedReplicaSetHistory,
     val node: Option[Node],
     val ledgerAuth: Map[String, Vector[Byte]],
     certStore: Option[java.nio.file.Path],
     stateStore: Option[java.nio.file.Path],
+    home: Option[java.nio.file.Path],
 ):
   import BftQuorum.*
   import BftFinality.*
 
-  val authorities: Map[String, Vector[Byte]] = manifest.authorities
-  val replicaIds: List[String] = manifest.ids
-  private val n = replicaIds.length
+  def authorities: Map[String, Vector[Byte]] = manifest.authorities
+  def replicaIds: List[String] = manifest.ids
+  private def n: Int = replicaIds.length
   private var state: ReplicaState = ReplicaState(ReplicaId(keypair.name), n, faulty = false)
   private val outbound = scala.collection.mutable.ListBuffer.empty[SignedMsg]
   /** Keyed by (view, seq, valueDigestHex, replicaId) — never overwrite peers. */
@@ -710,6 +1021,7 @@ final class BftReplica private (
   private var finalizedHighWater: Long = -1L
   /** Non-empty when restore failed or a later durable write failed. */
   private var ioError: Option[String] = None
+  private var historyMtime: Long = home.map(BftReplica.historyFileMtime).getOrElse(0L)
 
   certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
@@ -717,6 +1029,13 @@ final class BftReplica private (
         case Right(cs) =>
           certificates = cs
           finalizedHighWater = cs.map(_.height).foldLeft(-1L)(_ max _)
+          home.foreach { h =>
+            cs.sortBy(_.height).foreach { cert =>
+              advanceCheckpoint(h, cert) match
+                case Left(e) => ioError = Some(s"bft-checkpoint restore failed: $e")
+                case Right(_) => ()
+            }
+          }
         case Left(e) => ioError = Some(s"bft-certs restore failed: $e")
   }
 
@@ -752,26 +1071,41 @@ final class BftReplica private (
   private def failClosed(err: String): Unit =
     ioError = Some(err)
 
+  /** Atomically refresh membership history when the on-disk file changes. */
+  def refreshHistory(): Either[String, Unit] =
+    home match
+      case None => Right(())
+      case Some(h) =>
+        val mt = BftReplica.historyFileMtime(h)
+        if mt == historyMtime then Right(())
+        else
+          BftFinality.loadReplicaSetHistory(h).map { vh =>
+            history = vh
+            historyMtime = mt
+          }
+
   /** Local set must be the active membership at `height` (checked every transition). */
   private def requireLocalActiveAt(height: Long): Either[String, ReplicaSetManifest] =
-    if manifest.activationHeight > height then
-      Left(
-        s"bft: replica-set not yet active at height $height " +
-          s"(activates at ${manifest.activationHeight})")
-    else
-      history.deactivationHeight(manifest) match
-        case Some(d) if height >= d =>
-          Left(
-            s"bft: local set ${manifest.replicaSetDigest.short} deactivated at height $d " +
-              s"(refusing operate at height $height)")
-        case _ =>
-          history.activeAt(height).flatMap { active =>
-            if active.replicaSetDigest != manifest.replicaSetDigest then
-              Left(
-                s"bft: local set ${manifest.replicaSetDigest.short} is not active at height $height " +
-                  s"(active=${active.replicaSetDigest.short})")
-            else Right(active)
-          }
+    refreshHistory().flatMap { _ =>
+      if manifest.activationHeight > height then
+        Left(
+          s"bft: replica-set not yet active at height $height " +
+            s"(activates at ${manifest.activationHeight})")
+      else
+        history.deactivationHeight(manifest) match
+          case Some(d) if height >= d =>
+            Left(
+              s"bft: local set ${manifest.replicaSetDigest.short} deactivated at height $d " +
+                s"(refusing operate at height $height)")
+          case _ =>
+            history.activeAt(height).flatMap { active =>
+              if active.replicaSetDigest != manifest.replicaSetDigest then
+                Left(
+                  s"bft: local set ${manifest.replicaSetDigest.short} is not active at height $height " +
+                    s"(active=${active.replicaSetDigest.short})")
+              else Right(active)
+            }
+    }
 
   private def heightForValueDigest(d: Digest): Option[Long] =
     blockMeta.collectFirst {
@@ -789,7 +1123,9 @@ final class BftReplica private (
   def proposeBlock(view: Int, blockDigest: Digest): Either[String, List[SignedMsg]] =
     refuseIfCorrupt {
       for
-        primary <- designatedPrimary(replicaIds, view)
+        _ <- Either.cond(view == state.view, (),
+          s"bft: propose view $view != current view ${state.view}")
+        primary <- BftFinality.designatedPrimary(replicaIds, view)
         _ <- Either.cond(primary.id == keypair.name, (),
           s"bft: this replica ${keypair.name} is not primary for view $view (${primary.id})")
         heightParent <- (node, ledgerAuth.nonEmpty) match
@@ -826,15 +1162,30 @@ final class BftReplica private (
       yield out
     }
 
+  def currentView: Int = state.view
+
+  /** Start a view-change toward `newView` (must be strictly greater than current). */
+  def requestViewChange(newView: Int): Either[String, List[SignedMsg]] =
+    refuseIfCorrupt {
+      if newView <= state.view then
+        Left(s"bft: newView $newView must exceed current view ${state.view}")
+      else
+        val prepared = preparedFromSlots(state, minSeqExclusive = finalizedHighWater.toInt)
+        sign(keypair, Msg.ViewChange(newView, prepared, id)).flatMap(receive)
+    }
+
   def receive(sm: SignedMsg): Either[String, List[SignedMsg]] =
     refuseIfCorrupt {
+      val ids = replicaIds.map(ReplicaId(_))
       val primaryOk = sm.msg match
         case Msg.PrePrepare(view, _, _, from) =>
-          designatedPrimary(replicaIds, view).exists(_ == from)
+          BftFinality.designatedPrimary(replicaIds, view).exists(_ == from)
+        case Msg.NewView(newView, _, from) =>
+          BftFinality.designatedPrimary(replicaIds, newView).exists(_ == from)
         case _ => true
-      if !primaryOk then Left(s"bft: PrePrepare from non-primary ${msgFrom(sm.msg).id}")
+      if !primaryOk then Left(s"bft: message from non-primary ${msgFrom(sm.msg).id}")
       else BftFinality.verify(authorities, sm).flatMap { _ =>
-        val bind: Either[String, Long] = sm.msg match
+        val bind: Either[String, Unit] = sm.msg match
           case Msg.PrePrepare(_, seq, value, _) =>
             Digest.parse(new String(value.bytes.toArray, StandardCharsets.US_ASCII)) match
               case Left(e) => Left(e)
@@ -847,7 +1198,7 @@ final class BftReplica private (
                           Left(s"bft: PrePrepare seq $seq != block height $h")
                         else
                           requireLocalActiveAt(h).flatMap { _ =>
-                            noteSealedBlock(blockDig, h, b.parent).map(_ => h)
+                            noteSealedBlock(blockDig, h, b.parent).map(_ => ())
                           }
                       }
                     }
@@ -856,14 +1207,15 @@ final class BftReplica private (
                       case Some((h, _)) =>
                         if seq.toLong != h then
                           Left(s"bft: PrePrepare seq $seq != noted height $h")
-                        else requireLocalActiveAt(h).map(_ => h)
+                        else requireLocalActiveAt(h).map(_ => ())
                       case None =>
                         Left(s"bft: block ${blockDig.short} not noted as sealed")
           case Msg.Prepare(_, seq, _, _) =>
-            // Prepares may race ahead of PrePrepare on the wire; seq == height.
-            requireLocalActiveAt(seq.toLong).map(_ => seq.toLong)
+            requireLocalActiveAt(seq.toLong).map(_ => ())
           case Msg.Commit(_, seq, _, _) =>
-            requireLocalActiveAt(seq.toLong).map(_ => seq.toLong)
+            requireLocalActiveAt(seq.toLong).map(_ => ())
+          case Msg.ViewChange(_, _, _) | Msg.NewView(_, _, _) =>
+            Right(())
         bind.flatMap { _ =>
           val priorState = state
           val priorSeals = commitSeals.toMap
@@ -871,31 +1223,36 @@ final class BftReplica private (
             case Msg.Commit(view, seq, d, from) =>
               commitSeals((view, seq, d.hex, from.id)) = sm.seal
             case _ => ()
-          val (st2, out) = deliver(state, sm.msg)
+          val (st2, out) = sm.msg match
+            case vc: Msg.ViewChange => deliverViewChange(state, vc, ids)
+            case nv: Msg.NewView    => deliverNewView(state, nv, ids)
+            case other              => deliver(state, other)
           state = st2
-          // Do not sign outbound until we confirm we are still active for each msg height.
           val signedOutE: Either[String, List[SignedMsg]] =
             out.foldLeft[Either[String, List[SignedMsg]]](Right(Nil)) { (acc, m) =>
               acc.flatMap { xs =>
-                val hE = m match
+                val activeOk: Either[String, Unit] = m match
                   case Msg.Prepare(_, seq, d, _) =>
                     heightForValueDigest(d).orElse(Some(seq.toLong))
                       .toRight("bft: cannot sign Prepare for unknown value")
+                      .flatMap(h => requireLocalActiveAt(h).map(_ => ()))
                   case Msg.Commit(_, seq, d, _) =>
                     heightForValueDigest(d).orElse(Some(seq.toLong))
                       .toRight("bft: cannot sign Commit for unknown value")
+                      .flatMap(h => requireLocalActiveAt(h).map(_ => ()))
                   case Msg.PrePrepare(_, _, value, _) =>
                     Digest.parse(new String(value.bytes.toArray, StandardCharsets.US_ASCII))
                       .flatMap(d => blockMeta.get(d).map(_._1).toRight("bft: unknown PrePrepare block"))
-                hE.flatMap { h =>
-                  requireLocalActiveAt(h).flatMap { _ =>
-                    BftFinality.sign(keypair, m).map { s =>
-                      m match
-                        case Msg.Commit(view, seq, d, from) =>
-                          commitSeals((view, seq, d.hex, from.id)) = s.seal
-                        case _ => ()
-                      xs :+ s
-                    }
+                      .flatMap(h => requireLocalActiveAt(h).map(_ => ()))
+                  case Msg.ViewChange(_, _, _) | Msg.NewView(_, _, _) =>
+                    Right(())
+                activeOk.flatMap { _ =>
+                  BftFinality.sign(keypair, m).map { s =>
+                    m match
+                      case Msg.Commit(view, seq, d, from) =>
+                        commitSeals((view, seq, d.hex, from.id)) = s.seal
+                      case _ => ()
+                    xs :+ s
                   }
                 }
               }
@@ -918,7 +1275,16 @@ final class BftReplica private (
       }
     }
 
+  private def compactInMemory(): Unit =
+    val (compacted, seals, meta) = BftFinality.compactFinalized(
+      state, commitSeals.toMap, blockMeta, certificates, finalizedHighWater)
+    state = compacted
+    commitSeals.clear()
+    commitSeals ++= seals
+    blockMeta = meta
+
   private def persistState(): Either[String, Unit] =
+    compactInMemory()
     stateStore match
       case None => Right(())
       case Some(path) =>
@@ -930,7 +1296,8 @@ final class BftReplica private (
           case Right(()) => Right(())
 
   private def tryMintCertificates(): Either[String, Unit] =
-    state.slots.foldLeft[Either[String, Unit]](Right(())) { case (acc, ((view, seq), slot)) =>
+    val hwBefore = finalizedHighWater
+    val minted = state.slots.foldLeft[Either[String, Unit]](Right(())) { case (acc, ((view, seq), slot)) =>
       acc.flatMap { _ =>
         slot.decided match
           case None => Right(())
@@ -960,17 +1327,32 @@ final class BftReplica private (
                     ok.flatMap { _ =>
                       certificates = cert :: certificates
                       finalizedHighWater = finalizedHighWater max h
-                      certStore match
-                        case None => Right(())
-                        case Some(path) =>
-                          BftFinality.saveCerts(path, certificates) match
-                            case Left(e) =>
-                              failClosed(s"bft-certs write failed: $e")
-                              Left(s"bft: durable cert write failed ($e)")
-                            case Right(()) => Right(())
+                      val persisted =
+                        certStore match
+                          case None => Right(())
+                          case Some(path) =>
+                            BftFinality.saveCerts(path, certificates) match
+                              case Left(e) =>
+                                failClosed(s"bft-certs write failed: $e")
+                                Left(s"bft: durable cert write failed ($e)")
+                              case Right(()) => Right(())
+                      persisted.flatMap { _ =>
+                        home match
+                          case None => Right(())
+                          case Some(h) =>
+                            advanceCheckpoint(h, cert) match
+                              case Left(e) =>
+                                failClosed(s"bft-checkpoint write failed: $e")
+                                Left(s"bft: durable checkpoint write failed ($e)")
+                              case Right(_) => Right(())
+                      }
                     }
                 }
       }
+    }
+    minted.flatMap { _ =>
+      if finalizedHighWater > hwBefore then persistState()
+      else Right(())
     }
 
 object BftReplica:
@@ -1003,4 +1385,9 @@ object BftReplica:
           }
         case None =>
           ValidatedReplicaSetHistory.verify(List(manifest), Ed25519.verify)
-    yield new BftReplica(keypair, manifest, history, node, ledgerAuth, certStore, stateStore)
+    yield new BftReplica(keypair, manifest, history, node, ledgerAuth, certStore, stateStore, home)
+
+  private[systemhandler] def historyFileMtime(home: java.nio.file.Path): Long =
+    val p = BftFinality.defaultReplicaSetHistoryPath(home)
+    if java.nio.file.Files.exists(p) then java.nio.file.Files.getLastModifiedTime(p).toMillis
+    else 0L

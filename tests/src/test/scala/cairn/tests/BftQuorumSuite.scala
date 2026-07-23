@@ -62,6 +62,16 @@ class BftQuorumSuite extends munit.FunSuite:
     assert(!quorumsIntersect(5))
     assert(!quorumsIntersect(8))
 
+  test("view-change: prepared value commits under new primary"):
+    import BftQuorum.*
+    val decisions = runViewChange(ids, Set.empty, seq = 0, value)
+      .fold(e => fail(e), identity)
+    assert(honestAgree(decisions, Set.empty), clues(decisions))
+    val decided = decisions.collect { case (id, Some(d)) => id -> d.value.digest }
+    assert(decided.nonEmpty, clues(decisions))
+    assert(decided.values.toSet == Set(value.digest), clues(decided))
+    assert(decisions.values.flatten.exists(_.view == 1), clues(decisions))
+
   test("equivocating primary: honestAgree holds (no split brain)"):
     val valueB = Value("other-digest".getBytes.toVector)
     val decisions = runEquivocation(

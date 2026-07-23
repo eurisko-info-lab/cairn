@@ -84,7 +84,12 @@ object Sync:
     * Any authorized CAS failure (`contains` / `getBytes` / `putBytes`) aborts
     * the pull — the consumer chain is not advanced with a partial blob set.
     */
-  def pull(from: Node, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, List[Digest]] =
+  def pull(
+      from: Node,
+      to: Node,
+      authorities: Map[String, Vector[Byte]],
+      checkpoint: Option[BftFinality.FinalizedCheckpoint] = None,
+  ): Either[String, List[Digest]] =
     def casErr(e: Cas.Error): String = e match
       case Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
       case Cas.Error.Io(m)      => m
@@ -102,16 +107,18 @@ object Sync:
 
     for
       theirBlocks <- from.blocks
+      theirChain = theirBlocks.map(_.digest)
+      _ <- BftFinality.requireExtendsCheckpoint(theirChain, checkpoint)
       _ <- LedgerKernel.replay(authorities, theirBlocks, Ed25519.verify)
       st <- from.state(authorities)
       publishedDigests = st.published.toList.flatMap(_.split(":") match
         case Array(_, value, _) => Digest.parse(value).toOption
         case _                  => None)
-      want = theirBlocks.map(_.digest) ++ publishedDigests
+      want = theirChain ++ publishedDigests
       fetched <- want.foldLeft[Either[String, List[Digest]]](Right(Nil)) { (acc, d) =>
         acc.flatMap(fetchMissing(d, _))
       }.map(_.reverse)
-      _ <- to.writeChain(theirBlocks.map(_.digest))
+      _ <- to.writeChain(theirChain)
     yield fetched
 
   enum Comparison:

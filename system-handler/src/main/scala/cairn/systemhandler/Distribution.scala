@@ -84,29 +84,46 @@ final class HttpNode(
       s.createContext("/bft/propose", ex =>
         if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
         else
-          Canon.decode(readBody(ex)) match
+          Canon.decode(readBody(ex)).flatMap(BftFinality.ProposeRequest.fromCanon) match
             case Left(e) => reply(ex, 400, e.getBytes)
-            case Right(body) =>
-              try
-                val view = body.asMap.get("view").map(_.asInt.toInt).getOrElse(0)
-                Digest.parse(body.field("block").asStr).flatMap { block =>
-                  // Sequence is derived from sealed block height on the primary.
-                  replica.proposeBlock(view, block)
-                } match
-                  case Left(e) => reply(ex, 400, e.getBytes)
-                  case Right(out) =>
-                    reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
-                    peersRoot.foreach { root =>
-                      PeerRegistry.load(root).foreach { dir =>
-                        dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
-                          out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
-                        }
+            case Right(req) =>
+              BftFinality.verifyProposeRequest(replica.authorities, req).flatMap { _ =>
+                // Sequence is derived from sealed block height on the primary.
+                replica.proposeBlock(req.view, req.block)
+              } match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(out) =>
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                  peersRoot.foreach { root =>
+                    PeerRegistry.load(root).foreach { dir =>
+                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
+                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
                       }
                     }
-              catch case e: CodecError => reply(ex, 400, e.getMessage.getBytes)
+                  }
       )
       s.createContext("/bft/certs", ex =>
         reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
+      s.createContext("/bft/view-change", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)).flatMap(BftFinality.ViewChangeRequest.fromCanon) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(req) =>
+              BftFinality.verifyViewChangeRequest(replica.authorities, req).flatMap { _ =>
+                replica.requestViewChange(req.newView)
+              } match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(out) =>
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                  peersRoot.foreach { root =>
+                    PeerRegistry.load(root).foreach { dir =>
+                      dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
+                        out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
+                      }
+                    }
+                  }
+      )
     }
     s.start()
     server = s
@@ -164,10 +181,17 @@ object HttpSync:
       case false => fetchByHash(baseUrl, to, d).map(_ => fetched + 1)
     }
 
-  def pull(baseUrl: String, to: Node, authorities: Map[String, Vector[Byte]]): Either[String, PullReport] =
+  def pull(
+      baseUrl: String,
+      to: Node,
+      authorities: Map[String, Vector[Byte]],
+      checkpoint: Option[BftFinality.FinalizedCheckpoint] = None,
+      checkpointHome: Option[java.nio.file.Path] = None,
+  ): Either[String, PullReport] =
     for
       chainTxt <- get(baseUrl, "/chain")
       remoteChain = new String(chainTxt).linesIterator.filter(_.nonEmpty).map(Digest(_)).toList
+      _ <- BftFinality.requireExtendsCheckpoint(remoteChain, checkpoint)
       fetched <- remoteChain.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap(n => fetchIfMissing(baseUrl, to, d, n))
       }
@@ -181,6 +205,24 @@ object HttpSync:
       fetchedBlobs <- publishedDigests.foldLeft[Either[String, Int]](Right(0)) { (acc, d) =>
         acc.flatMap(n => fetchIfMissing(baseUrl, to, d, n))
       }
+      // Adopt remote finality certs that verify against local membership history.
+      _ <- checkpointHome match
+        case None => Right(())
+        case Some(home) =>
+          (BftFinality.fetchCerts(baseUrl), BftFinality.loadReplicaSetHistory(home)) match
+            case (Right(remoteCerts), Right(hist)) =>
+              remoteCerts.sortBy(_.height).foldLeft[Either[String, Unit]](Right(())) { (acc, cert) =>
+                acc.flatMap { _ =>
+                  BftFinality.FinalityCertificate.verifyAgainstHistory(
+                    cert, hist, to, authorities) match
+                    case Left(_) => Right(())
+                    case Right(_) => BftFinality.advanceCheckpoint(home, cert).map(_ => ())
+                }
+              }
+            case _ => Right(())
+      _ <- BftFinality.requireExtendsCheckpoint(
+        remoteChain,
+        checkpointHome.flatMap(h => BftFinality.loadCheckpoint(h).toOption.flatten).orElse(checkpoint))
       _ <- to.writeChain(remoteChain)
     yield PullReport(fetched, fetchedBlobs, remoteChain.size - fetched)
 
@@ -193,21 +235,23 @@ object Gossip:
   final case class Reorg(node: String, fromHead: Option[Digest], toHead: Digest, forkPoint: Int)
   final case class Peer(name: String, node: Node)
 
-  def round(peers: List[Peer], authorities: Map[String, Vector[Byte]]): Either[String, List[Reorg]] =
+  def round(
+      peers: List[Peer],
+      authorities: Map[String, Vector[Byte]],
+      checkpoint: Option[BftFinality.FinalizedCheckpoint] = None,
+  ): Either[String, List[Reorg]] =
     val candidates: List[(Peer, List[Digest])] = peers.map(p => (p, p.node.chainDigests))
     val reorgs = List.newBuilder[Reorg]
     val result = peers.foldLeft[Either[String, Unit]](Right(())) { (acc, me) =>
       acc.flatMap { _ =>
         val mine = me.node.chainDigests
         val ranked = candidates
-          .filter((p, chain) => chain.length > mine.length ||
-            (chain.length == mine.length && chain != mine &&
-             chain.lastOption.map(_.hex).getOrElse("") < mine.lastOption.map(_.hex).getOrElse("~")))
+          .filter((p, chain) => BftFinality.shouldAdoptChain(mine, chain, checkpoint))
           .sortBy((p, chain) => (-chain.length, chain.lastOption.map(_.hex).getOrElse("")))
         ranked.headOption match
           case None => Right(())
           case Some((from, theirChain)) =>
-            Sync.pull(from.node, me.node, authorities) match
+            Sync.pull(from.node, me.node, authorities, checkpoint) match
               case Left(err) => Left(s"gossip: ${me.name} <- ${from.name}: $err")
               case Right(_) =>
                 val forkPoint = mine.zip(theirChain).takeWhile(_ == _).length
