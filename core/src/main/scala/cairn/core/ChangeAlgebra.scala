@@ -158,9 +158,9 @@ final case class LangMigration(
   def canon: Canon = Canon.cmap(
     "from" -> Canon.CStr(fromLang.hex),
     "to" -> Canon.CStr(toLang.hex),
-    "ctorRenames" -> Canon.CMap(ctorRenames.toList.sortBy(_._1).map((k, v) => k -> Canon.CStr(v))),
-    "arityChanges" -> Canon.CMap(arityChanges.toList.sortBy(_._1).map((k, v) =>
-      k -> Canon.cmap("arity" -> Canon.CInt(v._1), "default" -> Cst.toCanon(v._2)))))
+    "ctorRenames" -> Canon.cmap(ctorRenames.toList.map((k, v) => k -> Canon.CStr(v))*),
+    "arityChanges" -> Canon.cmap(arityChanges.toList.map((k, v) =>
+      k -> Canon.cmap("arity" -> Canon.CInt(v._1), "default" -> Cst.toCanon(v._2)))*))
   def artifact: Artifact = Artifact(ArtifactKind.Migration, Canon.CTag("lang-migration", canon))
 
 object Migrate:

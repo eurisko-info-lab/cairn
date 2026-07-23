@@ -20,7 +20,15 @@ enum Canon:
   case CStr(v: String)
   case CBytes(v: Vector[Byte])
   case CList(items: List[Canon])
-  case CMap(entries: List[(String, Canon)]) // always kept sorted; build via Canon.cmap
+  // Constructor is private: entries must be sorted and duplicate-key-free
+  // (§4.12 canonicity), and the enum case's own `apply` gave every caller a
+  // way to skip that — the type boundary now forces construction through
+  // `Canon.cmap` (validates + sorts) from anywhere outside this file;
+  // `decode`'s 'M' case, the only other legitimate constructor, lives in
+  // the companion (which retains access) and enforces the same invariant
+  // itself, on already-sorted decoded bytes. Pattern matching (`case
+  // CMap(es) => ...`) is unaffected — only construction is restricted.
+  case CMap private[Canon] (entries: List[(String, Canon)])
   case CTag(tag: String, value: Canon)
 
 object Canon:

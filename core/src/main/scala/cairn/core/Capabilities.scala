@@ -28,12 +28,12 @@ object Capabilities:
   final case class Manifest(language: Digest, rows: Map[String, Row]):
     def canon: Canon = Canon.cmap(
       "language" -> Canon.CStr(language.hex),
-      "rows" -> Canon.CMap(rows.toList.sortBy(_._1).map((k, v) => k -> (v match
+      "rows" -> Canon.cmap(rows.toList.map((k, v) => k -> (v match
         case Row.Present(d)                    => Canon.CTag("present", Canon.CStr(d.hex))
         case Row.PlatformProvided(id, version) =>
           Canon.CTag("platform", Canon.cmap(
             "id" -> Canon.CStr(id), "version" -> Canon.CStr(version.hex)))
-        case Row.Deferred(n)                   => Canon.CTag("deferred", Canon.CStr(n))))))
+        case Row.Deferred(n)                   => Canon.CTag("deferred", Canon.CStr(n))))*))
     def artifact: Artifact = Artifact(ArtifactKind.Capability, canon)
     def render: String =
       (s"capabilities of ${language.short}:" ::
@@ -50,8 +50,8 @@ object Capabilities:
         "capability" -> Canon.CStr(id), "language" -> Canon.CStr(l.digest.hex))))
     val surfaceRow =
       if surfaceDigests.nonEmpty then
-        Row.Present(Digest.of(Canon.CMap(surfaceDigests.toList.sortBy(_._1).map((n, d) =>
-          n -> Canon.CStr(d.hex)))))
+        Row.Present(Digest.of(Canon.cmap(surfaceDigests.toList.map((n, d) =>
+          n -> Canon.CStr(d.hex))*)))
       else
         // encodings only (text/json/canon) when no named syntax surfaces are registered
         Row.Present(Digest.of(Canon.cstrs(Surfaces.forLanguage(l).keys.toList.sorted)))

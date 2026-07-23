@@ -12,6 +12,15 @@ class CanonSuite extends munit.FunSuite:
   test("encode/decode round-trip"):
     assertEquals(Canon.decode(Canon.encode(sample)), Right(sample))
 
+  test("CMap construction is enforced through cmap at the Scala type boundary"):
+    // The case's constructor is `private[Canon]` specifically so this can
+    // never compile from outside Canon.scala — cmap (validates + sorts) is
+    // the only outward-facing way to build one. Asserted here, not just
+    // documented, so a future relaxation of that visibility is caught.
+    val errs = scala.compiletime.testing.typeCheckErrors(
+      """cairn.kernel.Canon.CMap(List("x" -> (cairn.kernel.Canon.CInt(1): cairn.kernel.Canon)))""")
+    assert(errs.nonEmpty, "direct Canon.CMap(...) construction should not type-check outside Canon.scala")
+
   test("map ordering is canonical regardless of construction order"):
     val a = Canon.cmap("x" -> CInt(1), "y" -> CInt(2))
     val b = Canon.cmap("y" -> CInt(2), "x" -> CInt(1))
