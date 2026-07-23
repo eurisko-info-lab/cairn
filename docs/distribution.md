@@ -43,6 +43,10 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   deactivate when a successor activates. Every propose/receive/sign and
   certificate verify checks membership at the block height. Packaged
   `serve replica` loads history from `$CAIRN_HOME`.
+- **Membership ceremony** (`BftCeremony` / `cairn bft replica-set …`): per-machine
+  `keygen`, pubkey export/import, draft assemble, member `seal`, predecessor
+  `approve`, `finalize`, and bundle `export`/`install` — private keys never leave
+  their home. `init` remains a single-home lab shortcut.
 - **Continuous finality**: BFT `seq` is the sealed block height (not a fixed
   `0`). Replicas persist a finalized high-water mark so consecutive blocks
   advance through distinct slots on durable processes.
@@ -76,15 +80,40 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 1. **Content distribution** — HTTP blobs + replay-checked chain pull (real)
 2. **Convergence** — peer directory + HTTP gossip + deterministic fork choice (functional alpha)
-3. **Finality** — quorum certificates over sealed blocks; height-bound seq; membership history on the packaged serve path (multi-home CLI ceremony still incomplete)
+3. **Finality** — quorum certificates over sealed blocks; height-bound seq;
+   membership history on the packaged serve path; multi-home CLI ceremony
+   (`bft replica-set keygen|…|finalize|install`)
 
 ## CLI cheat sheet
 
 ```bash
 export CAIRN_KEYSTORE_SECRET='…'          # required for durable replica keys
 # or: export CAIRN_KEYSTORE_PLAINTEXT=1   # lab only
+
+# --- Multi-home membership ceremony (one private key per machine) ---
+# On each host:
+./bin/cairn bft replica-set keygen r0
+./bin/cairn bft replica-set export-pubkey r0 /tmp/r0.pubkey.canon
+# Coordinator gathers pubkeys, assembles draft, distributes draft.canon:
+./bin/cairn bft replica-set import-pubkey /tmp/r0.pubkey.canon   # …repeat
+./bin/cairn bft replica-set assemble r0 r1 r2 r3
+./bin/cairn bft replica-set export-draft /tmp/draft.canon
+# Each member:
+./bin/cairn bft replica-set import-draft /tmp/draft.canon
+./bin/cairn bft replica-set seal r0          # writes ceremony/seals/r0.canon
+# Coordinator imports seals and commits tip + history:
+./bin/cairn bft replica-set import-seal /tmp/r0.seal.canon       # …repeat
+./bin/cairn bft replica-set finalize
+./bin/cairn bft replica-set export /tmp/replica-set.bundle.canon
+# Every host installs the bundle:
+./bin/cairn bft replica-set install /tmp/replica-set.bundle.canon
+# Amendments: assemble --activation H … then approve (predecessor quorum) + seal + finalize
+./bin/cairn bft replica-set status
+
+# Lab shortcut (all keys under one home — not multi-machine):
+./bin/cairn bft replica-set init r0 r1 r2 r3
+
 ./bin/cairn serve 8743
-./bin/cairn bft replica-set init r0 r1 r2 r3       # write replica-set.canon + history + local keys
 ./bin/cairn serve replica r0 8743   # installs /bft/msg + /bft/propose + /bft/certs
 ./bin/cairn peer add alice http://127.0.0.1:8743
 ./bin/cairn peer add r1 http://127.0.0.1:8744 replica

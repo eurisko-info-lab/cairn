@@ -497,6 +497,133 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(BftFinality.FinalityCertificate.verifyAgainstHistory(
       fakeCert, hist, node, ledgerAuth).isLeft)
 
+  test("multi-home CLI ceremony: keygen → pubkey exchange → seal → commit → install"):
+    val secret = ksSecret
+    val ids = List("r0", "r1", "r2", "r3")
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-cer-$id")).toMap
+    val exchange = java.nio.file.Files.createTempDirectory("cairn-cer-xchg")
+    // 1. Each machine keygens only its own identity.
+    ids.foreach { id =>
+      BftCeremony.keygen(homes(id), id, secret).fold(e => fail(e), identity)
+      assert(Keystore.load(homes(id), id, secret).isRight)
+      ids.filter(_ != id).foreach { other =>
+        assert(Keystore.load(homes(id), other, secret).isLeft)
+      }
+      val pkFile = exchange.resolve(s"$id.pubkey.canon")
+      BftCeremony.exportPubkey(homes(id), id, pkFile, secret).fold(e => fail(e), identity)
+    }
+    // 2. Coordinator (r0) imports every pubkey and assembles genesis draft.
+    val coord = homes("r0")
+    ids.foreach { id =>
+      BftCeremony.importPubkey(coord, exchange.resolve(s"$id.pubkey.canon"))
+        .fold(e => fail(e), identity)
+    }
+    val draft = BftCeremony.assemble(coord, ids).fold(e => fail(e), identity)
+    assertEquals(draft.n, 4)
+    assertEquals(draft.replaces, None)
+    val draftFile = exchange.resolve("draft.canon")
+    BftCeremony.exportDraft(coord, draftFile).fold(e => fail(e), identity)
+    // 3. Each member imports draft and seals with its local key only.
+    ids.foreach { id =>
+      BftCeremony.importDraft(homes(id), draftFile).fold(e => fail(e), identity)
+      val sealFile = exchange.resolve(s"$id.seal.canon")
+      val sealedPath = BftCeremony.sealMember(homes(id), id, secret).fold(e => fail(e), identity)
+      java.nio.file.Files.copy(
+        sealedPath, sealFile,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+    // 4. Coordinator gathers seals and commits.
+    ids.foreach { id =>
+      BftCeremony.importSeal(coord, exchange.resolve(s"$id.seal.canon"))
+        .fold(e => fail(e), identity)
+    }
+    // Draft must be present on coordinator for commit (re-import after member importDraft
+    // cleared only local contributions — coordinator still has its draft + imported seals).
+    val tip = BftCeremony.commit(coord).fold(e => fail(e), identity)
+    ReplicaSetManifest.verifySeals(tip, Ed25519.verify).fold(e => fail(e), identity)
+    // 5. Export bundle and install on every other home.
+    val bundle = exchange.resolve("replica-set.bundle.canon")
+    BftCeremony.exportBundle(coord, bundle).fold(e => fail(e), identity)
+    ids.filter(_ != "r0").foreach { id =>
+      BftCeremony.installBundle(homes(id), bundle).fold(e => fail(e), identity)
+      val loaded = BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(homes(id)))
+        .fold(e => fail(e), identity)
+      assertEquals(loaded.digest, tip.digest)
+      val hist = BftFinality.loadReplicaSetHistory(homes(id)).fold(e => fail(e), identity)
+      assertEquals(hist.manifests.map(_.digest), List(tip.digest))
+    }
+
+  test("multi-home CLI ceremony amendment: approve + seal + commit"):
+    val secret = ksSecret
+    val ids = List("r0", "r1", "r2", "r3")
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-am-$id")).toMap
+    val exchange = java.nio.file.Files.createTempDirectory("cairn-am-xchg")
+    ids.foreach { id =>
+      BftCeremony.keygen(homes(id), id, secret).fold(e => fail(e), identity)
+      BftCeremony.exportPubkey(homes(id), id, exchange.resolve(s"$id.pubkey.canon"), secret)
+        .fold(e => fail(e), identity)
+    }
+    val coord = homes("r0")
+    ids.foreach(id =>
+      BftCeremony.importPubkey(coord, exchange.resolve(s"$id.pubkey.canon")).fold(e => fail(e), identity))
+    BftCeremony.assemble(coord, ids).fold(e => fail(e), identity)
+    val draft0 = exchange.resolve("draft0.canon")
+    BftCeremony.exportDraft(coord, draft0).fold(e => fail(e), identity)
+    ids.foreach { id =>
+      BftCeremony.importDraft(homes(id), draft0).fold(e => fail(e), identity)
+      BftCeremony.sealMember(homes(id), id, secret).fold(e => fail(e), identity)
+      java.nio.file.Files.copy(
+        BftCeremony.sealPath(homes(id), id),
+        exchange.resolve(s"$id.seal0.canon"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+    // Re-import draft on coordinator (members' importDraft is local-only) and seals.
+    BftCeremony.importDraft(coord, draft0).fold(e => fail(e), identity)
+    ids.foreach(id =>
+      BftCeremony.importSeal(coord, exchange.resolve(s"$id.seal0.canon")).fold(e => fail(e), identity))
+    val genesis = BftCeremony.commit(coord).fold(e => fail(e), identity)
+    val bundle0 = exchange.resolve("bundle0.canon")
+    BftCeremony.exportBundle(coord, bundle0).fold(e => fail(e), identity)
+    ids.foreach { id =>
+      if id != "r0" then
+        BftCeremony.installBundle(homes(id), bundle0).fold(e => fail(e), identity)
+    }
+    // Amend at activation height 5 with same membership.
+    ids.foreach(id =>
+      BftCeremony.importPubkey(coord, exchange.resolve(s"$id.pubkey.canon")).fold(e => fail(e), identity))
+    val amendedDraft = BftCeremony.assemble(coord, ids, activationHeight = 5L)
+      .fold(e => fail(e), identity)
+    assertEquals(amendedDraft.replaces, Some(genesis.digest))
+    val draft1 = exchange.resolve("draft1.canon")
+    BftCeremony.exportDraft(coord, draft1).fold(e => fail(e), identity)
+    // Predecessor quorum approvals (3 of 4) + all member seals.
+    ids.take(3).foreach { id =>
+      BftCeremony.importDraft(homes(id), draft1).fold(e => fail(e), identity)
+      BftCeremony.approve(homes(id), id, secret).fold(e => fail(e), identity)
+      java.nio.file.Files.copy(
+        BftCeremony.approvalPath(homes(id), id),
+        exchange.resolve(s"$id.appr.canon"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+    ids.foreach { id =>
+      BftCeremony.importDraft(homes(id), draft1).fold(e => fail(e), identity)
+      BftCeremony.sealMember(homes(id), id, secret).fold(e => fail(e), identity)
+      java.nio.file.Files.copy(
+        BftCeremony.sealPath(homes(id), id),
+        exchange.resolve(s"$id.seal1.canon"),
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+    BftCeremony.importDraft(coord, draft1).fold(e => fail(e), identity)
+    ids.take(3).foreach(id =>
+      BftCeremony.importApproval(coord, exchange.resolve(s"$id.appr.canon")).fold(e => fail(e), identity))
+    ids.foreach(id =>
+      BftCeremony.importSeal(coord, exchange.resolve(s"$id.seal1.canon")).fold(e => fail(e), identity))
+    val successor = BftCeremony.commit(coord).fold(e => fail(e), identity)
+    assertEquals(successor.replaces, Some(genesis.digest))
+    assertEquals(successor.activationHeight, 5L)
+    val hist = BftFinality.loadReplicaSetHistory(coord).fold(e => fail(e), identity)
+    assertEquals(hist.manifests.map(_.digest), List(genesis.digest, successor.digest))
+
   test("forged replica-set history without predecessor quorum is rejected"):
     val home = java.nio.file.Files.createTempDirectory("cairn-bft-forged-hist")
     val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)

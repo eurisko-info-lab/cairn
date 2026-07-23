@@ -3,8 +3,9 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systemhandler.{
-  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
-  HttpGossip, HttpNode, HttpSync, Keypair, Keystore, Node, PeerRegistry, Provenance, Sync}
+  BftCeremony, BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip,
+  GossipDaemon, HttpGossip, HttpNode, HttpSync, Keypair, Keystore, Node, PeerRegistry, Provenance,
+  Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
 import cairn.runtime.PackLoader
@@ -720,6 +721,67 @@ object Cli:
         }
       case "bft" :: "replica-set" :: "init" :: names if names.nonEmpty =>
         bftReplicaSetInit(home, names)
+      case List("bft", "replica-set", "keygen", name) =>
+        keystoreSecret.flatMap { sec =>
+          BftCeremony.keygen(home, name, sec).map { kp =>
+            s"keygen ${kp.name} pk=${Digest.of(Canon.CBytes(kp.publicBytes)).short}"
+          }
+        }
+      case List("bft", "replica-set", "export-pubkey", name) =>
+        keystoreSecret.flatMap { sec =>
+          val out = BftCeremony.pubkeyPath(home, name)
+          BftCeremony.exportPubkey(home, name, out, sec).map(p => s"exported pubkey $name -> $p")
+        }
+      case List("bft", "replica-set", "export-pubkey", name, outStr) =>
+        keystoreSecret.flatMap { sec =>
+          BftCeremony.exportPubkey(home, name, Path.of(outStr), sec)
+            .map(p => s"exported pubkey $name -> $p")
+        }
+      case List("bft", "replica-set", "import-pubkey", pathStr) =>
+        BftCeremony.importPubkey(home, Path.of(pathStr)).map { (id, dest) =>
+          s"imported pubkey $id -> $dest"
+        }
+      case "bft" :: "replica-set" :: "assemble" :: args =>
+        parseAssembleArgs(args).flatMap { (ids, activation, replaces) =>
+          BftCeremony.assemble(home, ids, activation, replaces).map { d =>
+            s"draft assembled body=${Digest.of(d.bodyCanon).short} n=${d.n} " +
+              s"activation=${d.activationHeight} replaces=${d.replaces.map(_.short).getOrElse("none")}"
+          }
+        }
+      case List("bft", "replica-set", "export-draft", outStr) =>
+        BftCeremony.exportDraft(home, Path.of(outStr)).map(p => s"exported draft -> $p")
+      case List("bft", "replica-set", "import-draft", pathStr) =>
+        BftCeremony.importDraft(home, Path.of(pathStr)).map { d =>
+          s"imported draft body=${Digest.of(d.bodyCanon).short} n=${d.n}"
+        }
+      case List("bft", "replica-set", "seal", name) =>
+        keystoreSecret.flatMap { sec =>
+          BftCeremony.sealMember(home, name, sec).map(p => s"sealed member $name -> $p")
+        }
+      case List("bft", "replica-set", "import-seal", pathStr) =>
+        BftCeremony.importSeal(home, Path.of(pathStr)).map { (id, dest) =>
+          s"imported seal $id -> $dest"
+        }
+      case List("bft", "replica-set", "approve", name) =>
+        keystoreSecret.flatMap { sec =>
+          BftCeremony.approve(home, name, sec).map(p => s"approval $name -> $p")
+        }
+      case List("bft", "replica-set", "import-approval", pathStr) =>
+        BftCeremony.importApproval(home, Path.of(pathStr)).map { (id, dest) =>
+          s"imported approval $id -> $dest"
+        }
+      case List("bft", "replica-set", "finalize") =>
+        BftCeremony.commit(home).map { m =>
+          s"finalized replica-set ${m.digest.short} n=${m.n} ids=${m.ids.mkString(",")}"
+        }
+      case List("bft", "replica-set", "export", outStr) =>
+        BftCeremony.exportBundle(home, Path.of(outStr)).map(p => s"exported bundle -> $p")
+      case List("bft", "replica-set", "install", pathStr) =>
+        BftCeremony.installBundle(home, Path.of(pathStr)).map { m =>
+          s"installed replica-set ${m.digest.short} n=${m.n}"
+        }
+      case List("bft", "replica-set", "status") =>
+        BftCeremony.status(home)
       case List("smoke", "distribution") =>
         smokeDistribution(ledgerCtx)
       case porcelainCmd :: rest
@@ -738,12 +800,39 @@ object Cli:
 
   /** Require CAIRN_KEYSTORE_SECRET or lab plaintext; never silently invent keys over failures. */
   private def keystoreLoadOrCreate(home: Path, name: String): Either[String, Keypair] =
+    keystoreSecret.flatMap(sec => Keystore.loadOrCreate(home, name, sec))
+
+  private def keystoreSecret: Either[String, Option[Array[Byte]]] =
     Keystore.envSecret match
-      case Some(sec) => Keystore.loadOrCreate(home, name, Some(sec))
-      case None if Keystore.allowPlaintext => Keystore.loadOrCreate(home, name, None)
+      case Some(sec) => Right(Some(sec))
+      case None if Keystore.allowPlaintext => Right(None)
       case None =>
         Left(
           "keystore: set CAIRN_KEYSTORE_SECRET (or CAIRN_KEYSTORE_PLAINTEXT=1 for lab)")
+
+  /** Parse `assemble [--activation N] [--replaces HEX] id…`. */
+  private def parseAssembleArgs(
+      args: List[String],
+  ): Either[String, (List[String], Long, Option[Digest])] =
+    def loop(
+        rest: List[String],
+        activation: Long,
+        replaces: Option[Digest],
+        ids: List[String],
+    ): Either[String, (List[String], Long, Option[Digest])] =
+      rest match
+        case Nil =>
+          if ids.isEmpty then Left("usage: bft replica-set assemble [--activation N] [--replaces HEX] <id>…")
+          else Right((ids, activation, replaces))
+        case "--activation" :: n :: tail if n.forall(c => c.isDigit) =>
+          loop(tail, n.toLong, replaces, ids)
+        case "--replaces" :: hex :: tail =>
+          Digest.parse(hex).flatMap(d => loop(tail, activation, Some(d), ids))
+        case id :: tail if !id.startsWith("--") =>
+          loop(tail, activation, replaces, ids :+ id)
+        case bad :: _ =>
+          Left(s"ceremony: bad assemble argument '$bad'")
+    loop(args, 0L, None, Nil)
 
   private def serveHttp(
       home: Path,
@@ -806,7 +895,8 @@ object Cli:
       }
       _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
       cert <- BftFinality.agreeNetworkRemote(urls, block)
-      _ <- BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, node, ledgerAuth)
+      hist <- BftFinality.loadReplicaSetHistory(home)
+      _ <- BftFinality.FinalityCertificate.verifyAgainstHistory(cert, hist, node, ledgerAuth)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
   /** Create local keypairs for each name and write a sealed replica-set.canon. */
