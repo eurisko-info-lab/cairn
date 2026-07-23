@@ -9,12 +9,26 @@ package cairn.core
   * certifying reference; [[WaveESuite]] asserts agreement.
   */
 final class CompiledNetEngine(lang: NetLanguage):
+  // Reject a malformed or ambiguous rule table at construction, rather than
+  // letting it be silently indexed below — an ambiguous table (two rules
+  // claiming the same unordered kind pair) would otherwise be granted
+  // accidental declaration-order semantics by getOrElseUpdate rather than
+  // being caught as the validation error it is. See NetLanguageChecker's
+  // doc for the full list of what "malformed" covers (unknown kinds,
+  // out-of-range ports, non-linear rewrites).
+  NetLanguageChecker.validate(lang).left.foreach { errs =>
+    throw RuntimeException(
+      s"CompiledNetEngine: invalid NetLanguage '${lang.name}': ${errs.map(_.render).mkString("; ")}")
+  }
+
   /** `getOrElseUpdate` preserves [[NetEngine.ruleFor]]'s exact precedence:
     * every rule's forward (left, right) orientation is indexed before ANY
-    * rule's backward (right, left) orientation is considered, so a forward
-    * match always wins over a same-keyed backward one, and the first rule
-    * in declaration order wins a same-keyed forward/forward tie — identical
-    * to the original's "try forward across all rules, then fall back".
+    * rule's backward (right, left) orientation is considered. With the
+    * validation above in place, no two DIFFERENT rules ever share an
+    * unordered kind pair, so `getOrElseUpdate` here can never actually
+    * overwrite-skip a competing rule — the only remaining writes are a
+    * single rule's own forward and (if `left != right`) backward entries,
+    * which target different keys.
     */
   private val byKindPair: Map[(String, String), (NetRule, Boolean)] =
     val m = scala.collection.mutable.LinkedHashMap.empty[(String, String), (NetRule, Boolean)]
