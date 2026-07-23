@@ -23,6 +23,15 @@ jobs:
           apps: scala-cli
       - name: Full test suite (incl. fuzz corpus + host-run ports)
         run: sbt -batch test
+      - name: Fat jar + bin/cairn smoke
+        run: |
+          sbt -batch examples/assembly
+          ./bin/cairn --help 2>/dev/null || ./bin/cairn 2>&1 | head -5
+          HOME_TMP=$(mktemp -d)
+          export CAIRN_HOME="$HOME_TMP"
+          ./bin/cairn peer list
+          ./bin/cairn peer add a http://127.0.0.1:1
+          ./bin/cairn peer list | grep -q a
       - name: Golden digests (languages + Rosetta)
         run: |
           sbt -batch "examples/runMain cairn.examples.Main digests" | tee /tmp/cairn-digests-raw.txt

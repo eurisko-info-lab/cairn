@@ -25,10 +25,14 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   CLI: `cairn gossip once`, `cairn gossip run N`. In-process `Gossip.converge`
   remains for transcripts.
 - **BFT finality certificates** (`BftFinality`): signed PrePrepare/Prepare/Commit
-  over Ed25519, `2f+1` quorum, minting a `FinalityCertificate` for an
-  already-sealed PoA block digest. Local agreement is `BftFinality.agreeLocal`;
-  HTTP transport is `POST /bft/msg` + `GET /bft/certs` on replica nodes.
-  CLI smoke: `cairn bft agree <block-digest-hex>`.
+  over Ed25519 with `signer == msg.from`, designated primary per view, and a
+  certificate that requires **2f+1 distinct** known replicas. The certificate
+  binds `replicaSet` (sorted-id digest), block height, and parent, and is only
+  minted for a **replay-valid sealed PoA block** on the local chain.
+  Seal collection is keyed by `(view, seq, digest, replicaId)` so peer commits
+  do not overwrite each other. HTTP: `POST /bft/msg` + `GET /bft/certs` on
+  `cairn serve replica <name> [port]`. Network CLI: `cairn bft agree <hex>`
+  against registered replicas; lab: `cairn bft agree local <hex>`.
 - **Divergence surfacing** (`Sync.compare`): `Same / Ahead / Behind /
   Diverged(atHeight, headA, headB)`.
 - **Light clients** (M35): Merkle inclusion proofs verify "published" and
@@ -40,17 +44,26 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 | --- | --- |
 | Peer discovery | Directory / announce — not open DHT or Sybil-resistant membership |
 | Gossip daemon | Pull-based fork choice; no push epidemic or anti-entropy beyond want/have |
-| BFT finality | Static authenticated replica set (`f < n/3`); certifies PoA block digests — does not replace M36 round-robin sealing |
+| BFT finality | Static authenticated replica set (`f < n/3`); certifies replay-valid sealed PoA blocks — does not replace M36 round-robin sealing. Durable keys under `$CAIRN_HOME/replicas/`. |
 | Useful-work market | Still deferred; `RecordCertificate` remains the natural anchor |
+
+## Operational layers
+
+1. **Content distribution** — HTTP blobs + replay-checked chain pull (real)
+2. **Convergence** — peer directory + HTTP gossip + deterministic fork choice (functional alpha)
+3. **Finality** — quorum certificates over sealed blocks (repaired prototype; still a static replica set)
 
 ## CLI cheat sheet
 
 ```bash
 ./bin/cairn serve 8743
+./bin/cairn serve replica r0 8743   # installs /bft/msg + /bft/certs
 ./bin/cairn peer add alice http://127.0.0.1:8743
+./bin/cairn peer add r1 http://127.0.0.1:8744 replica
 ./bin/cairn peer discover http://127.0.0.1:8743
 ./bin/cairn gossip once
 ./bin/cairn gossip run 5
-./bin/cairn bft agree <64-hex-block-digest>
+./bin/cairn bft agree <64-hex-block-digest>        # network (needs role=replica peers)
+./bin/cairn bft agree local <64-hex-block-digest>  # in-process lab
 ./bin/cairn pull http://127.0.0.1:8743
 ```

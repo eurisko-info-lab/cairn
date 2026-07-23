@@ -72,7 +72,9 @@ sbt examples/assembly && ./bin/cairn home                         # fat jar + wr
 ./bin/cairn serve                                                 # HTTP node: /chain /heads /blob/… /peers
 ./bin/cairn peer add alice http://127.0.0.1:8743
 ./bin/cairn gossip once                                           # HttpGossip round
-./bin/cairn bft agree <block-digest-hex>                          # 2f+1 finality certificate
+./bin/cairn bft agree <block-digest-hex>                          # network finality (replica peers)
+./bin/cairn bft agree local <block-digest-hex>                    # in-process sealed-block lab
+./bin/cairn serve replica <name> [port]                           # HTTP node with /bft/msg
 sbt "examples/runMain cairn.examples.Main ui"                     # Web explorer → http://127.0.0.1:8765
 sbt "examples/runMain cairn.examples.Main digests"                # golden digests
 sbt "examples/runMain cairn.examples.Main capabilities stlc"      # §2b capability manifest

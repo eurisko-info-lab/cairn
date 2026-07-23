@@ -100,12 +100,20 @@ object DomainAgreement:
               s"must equal primary+refs ${expectedAncestors.sorted}")
         else if a.ancestorLanguages.exists((_, d) => d.hex.length != 64) then
           Left("domain-agreement: malformed ancestor language digest")
-        else Right(())
+        else if a.childLanguage.exists(_.hex.length != 64) then
+          Left("domain-agreement: malformed child language digest")
+        else a.dependencyEvidence match
+          case Canon.CInt(0) =>
+            Left("domain-agreement: missing dependency evidence")
+          case _ => Right(())
       }
 
   /** Ancestry-change policy: first plant has no `replaces`; amendments must
     * cite the live agreement digest, keep the same owner, and keep the same
     * child name. Primary/refs may change only under that amendment.
+    *
+    * When `live` cannot be decoded the caller must fail closed — this helper
+    * only sees a successfully loaded prior agreement.
     */
   def allowsTransition(
       proposed: DomainAgreement,
@@ -126,3 +134,19 @@ object DomainAgreement:
             s"domain-agreement: ancestry change must replace ${prev.digest.short} " +
               s"(got ${proposed.replaces.map(_.short).getOrElse("none")})")
         else Right(())
+
+  /** Authenticate that `signer` is the declared owner (name match + optional
+    * seal over the agreement canon). Call before [[Branches.plantGoverned]].
+    */
+  def authenticateOwner(
+      agreement: DomainAgreement,
+      signerName: String,
+      signerPublic: Vector[Byte],
+      seal: Vector[Byte],
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
+  ): Either[String, Unit] =
+    if signerName != agreement.owner then
+      Left(s"domain-agreement: signer '$signerName' is not owner '${agreement.owner}'")
+    else if !verify(signerPublic, Canon.encode(agreement.canon), seal) then
+      Left(s"domain-agreement: bad owner seal from '${agreement.owner}'")
+    else Right(())

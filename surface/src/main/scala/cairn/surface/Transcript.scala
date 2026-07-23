@@ -3,7 +3,7 @@ package cairn.surface
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systemhandler.{
-  BftFinality, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
+  BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip, GossipDaemon,
   HttpGossip, HttpNode, HttpSync, Keypair, Node, PeerRegistry, Provenance, Sync}
 import cairn.systeminterface.Filesystem as Fs
 import cairn.core.TreeEngine
@@ -665,9 +665,13 @@ object Cli:
           scala.io.StdIn.readLine()
           "ui stopped"
       case List("serve") =>
-        serveHttp(home, 0, ledgerCtx)
+        serveHttp(home, 0, ledgerCtx, withBft = false)
       case List("serve", portStr) if portStr.forall(_.isDigit) =>
-        serveHttp(home, portStr.toInt, ledgerCtx)
+        serveHttp(home, portStr.toInt, ledgerCtx, withBft = false)
+      case List("serve", "replica", name) =>
+        serveHttp(home, 0, ledgerCtx, withBft = true, replicaName = name)
+      case List("serve", "replica", name, portStr) if portStr.forall(_.isDigit) =>
+        serveHttp(home, portStr.toInt, ledgerCtx, withBft = true, replicaName = name)
       case List("pull", baseUrl) =>
         pullHttp(home, baseUrl, ledgerCtx)
       case List("fetch-hash", baseUrl, hex) =>
@@ -699,20 +703,20 @@ object Cli:
         val root = home.resolve("nodeA").toAbsolutePath.normalize
         java.nio.file.Files.createDirectories(root)
         val node = Node(root, ledgerCtx)
-        val daemon = GossipDaemon("nodeA", node, home, defaultAuthorities, intervalMs = 50)
-        val reports = (1 to n).map(_ => daemon.tick())
-        daemon.stop()
-        val reorgs = reports.map(_.reorgs.size).sum
-        Right(s"gossip ticks=$n reorgs=$reorgs lastErrors=${reports.lastOption.map(_.errors.size).getOrElse(0)}")
+        defaultAuthorities(home).map { auth =>
+          val daemon = GossipDaemon("nodeA", node, home, auth, intervalMs = 50)
+          val reports = (1 to n).map(_ => daemon.tick())
+          daemon.stop()
+          val reorgs = reports.map(_.reorgs.size).sum
+          s"gossip ticks=$n reorgs=$reorgs lastErrors=${reports.lastOption.map(_.errors.size).getOrElse(0)}"
+        }
       case List("bft", "agree", hex) =>
         Digest.parse(hex).flatMap { d =>
-          val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-          BftFinality.agreeLocal(replicas, replicas.head, view = 0, seq = 0, d).map { cert =>
-            BftFinality.FinalityCertificate.verify(cert, replicas.map(k => k.name -> k.publicBytes).toMap, 4) match
-              case Left(e)  => s"cert minted but verify failed: $e"
-              case Right(()) =>
-                s"bft finality ${cert.digest.short} for block ${d.short} commits=${cert.commits.size}"
-          }
+          bftAgree(home, d, ledgerCtx)
+        }
+      case List("bft", "agree", "local", hex) =>
+        Digest.parse(hex).flatMap { d =>
+          bftAgreeLocal(home, d, ledgerCtx)
         }
       case porcelainCmd :: rest
           if Set("chain", "auth", "branch", "domain", "compose", "catalog",
@@ -725,43 +729,115 @@ object Cli:
             "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
             "repl|lsp|ui] <arg>")
 
-  private def defaultAuthorities: Map[String, Vector[Byte]] =
-    val kp = Keypair.dev("dev-authority")
-    Map(kp.name -> kp.publicBytes)
+  private def defaultAuthorities(home: Path): Either[String, Map[String, Vector[Byte]]] =
+    Keypair.loadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
 
-  private def serveHttp(home: Path, port: Int, ledgerCtx: EffectContext): Either[String, String] =
+  private def serveHttp(
+      home: Path,
+      port: Int,
+      ledgerCtx: EffectContext,
+      withBft: Boolean,
+      replicaName: String = "local",
+  ): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    val http = HttpNode(node, defaultAuthorities, peersRoot = Some(home))
-    val bound = http.start(port)
-    // Self-announce so discoverers find us
-    val selfUrl = s"http://127.0.0.1:$bound"
-    PeerRegistry.add(home, "local", selfUrl)
-    System.out.println(s"Cairn HTTP node at $selfUrl")
-    System.out.println(s"  GET /chain  /heads  /blob/<digest>  /peers")
-    System.out.println(s"  POST /peers (announce)  POST /bft/msg (if replica)")
-    System.out.println(s"serving $root (CAIRN_HOME=$home)")
-    System.out.println("Press Enter to stop.")
-    scala.io.StdIn.readLine()
-    http.stop()
-    Right(s"serve stopped (was :$bound)")
+    for
+      ledgerAuth <- defaultAuthorities(home)
+      bftOpt <-
+        if !withBft then Right(None)
+        else
+          for
+            dir <- PeerRegistry.load(home)
+            ids0 = dir.replicas.map(_.name)
+            ids = if ids0.contains(replicaName) then ids0.distinct else (ids0 :+ replicaName).distinct
+            _ <- BftFinality.designatedPrimary(ids, 0)
+            kp <- Keypair.loadOrCreate(home, replicaName)
+            auth2 <- ids.foldLeft[Either[String, Map[String, Vector[Byte]]]](Right(Map.empty)) { (acc, n) =>
+              acc.flatMap { m =>
+                Keypair.loadOrCreate(home, n).map(k => m + (n -> k.publicBytes))
+              }
+            }
+          yield Some(BftReplica(
+            kp, auth2, ids, node = Some(node), ledgerAuth = ledgerAuth,
+            certStore = Some(home.resolve("bft-certs.canon"))))
+      http = HttpNode(node, ledgerAuth, peersRoot = Some(home), bft = bftOpt)
+      bound = http.start(port)
+      selfUrl = s"http://127.0.0.1:$bound"
+      role = if withBft then PeerRegistry.Role.Replica else PeerRegistry.Role.Gossip
+      pk = bftOpt.map(_.keypair.publicBytes)
+      _ <- PeerRegistry.add(home, replicaName, selfUrl, role, publicKey = pk)
+    yield
+      System.out.println(s"Cairn HTTP node at $selfUrl")
+      System.out.println(s"  GET /chain  /heads  /blob/<digest>  /peers")
+      if withBft then
+        System.out.println(s"  POST /bft/msg  GET /bft/certs  (replica=$replicaName)")
+      else
+        System.out.println(s"  (gossip only — use `serve replica <name>` to enable BFT)")
+      System.out.println(s"serving $root (CAIRN_HOME=$home)")
+      System.out.println("Press Enter to stop.")
+      scala.io.StdIn.readLine()
+      http.stop()
+      s"serve stopped (was :$bound)"
+
+  /** Network agreement against registered `role=replica` peers. */
+  private def bftAgree(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    for
+      ledgerAuth <- defaultAuthorities(home)
+      dir <- PeerRegistry.load(home)
+      reps = dir.replicas
+      _ <- Either.cond(reps.nonEmpty, (), "bft: no role=replica peers — add some or use `bft agree local`")
+      ids = reps.map(_.name)
+      primaryId <- BftFinality.designatedPrimary(ids, view = 0)
+      primary <- Keypair.loadOrCreate(home, primaryId.id)
+      urls = reps.map(p => p.name -> p.baseUrl).toMap
+      _ <- BftFinality.requireSealedBlock(node, ledgerAuth, block)
+      cert <- BftFinality.agreeNetwork(primary, urls, view = 0, seq = 0, block)
+      auth <- ids.foldLeft[Either[String, Map[String, Vector[Byte]]]](Right(Map.empty)) { (acc, n) =>
+        acc.flatMap(m => Keypair.loadOrCreate(home, n).map(k => m + (n -> k.publicBytes)))
+      }
+      setDig = BftFinality.replicaSetDigest(ids)
+      _ <- BftFinality.FinalityCertificate.verify(cert, auth, setDig)
+    yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
+
+  /** In-process lab agreement bound to a local sealed block (not network). */
+  private def bftAgreeLocal(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    val names = List("r0", "r1", "r2", "r3")
+    for
+      ledgerAuth <- defaultAuthorities(home)
+      replicas <- names.foldLeft[Either[String, List[Keypair]]](Right(Nil)) { (acc, n) =>
+        acc.flatMap(ks => Keypair.loadOrCreate(home, n).map(ks :+ _))
+      }
+      cert <- BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
+      auth = replicas.map(k => k.name -> k.publicBytes).toMap
+      setDig = BftFinality.replicaSetDigest(replicas.map(_.name))
+      _ <- BftFinality.FinalityCertificate.verify(cert, auth, setDig)
+    yield s"bft local finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
   private def pullHttp(home: Path, baseUrl: String, ledgerCtx: EffectContext): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    HttpSync.pull(baseUrl, node, defaultAuthorities).map { r =>
-      s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
+    defaultAuthorities(home).flatMap { auth =>
+      HttpSync.pull(baseUrl, node, auth).map { r =>
+        s"pull ok: blocks=${r.fetchedBlocks} blobs=${r.fetchedBlobs} alreadyHad=${r.alreadyHad}"
+      }
     }
 
   private def gossipOnce(home: Path, ledgerCtx: EffectContext): Either[String, String] =
     val root = home.resolve("nodeA").toAbsolutePath.normalize
     java.nio.file.Files.createDirectories(root)
     val node = Node(root, ledgerCtx)
-    val report = HttpGossip.round("nodeA", node,
-      PeerRegistry.load(home).toOption.toList.flatMap(_.gossipPeers),
-      defaultAuthorities)
-    Right(
+    defaultAuthorities(home).map { auth =>
+      val report = HttpGossip.round("nodeA", node,
+        PeerRegistry.load(home).toOption.toList.flatMap(_.gossipPeers),
+        auth)
       s"gossip once: pulled=${report.pulled.mkString(",")}" +
-        s" reorgs=${report.reorgs.size} errors=${report.errors.size}")
+        s" reorgs=${report.reorgs.size} errors=${report.errors.size}"
+    }

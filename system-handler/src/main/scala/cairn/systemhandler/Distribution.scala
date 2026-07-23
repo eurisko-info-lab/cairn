@@ -19,9 +19,13 @@ final class HttpNode(
     bft: Option[BftReplica] = None,
 ):
   private var server: HttpServer | Null = null
+  private var executor: java.util.concurrent.ExecutorService | Null = null
 
   def start(port: Int = 0): Int =
     val s = HttpServer.create(InetSocketAddress(port), 0)
+    val pool = java.util.concurrent.Executors.newCachedThreadPool()
+    s.setExecutor(pool)
+    executor = pool
     def reply(ex: HttpExchange, code: Int, body: Array[Byte]): Unit =
       ex.sendResponseHeaders(code, body.length)
       ex.getResponseBody.write(body)
@@ -68,6 +72,9 @@ final class HttpNode(
               replica.receive(sm) match
                 case Left(e) => reply(ex, 400, e.getBytes)
                 case Right(out) =>
+                  // Reply before fan-out so nested POSTs cannot deadlock on this
+                  // request thread (even with a thread pool, keep the critical path short).
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
                   peersRoot.foreach { root =>
                     PeerRegistry.load(root).foreach { dir =>
                       dir.replicas.filterNot(_.name == replica.keypair.name).foreach { p =>
@@ -75,7 +82,6 @@ final class HttpNode(
                       }
                     }
                   }
-                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
       )
       s.createContext("/bft/certs", ex =>
         reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
@@ -84,7 +90,11 @@ final class HttpNode(
     server = s
     s.getAddress.getPort
 
-  def stop(): Unit = Option(server).foreach(_.stop(0))
+  def stop(): Unit =
+    Option(server).foreach(_.stop(0))
+    Option(executor).foreach(_.shutdownNow())
+    server = null
+    executor = null
 
 object HttpSync:
   private val client = HttpClient.newHttpClient()

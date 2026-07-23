@@ -693,20 +693,60 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * Validates structural well-formedness, ownership / ancestry-change policy,
     * stores the agreement certificate in CAS, and records its digest on the
     * manifest. Local bootstrap without governance still uses [[forkFrom]].
+    *
+    * Fail-closed: if the child already cites a `domainAgreement` digest that
+    * cannot be loaded/decoded, planting is rejected (never silently treated
+    * as first plant).
+    *
+    * When `ownerSeal` is provided, the seal must authenticate `agreement.owner`
+    * over [[DomainAgreement.canon]] via `verify`.
     */
   def plantGoverned(
       agreement: DomainAgreement,
       module: Option[Module] = None,
+      ownerSeal: Option[(String, Vector[Byte], Vector[Byte])] = None,
+      verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean =
+        (_, _, _) => false,
   ): Either[String, BranchManifest] =
     val known = list().toSet
-    val live: Option[DomainAgreement] =
-      if known.contains(agreement.child) then
-        load(agreement.child).domainAgreement.flatMap { d =>
-          getByDigest(d).toOption.flatMap(a => DomainAgreement.fromCanon(a.body).toOption)
-        }
-      else None
+    val liveE: Either[String, Option[DomainAgreement]] =
+      if !known.contains(agreement.child) then Right(None)
+      else
+        load(agreement.child).domainAgreement match
+          case None => Right(None)
+          case Some(d) =>
+            getByDigest(d) match
+              case Left(e) =>
+                Left(s"domain-agreement: cannot load live ${d.short}: $e")
+              case Right(art) =>
+                DomainAgreement.fromCanon(art.body) match
+                  case Left(e) =>
+                    Left(s"domain-agreement: cannot decode live ${d.short}: $e")
+                  case Right(ag) => Right(Some(ag))
     for
+      live <- liveE
+      _ <- ownerSeal match
+        case None => Right(())
+        case Some((name, pk, seal)) =>
+          DomainAgreement.authenticateOwner(agreement, name, pk, seal, verify)
       _ <- DomainAgreement.wellFormed(agreement, known, primaryOf(known))
+      // Ancestor delegation: primary (if any) must exist; soft refs likewise
+      // already checked by DomainBranch.wellFormed. Require that a primary
+      // with its own live agreement is loadable (fail closed on corruption).
+      _ <- agreement.primaryAncestor match
+        case None => Right(())
+        case Some(p) if !known.contains(p) =>
+          Left(s"domain-agreement: unknown primary ancestor '$p'")
+        case Some(p) =>
+          load(p).domainAgreement match
+            case None => Right(())
+            case Some(d) =>
+              getByDigest(d) match
+                case Left(e) =>
+                  Left(s"domain-agreement: primary '$p' agreement ${d.short} unloadable: $e")
+                case Right(art) =>
+                  DomainAgreement.fromCanon(art.body).left.map(e =>
+                    s"domain-agreement: primary '$p' agreement decode: $e").map(_ => ())
       _ <- DomainAgreement.allowsTransition(agreement, live)
       art = agreement.artifact
       _ = putArt(art)

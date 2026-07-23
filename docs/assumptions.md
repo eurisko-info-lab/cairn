@@ -78,8 +78,9 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    remains decidable and the sole certifier.
 9. ~~Single-authority PoA~~ — discharged: on-chain authority sets,
    majority-quorum add/remove, round-robin sealing. BFT finality certificates
-   (`BftFinality`, `2f+1` over static replicas) certify sealed PoA digests;
-   open-membership / public-ledger BFT remains out.
+   (`BftFinality`) require **distinct** authenticated replicas (`2f+1`), bind a
+   replica-set digest, and certify **replay-valid sealed PoA blocks** (not
+   arbitrary digests). Open-membership / public-ledger BFT remains out.
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
     Rosetta skeletons are golden-checked. All four pass whole-file byte

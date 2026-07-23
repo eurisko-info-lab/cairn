@@ -269,6 +269,38 @@ class BranchSuite extends munit.FunSuite:
     // owner reassignment rejected
     assert(branches.plantGoverned(a1.copy(owner = "mallory", replaces = Some(a1.digest))).isLeft)
 
+  test("DomainAgreement plantGoverned fails closed when live agreement is unloadable"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-domain-failclosed")
+    val cas = DiskCas(dir)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    branches.forkFrom("LAW", primary = None).fold(e => fail(e), identity)
+    val lawLang = Digest.of(Canon.CStr("law-lang"))
+    val sdsLang = Digest.of(Canon.CStr("sds-lang"))
+    val a0 = DomainAgreement(
+      child = "SDS",
+      primaryAncestor = Some("LAW"),
+      references = Nil,
+      owner = "alice",
+      childLanguage = Some(sdsLang),
+      ancestorLanguages = List("LAW" -> lawLang),
+      dependencyEvidence = Canon.cstrs(List("cert")),
+      replaces = None)
+    branches.plantGoverned(a0).fold(e => fail(e), identity)
+    // Delete the live agreement blob from CAS while leaving the manifest pointer.
+    val agr = a0.digest
+    val obj = dir.resolve("objects").resolve(agr.hex.take(2)).resolve(agr.hex.drop(2))
+    assert(java.nio.file.Files.exists(obj), s"expected CAS object at $obj")
+    java.nio.file.Files.delete(obj)
+    branches.forkFrom("CHEMISTRY", primary = None).fold(e => fail(e), identity)
+    val chemLang = Digest.of(Canon.CStr("chem-lang"))
+    val a1 = a0.copy(
+      references = List("CHEMISTRY"),
+      ancestorLanguages = List("LAW" -> lawLang, "CHEMISTRY" -> chemLang),
+      replaces = Some(a0.digest))
+    val err = branches.plantGoverned(a1)
+    assert(err.isLeft, err.toString)
+    assert(err.swap.toOption.exists(_.contains("cannot load live")), err.toString)
+
   test("DomainBranch.wellFormed rejects unknown / self / primary∩refs"):
     val known = Set("LAW", "CHEMISTRY")
     assert(DomainBranch.wellFormed(
