@@ -22,6 +22,6 @@ How the §2 vocabulary of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md) maps to code.
 | Rosetta | `rosetta.RosettaModule` + `ScalaPort`/`LeanPort` (round-trip-verified emitters) |
 | Ledger | `kernel.Tx/Block/LedgerState/LedgerKernel` (pure) + `systemhandler.Node` (I/O) |
 | Transcript | `surface.Transcript` — DSL defined in the grammar engine itself |
-| Meta-language / grammar-language | `core.Meta` — fused surface (fixpoint achieved; STLC/meta `.cairn` are host-emitted mirrors; see docs/assumptions.md §11). Meta grammar includes both `language …` and `surface … for …` tops. |
+| Meta-language / grammar-language | `core.Meta` — two composing fragments, `Meta.fragment` (composition IR) and `Meta.grammarFragment` (grammar vocabulary), split into `languages/meta.cairn` + `languages/grammar.cairn` (fixpoint achieved for both; STLC/meta/grammar `.cairn` are host-emitted mirrors; see docs/assumptions.md §11). Meta grammar includes both `language …` and `surface … for …` tops. |
 | Surface / encoding | named syntax surfaces plus encodings (`text`/`json`/`canon` via Surfaces); ports are projection surfaces |
 | Capability bundle | per language: `Present` (CAS/artifact digests), `PlatformProvided` (host mechanisms), or `Deferred` — see `core.Capabilities`; not every language ships every row (§2b) |

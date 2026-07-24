@@ -66,13 +66,18 @@ second node pull blocks + blobs by hash, replay the chain through the pure
 
 ## 7. Self-description (fixpoint achieved, §2b)
 
-Self-description fixpoint achieved: `core/Meta.scala` is a fused meta
-surface (fragment IR + grammar vocabulary, including the Phase 3
-`surface <style> for <lang>` top) that can describe and reconstruct
-itself — `languages/meta.cairn` matches the seed digest-for-digest
-([docs/assumptions.md](assumptions.md) §11). Meta stays fused;
-object languages split semantics vs surfaces under `languages/<name>/surfaces/`.
-A separate `grammar.cairn` split remains deferred.
+Self-description fixpoint achieved: `core/Meta.scala` holds two composing
+fragments — `Meta.fragment` (composition IR: `language`/`fragment`/`sort`/
+`ctor`/`rule`/`judgment`, including the Phase 3 `surface <style> for <lang>`
+top) and `Meta.grammarFragment` (the grammar-authoring vocabulary: `syntax`/
+`print`/`infix`/`tok`/`cat`/…) — each of which can describe and reconstruct
+itself, and which compose together (`meta requires grammar`) into the one
+bootstrap grammar that parses every `.cairn` file. `languages/meta.cairn`
+and `languages/grammar.cairn` each match their Scala seed digest-for-digest
+([docs/assumptions.md](assumptions.md) §11). Object languages split
+semantics vs surfaces under `languages/<name>/surfaces/`; meta itself is now
+split the same way, into composition IR (`meta.cairn`) and grammar vocabulary
+(`grammar.cairn`) — the primordial meta-language/grammar-language pair.
 
 What stays host-backed:
 

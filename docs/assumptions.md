@@ -89,20 +89,25 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     AffineNet/IcNet ↔ classical IC) are separate from Rosetta — see
     [docs/agreement.md](agreement.md); native tools optional with goldens /
     `HvmSurface` export (live `hvm` when on PATH).
-11. ~~Meta-language staging~~ — discharged: the fused meta surface
-    covers grammar productions, print rules, infix tables, rewrite rules, and
-    judgments; `languages/meta.cairn` passes the self-description fixpoint
-    (Meta can describe/reconstruct itself). **STLC/meta `.cairn` are runtime
-    source of truth** via `PackLoader` (same as exemplars); Scala
-    `Stlc.fragments` / `Meta.fragment` remain the bootstrap seed (digest-
-    equality / fixpoint tests). `emit-languages` format-preserves against git
-    HEAD. **Surface-file split (Phase 2)** landed for stlc/search/pki/law/sds
-    **and** Core-facing `query` / `policy`:
-    semantic `languages/<name>.cairn` + `languages/<name>/surfaces/default.cairn`.
+11. ~~Meta-language staging~~ — discharged, **including the meta/grammar
+    split**: `core/Meta.scala` holds two composing fragments — `Meta.fragment`
+    (composition IR) and `Meta.grammarFragment` (grammar productions, print
+    rules, infix tables — the vocabulary every language's `syntax`/`print`/
+    `infix` declarations use); `languages/meta.cairn` and
+    `languages/grammar.cairn` each pass their own self-description fixpoint,
+    and `meta requires grammar` composes them into the one bootstrap grammar
+    that parses every `.cairn` file — the primordial meta-language/
+    grammar-language pair (§2b) is no longer deferred. **STLC/meta/grammar
+    `.cairn` are runtime source of truth** via `PackLoader` (same as
+    exemplars); Scala `Stlc.fragments` / `Meta.fragment` / `Meta.grammarFragment`
+    remain the bootstrap seeds (digest-equality / fixpoint tests).
+    `emit-languages` format-preserves against git HEAD. **Surface-file split
+    (Phase 2)** landed for stlc/search/pki/law/sds **and** Core-facing
+    `query` / `policy`: semantic `languages/<name>.cairn` +
+    `languages/<name>/surfaces/default.cairn`.
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
-    unisoncore) split the same way. Meta itself stays fused (bootstrap fixpoint)
-    while describing the surface top. Residuals: `Query.run` / policy
+    unisoncore) split the same way. Residuals: `Query.run` / policy
     enforcement / TreeEngine / Delta stay Scala interpreters of `.cairn` data.
     Effect `ResourceSchema` uses typed `PathPattern` (`Digest|Path` for Cas).
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).

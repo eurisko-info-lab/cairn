@@ -347,7 +347,6 @@ LeanCore `#check` envelope.
   vote persistence is fail-closed via `DurableIo.writeConsensus`. Remaining
   honesty bounds: directory discovery (not DHT), and BFT as finality-over-PoA
   rather than a public ledger ([distribution.md](distribution.md))
-- **Separate `grammar.cairn`** — deferred ([bootstrap.md](bootstrap.md))
 - **PKI/Search/Riemann host glue, Claims, SDS sealing tutorials** — remain in
   `examples/` (need handler crypto/CAS/filesystem); pure packs that need no
   handlers live in `user/`
