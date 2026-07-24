@@ -139,7 +139,9 @@ import java.nio.file.Path
           val (sem, surf) = writeExemplarPair(name)
           println(s"wrote languages/$name.cairn (${sem.length} bytes) + surfaces/default.cairn (${surf.length} bytes)")
         val metaText = writeExemplarLanguage("meta")
-        println(s"wrote languages/meta.cairn (${metaText.length} bytes) (fused; Meta describes surface tops)")
+        println(s"wrote languages/meta.cairn (${metaText.length} bytes) (composition IR; requires grammar)")
+        val grammarText = writeExemplarLanguage("grammar")
+        println(s"wrote languages/grammar.cairn (${grammarText.length} bytes) (grammar-authoring vocabulary)")
       case other =>
         Cli.main(other, packs, portModules, packLoader, ledgerCtx, processCtx, lspCtx, fsCtx) match
           case Right(out) => println(out)
