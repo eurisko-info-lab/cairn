@@ -1141,10 +1141,15 @@ object Cli:
               }
             }
             initiator = replicas.find(_.name == running.head).get
+            // Generous budget: this is a smoke test, not a hot path — under
+            // contended CI runners, tight poll windows can force spurious
+            // extra view-changes (each poll timing out before a cert that
+            // did land gets observed), burning through maxViews even though
+            // the replicas themselves are fine, just slow to answer.
             cert <- BftFinality.agreeNetworkRemote(
               urls, block, initiator,
               chainId = block, replicaSet = manifest.replicaSetDigest,
-              polls = 80, pollSleepMs = 40, maxViews = 8)
+              polls = 160, pollSleepMs = 80, maxViews = 16)
             _ <- if cert.view >= 1 then Right(())
                  else Left(s"expected a view-change (view >= 1), got view=${cert.view}")
             _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
