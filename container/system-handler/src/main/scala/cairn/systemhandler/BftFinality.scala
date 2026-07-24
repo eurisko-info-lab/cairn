@@ -1905,11 +1905,26 @@ final class BftReplica private (
   certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
       BftFinality.loadCerts(path) match
-        case Right(cs) =>
-          certificates = cs
-          finalizedHighWater = cs.map(_.height).foldLeft(-1L)(_ max _)
+        case Right(candidates) =>
+          // Load into a candidate set, verify every entry against chain +
+          // membership history (or the weaker manifest-only quorum/seal
+          // check when no local chain is available — same fallback
+          // tryMintCertificates already uses), THEN derive finalizedHighWater
+          // and advance the durable checkpoint from the verified subset
+          // only. advanceCheckpoint has no rollback: verifying first (not
+          // filtering after) is what keeps a forged-but-decodable cert from
+          // ever durably advancing the checkpoint.
+          val verified = candidates.filter { cert =>
+            (node, ledgerAuth.nonEmpty) match
+              case (Some(n), true) =>
+                FinalityCertificate.verifyAgainstHistory(cert, history, n, ledgerAuth).isRight
+              case _ =>
+                FinalityCertificate.verify(cert, manifest).isRight
+          }
+          certificates = verified
+          finalizedHighWater = verified.map(_.height).foldLeft(-1L)(_ max _)
           home.foreach { h =>
-            cs.sortBy(_.height).foreach { cert =>
+            verified.sortBy(_.height).foreach { cert =>
               advanceCheckpoint(h, cert) match
                 case Left(e) => ioError = Some(s"bft-checkpoint restore failed: $e")
                 case Right(_) => ()

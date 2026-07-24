@@ -685,6 +685,34 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(err.isLeft, err.toString)
     assert(err.swap.toOption.exists(_.contains("durable I/O failure")), err.toString)
 
+  test("startup filters an unverifiable certificate out of bft-certs.canon instead of trusting it"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-certverify")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
+      .fold(e => fail(e), identity)
+    val block = node.chainDigests.head
+    val legit = BftFinality.agreeForSealedBlock(node, ledgerAuth, replicas, 0, 0, block)
+      .fold(e => fail(e), identity)
+    // Decodes fine (structurally valid) but fails verifyAgainstHistory's
+    // replica-set-epoch check — a forged-but-well-formed certificate.
+    val forged = legit.copy(replicaSet = Digest.of(Canon.CStr("forged-replica-set")))
+    val certPath = home.resolve("bft-certs.canon")
+    BftFinality.saveCerts(certPath, List(legit, forged)).fold(e => fail(e), identity)
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      certStore = Some(certPath), home = Some(home)).fold(e => fail(e), identity)
+    assertEquals(bft.finalityCerts.map(_.digest), List(legit.digest))
+    val cp = BftFinality.loadCheckpoint(home).fold(e => fail(e), identity)
+    assertEquals(cp.map(_.height), Some(legit.height))
+    assertEquals(cp.map(_.block), Some(legit.blockDigest))
+
   test("Keystore encrypts private keys at rest when a secret is supplied"):
     val kp = Keypair.dev("enc-r0")
     val secret = Some("test-keystore-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8))
