@@ -9,6 +9,8 @@ transcript law-surface {
   roundtrip "enactedBy act cert root" ;
   delta "{ add s1 = section \"1\" heading \"Purpose\" text \"This Act governs chemical safety disclosure.\" ; }" ;
   delta "{ add s3 = section \"3\" heading \"SDS duty\" text \"Publishers must maintain an SDS.\" ; }" ;
+  roundtrip "cites \"3\" \"1\"" ;
+  delta "{ add s3cites1 = cites \"3\" \"1\" ; }" ;
   delta "{ add act = statute \"Model Chemical Safety Act\" sections ( s1 , s3 ) ; }" ;
   delta "{ add authority = enactedBy act cert root ; }" ;
   publish statutes ;

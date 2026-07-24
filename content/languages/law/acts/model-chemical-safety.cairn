@@ -1,7 +1,10 @@
 -- Model Chemical Safety Act — Law pack fixture (PKI → Law → SDS).
 -- Source of truth for the thin statute corpus; not host Scala.
+-- Cross-references use structured `cites` (judgment-checked), not free-text only.
 s1 = section "1" heading "Purpose" text "This Act governs chemical safety disclosure." ;
 s2 = section "2" heading "Definitions" text "Substance has the meaning in Section 1." ;
 s3 = section "3" heading "SDS duty" text "Publishers must maintain an SDS as defined in Section 2." ;
+s2cites1 = cites "2" "1" ;
+s3cites2 = cites "3" "2" ;
 act = statute "Model Chemical Safety Act" sections ( s1 , s2 , s3 ) ;
 authority = enactedBy act cert root ;

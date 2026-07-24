@@ -132,11 +132,13 @@ class ParitySuite extends munit.FunSuite:
       case _ => false
     })
     val dl = Delta.deltaOf(Law.language).fold(e => fail(e.map(_.render).mkString), identity)
-    // repeal Section 1 — Section 2's citation becomes dangling
+    // repeal Section 1 — structured cites + free-text become dangling
     val repeal = Parser.parse(dl.grammar, """{ remove s1 ; }""").fold(e => fail(e), identity)
     val after = Delta.apply(Law.language, act, repeal).fold(e => fail(e), _._1)
     val errs = Law.citationCheck(after)
-    assert(errs.exists(_.contains("cites Section 1")), errs.toString)
+    assert(
+      errs.exists(e => e.contains("citeOk") || e.contains("cites Section 1")),
+      errs.toString)
 
   test("parity: Law tutorial closes over PKI; SDS language includes Law+PKI"):
     val r = LawTutorial.run()

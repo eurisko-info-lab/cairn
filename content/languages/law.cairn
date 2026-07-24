@@ -4,6 +4,21 @@ language law {
     ctor section : LawObj(Number, Heading, Text);
     ctor statute : LawObj(Name, Sections);
     ctor enactedBy : LawObj(Name, Name);
+    -- Structured citation: section number $from cites section number $to.
+    ctor cites : LawObj(Number, Number);
     varctor lawRef;
+    -- Host supplies binding names; checker verifies numbers match those sections.
+    judgment citeOk {
+      rule cite-resolved :
+        $ctx-lookup($ctx, $fromName, section($from, $h, $t)),
+        $ctx-lookup($ctx, $toName, section($to, $h2, $t2))
+        |- citeOk($ctx, $fromName, $toName, cites($from, $to));
+    }
+    judgment enactedByOk {
+      rule eb-statute :
+        $ctx-lookup($ctx, $statuteName, statute($title, $secs))
+        |- enactedByOk($ctx, enactedBy($statuteName, $cert))
+        where $neq($cert, "");
+    }
   }
 }

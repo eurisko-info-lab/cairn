@@ -129,9 +129,9 @@ final class Sds(packs: PackAccess):
     * not a host-only 1..16 Set.
     */
   def checkSectionNumber(n: String): Boolean =
-    val cfg = CheckerCfg(euClpLanguage.judgments.values.toList)
-    val goal = Cst.node("sectionNumberOk", Cst.Leaf(n))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(
+      CheckerCfg(euClpLanguage.judgments.values.toList),
+      Cst.node("sectionNumberOk", Cst.Leaf(n))).isRight
 
   /** EU-CLP number implied by a section body ctor. */
   def sectionNumber(sec: Cst): Option[Int] = sec match
@@ -437,9 +437,9 @@ final class Sds(packs: PackAccess):
     * `sectionNumberOk`).
     */
   def checkTranslationStateTag(tag: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("translationStateTag", Cst.Leaf(tag))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(
+      CheckerCfg(language.judgments.values.toList),
+      Cst.node("translationStateTag", Cst.Leaf(tag))).isRight
 
   /** Phrase / product / section names a shadow change-set overrides.
     * Domain-aware footprint for GRANITE-style shadow rebase (base edit of an

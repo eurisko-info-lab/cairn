@@ -56,8 +56,9 @@ under `SDS` via `forkFrom` / `underSds`.
 `languages/law.cairn` + `user/law` (pack façade) + `examples/law` (`LawTutorial`):
 
 - Statute sections + `enactedBy` citing a PKI cert name as authority.
-- Citation judgment (host residual); repeal via free ΔL `remove`; closed language includes PKI `cert`.
-- Model Chemical Safety Act: `languages/law/acts/model-chemical-safety.cairn` via `ModuleSource` — not Scala.
+- Structured `cites` + pack judgments `citeOk` / `enactedByOk` via `Search.prove`.
+- Free-text "Section N" scan is a migration aid (must match a `cites` term).
+- Model Chemical Safety Act: `languages/law/acts/model-chemical-safety.cairn` via `ModuleSource`.
 - Full statute corpora / jurisdiction profiles still deferred (loaner will add `law-*-credit` packs).
 
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
@@ -117,13 +118,13 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- **Scala orchestration residual (platform debt):** `Law.citationCheck` (free-text
-  cites), `Sds.validate` / `EuClp.conform` outline walks, `SectionReport.toCst`,
-  effectful causal step bodies (CAS/Branches/Ed25519). Shared goal API is
-  `Search.prove`; `WorkflowRunner` accepts a named-handler registry (miss fails
-  closed). Still open: whole-module judgments + pack-declared ActionKey step
-  bindings. Paying this down is a Cairn platform task — domain apps must not
-  grow new Scala.
+- **Scala orchestration residual (platform debt):** `Sds.validate` /
+  `EuClp.conform` outline walks, `SectionReport.toCst`, effectful causal step
+  bodies (CAS/Branches/Ed25519). Law citations are pack-judged (`citeOk`);
+  free-text scan is migration-only. `WorkflowRunner.HandlerRegistry` binds
+  step→handler-id→impl (ActionKey digests next). Still open: whole-module
+  structural judgments + pack-declared ActionKey step bindings. Domain apps
+  must not grow new Scala.
 - Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
   research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;

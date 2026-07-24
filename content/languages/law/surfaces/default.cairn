@@ -7,12 +7,14 @@ surface default for law {
     keyword sections;
     keyword enactedBy;
     keyword cert;
+    keyword cites;
     punct "(";
     punct ")";
     punct ",";
     syntax lawObj += section : tok "section" str tok "heading" str tok "text" str;
     syntax lawObj += statute : tok "statute" str tok "sections" tok "(" sepby1 name "," tok ")";
     syntax lawObj += enactedBy : tok "enactedBy" name tok "cert" name;
+    syntax lawObj += cites : tok "cites" str str;
     top lawObj;
   }
 }
