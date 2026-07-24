@@ -23,20 +23,20 @@ object Meta:
   private def optList(items: List[Cst]): Cst =
     if items.isEmpty then n("none") else n("some", lst(items))
 
-  /** The meta surface's own definition — a Fragment like any other. */
+  /** The meta surface's own definition — composition/fragment IR only. Grammar
+    * productions (`syntax`/`print`/`infix`/…) live in [[grammarFragment]] —
+    * `meta` composes with it (see [[language]]) to become self-hosting, the
+    * same way any other fragment composes with a `requires`d interface.
+    */
   val fragment: Fragment = Fragment(
     name = "meta",
     provides = List("meta"),
-    requires = Nil,
+    requires = List("grammar"),
     sorts = List(SortDef("FragmentD", SortMode.Tree)),
     grammar = GrammarPart(
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
-        "ctor", "binds", "in", "varctor", "keyword", "punct", "identcont", "syntax", "print",
-        "infix", "over", "tag", "prec", "left", "right", "rule", "judgment", "top",
-        "tok", "tokfield", "name", "anyident", "num", "str", "restofline", "cat", "opt",
-        "star", "sepby1", "block", "run", "adjacent1",
-        "lit", "sp", "nl", "indent", "dedent", "field", "strfield", "sep", "where"),
-      puncts = List("{", "}", "(", ")", ":", ";", ",", "+=", "=>", "|-", "$"),
+        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where"),
+      puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$"),
       identContExtra = "-",
       categories = List(
         CategorySpec("file", List(
@@ -63,18 +63,6 @@ object Meta:
             Elem.Tok("ctor"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.AnyIdentLeaf,
             Elem.Opt(Elem.Cat("argList")), Elem.Star(Elem.Cat("bindsClause")), Elem.Tok(";"))),
           ConstructorSpec("varCtorDecl", List(Elem.Tok("varctor"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
-          ConstructorSpec("keywordDecl", List(Elem.Tok("keyword"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
-          ConstructorSpec("punctDecl", List(Elem.Tok("punct"), Elem.StrLeaf, Elem.Tok(";"))),
-          ConstructorSpec("identContDecl", List(Elem.Tok("identcont"), Elem.StrLeaf, Elem.Tok(";"))),
-          ConstructorSpec("syntaxDecl", List(
-            Elem.Tok("syntax"), Elem.AnyIdentLeaf, Elem.Tok("+="), Elem.AnyIdentLeaf, Elem.Tok(":"),
-            Elem.Star(Elem.Cat("elem")), Elem.Tok(";"))),
-          ConstructorSpec("printDecl", List(
-            Elem.Tok("print"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Star(Elem.Cat("seg")), Elem.Tok(";"))),
-          ConstructorSpec("infixDecl", List(
-            Elem.Tok("infix"), Elem.AnyIdentLeaf, Elem.Tok("over"), Elem.AnyIdentLeaf, Elem.Tok(":"),
-            Elem.StrLeaf, Elem.Tok("tag"), Elem.AnyIdentLeaf, Elem.Tok("prec"), Elem.NumLeaf,
-            Elem.Cat("assoc"), Elem.Tok(";"))),
           ConstructorSpec("ruleDecl", List(
             Elem.Tok("rule"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Cat("pat"), Elem.Tok("=>"),
             Elem.Cat("pat"), Elem.Tok(";"))),
@@ -86,33 +74,6 @@ object Meta:
         CategorySpec("bindsClause", List(
           ConstructorSpec("binds", List(
             Elem.Tok("binds"), Elem.NumLeaf, Elem.Tok("in"), Elem.SepBy1(Elem.NumLeaf, ","))))),
-        CategorySpec("assoc", List(
-          ConstructorSpec("assocLeft", List(Elem.Tok("left"))),
-          ConstructorSpec("assocRight", List(Elem.Tok("right"))))),
-        CategorySpec("elem", List(
-          ConstructorSpec("elemTok", List(Elem.Tok("tok"), Elem.StrLeaf)),
-          ConstructorSpec("elemTokField", List(Elem.Tok("tokfield"), Elem.StrLeaf)),
-          ConstructorSpec("elemName", List(Elem.Tok("name"))),
-          ConstructorSpec("elemAnyIdent", List(Elem.Tok("anyident"))),
-          ConstructorSpec("elemNum", List(Elem.Tok("num"))),
-          ConstructorSpec("elemStr", List(Elem.Tok("str"))),
-          ConstructorSpec("elemRest", List(Elem.Tok("restofline"))),
-          ConstructorSpec("elemCat", List(Elem.Tok("cat"), Elem.AnyIdentLeaf)),
-          ConstructorSpec("elemOpt", List(Elem.Tok("opt"), Elem.Cat("elem"))),
-          ConstructorSpec("elemStar", List(Elem.Tok("star"), Elem.Cat("elem"))),
-          ConstructorSpec("elemSepBy1", List(Elem.Tok("sepby1"), Elem.Cat("elem"), Elem.StrLeaf)),
-          ConstructorSpec("elemBlock", List(Elem.Tok("block"), Elem.AnyIdentLeaf)),
-          ConstructorSpec("elemRun", List(Elem.Tok("run"), Elem.AnyIdentLeaf)),
-          ConstructorSpec("elemAdj", List(Elem.Tok("adjacent1"), Elem.Cat("elem"))))),
-        CategorySpec("seg", List(
-          ConstructorSpec("segLit", List(Elem.Tok("lit"), Elem.StrLeaf)),
-          ConstructorSpec("segSp", List(Elem.Tok("sp"))),
-          ConstructorSpec("segNl", List(Elem.Tok("nl"))),
-          ConstructorSpec("segIn", List(Elem.Tok("indent"))),
-          ConstructorSpec("segOut", List(Elem.Tok("dedent"))),
-          ConstructorSpec("segField", List(Elem.Tok("field"), Elem.NumLeaf)),
-          ConstructorSpec("segStrField", List(Elem.Tok("strfield"), Elem.NumLeaf)),
-          ConstructorSpec("segSep", List(Elem.Tok("sep"), Elem.NumLeaf, Elem.StrLeaf)))),
         CategorySpec("pat", List(
           ConstructorSpec("patMetaNode", List(
             Elem.Tok("$"), Elem.AnyIdentLeaf, Elem.Tok("("),
@@ -152,6 +113,98 @@ object Meta:
           PrintSeg.Lit("ctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
           PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Field(2), PrintSeg.SepFields(3, ""), PrintSeg.Lit(";"))),
         PrintRule("varCtorDecl", List(PrintSeg.Lit("varctor"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("ruleDecl", List(
+          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("=>"), PrintSeg.Space,
+          PrintSeg.Field(2), PrintSeg.Lit(";"))),
+        PrintRule("judgmentDecl", List(
+          PrintSeg.Lit("judgment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("{"),
+          PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
+          PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
+        PrintRule("topDecl", List(PrintSeg.Lit("top"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
+        PrintRule("binds", List(
+          PrintSeg.Space, PrintSeg.Lit("binds"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+          PrintSeg.Lit("in"), PrintSeg.Space, PrintSeg.SepFields(1, ", "))),
+        PrintRule("patMetaNode", List(
+          PrintSeg.Lit("$"), PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
+        PrintRule("patMeta", List(PrintSeg.Lit("$"), PrintSeg.Field(0))),
+        PrintRule("patNode", List(PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
+        PrintRule("patLeaf", List(PrintSeg.Field(0))),
+        PrintRule("patStr", List(PrintSeg.StrField(0))),
+        PrintRule("judgRule", List(
+          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("|-"), PrintSeg.Space,
+          PrintSeg.Field(2), PrintSeg.Field(3), PrintSeg.Lit(";"))),
+        PrintRule("whereC", List(
+          PrintSeg.Space, PrintSeg.Lit("where"), PrintSeg.Space, PrintSeg.SepFields(0, ", ")))),
+      top = Some("file")))
+
+  /** The grammar-authoring vocabulary — `syntax`/`print`/`infix`/`tok`/`cat`/…
+    * (the same shape as [[Elem]]/[[PrintSeg]] in `kernel.Grammar`), split out
+    * of the fused meta fragment so it's independently self-describing: this
+    * is the "grammar-language" of the primordial bootstrap pair (CAIRN-
+    * PROMPT.md §2b), and every `surfaces` directory's `.cairn` files across
+    * every shipped language already use exactly this vocabulary to declare
+    * custom syntax.
+    * Extends [[fragment]]'s `item` category additively (same amalgamation
+    * mechanism any two ordinary fragments use to jointly extend a shared
+    * category, e.g. STLC's `term`) rather than requiring any new composition
+    * machinery.
+    */
+  val grammarFragment: Fragment = Fragment(
+    name = "grammar",
+    provides = List("grammar"),
+    requires = Nil,
+    grammar = GrammarPart(
+      keywords = List("keyword", "punct", "identcont", "syntax", "print",
+        "infix", "over", "tag", "prec", "left", "right",
+        "tok", "tokfield", "name", "anyident", "num", "str", "restofline", "cat", "opt",
+        "star", "sepby1", "block", "run", "adjacent1",
+        "lit", "sp", "nl", "indent", "dedent", "field", "strfield", "sep"),
+      puncts = List("+=", ":", ";"),
+      categories = List(
+        CategorySpec("item", List(
+          ConstructorSpec("keywordDecl", List(Elem.Tok("keyword"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("punctDecl", List(Elem.Tok("punct"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("identContDecl", List(Elem.Tok("identcont"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("syntaxDecl", List(
+            Elem.Tok("syntax"), Elem.AnyIdentLeaf, Elem.Tok("+="), Elem.AnyIdentLeaf, Elem.Tok(":"),
+            Elem.Star(Elem.Cat("elem")), Elem.Tok(";"))),
+          ConstructorSpec("printDecl", List(
+            Elem.Tok("print"), Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Star(Elem.Cat("seg")), Elem.Tok(";"))),
+          ConstructorSpec("infixDecl", List(
+            Elem.Tok("infix"), Elem.AnyIdentLeaf, Elem.Tok("over"), Elem.AnyIdentLeaf, Elem.Tok(":"),
+            Elem.StrLeaf, Elem.Tok("tag"), Elem.AnyIdentLeaf, Elem.Tok("prec"), Elem.NumLeaf,
+            Elem.Cat("assoc"), Elem.Tok(";"))))),
+        CategorySpec("assoc", List(
+          ConstructorSpec("assocLeft", List(Elem.Tok("left"))),
+          ConstructorSpec("assocRight", List(Elem.Tok("right"))))),
+        CategorySpec("elem", List(
+          ConstructorSpec("elemTok", List(Elem.Tok("tok"), Elem.StrLeaf)),
+          ConstructorSpec("elemTokField", List(Elem.Tok("tokfield"), Elem.StrLeaf)),
+          ConstructorSpec("elemName", List(Elem.Tok("name"))),
+          ConstructorSpec("elemAnyIdent", List(Elem.Tok("anyident"))),
+          ConstructorSpec("elemNum", List(Elem.Tok("num"))),
+          ConstructorSpec("elemStr", List(Elem.Tok("str"))),
+          ConstructorSpec("elemRest", List(Elem.Tok("restofline"))),
+          ConstructorSpec("elemCat", List(Elem.Tok("cat"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemOpt", List(Elem.Tok("opt"), Elem.Cat("elem"))),
+          ConstructorSpec("elemStar", List(Elem.Tok("star"), Elem.Cat("elem"))),
+          ConstructorSpec("elemSepBy1", List(Elem.Tok("sepby1"), Elem.Cat("elem"), Elem.StrLeaf)),
+          ConstructorSpec("elemBlock", List(Elem.Tok("block"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemRun", List(Elem.Tok("run"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("elemAdj", List(Elem.Tok("adjacent1"), Elem.Cat("elem"))))),
+        CategorySpec("seg", List(
+          ConstructorSpec("segLit", List(Elem.Tok("lit"), Elem.StrLeaf)),
+          ConstructorSpec("segSp", List(Elem.Tok("sp"))),
+          ConstructorSpec("segNl", List(Elem.Tok("nl"))),
+          ConstructorSpec("segIn", List(Elem.Tok("indent"))),
+          ConstructorSpec("segOut", List(Elem.Tok("dedent"))),
+          ConstructorSpec("segField", List(Elem.Tok("field"), Elem.NumLeaf)),
+          ConstructorSpec("segStrField", List(Elem.Tok("strfield"), Elem.NumLeaf)),
+          ConstructorSpec("segSep", List(Elem.Tok("sep"), Elem.NumLeaf, Elem.StrLeaf))))),
+      printRules = List(
         PrintRule("keywordDecl", List(PrintSeg.Lit("keyword"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
         PrintRule("punctDecl", List(PrintSeg.Lit("punct"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Lit(";"))),
         PrintRule("identContDecl", List(PrintSeg.Lit("identcont"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Lit(";"))),
@@ -168,19 +221,6 @@ object Meta:
           PrintSeg.StrField(2), PrintSeg.Space, PrintSeg.Lit("tag"), PrintSeg.Space, PrintSeg.Field(3),
           PrintSeg.Space, PrintSeg.Lit("prec"), PrintSeg.Space, PrintSeg.Field(4), PrintSeg.Space,
           PrintSeg.Field(5), PrintSeg.Lit(";"))),
-        PrintRule("ruleDecl", List(
-          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
-          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("=>"), PrintSeg.Space,
-          PrintSeg.Field(2), PrintSeg.Lit(";"))),
-        PrintRule("judgmentDecl", List(
-          PrintSeg.Lit("judgment"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("{"),
-          PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
-          PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
-        PrintRule("topDecl", List(PrintSeg.Lit("top"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
-        PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
-        PrintRule("binds", List(
-          PrintSeg.Space, PrintSeg.Lit("binds"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-          PrintSeg.Lit("in"), PrintSeg.Space, PrintSeg.SepFields(1, ", "))),
         PrintRule("assocLeft", List(PrintSeg.Lit("left"))),
         PrintRule("assocRight", List(PrintSeg.Lit("right"))),
         PrintRule("elemTok", List(PrintSeg.Lit("tok"), PrintSeg.Space, PrintSeg.StrField(0))),
@@ -204,26 +244,21 @@ object Meta:
         PrintRule("segOut", List(PrintSeg.Lit("dedent"))),
         PrintRule("segField", List(PrintSeg.Lit("field"), PrintSeg.Space, PrintSeg.Field(0))),
         PrintRule("segStrField", List(PrintSeg.Lit("strfield"), PrintSeg.Space, PrintSeg.Field(0))),
-        PrintRule("segSep", List(PrintSeg.Lit("sep"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.StrField(1))),
-        PrintRule("patMetaNode", List(
-          PrintSeg.Lit("$"), PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
-        PrintRule("patMeta", List(PrintSeg.Lit("$"), PrintSeg.Field(0))),
-        PrintRule("patNode", List(PrintSeg.Field(0), PrintSeg.Lit("("), PrintSeg.Field(1), PrintSeg.Lit(")"))),
-        PrintRule("patLeaf", List(PrintSeg.Field(0))),
-        PrintRule("patStr", List(PrintSeg.StrField(0))),
-        PrintRule("judgRule", List(
-          PrintSeg.Lit("rule"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit(":"),
-          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("|-"), PrintSeg.Space,
-          PrintSeg.Field(2), PrintSeg.Field(3), PrintSeg.Lit(";"))),
-        PrintRule("whereC", List(
-          PrintSeg.Space, PrintSeg.Lit("where"), PrintSeg.Space, PrintSeg.SepFields(0, ", ")))),
-      top = Some("file")))
+        PrintRule("segSep", List(PrintSeg.Lit("sep"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.StrField(1)))),
+      top = None))
 
   lazy val language: ComposedLanguage =
-    Compose.compose("meta", List(fragment)).fold(
+    Compose.compose("meta", List(fragment, grammarFragment)).fold(
       e => throw RuntimeException(e.map(_.render).mkString("\n")), identity)
 
   lazy val grammar: GrammarSpec = language.grammar
+
+  /** `grammarFragment` composed alone — mirrors [[language]], for consumers
+    * (tests, tooling) that want the standalone "grammar" pack's identity.
+    */
+  lazy val grammarLanguage: ComposedLanguage =
+    Compose.compose("grammar", List(grammarFragment)).fold(
+      e => throw RuntimeException(e.map(_.render).mkString("\n")), identity)
 
   // ======================= elaboration (Cst -> Fragment) =======================
 

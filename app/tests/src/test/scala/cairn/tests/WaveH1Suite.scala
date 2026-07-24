@@ -58,28 +58,44 @@ class WaveH1Suite extends munit.FunSuite:
     val cst = Parser.parse(Meta.grammar, text).fold(e => fail(e), identity)
     RoundTrip.check(Meta.grammar, cst).fold(e => fail(e), identity)
 
-  test("M42: bootstrap fixpoint — the meta language describes itself"):
-    // 1. print the meta fragment in its own surface
-    val metaText = Meta.printLanguage("meta", List(Meta.fragment)).fold(e => fail(e), identity)
-    // 2. parse it with the SEED grammar and compose
-    val l2 = Meta.parseFile(metaText).fold(e => fail(e), identity)
+  test("M42: bootstrap fixpoint — meta + grammar together describe Cairn's own syntax"):
+    // 1. print the meta + grammar fragments in their own (bootstrap) surface
+    val bootText = Meta.printLanguage("meta", List(Meta.fragment, Meta.grammarFragment)).fold(e => fail(e), identity)
+    // 2. parse it with the SEED grammar (meta composed with grammar) and compose
+    val l2 = Meta.parseFile(bootText).fold(e => fail(e), identity)
     // 3. the reconstructed language IS the seed, digest for digest
     assertEquals(l2.digest, Meta.language.digest)
     assertEquals(l2.grammar, Meta.grammar)
-    // 4. reparse the text under the RECONSTRUCTED grammar: same fragment again
-    val cst2 = Parser.parse(l2.grammar, metaText).fold(e => fail(e), identity)
+    // 4. reparse the text under the RECONSTRUCTED grammar: same two fragments again
+    val cst2 = Parser.parse(l2.grammar, bootText).fold(e => fail(e), identity)
     cst2 match
-      case Cst.Node("file", List(Cst.Leaf("meta"), Cst.Node("list", List(fragCst)))) =>
-        assertEquals(Meta.elaborateFragment(fragCst), Right(Meta.fragment))
+      case Cst.Node("file", List(Cst.Leaf("meta"), Cst.Node("list", List(metaCst, grammarCst)))) =>
+        assertEquals(Meta.elaborateFragment(metaCst), Right(Meta.fragment))
+        assertEquals(Meta.elaborateFragment(grammarCst), Right(Meta.grammarFragment))
       case other => fail(s"unexpected: ${other.render}")
 
-  test("M42: checked-in language files load at runtime (no recompile)"):
+  test("M42: grammar.cairn independently describes itself"):
+    // grammar.cairn has no `top` of its own — it's parsed as part of the
+    // bootstrap grammar (meta's top="file" anchors every .cairn file,
+    // grammar.cairn included) — so this checks the ISOLATED fragment's
+    // digest/grammar/round-trip, not standalone top-level parseability.
+    val cst = Meta.encode(Meta.grammarFragment)
+    assertEquals(Meta.elaborateFragment(cst), Right(Meta.grammarFragment))
+    assertEquals(Meta.grammarLanguage.digest,
+      Compose.compose("grammar", List(Meta.grammarFragment)).fold(e => fail(e.map(_.render).mkString), identity).digest)
+
+  test("M42: checked-in meta.cairn + grammar.cairn load at runtime (no recompile)"):
     val lang = packs.requireClosed("stlc")
     assertEquals(lang.digest, Stlc.language.digest)
     assertEquals(lang.grammar, Stlc.language.grammar)
-    // meta.cairn is also runtime SoT (seed Meta.language stays digest-equal)
+    // meta.cairn `requires grammar`, so requireClosed("meta") alone pulls in
+    // grammar.cairn transitively — both are runtime SoT (the two-fragment
+    // seed Meta.language stays digest-equal to the composed on-disk result).
     val meta = packs.requireClosed("meta")
     assertEquals(meta.digest, Meta.language.digest)
+    // grammar.cairn also stands alone, digest-equal to its own single-fragment seed.
+    val grammarLang = packs.requireClosed("grammar")
+    assertEquals(grammarLang.digest, Meta.grammarLanguage.digest)
 
   test("bootstrap: query/policy .cairn packs match Scala seeds digest-for-digest"):
     val q = packs.requireClosed("query")
