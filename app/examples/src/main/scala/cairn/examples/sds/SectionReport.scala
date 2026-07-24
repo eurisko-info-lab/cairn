@@ -109,44 +109,26 @@ object SectionReport:
       Cst.Node("list", sections))
 
   /** Project an SDS language module with `outline` + section body defs.
-    * [[lang]] selects locale via [[Sds.sectionFieldText]] (corpus refs + shadows).
+    * Walk is [[cairn.runtime.OutlineProjector]]; SDS only supplies Resolve.
     */
   def toCst(module: Module, outlineName: String, lang: String = "en"): Either[String, Cst] =
-    module.get(outlineName) match
-      case Some(Cst.Node("outline", List(Cst.Leaf(name), Cst.Leaf(cas), sectionsField))) =>
-        val refs = sectionsField match
-          case Cst.Node("none", _) => Nil
-          case Cst.Node("some", List(Cst.Node("list", rs))) => rs.collect { case Cst.Leaf(r) => r }
-          case Cst.Node("list", rs) => rs.collect { case Cst.Leaf(r) => r }
-          case other => return Left(s"bad outline sections: ${other.render}")
-        val blocks = refs.flatMap { ref =>
-          module.get(ref).flatMap { sec =>
-            sds.sectionNumber(sec).map { n =>
-              val title = SectionNumbering.byNumber.getOrElse(n, s"section-$n")
-              val keys = sec match
-                case Cst.Node(tag, _) if sds.typedSectionTags.contains(tag) =>
-                  sds.typedSectionKeys.getOrElse(tag, Nil)
-                case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-                  fields.collect {
-                    case Cst.Node("sectionField" | "sectionFieldRef", List(Cst.Leaf(k), _, _)) => k
-                  }.distinct
-                case _ => Nil
-              val lines = keys.flatMap { k =>
-                sds.sectionFieldText(module, ref, k, lang).map { v =>
-                  Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
-                }
-              }
-              Cst.node(
-                "sectionBlock",
-                Cst.Leaf(n.toString),
-                Cst.Leaf(title),
-                Cst.Node("list", lines))
-            }
-          }
-        }
-        Right(Cst.node("report", Cst.Leaf(name), Cst.Leaf(cas), Cst.Node("list", blocks)))
-      case Some(other) => Left(s"'$outlineName' is not an outline: ${other.render}")
-      case None => Left(s"no outline '$outlineName'")
+    import cairn.runtime.OutlineProjector
+    OutlineProjector.toReport(
+      module, outlineName, lang,
+      OutlineProjector.Resolve(
+        sectionNumber = sds.sectionNumber,
+        title = n => SectionNumbering.byNumber.getOrElse(n, s"section-$n"),
+        fieldKeys = {
+          case Cst.Node(tag, _) if sds.typedSectionTags.contains(tag) =>
+            sds.typedSectionKeys.getOrElse(tag, Nil)
+          case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
+            fields.collect {
+              case Cst.Node("sectionField" | "sectionFieldRef", List(Cst.Leaf(k), _, _)) => k
+            }.distinct
+          case _ => Nil
+        },
+        fieldText = (mod, ref, k, l) => sds.sectionFieldText(mod, ref, k, l),
+      ))
 
   def render(doc: Chemicals.ChemicalDoc): Either[String, String] =
     for

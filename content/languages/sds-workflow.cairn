@@ -3,6 +3,8 @@ language sds-workflow {
     sort WfObj tree;
     ctor step : WfObj(Name, Phase);
     ctor workflow : WfObj(Id, StepRefs);
+    -- step name → stable handler id (composition root registers implementations).
+    ctor bind : WfObj(Name, HandlerId);
     varctor workflowRef;
     judgment workflowStepOk {
       rule ws-author :   |- workflowStepOk("author");

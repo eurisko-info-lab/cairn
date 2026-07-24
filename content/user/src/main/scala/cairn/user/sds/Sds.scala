@@ -164,50 +164,48 @@ final class Sds(packs: PackAccess):
     case Cst.Node("list", xs) => xs
     case _ => Nil
 
-  // ---- domain validation (ΔSDS = generic ΔL + these checks) ----
+  // ---- domain validation (ΔSDS = generic ΔL + ModuleStructural + Search.prove) ----
 
   def validate(m: Module): Either[String, Unit] =
     val errs = List.newBuilder[String]
-    val seenTranslationStates = scala.collection.mutable.HashSet.empty[(String, String)]
-    val seenFieldStates = scala.collection.mutable.HashSet.empty[(String, String, String)]
     def defined(n: String) = m.get(n).isDefined
-    def requireNonEmpty(ctor: String, name: String, label: String, v: String): Unit =
-      if v.isEmpty then errs += s"$ctor '$name': empty $label"
-    def validateLocales(
-        name: String,
-        ctor: String,
-        overlays: Cst,
-        allowed: Set[String]
-    ): Unit =
-      val seen = scala.collection.mutable.HashSet.empty[(String, String)]
-      for row <- localeRows(overlays) do row match
-        case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
-          if k.isEmpty then errs += s"$ctor '$name': empty locale key"
-          else if !allowed.contains(k) then
-            errs += s"$ctor '$name': locale key '$k' not in typed slots"
-          else if lang.isEmpty then errs += s"$ctor '$name' locale '$k': empty lang"
-          else if !seen.add((k, lang)) then
-            errs += s"$ctor '$name' duplicate locale '$k' lang '$lang'"
-        case Cst.Node("fieldLocaleRef", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))) =>
-          if k.isEmpty then errs += s"$ctor '$name': empty locale key"
-          else if !allowed.contains(k) then
-            errs += s"$ctor '$name': locale key '$k' not in typed slots"
-          else if lang.isEmpty then errs += s"$ctor '$name' locale '$k': empty lang"
-          else if ref.isEmpty then errs += s"$ctor '$name' locale '$k': empty phrase ref"
-          else if !defined(ref) then
-            errs += s"$ctor '$name' locale '$k' references unknown phrase '$ref'"
-          else if !seen.add((k, lang)) then
-            errs += s"$ctor '$name' duplicate locale '$k' lang '$lang'"
-        case other => errs += s"$ctor '$name': bad locale ${other.render}"
+    def phraseNameExists(phrase: String): Boolean =
+      m.defs.exists {
+        case (_, Cst.Node("phrase" | "corpusPhrase", List(Cst.Leaf(n), _, _))) => n == phrase
+        case _ => false
+      }
+
+    // Structural folds Search cannot express.
+    errs ++= ModuleStructural.run(m, List(
+      ModuleStructural.Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
+      ModuleStructural.Spec.UniqueTuples(
+        "translationState", List(List(0), List(1)), "translationState"),
+      ModuleStructural.Spec.UniqueTuples(
+        "sectionFieldState", List(List(0), List(1), List(2)), "sectionFieldState"),
+      ModuleStructural.Spec.OutlineNums(
+        "outline", 2,
+        (mod, ref) => mod.get(ref) match
+          case None => Left(s"references unknown section '$ref'")
+          case Some(sec) =>
+            sectionNumber(sec) match
+              case None => Left(s"references '$ref' which is not a section body")
+              case Some(n) if checkSectionNumber(n.toString) => Right(n)
+              case Some(n) => Left(s"section '$ref' number $n fails sectionNumberOk"),
+        "outline"),
+    ))
+
+    // Typed sections: non-empty EN slots from pack key tables (no per-ctor arms).
+    for (tag, keys) <- typedSectionKeys do
+      val idxs = keys.indices.toList
+      errs ++= ModuleStructural.run(m, List(
+        ModuleStructural.Spec.NonEmptyLeaves(tag, idxs, keys)))
+
     for (name, term) <- m.defs do term match
       case Cst.Node("mixture", List(Cst.Node("list", comps))) =>
-        var total = 0L
         for c <- comps do c match
-          case Cst.Node("component", List(Cst.Leaf(ref), Cst.Leaf(pct))) =>
-            total += pct.toLong
+          case Cst.Node("component", List(Cst.Leaf(ref), _)) =>
             if !defined(ref) then errs += s"mixture '$name' references unknown substance '$ref'"
           case other => errs += s"mixture '$name': bad component ${other.render}"
-        if total > 100 then errs += s"mixture '$name' percentages sum to $total > 100"
       case Cst.Node("product", List(_, Cst.Leaf(mix), Cst.Node("list", phraseRefs))) =>
         if !defined(mix) then errs += s"product '$name' references unknown mixture '$mix'"
         for p <- phraseRefs do p match
@@ -226,16 +224,12 @@ final class Sds(packs: PackAccess):
             errs += s"sectionFieldShadow '$name' references unknown section '$sec'"
       case Cst.Node("translationState", List(Cst.Leaf(phrase), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))) =>
         if phrase.isEmpty then errs += s"translationState '$name': empty phrase ref"
-        else if !m.defs.exists {
-            case (_, Cst.Node("phrase" | "corpusPhrase", List(Cst.Leaf(n), _, _))) => n == phrase
-            case _ => false
-          } then errs += s"translationState '$name' references unknown phrase '$phrase'"
+        else if !phraseNameExists(phrase) then
+          errs += s"translationState '$name' references unknown phrase '$phrase'"
         if lang.isEmpty then errs += s"translationState '$name': empty lang"
         if hash.isEmpty then errs += s"translationState '$name': empty from-hash"
         if !checkTranslationStateTag(tag) then
           errs += s"translationState '$name': unknown state tag '$tag'"
-        else if phrase.nonEmpty && lang.nonEmpty && !seenTranslationStates.add((phrase, lang)) then
-          errs += s"translationState '$name' duplicate mark for '$phrase' lang '$lang'"
       case Cst.Node("sectionFieldState", List(
           Cst.Leaf(sec), Cst.Leaf(key), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))) =>
         if sec.isEmpty then errs += s"sectionFieldState '$name': empty section ref"
@@ -250,9 +244,6 @@ final class Sds(packs: PackAccess):
         if hash.isEmpty then errs += s"sectionFieldState '$name': empty from-hash"
         if !checkTranslationStateTag(tag) then
           errs += s"sectionFieldState '$name': unknown state tag '$tag'"
-        else if sec.nonEmpty && key.nonEmpty && lang.nonEmpty &&
-            !seenFieldStates.add((sec, key, lang)) then
-          errs += s"sectionFieldState '$name' duplicate mark for '$sec'.$key lang '$lang'"
       case Cst.Node("basis", List(Cst.Leaf(target), Cst.Leaf(section))) =>
         if !defined(target) then errs += s"basis '$name' references unknown product '$target'"
         if section.isEmpty then errs += s"basis '$name' missing Law section number"
@@ -277,153 +268,32 @@ final class Sds(packs: PackAccess):
             else if !seen.add((k, lang)) then
               errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
           case other => errs += s"euSection '$name': bad field ${other.render}"
-      case Cst.Node("identificationSection", List(
-          Cst.Leaf(pn), Cst.Leaf(syn), Cst.Leaf(use), Cst.Leaf(against),
-          Cst.Leaf(supplier), Cst.Leaf(phone), overlays)) =>
-        requireNonEmpty("identificationSection", name, "productName", pn)
-        requireNonEmpty("identificationSection", name, "synonyms", syn)
-        requireNonEmpty("identificationSection", name, "recommendedUse", use)
-        requireNonEmpty("identificationSection", name, "usesAdvisedAgainst", against)
-        requireNonEmpty("identificationSection", name, "supplierName", supplier)
-        requireNonEmpty("identificationSection", name, "emergencyPhone", phone)
-        validateLocales(name, "identificationSection", overlays, identificationKeys)
-      case Cst.Node("hazardsSection", List(
-          Cst.Leaf(cls), Cst.Leaf(hnoc), Cst.Leaf(phrases), Cst.Leaf(signal),
-          Cst.Leaf(pictos), overlays)) =>
-        requireNonEmpty("hazardsSection", name, "classificationSummary", cls)
-        requireNonEmpty("hazardsSection", name, "hazardsNotOtherwiseClassified", hnoc)
-        requireNonEmpty("hazardsSection", name, "hazardPhrases", phrases)
-        requireNonEmpty("hazardsSection", name, "signalWord", signal)
-        requireNonEmpty("hazardsSection", name, "pictograms", pictos)
-        validateLocales(name, "hazardsSection", overlays, hazardsKeys)
-      case Cst.Node("compositionSection", List(
-          Cst.Leaf(comp), Cst.Leaf(cas), Cst.Leaf(ec), Cst.Leaf(conc), overlays)) =>
-        requireNonEmpty("compositionSection", name, "componentName", comp)
-        requireNonEmpty("compositionSection", name, "cas", cas)
-        requireNonEmpty("compositionSection", name, "ec", ec)
-        requireNonEmpty("compositionSection", name, "concentration", conc)
-        validateLocales(name, "compositionSection", overlays, compositionKeys)
-      case Cst.Node("firstAidSection", List(
-          Cst.Leaf(ga), Cst.Leaf(inh), Cst.Leaf(skin), Cst.Leaf(eye),
-          Cst.Leaf(ing), overlays)) =>
-        requireNonEmpty("firstAidSection", name, "generalAdvice", ga)
-        requireNonEmpty("firstAidSection", name, "inhalation", inh)
-        requireNonEmpty("firstAidSection", name, "skinContact", skin)
-        requireNonEmpty("firstAidSection", name, "eyeContact", eye)
-        requireNonEmpty("firstAidSection", name, "ingestion", ing)
-        validateLocales(name, "firstAidSection", overlays, firstAidKeys)
-      case Cst.Node("firefightingSection", List(
-          Cst.Leaf(em), Cst.Leaf(uem), Cst.Leaf(sh), Cst.Leaf(fp), overlays)) =>
-        requireNonEmpty("firefightingSection", name, "extinguishingMedia", em)
-        requireNonEmpty("firefightingSection", name, "unsuitableExtinguishingMedia", uem)
-        requireNonEmpty("firefightingSection", name, "specialHazards", sh)
-        requireNonEmpty("firefightingSection", name, "firefighterProtection", fp)
-        validateLocales(name, "firefightingSection", overlays, firefightingKeys)
-      case Cst.Node("accidentalReleaseSection", List(
-          Cst.Leaf(pp), Cst.Leaf(ep), Cst.Leaf(cm), overlays)) =>
-        requireNonEmpty("accidentalReleaseSection", name, "personalPrecautions", pp)
-        requireNonEmpty("accidentalReleaseSection", name, "environmentalPrecautions", ep)
-        requireNonEmpty("accidentalReleaseSection", name, "cleanupMethods", cm)
-        validateLocales(name, "accidentalReleaseSection", overlays, accidentalReleaseKeys)
-      case Cst.Node("handlingStorageSection", List(
-          Cst.Leaf(h), Cst.Leaf(st), Cst.Leaf(si), overlays)) =>
-        requireNonEmpty("handlingStorageSection", name, "handling", h)
-        requireNonEmpty("handlingStorageSection", name, "storage", st)
-        requireNonEmpty("handlingStorageSection", name, "storageIncompatibilities", si)
-        validateLocales(name, "handlingStorageSection", overlays, handlingStorageKeys)
-      case Cst.Node("exposureControlsSection", List(
-          Cst.Leaf(oel), Cst.Leaf(ec), Cst.Leaf(eye), Cst.Leaf(skin),
-          Cst.Leaf(resp), overlays)) =>
-        requireNonEmpty("exposureControlsSection", name, "occupationalExposureLimit", oel)
-        requireNonEmpty("exposureControlsSection", name, "engineeringControls", ec)
-        requireNonEmpty("exposureControlsSection", name, "eyeProtection", eye)
-        requireNonEmpty("exposureControlsSection", name, "skinProtection", skin)
-        requireNonEmpty("exposureControlsSection", name, "respiratoryProtection", resp)
-        validateLocales(name, "exposureControlsSection", overlays, exposureControlsKeys)
-      case Cst.Node("physicalChemicalSection", List(
-          Cst.Leaf(app), Cst.Leaf(odor), Cst.Leaf(mw), Cst.Leaf(mp), Cst.Leaf(bp),
-          Cst.Leaf(fp), Cst.Leaf(dens), Cst.Leaf(sol), Cst.Leaf(expl), overlays)) =>
-        requireNonEmpty("physicalChemicalSection", name, "appearance", app)
-        requireNonEmpty("physicalChemicalSection", name, "odor", odor)
-        requireNonEmpty("physicalChemicalSection", name, "molecularWeight", mw)
-        requireNonEmpty("physicalChemicalSection", name, "meltingPoint", mp)
-        requireNonEmpty("physicalChemicalSection", name, "boilingPoint", bp)
-        requireNonEmpty("physicalChemicalSection", name, "flashPoint", fp)
-        requireNonEmpty("physicalChemicalSection", name, "density", dens)
-        requireNonEmpty("physicalChemicalSection", name, "solubility", sol)
-        requireNonEmpty("physicalChemicalSection", name, "explosiveLimits", expl)
-        validateLocales(name, "physicalChemicalSection", overlays, physicalChemicalKeys)
-      case Cst.Node("stabilityReactivitySection", List(
-          Cst.Leaf(st), Cst.Leaf(cta), Cst.Leaf(im), Cst.Leaf(hd), overlays)) =>
-        requireNonEmpty("stabilityReactivitySection", name, "stability", st)
-        requireNonEmpty("stabilityReactivitySection", name, "conditionsToAvoid", cta)
-        requireNonEmpty("stabilityReactivitySection", name, "incompatibleMaterials", im)
-        requireNonEmpty("stabilityReactivitySection", name, "hazardousDecomposition", hd)
-        validateLocales(name, "stabilityReactivitySection", overlays, stabilityReactivityKeys)
-      case Cst.Node("toxicologicalSection", List(
-          Cst.Leaf(ld50), Cst.Leaf(irr), Cst.Leaf(inh), Cst.Leaf(carc), overlays)) =>
-        requireNonEmpty("toxicologicalSection", name, "ld50Oral", ld50)
-        requireNonEmpty("toxicologicalSection", name, "irritation", irr)
-        requireNonEmpty("toxicologicalSection", name, "inhalationEffects", inh)
-        requireNonEmpty("toxicologicalSection", name, "carcinogenicity", carc)
-        validateLocales(name, "toxicologicalSection", overlays, toxicologicalKeys)
-      case Cst.Node("ecologicalSection", List(
-          Cst.Leaf(eco), Cst.Leaf(pers), Cst.Leaf(bio), Cst.Leaf(mob), overlays)) =>
-        requireNonEmpty("ecologicalSection", name, "ecotoxicity", eco)
-        requireNonEmpty("ecologicalSection", name, "persistence", pers)
-        requireNonEmpty("ecologicalSection", name, "bioaccumulation", bio)
-        requireNonEmpty("ecologicalSection", name, "mobility", mob)
-        validateLocales(name, "ecologicalSection", overlays, ecologicalKeys)
-      case Cst.Node("disposalSection", List(
-          Cst.Leaf(dm), Cst.Leaf(wc), overlays)) =>
-        requireNonEmpty("disposalSection", name, "disposalMethods", dm)
-        requireNonEmpty("disposalSection", name, "wasteClassification", wc)
-        validateLocales(name, "disposalSection", overlays, disposalKeys)
-      case Cst.Node("transportSection", List(
-          Cst.Leaf(un), Cst.Leaf(psn), Cst.Leaf(cls), Cst.Leaf(pg), overlays)) =>
-        requireNonEmpty("transportSection", name, "unNumber", un)
-        requireNonEmpty("transportSection", name, "properShippingName", psn)
-        requireNonEmpty("transportSection", name, "transportHazardClass", cls)
-        requireNonEmpty("transportSection", name, "packingGroup", pg)
-        validateLocales(name, "transportSection", overlays, transportKeys)
-      case Cst.Node("regulatorySection", List(
-          Cst.Leaf(ri), Cst.Leaf(rs), Cst.Leaf(us), overlays)) =>
-        requireNonEmpty("regulatorySection", name, "regulatoryInfo", ri)
-        requireNonEmpty("regulatorySection", name, "reachStatus", rs)
-        requireNonEmpty("regulatorySection", name, "usInventory", us)
-        validateLocales(name, "regulatorySection", overlays, regulatoryKeys)
-      case Cst.Node("otherInformationSection", List(
-          Cst.Leaf(rd), Cst.Leaf(oi), overlays)) =>
-        requireNonEmpty("otherInformationSection", name, "revisionDate", rd)
-        requireNonEmpty("otherInformationSection", name, "otherInformation", oi)
-        validateLocales(name, "otherInformationSection", overlays, otherInformationKeys)
-      case Cst.Node("outline", List(_, _, sectionsField)) =>
-        val refs = sectionsField match
-          case Cst.Node("none", _) => Nil
-          case Cst.Node("some", List(Cst.Node("list", rs))) => rs
-          case Cst.Node("list", rs) => rs // tolerate non-opt shape
-          case other =>
-            errs += s"outline '$name': bad sections ${other.render}"
-            Nil
-        val nums = List.newBuilder[Int]
-        for r <- refs do r match
-          case Cst.Leaf(ref) =>
-            m.get(ref) match
-              case Some(sec) =>
-                sectionNumber(sec) match
-                  case Some(n) if checkSectionNumber(n.toString) => nums += n
-                  case Some(n) =>
-                    errs += s"outline '$name' section '$ref' number $n fails sectionNumberOk"
-                  case None =>
-                    errs += s"outline '$name' references '$ref' which is not a section body"
-              case None =>
-                errs += s"outline '$name' references unknown section '$ref'"
-          case other => errs += s"outline '$name': bad section ref ${other.render}"
-        val ns = nums.result()
-        if ns.distinct.sizeIs != ns.size then
-          errs += s"outline '$name' has duplicate section numbers"
-        if ns != ns.sorted then
-          errs += s"outline '$name' section numbers not ascending: ${ns.mkString(",")}"
+      case Cst.Node(tag, fields) if typedSectionTags.contains(tag) =>
+        val keys = typedSectionKeys.getOrElse(tag, Nil)
+        val overlays = fields.lift(keys.length)
+        overlays.foreach { ov =>
+          val allowed = keys.toSet
+          val seen = scala.collection.mutable.HashSet.empty[(String, String)]
+          for row <- localeRows(ov) do row match
+            case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
+              if k.isEmpty then errs += s"$tag '$name': empty locale key"
+              else if !allowed.contains(k) then
+                errs += s"$tag '$name': locale key '$k' not in typed slots"
+              else if lang.isEmpty then errs += s"$tag '$name' locale '$k': empty lang"
+              else if !seen.add((k, lang)) then
+                errs += s"$tag '$name' duplicate locale '$k' lang '$lang'"
+            case Cst.Node("fieldLocaleRef", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))) =>
+              if k.isEmpty then errs += s"$tag '$name': empty locale key"
+              else if !allowed.contains(k) then
+                errs += s"$tag '$name': locale key '$k' not in typed slots"
+              else if lang.isEmpty then errs += s"$tag '$name' locale '$k': empty lang"
+              else if ref.isEmpty then errs += s"$tag '$name' locale '$k': empty phrase ref"
+              else if !defined(ref) then
+                errs += s"$tag '$name' locale '$k' references unknown phrase '$ref'"
+              else if !seen.add((k, lang)) then
+                errs += s"$tag '$name' duplicate locale '$k' lang '$lang'"
+            case other => errs += s"$tag '$name': bad locale ${other.render}"
+        }
       case _ => ()
     val es = errs.result()
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
@@ -482,7 +352,7 @@ final class Sds(packs: PackAccess):
     else
       Merge.threeWay(
         language, base, baseChange, shadowChange,
-        ModuleGate.host("sds.validate")(validate))
+        ModuleGate.fromJudgment("sds.validate")(validate))
 
   // ---- the compiled document view (a bidirectional surface, M47) ----
 

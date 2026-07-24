@@ -118,13 +118,13 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- **Scala orchestration residual (platform debt):** `Sds.validate` /
-  `EuClp.conform` outline walks, `SectionReport.toCst`, effectful causal step
-  bodies (CAS/Branches/Ed25519). Law citations are pack-judged (`citeOk`);
-  free-text scan is migration-only. `WorkflowRunner.HandlerRegistry` binds
-  step→handler-id→impl (ActionKey digests next). Still open: whole-module
-  structural judgments + pack-declared ActionKey step bindings. Domain apps
-  must not grow new Scala.
+- **Host = generic effects only:** `ModuleStructural` + `Search.prove` gate
+  SDS validate; `EuClp.conform` composes that gate + title judgments;
+  `OutlineProjector` walks reports; `sds-workflow` `bind` +
+  `HandlerRegistry` dispatch causal steps by handler id. Forever-host:
+  Ed25519 / CAS / FS / ledger implementations registered under those ids —
+  not domain match arms. ActionKey digests may replace string handler ids.
+  Domain apps must not grow new Scala.
 - Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
   research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;

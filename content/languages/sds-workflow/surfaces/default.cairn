@@ -3,11 +3,13 @@ surface default for sds-workflow {
     keyword step;
     keyword workflow;
     keyword steps;
+    keyword bind;
     punct "(";
     punct ")";
     punct ",";
     syntax wfObj += step : tok "step" name name;
     syntax wfObj += workflow : tok "workflow" name tok "steps" tok "(" sepby1 name "," tok ")";
+    syntax wfObj += bind : tok "bind" name name;
     top wfObj;
   }
 }

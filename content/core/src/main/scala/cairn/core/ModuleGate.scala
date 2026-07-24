@@ -30,6 +30,13 @@ object ModuleGate:
   def host(judgment: String)(f: Module => Either[String, Unit]): ModuleGate =
     ModuleGate(judgment, m => f(m).left.map(Canon.CStr.apply))
 
+  /** Same witness tagging as [[host]], named for pack-declared gates
+    * (`sds.validate`, `law.validate`) whose body is Search.prove +
+    * [[ModuleStructural]] — not an open-ended domain closure.
+    */
+  def fromJudgment(judgment: String)(f: Module => Either[String, Unit]): ModuleGate =
+    host(judgment)(f)
+
   /** Run `gate` after a successful ΔL apply (migration, branch accept,
     * structured edit). Failure is a judgment-tagged [[Canon]] detail.
     */

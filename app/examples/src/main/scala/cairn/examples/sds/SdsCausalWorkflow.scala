@@ -89,14 +89,14 @@ object SdsCausalWorkflow:
       branches.commitTip(name, tip)
 
     val runnerSteps = wf.steps.map(s => WorkflowRunner.Step(s.name, s.phase))
-    // Named handler registry — pack declares order; miss fails closed (no match fallthrough).
-    val handlers: Map[String, WorkflowRunner.Handler] = Map(
-      "author" -> { _ =>
+    // Pack binds step→handlerId; composition root supplies implementations by id.
+    val handlersById: Map[String, WorkflowRunner.Handler] = Map(
+      "branches_forkUnderDomain" -> { _ =>
         SdsDomainTree.underSds(branches, "sds-author", Some(base))
           .fold(e => throw RuntimeException(e), identity)
         Right(base.digest.short)
       },
-      "shadow" -> { _ =>
+      "delta_tipCommit" -> { _ =>
         val shadowCs = parse(
           """{ add industrial = shadow cleanerProduct overrides h225 with "Extremely flammable - industrial grade" ; }""")
         val tip = SemanticRepository.tipAfter(lang, base, shadowCs)
@@ -105,7 +105,7 @@ object SdsCausalWorkflow:
         underSdsTip("sds-industrial", tip)
         Right(tip.tipDigest.short)
       },
-      "rebase" -> { _ =>
+      "branches_merge" -> { _ =>
         val pctCs = parse("""{ replace cleaner = mixture of ( acetone pct 70 , secretBlend pct 15 ) ; }""")
         val pctTip = SemanticRepository.tipAfter(lang, base, pctCs)
           .fold(e => throw RuntimeException(e), identity)
@@ -118,7 +118,7 @@ object SdsCausalWorkflow:
           case Left(e) => throw RuntimeException(e)
         Right(if rebaseMerged then "merged" else "conflict")
       },
-      "conflict" -> { _ =>
+      "delta_rebaseConflictProbe" -> { _ =>
         val shadowCs = parse(
           """{ add industrial = shadow cleanerProduct overrides h225 with "Extremely flammable - industrial grade" ; }""")
         val phraseCs = parse(
@@ -128,14 +128,14 @@ object SdsCausalWorkflow:
           case Right(_) => Set.empty
         Right(conflictOverlap.mkString(","))
       },
-      "approve" -> { _ =>
+      "branches_commitTip" -> { _ =>
         val tip = industrialTip.getOrElse(throw RuntimeException("shadow before approve"))
         underSdsTip("sds-approved", tip)
         val approved = branches.headModule("sds-approved").fold(e => throw RuntimeException(e), identity)
         approvedDigest = approved.digest
         Right(approvedDigest.short)
       },
-      "sign" -> { _ =>
+      "evidence_signAttach" -> { _ =>
         val tip = industrialTip.getOrElse(throw RuntimeException("shadow before sign"))
         val kp = Keypair.dev("alice-sds")
         alice = Some(kp)
@@ -177,7 +177,7 @@ object SdsCausalWorkflow:
           branches.loadChangeHistory("sds-hist", lang).fold(e => throw RuntimeException(e), _.length)
         Right(tipSigHex.take(16))
       },
-      "publish" -> { _ =>
+      "ledger_publishHead" -> { _ =>
         val kp = alice.getOrElse(throw RuntimeException("sign before publish"))
         val node = Node(work.resolve("ledger"), EffectContexts.forLedger())
         val auth = Map(kp.name -> kp.publicBytes)
@@ -189,7 +189,8 @@ object SdsCausalWorkflow:
         Right(if ledgerPublished then "published" else "failed")
       },
     )
-    val runner = WorkflowRunner.run(runnerSteps, handlers)
+    val registry = WorkflowRunner.HandlerRegistry(wf.binds, handlersById)
+    val runner = WorkflowRunner.run(runnerSteps, registry)
       .fold(e => throw RuntimeException(e), identity)
 
     if runner.completed != wf.steps.map(_.name) then
