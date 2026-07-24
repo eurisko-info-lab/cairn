@@ -1,7 +1,7 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
+import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, ModuleGate, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
 import cairn.systeminterface.PackAccess
@@ -121,6 +121,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       phase: String, // "cas" | "refs" | "publish" | "done"
       /** Provisional digests (provenance, tip base, …) protected as GC roots. */
       extras: List[Digest] = Nil,
+      /** Domain-gate judgment that validated `moduleDigest`, if any (survives
+        * crash-recovery so [[applyRefs]] can restore [[BranchManifest.gateEvidence]]).
+        */
+      gateJudgment: Option[String] = None,
   ):
     def rootDigests: List[Digest] =
       moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras
@@ -134,7 +138,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         s"causal=${causalHistoryRoot.map(_.hex).getOrElse("")}",
         s"historyAppend=$historyAppend",
         s"phase=$phase",
-        s"extras=${extras.map(_.hex).mkString(",")}")
+        s"extras=${extras.map(_.hex).mkString(",")}",
+        s"gateJudgment=${gateJudgment.getOrElse("")}")
       lines.mkString("\n")
 
   private object AcceptJournal:
@@ -153,7 +158,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         histAppend = m.get("historyAppend").forall(_ != "false")
         phase <- m.get("phase").toRight("accept journal: missing phase")
         extras = m.getOrElse("extras", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
-      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras)
+        gateJudgment = m.get("gateJudgment").filter(_.nonEmpty)
+      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras, gateJudgment)
 
   private def writeJournal(j: AcceptJournal): Unit =
     refsMkdirs()
@@ -184,7 +190,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       modArt.key,
       acceptedChange = Some(vcsArt.key.valueHash),
       parents = j.parents,
-      causalHistoryRoot = j.causalHistoryRoot)
+      causalHistoryRoot = j.causalHistoryRoot,
+      gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil))
 
   /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
     * On ledger failure after refs, journal stays at phase=publish for recovery.
@@ -207,6 +214,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       provenanceTool: String,
       historyAppend: Boolean = true,
       extraPuts: List[Artifact] = Nil,
+      gateJudgment: Option[String] = None,
   ): Either[String, BranchManifest] =
     if module.digest != vcs.result then
       Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
@@ -225,7 +233,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           .fold(e => throw RuntimeException(casErr(e)), identity)
       val extras = extraKeys.map(_.valueHash) :+ provDig
       var journal = AcceptJournal(
-        branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras)
+        branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras,
+        gateJudgment)
       writeJournal(journal)
       val manifest = applyRefs(journal)
       journal = journal.copy(phase = "refs")
@@ -494,6 +503,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       parents: List[Digest] = Nil,
       causalHistoryRoot: Option[Digest] = None,
       conflictState: Option[Digest] = None,
+      /** Domain-gate judgment(s) that validated `newHead`'s module, if any.
+        * Overwrites (not accumulates) — reflects this accept only, since an
+        * un-gated advance genuinely does not carry forward a prior gate's claim.
+        */
+      gateEvidence: List[(String, Digest)] = Nil,
   ): BranchManifest =
     val cur = load(branch)
     val nextHistory = acceptedChange match
@@ -510,6 +524,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       conflictState = conflictState,
       changeHistory = nextHistory,
       certificates = cur.certificates,
+      gateEvidence = gateEvidence,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)
@@ -986,6 +1001,29 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         language, SemanticRepository.Tip(base, tipMod, vcs.change))
     yield checked
 
+  /** Persist a merge/gate conflict on `into` — conflict artifact stored,
+    * `conflictState` recorded on the branch manifest, head left unchanged.
+    * Shared by every acceptance path (two-sided merge, fast-forward,
+    * one-sided) so a domain-gate rejection is recorded identically no matter
+    * which path produced it.
+    */
+  private def markConflict(into: String, conflict: Merge.Conflict): Merge.Conflict =
+    val conflictKey = putArt(conflict.artifact)
+    val cur = load(into)
+    val marked = BranchManifest(
+      into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
+      cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
+      changeHistory = cur.changeHistory,
+      certificates = cur.certificates,
+      gateEvidence = cur.gateEvidence,
+      primaryAncestor = cur.primaryAncestor,
+      references = cur.references,
+      domainAgreement = cur.domainAgreement)
+    putArt(marked.artifact) // conflictState recorded; head unchanged
+    refsMkdirs()
+    refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
+    conflict
+
   /** Semantic merge into `into`: integrate two change histories relative to
     * `base`, then journaled transactional accept. On conflict, the conflict
     * artifact is stored in CAS and the branch head is left unchanged.
@@ -1000,25 +1038,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeOurs: Cst,
       changeTheirs: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      gate: ModuleGate = ModuleGate.passthrough,
       publish: Option[Publish] = None,
       parentBranches: List[String] = Nil,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration).flatMap {
+    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, gate).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
-        val conflictKey = putArt(conflict.artifact)
-        val cur = load(into)
-        val marked = BranchManifest(
-          into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
-          cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
-          changeHistory = cur.changeHistory,
-          certificates = cur.certificates,
-          primaryAncestor = cur.primaryAncestor,
-          references = cur.references,
-          domainAgreement = cur.domainAgreement)
-        putArt(marked.artifact) // conflictState recorded; head unchanged
-        refsMkdirs()
-        refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
-        Right(Left(conflict))
+        Right(Left(markConflict(into, conflict)))
       case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
         val parentDigests =
           if parentBranches.nonEmpty then
@@ -1029,6 +1055,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           provenanceParents = List(base.digest),
           provenanceTool = "semantic-merge",
           extraPuts = List(base.artifact),
+          gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment),
         ).map(Right(_))
     }
 
@@ -1042,6 +1069,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       ours: String,
       theirs: String,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      gate: ModuleGate = ModuleGate.passthrough,
       publish: Option[Publish] = None,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
@@ -1072,34 +1100,54 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDig.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
       parentDigests = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash))
+      gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment)
       out <- (stackedA, stackedB) match
         case (None, None) =>
           headModule(ours).flatMap { m =>
-            // Fast-forward: put tip module, advance without a new change-set.
-            val modKey = putArt(m.artifact)
-            Right(Right(advance(
-              into, modKey,
-              acceptedChange = load(ours).acceptedChange,
-              parents = parentDigests,
-              causalHistoryRoot = Some(baseDig))))
+            // Fast-forward: no new ΔL apply happens here, but `into` is still
+            // accepting a module it has never gate-checked under `into`'s own
+            // domain gate — require it, same as every other acceptance path.
+            gate(m) match
+              case Left(w) =>
+                Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
+              case Right(()) =>
+                val modKey = putArt(m.artifact)
+                Right(Right(advance(
+                  into, modKey,
+                  acceptedChange = load(ours).acceptedChange,
+                  parents = parentDigests,
+                  causalHistoryRoot = Some(baseDig),
+                  gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil))))
           }
         case (Some((_, chA)), Some((_, chB))) =>
-          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs))
+          merge(language, into, base, chA, chB, migration, gate, publish, List(ours, theirs))
         case (Some((_, chA)), None) =>
           SemanticRepository.commit(language, base, chA).flatMap { (mod, vcs) =>
-            transactionalAccept(
-              into, mod, vcs, parentDigests, Some(baseDig), publish,
-              provenanceParents = List(base.digest),
-              provenanceTool = "semantic-merge",
-            ).map(Right(_))
+            gate(mod) match
+              case Left(w) =>
+                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
+                Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
+              case Right(()) =>
+                transactionalAccept(
+                  into, mod, vcs, parentDigests, Some(baseDig), publish,
+                  provenanceParents = List(base.digest),
+                  provenanceTool = "semantic-merge",
+                  gateJudgment = gateJudgment,
+                ).map(Right(_))
           }
         case (None, Some((_, chB))) =>
           SemanticRepository.commit(language, base, chB).flatMap { (mod, vcs) =>
-            transactionalAccept(
-              into, mod, vcs, parentDigests, Some(baseDig), publish,
-              provenanceParents = List(base.digest),
-              provenanceTool = "semantic-merge",
-            ).map(Right(_))
+            gate(mod) match
+              case Left(w) =>
+                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
+                Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
+              case Right(()) =>
+                transactionalAccept(
+                  into, mod, vcs, parentDigests, Some(baseDig), publish,
+                  provenanceParents = List(base.digest),
+                  provenanceTool = "semantic-merge",
+                  gateJudgment = gateJudgment,
+                ).map(Right(_))
           }
     yield out
 

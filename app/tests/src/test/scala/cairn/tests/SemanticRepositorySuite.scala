@@ -79,6 +79,101 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)
 
+  /** Stand-in for a whole-module domain invariant like SDS's percentage-sum
+    * check: caps total def count. Each of two disjoint edits below stays
+    * under the cap alone; only their join exceeds it — exactly the shape a
+    * footprint-disjointness check cannot catch, but a [[ModuleGate]] can.
+    */
+  private def capacityGate(capacity: Int): ModuleGate =
+    ModuleGate.fromJudgment("test.capacity") { m =>
+      if m.defs.size > capacity then Left(s"module has ${m.defs.size} defs, capacity is $capacity")
+      else Right(())
+    }
+
+  test("ModuleGate: two disjoint edits individually pass but jointly exceed a whole-module capacity"):
+    val gate = capacityGate(3)
+    val cA = parseChange("{ add fromA = true ; }")
+    val cB = parseChange("{ add fromB = false ; }")
+    val (modA, _) = SemanticRepository.commit(lang, m0, cA).fold(e => fail(e), identity)
+    val (modB, _) = SemanticRepository.commit(lang, m0, cB).fold(e => fail(e), identity)
+    assertEquals(gate(modA), Right(()))
+    assertEquals(gate(modB), Right(()))
+    assert(SemanticRepository.commutes(lang, cA, cB))
+    // Disjoint footprints commute cleanly (no name overlap) — the whole-module
+    // gate, not commutation, is what must catch the joint capacity breach.
+    Merge.threeWay(lang, m0, cA, cB, gate) match
+      case Left(conflict) =>
+        assert(conflict.witness.exists {
+          case Merge.ConflictWitness.DomainValidationFailed("test.capacity", _) => true
+          case _ => false
+        }, conflict.witness.toString)
+      case Right(_) => fail("expected the whole-module gate to reject the joint merge")
+
+  test("Branches.mergeBranches: gate rejects two disjoint edits that jointly exceed capacity"):
+    val dir = Files.createTempDirectory("cairn-semrepo-gate")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val gate = capacityGate(3)
+    val cA = parseChange("{ add fromA = true ; }")
+    val cB = parseChange("{ add fromB = false ; }")
+    branches.importModule("base", m0)
+    val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
+    branches.commitTip("feat-a", tipA)
+    branches.commitTip("feat-b", tipB)
+    // Without a gate: the everyday repository path used to accept this silently.
+    branches.mergeBranches(lang, "main-ungated", "feat-a", "feat-b") match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("main-ungated").fold(e => fail(e), identity)
+        assertEquals(head.defs.size, 4) // a, b, fromA, fromB — over the gate's cap of 3
+        assertEquals(manifest.gateEvidence, Nil)
+      case other => fail(other.toString)
+    // With the gate supplied: the same merge is caught as a domain-validation conflict.
+    branches.mergeBranches(lang, "main-gated", "feat-a", "feat-b", gate = gate) match
+      case Right(Left(conflict)) =>
+        assert(conflict.witness.exists {
+          case Merge.ConflictWitness.DomainValidationFailed("test.capacity", _) => true
+          case _ => false
+        }, conflict.witness.toString)
+        assert(!branches.load("main-gated").head.isDefined)
+      case other => fail(other.toString)
+
+  test("Branches.mergeBranches: gate runs on the one-sided fast-path too, and its judgment is retained on accept"):
+    val dir = Files.createTempDirectory("cairn-semrepo-gate-onesided")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val gate = capacityGate(3)
+    val cAnchor = parseChange("{ add anchor = true ; }")
+    val tipAnchor = SemanticRepository.tipAfter(lang, m0, cAnchor).fold(e => fail(e), identity)
+    // theirs is exactly the shared anchor commit — nothing beyond it, so any
+    // merge here is one-sided (theirs's suffix past the LCA is empty).
+    branches.commitTip("theirs", tipAnchor)
+
+    // ours diverges beyond theirs with an over-capacity addition (3 -> 5 defs).
+    branches.commitTip("ours-over", tipAnchor)
+    val cOver = parseChange("{ add fromA = true ; add fromA2 = true ; }")
+    val tipOver = SemanticRepository.tipAfter(lang, tipAnchor.tip, cOver).fold(e => fail(e), identity)
+    branches.commitTip("ours-over", tipOver)
+    branches.mergeBranches(lang, "into-gated", "ours-over", "theirs", gate = gate) match
+      case Right(Left(conflict)) =>
+        assert(conflict.witness.exists {
+          case Merge.ConflictWitness.DomainValidationFailed("test.capacity", _) => true
+          case _ => false
+        }, conflict.witness.toString)
+      case other => fail(other.toString)
+
+    // ours diverges beyond theirs with a capacity-preserving edit (stays at 3 defs) — accepts,
+    // and the accepted manifest retains the judgment + evidence digest.
+    branches.commitTip("ours-ok", tipAnchor)
+    val cOk = parseChange("{ replace anchor = false ; }")
+    val tipOk = SemanticRepository.tipAfter(lang, tipAnchor.tip, cOk).fold(e => fail(e), identity)
+    branches.commitTip("ours-ok", tipOk)
+    branches.mergeBranches(lang, "into-gated-ok", "ours-ok", "theirs", gate = gate) match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("into-gated-ok").fold(e => fail(e), identity)
+        assertEquals(manifest.gateEvidence, List("test.capacity" -> head.digest))
+      case other => fail(other.toString)
+
   test("Branches.publishHead: optional ledger SetBranchHead after accept"):
     val dir = Files.createTempDirectory("cairn-semrepo-pub")
     val cas = DiskCas(dir.resolve("cas"))

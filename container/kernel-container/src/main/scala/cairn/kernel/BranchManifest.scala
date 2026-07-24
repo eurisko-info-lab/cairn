@@ -45,6 +45,12 @@ final case class BranchManifest(
       * under namespace governance (optional — bootstrap forks may omit it).
       */
     domainAgreement: Option[Digest] = None,
+    /** Domain-gate judgment(s) that validated the currently accepted module,
+      * paired with the module digest each was checked against (e.g.
+      * `"sds.validate" -> moduleDigest`). Reflects only the current head's
+      * acceptance, not full merge history; empty when no gate ran.
+      */
+    gateEvidence: List[(String, Digest)] = Nil,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -59,7 +65,9 @@ final case class BranchManifest(
     "primaryAncestor" -> primaryAncestor.fold(Canon.CTag("none", Canon.CStr("")))(n =>
       Canon.CTag("some", Canon.CStr(n))),
     "references" -> Canon.CList(references.map(Canon.CStr.apply)),
-    "domainAgreement" -> optDigest(domainAgreement))
+    "domainAgreement" -> optDigest(domainAgreement),
+    "gateEvidence" -> Canon.CList(gateEvidence.map { (j, d) =>
+      Canon.cmap("judgment" -> Canon.CStr(j), "evidence" -> Canon.CStr(d.hex)) }))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -95,7 +103,10 @@ object BranchManifest:
       certificates = m.get("certificates").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
       primaryAncestor = m.get("primaryAncestor").flatMap(name),
       references = m.get("references").map(_.asList.map(_.asStr).filter(_.nonEmpty)).getOrElse(Nil),
-      domainAgreement = m.get("domainAgreement").flatMap(dig))
+      domainAgreement = m.get("domainAgreement").flatMap(dig),
+      gateEvidence = m.get("gateEvidence").map(_.asList.map { c =>
+        c.field("judgment").asStr -> Digest(c.field("evidence").asStr)
+      }).getOrElse(Nil))
 
 /** Pure checks for ledger domain ancestry (trunk / primary / references). */
 object DomainBranch:
