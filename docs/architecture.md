@@ -389,18 +389,18 @@ LeanCore `#check` envelope.
   Not multi-node consensus; `BftQuorum` is separate research/sim.
 - **SDS vs report formats** — SDS (`languages/sds.cairn`) is semantic only.
   JSON/XML/CSV/PDF are `sds-report` projection surfaces that *consume* SDS
-  modules — not SDS constructors. Host residual: `toCst`; print path is
-  `SectionReport.printSurface`; PDF bytes via `PdfMinimal`.
+  modules — not SDS constructors. Module path: `OutlineProjector` +
+  `SectionReport.printSurface`; PDF bytes via `PdfMinimal`. Residual:
+  `ChemicalDoc`→`toCst` emit/view path (disk chemicals are SoT).
 - **Dirty-subtree (M7)** — `dirtyOps` / `putReassociated`: structural equality
   + LCS delete alignment; inserts without an original span still parent-reprint.
 - **SDS workflow / evidence packs** — `languages/sds-workflow.cairn` +
   `causal.cairn` declare the author→…→publish sequence (`workflowStepOk` /
-  `workflowPhaseOk`). `languages/sds-certificate.cairn` +
+  `workflowPhaseOk`) and `bind` handler ids. `languages/sds-certificate.cairn` +
   `workflow-kinds.cairn` declare approval/sign/publication kinds
-  (`certificateKindOk`). `SdsCausalWorkflow` plants `SdsDomainTree`
-  (`PKI`/`CHEMISTRY` on trunk, `LAW`←`PKI`, `SDS`←`LAW`+ref `CHEMISTRY`) then
-  runs work branches under `SDS`. Residual: CAS/Branches/Ed25519/ledger
-  orchestration stays Scala.
+  (`certificateKindOk`). `SdsCausalWorkflow` plants `SdsDomainTree` then
+  dispatches via `HandlerRegistry`. Forever-host: CAS/Branches/Ed25519/ledger
+  handler bodies (not domain match arms).
 - **Phase0 MemCas/DiskCas + WaveA M4 algo agility** — intentional direct
   trait-contract tests (no authority surface). Branch seeds, admin, chunking,
   Unison host glue, sync paths, Browser stats, provenance `why`, Branches

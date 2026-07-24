@@ -1,0 +1,8 @@
+language sds-document {
+  fragment doc provides sdsDocument {
+    sort Doc tree;
+    sort HazardLine tree;
+    ctor doc : Doc(Label, Lines);
+    ctor hazardLine : HazardLine(Name, Text);
+  }
+}

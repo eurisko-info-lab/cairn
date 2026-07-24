@@ -58,17 +58,13 @@ object SectionReport:
 
   private def fieldLines(sec: Cst, lang: String): List[Cst] = sec match
     case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-      val preferred = fields.collect {
-        case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(v))) if l == lang =>
-          k -> v
-      }.toMap
-      val en = fields.collect {
-        case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf("en"), Cst.Leaf(v))) =>
-          k -> v
-      }.toMap
-      (en.keySet ++ preferred.keySet).toList.sorted.map { k =>
-        val v = preferred.getOrElse(k, en(k))
-        Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v))
+      val keys = fields.collect {
+        case Cst.Node("sectionField", List(Cst.Leaf(k), _, _)) => k
+      }.distinct.sorted
+      keys.flatMap { k =>
+        MultilingualResolve.pick(
+          ModuleFieldResolve.keyedRows(fields, Set("sectionField"), 0, 1, 2, k),
+          lang).map(v => Cst.node("fieldLine", Cst.Leaf(k), Cst.Leaf(v)))
       }
     case Cst.Node(tag, _) if sds.typedSectionTags.contains(tag) =>
       val keys = sds.typedSectionKeys.getOrElse(tag, Nil)

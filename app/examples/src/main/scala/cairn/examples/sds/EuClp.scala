@@ -3,7 +3,7 @@ import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.runtime.PackLoader
+import cairn.runtime.{OutlineProjector, PackLoader}
 import cairn.user.sds.Sds
 
 /** EU-CLP / REACH Annex II regulatory profile pack (versioned language).
@@ -11,8 +11,8 @@ import cairn.user.sds.Sds
   * Language: [[languages/eu-clp.cairn]] + surface. Instance module:
   * [[languages/sds/profiles/eu-clp-annex-ii.cairn]] (profile version `"1"`).
   *
-  * [[conform]] composes SDS module gate + pack judgments — not a second
-  * SDS outline walk.
+  * [[conform]] composes SDS module gate + pack judgments over
+  * [[OutlineProjector]] refs — not a second SDS outline walk.
   */
 object EuClp:
   private lazy val packs = PackLoader(EffectContexts.forPackLoader())
@@ -75,16 +75,9 @@ object EuClp:
         errs += "no outline binding in SDS module"
         Nil
       case Some(on) =>
-        m.get(on) match
-          case Some(Cst.Node("outline", List(_, _, sectionsField))) =>
-            val refs = sectionsField match
-              case Cst.Node("none", _) => Nil
-              case Cst.Node("some", List(Cst.Node("list", rs))) =>
-                rs.collect { case Cst.Leaf(r) => r }
-              case Cst.Node("list", rs) => rs.collect { case Cst.Leaf(r) => r }
-              case other =>
-                errs += s"outline '$on': bad sections ${other.render}"
-                Nil
+        OutlineProjector.outlineRefs(m, on) match
+          case Left(e) => errs += e; Nil
+          case Right((_, _, refs)) =>
             val collected = List.newBuilder[Int]
             for ref <- refs do
               m.get(ref).flatMap(sds.sectionNumber) match
@@ -99,12 +92,6 @@ object EuClp:
                 case None =>
                   errs += s"outline '$on' references non-section '$ref'"
             collected.result()
-          case Some(other) =>
-            errs += s"'$on' is not an outline: ${other.render}"
-            Nil
-          case None =>
-            errs += s"no outline '$on'"
-            Nil
     val es = errs.result()
     ConformanceReport(
       outlineName = chosen.getOrElse(""),

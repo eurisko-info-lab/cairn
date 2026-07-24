@@ -1,0 +1,12 @@
+surface default for sds-document {
+  fragment doc {
+    keyword SDS;
+    keyword hazard;
+    punct ":";
+    syntax doc += doc : tok "SDS" tok ":" str star cat line;
+    syntax line += hazardLine : tok "hazard" anyident tok ":" str;
+    print doc : lit "SDS:" sp strfield 0 nl sep 1 "\n";
+    print hazardLine : lit "hazard" sp field 0 sp lit ":" sp strfield 1;
+    top doc;
+  }
+}

@@ -61,7 +61,15 @@ final class Law(packs: PackAccess):
 
   private val citation = """Section\s+(\S+)""".r
 
-  /** Migration aid: free-text "Section N" must have a matching structured `cites`. */
+  /** Migration aid, intentionally retained (not residual debt): the model
+    * statute's prose still narrates "Section N" cross-references inline
+    * (`languages/law/acts/model-chemical-safety.cairn`), so this catches
+    * prose/structure drift — a free-text mention with no matching structured
+    * `cites` term, or one pointing at a section that doesn't exist. If a
+    * future statute corpus is structured-only (no prose citations), delete
+    * this and the corresponding `ParitySuite` assertion instead of carrying
+    * it forward unused.
+    */
   def freeTextCiteCheck(m: Module): List[String] =
     val sectionNums = sectionByNumber(m).keySet
     val structured = m.defs.collect {

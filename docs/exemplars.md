@@ -13,9 +13,33 @@ loaner) are Cairn. Any domain-specific Scala is a failure of the platform —
 not an app feature. Statute/chemical fixtures load from disk via
 [[cairn.runtime.ModuleSource]] (e.g. `languages/law/acts/`). Forever-host
 concerns (Ed25519, CAS, FS, ledger I/O) must be generic effects, never
-domain classes. Remaining Scala under `examples/` / `user/` is **platform debt**
-(citation gate, `Sds.validate`, causal handlers, …) to be paid down — see
-“Scala orchestration residual” below.
+domain classes.
+
+**Host boundary (paid vs residual):**
+- **Paid:** `Sds.validate` = `ModuleStructural` specs + `Search.prove`; typed
+  section keys from `SurfaceSlots`; EU-CLP titles from annex-II module (no
+  host fallback table); workflow `bind` + `HandlerRegistry`; `OutlineProjector`;
+  `MultilingualResolve` for lang→en→any; `MultilingualRestale` for the generic
+  stale-on-source-change algorithm (`PhraseStaleness`/`SectionFieldStaleness`
+  supply state tags/projection only); `Sds.render`'s product-phrase document
+  view now loads `languages/sds-document.cairn` + its `default` surface via
+  `PackLoader` — same pattern as `sds-report` — instead of a host `GrammarSpec`
+  literal.
+- **Forever-host OK:** causal handler *bodies* (CAS/Branches/Ed25519/ledger),
+  `ChemicalSource` / `ModuleSource`, PDF bytes, tutorials; `Chemicals` host
+  maps (`Acetone.pure`/`.thin`, `Ethanol.pure`/`.thin`) — scoped to
+  `EmitChemicalCairn`'s one-shot fixture regeneration only; every other call
+  site (tutorials, workflow, `SectionReport`, tests) loads the disk `.cairn`
+  under `languages/sds/chemicals/` via `ChemicalSource`, which stays SoT;
+  `Law.freeTextCiteCheck` — a named migration aid keeping the model statute's
+  inline "Section N" prose consistent with its structured `cites` terms; the
+  one fixture is prose *and* structure (not structured-only), so there is
+  nothing to delete yet — drop it if a future statute corpus stops narrating
+  citations in prose; workflow `bind` handler ids as pack-declared strings
+  (ActionKey digests are optional hardening, not required for purity).
+- **Still debt:** none for the SDS/platform gate — Phrase/SectionField
+  staleness peel uses `ModuleFieldResolve`; restale uses `MultilingualRestale`;
+  rewrite ΔL emitters remain thin host glue (ΔL construction is forever-host).
 
 **Changes:** free ΔL only — `Delta.deltaOf(L)` derives `add` / `remove` / …
 on demand. It is **never materialized** as checked-in `.cairn` (no `dpki` /
@@ -118,17 +142,12 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- **Host = generic effects only:** `ModuleStructural` + `Search.prove` gate
-  SDS validate; `EuClp.conform` composes that gate + title judgments;
-  `OutlineProjector` walks reports; `sds-workflow` `bind` +
-  `HandlerRegistry` dispatch causal steps by handler id. Forever-host:
-  Ed25519 / CAS / FS / ledger implementations registered under those ids —
-  not domain match arms. ActionKey digests may replace string handler ids.
-  Domain apps must not grow new Scala.
 - Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
   research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
   lang-scoped shadows still absent (shadows are lang-blind).
+- Residual debt listed under **Host boundary** above — SDS/platform gate is
+  paid; remaining Scala is forever-host OK (effects, emit fixtures, tutorials).
 
 ## Bend — on par with GRANITE computation *intent* (surface profile)
 

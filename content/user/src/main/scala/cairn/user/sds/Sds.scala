@@ -13,20 +13,16 @@ import cairn.core.*
   *
   * Object language: [[languages/sds.cairn]] (`provides sds requires law`).
   * Closed composition pulls Law + PKI; compose without them fails.
-  * ΔSDS = generic ΔL + domain validation. Scala = host glue only.
-  * Phrase + section-field staleness: `translationState` / `sectionFieldState`
-  * + `translationStateTag` judgment; host derive/apply emit real ΔSDS
-  * changesets. Regulatory conformance: ΔSDS domain gate calls `eu-clp`
-  * `sectionNumberOk` and SDS `translationStateTag` judgments (not host-only
-  * Sets); full-module [[EuClp.conform]] remains a thin host walk over those
-  * facts. Chemical instances load from `languages/sds/chemicals/` `.cairn`
-  * files (`ChemicalSource`); host maps remain emit fixtures. Report encodings
-  * (JSON/XML/CSV/PDF/XLS) are **not** SDS vocabulary — they live in the
-  * separate `sds-report` projection pack ([[cairn.examples.sds.SectionReport]])
-  * that *consumes* SDS modules/outlines.
+  * ΔSDS = generic ΔL + [[ModuleStructural]] specs + Search.prove. Typed
+  * section keys come from [[SurfaceSlots]] (surface `Tok`/`StrLeaf`), not
+  * host maps. Phrase + section-field staleness: `translationState` /
+  * `sectionFieldState` + `translationStateTag` judgment; host derive/apply
+  * emit real ΔSDS changesets. Regulatory conformance: ΔSDS domain gate
+  * calls `eu-clp` `sectionNumberOk` and SDS `translationStateTag`.
+  * Chemical instances load from `languages/sds/chemicals/` via
+  * `ChemicalSource`. Report encodings are the `sds-report` projection pack.
   * `sectionField` / `sectionFieldRef` resolve with multilingual fallback, then
-  * `sectionFieldShadow` overrides. Typed sections flatten to the same
-  * key/lang resolution path.
+  * `sectionFieldShadow` overrides.
   */
 final class Sds(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("sds")
@@ -41,89 +37,17 @@ final class Sds(packs: PackAccess):
   /** EU-CLP regulatory judgments (`sectionNumberOk`) — disk SoT via PackLoader. */
   private lazy val euClpLanguage: ComposedLanguage = packs.requireClosed("eu-clp")
 
-  private val identificationKeys: Set[String] = Set(
-    "productName", "synonyms", "recommendedUse", "usesAdvisedAgainst",
-    "supplierName", "emergencyPhone")
-  private val hazardsKeys: Set[String] = Set(
-    "classificationSummary", "hazardsNotOtherwiseClassified", "hazardPhrases",
-    "signalWord", "pictograms")
-  private val compositionKeys: Set[String] = Set(
-    "componentName", "cas", "ec", "concentration")
-  private val firstAidKeys: Set[String] = Set(
-    "generalAdvice", "inhalation", "skinContact", "eyeContact", "ingestion")
-  private val firefightingKeys: Set[String] = Set(
-    "extinguishingMedia", "unsuitableExtinguishingMedia", "specialHazards",
-    "firefighterProtection")
-  private val accidentalReleaseKeys: Set[String] = Set(
-    "personalPrecautions", "environmentalPrecautions", "cleanupMethods")
-  private val handlingStorageKeys: Set[String] = Set(
-    "handling", "storage", "storageIncompatibilities")
-  private val exposureControlsKeys: Set[String] = Set(
-    "occupationalExposureLimit", "engineeringControls", "eyeProtection",
-    "skinProtection", "respiratoryProtection")
-  private val physicalChemicalKeys: Set[String] = Set(
-    "appearance", "odor", "molecularWeight", "meltingPoint", "boilingPoint",
-    "flashPoint", "density", "solubility", "explosiveLimits")
-  private val stabilityReactivityKeys: Set[String] = Set(
-    "stability", "conditionsToAvoid", "incompatibleMaterials",
-    "hazardousDecomposition")
-  private val toxicologicalKeys: Set[String] = Set(
-    "ld50Oral", "irritation", "inhalationEffects", "carcinogenicity")
-  private val ecologicalKeys: Set[String] = Set(
-    "ecotoxicity", "persistence", "bioaccumulation", "mobility")
-  private val disposalKeys: Set[String] = Set(
-    "disposalMethods", "wasteClassification")
-  private val transportKeys: Set[String] = Set(
-    "unNumber", "properShippingName", "transportHazardClass", "packingGroup")
-  private val regulatoryKeys: Set[String] = Set(
-    "regulatoryInfo", "reachStatus", "usInventory")
-  private val otherInformationKeys: Set[String] = Set(
-    "revisionDate", "otherInformation")
+  /** Typed section ctors from the pack (declaration order ⇒ EU-CLP 1..16). */
+  lazy val typedSectionOrder: List[String] =
+    SurfaceSlots.ctorsEndingWith(language, "Section", exclude = Set("euSection"))
 
-  val typedSectionTags: Set[String] = Set(
-    "identificationSection", "hazardsSection", "compositionSection",
-    "firstAidSection", "firefightingSection", "accidentalReleaseSection",
-    "handlingStorageSection", "exposureControlsSection",
-    "physicalChemicalSection", "stabilityReactivitySection",
-    "toxicologicalSection", "ecologicalSection", "disposalSection",
-    "transportSection", "regulatorySection", "otherInformationSection")
+  lazy val typedSectionTags: Set[String] = typedSectionOrder.toSet
 
-  /** Ordered EN slot keys per typed section tag (for report / rewrite). */
-  val typedSectionKeys: Map[String, List[String]] = Map(
-    "identificationSection" -> List(
-      "productName", "synonyms", "recommendedUse", "usesAdvisedAgainst",
-      "supplierName", "emergencyPhone"),
-    "hazardsSection" -> List(
-      "classificationSummary", "hazardsNotOtherwiseClassified", "hazardPhrases",
-      "signalWord", "pictograms"),
-    "compositionSection" -> List("componentName", "cas", "ec", "concentration"),
-    "firstAidSection" -> List(
-      "generalAdvice", "inhalation", "skinContact", "eyeContact", "ingestion"),
-    "firefightingSection" -> List(
-      "extinguishingMedia", "unsuitableExtinguishingMedia", "specialHazards",
-      "firefighterProtection"),
-    "accidentalReleaseSection" -> List(
-      "personalPrecautions", "environmentalPrecautions", "cleanupMethods"),
-    "handlingStorageSection" -> List(
-      "handling", "storage", "storageIncompatibilities"),
-    "exposureControlsSection" -> List(
-      "occupationalExposureLimit", "engineeringControls", "eyeProtection",
-      "skinProtection", "respiratoryProtection"),
-    "physicalChemicalSection" -> List(
-      "appearance", "odor", "molecularWeight", "meltingPoint", "boilingPoint",
-      "flashPoint", "density", "solubility", "explosiveLimits"),
-    "stabilityReactivitySection" -> List(
-      "stability", "conditionsToAvoid", "incompatibleMaterials",
-      "hazardousDecomposition"),
-    "toxicologicalSection" -> List(
-      "ld50Oral", "irritation", "inhalationEffects", "carcinogenicity"),
-    "ecologicalSection" -> List(
-      "ecotoxicity", "persistence", "bioaccumulation", "mobility"),
-    "disposalSection" -> List("disposalMethods", "wasteClassification"),
-    "transportSection" -> List(
-      "unNumber", "properShippingName", "transportHazardClass", "packingGroup"),
-    "regulatorySection" -> List("regulatoryInfo", "reachStatus", "usInventory"),
-    "otherInformationSection" -> List("revisionDate", "otherInformation"))
+  /** Ordered EN slot keys from the SDS surface (`Tok(label) StrLeaf`), not host maps. */
+  lazy val typedSectionKeys: Map[String, List[String]] =
+    typedSectionOrder.map(tag => tag -> SurfaceSlots.labeledStrSlots(language.grammar, tag)).toMap
+
+  private lazy val sectionBodyTags: Set[String] = typedSectionTags + "euSection"
 
   /** Kernel-check `sectionNumberOk` (eu-clp pack) — ΔSDS domain gate uses this,
     * not a host-only 1..16 Set.
@@ -133,55 +57,64 @@ final class Sds(packs: PackAccess):
       CheckerCfg(euClpLanguage.judgments.values.toList),
       Cst.node("sectionNumberOk", Cst.Leaf(n))).isRight
 
-  /** EU-CLP number implied by a section body ctor. */
+  /** EU-CLP number implied by a section body ctor (pack order / euSection leaf). */
   def sectionNumber(sec: Cst): Option[Int] = sec match
     case Cst.Node("euSection", List(Cst.Leaf(num), _)) => num.toIntOption
-    case Cst.Node("identificationSection", _) => Some(1)
-    case Cst.Node("hazardsSection", _) => Some(2)
-    case Cst.Node("compositionSection", _) => Some(3)
-    case Cst.Node("firstAidSection", _) => Some(4)
-    case Cst.Node("firefightingSection", _) => Some(5)
-    case Cst.Node("accidentalReleaseSection", _) => Some(6)
-    case Cst.Node("handlingStorageSection", _) => Some(7)
-    case Cst.Node("exposureControlsSection", _) => Some(8)
-    case Cst.Node("physicalChemicalSection", _) => Some(9)
-    case Cst.Node("stabilityReactivitySection", _) => Some(10)
-    case Cst.Node("toxicologicalSection", _) => Some(11)
-    case Cst.Node("ecologicalSection", _) => Some(12)
-    case Cst.Node("disposalSection", _) => Some(13)
-    case Cst.Node("transportSection", _) => Some(14)
-    case Cst.Node("regulatorySection", _) => Some(15)
-    case Cst.Node("otherInformationSection", _) => Some(16)
+    case Cst.Node(tag, _) =>
+      val i = typedSectionOrder.indexOf(tag)
+      if i >= 0 then Some(i + 1) else None
     case _ => None
 
-  private def isSectionBody(term: Cst): Boolean = term match
-    case Cst.Node(tag, _) if tag == "euSection" || typedSectionTags.contains(tag) => true
-    case _ => false
-
-  private def localeRows(overlays: Cst): List[Cst] = overlays match
-    case Cst.Node("none", _) => Nil
-    case Cst.Node("some", List(Cst.Node("list", xs))) => xs
-    case Cst.Node("list", xs) => xs
-    case _ => Nil
-
-  // ---- domain validation (ΔSDS = generic ΔL + ModuleStructural + Search.prove) ----
+  // ---- domain validation (ΔSDS = ModuleStructural specs + Search.prove) ----
 
   def validate(m: Module): Either[String, Unit] =
-    val errs = List.newBuilder[String]
-    def defined(n: String) = m.get(n).isDefined
-    def phraseNameExists(phrase: String): Boolean =
-      m.defs.exists {
-        case (_, Cst.Node("phrase" | "corpusPhrase", List(Cst.Leaf(n), _, _))) => n == phrase
-        case _ => false
-      }
-
-    // Structural folds Search cannot express.
-    errs ++= ModuleStructural.run(m, List(
+    val typedSpecs = typedSectionKeys.toList.flatMap { (tag, keys) =>
+      List(
+        ModuleStructural.Spec.NonEmptyLeaves(tag, keys.indices.toList, keys),
+        ModuleStructural.Spec.KeyedLocaleOverlay(
+          tag, keys.length, keys.toSet,
+          "fieldLocale", "fieldLocaleRef", 0, 1, 2, tag),
+      )
+    }
+    val es = ModuleStructural.run(m, List(
       ModuleStructural.Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
+      ModuleStructural.Spec.DefinedNodeListRefs("mixture", 0, List(0), "mixture"),
+      ModuleStructural.Spec.DefinedRef("product", 1, "product"),
+      ModuleStructural.Spec.DefinedLeafList("product", 2, "product"),
+      ModuleStructural.Spec.DefinedRefs("shadow", List(0, 1), "shadow"),
+      ModuleStructural.Spec.RefTagIn(
+        "sectionFieldShadow", 0, sectionBodyTags, "sectionFieldShadow"),
+      ModuleStructural.Spec.NonEmptyLeaves(
+        "sectionFieldShadow", List(1), List("field key")),
       ModuleStructural.Spec.UniqueTuples(
         "translationState", List(List(0), List(1)), "translationState"),
+      ModuleStructural.Spec.LeafValueInCtorField(
+        "translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
+      ModuleStructural.Spec.NonEmptyLeaves(
+        "translationState", List(1, 2), List("lang", "from-hash")),
+      ModuleStructural.Spec.LeafOk(
+        "translationState", 3, checkTranslationStateTag,
+        s => s"$s: unknown state tag"),
       ModuleStructural.Spec.UniqueTuples(
         "sectionFieldState", List(List(0), List(1), List(2)), "sectionFieldState"),
+      ModuleStructural.Spec.RefTagIn(
+        "sectionFieldState", 0, sectionBodyTags, "sectionFieldState"),
+      ModuleStructural.Spec.NonEmptyLeaves(
+        "sectionFieldState", List(1, 2, 3), List("field key", "lang", "from-hash")),
+      ModuleStructural.Spec.LeafOk(
+        "sectionFieldState", 4, checkTranslationStateTag,
+        s => s"$s: unknown state tag"),
+      ModuleStructural.Spec.DefinedRef("basis", 0, "basis"),
+      ModuleStructural.Spec.NonEmptyLeaves("basis", List(1), List("Law section number")),
+      ModuleStructural.Spec.LeafOk(
+        "euSection", 0,
+        v => v.toIntOption.exists(n => checkSectionNumber(n.toString)),
+        s => s"$s fails sectionNumberOk"),
+      ModuleStructural.Spec.UniqueTuplesInList(
+        "euSection", 1, List(List(0), List(1)), "euSection",
+        Some(Set("sectionField", "sectionFieldRef"))),
+      ModuleStructural.Spec.ListChildDefinedRefs(
+        "euSection", 1, Map("sectionFieldRef" -> List(List(2))), "euSection"),
       ModuleStructural.Spec.OutlineNums(
         "outline", 2,
         (mod, ref) => mod.get(ref) match
@@ -192,110 +125,7 @@ final class Sds(packs: PackAccess):
               case Some(n) if checkSectionNumber(n.toString) => Right(n)
               case Some(n) => Left(s"section '$ref' number $n fails sectionNumberOk"),
         "outline"),
-    ))
-
-    // Typed sections: non-empty EN slots from pack key tables (no per-ctor arms).
-    for (tag, keys) <- typedSectionKeys do
-      val idxs = keys.indices.toList
-      errs ++= ModuleStructural.run(m, List(
-        ModuleStructural.Spec.NonEmptyLeaves(tag, idxs, keys)))
-
-    for (name, term) <- m.defs do term match
-      case Cst.Node("mixture", List(Cst.Node("list", comps))) =>
-        for c <- comps do c match
-          case Cst.Node("component", List(Cst.Leaf(ref), _)) =>
-            if !defined(ref) then errs += s"mixture '$name' references unknown substance '$ref'"
-          case other => errs += s"mixture '$name': bad component ${other.render}"
-      case Cst.Node("product", List(_, Cst.Leaf(mix), Cst.Node("list", phraseRefs))) =>
-        if !defined(mix) then errs += s"product '$name' references unknown mixture '$mix'"
-        for p <- phraseRefs do p match
-          case Cst.Leaf(pr) if !defined(pr) => errs += s"product '$name' references unknown phrase '$pr'"
-          case _ => ()
-      case Cst.Node("shadow", List(Cst.Leaf(prod), Cst.Leaf(phrase), _)) =>
-        if !defined(prod) then errs += s"shadow '$name' references unknown product '$prod'"
-        if !defined(phrase) then errs += s"shadow '$name' references unknown phrase '$phrase'"
-      case Cst.Node("sectionFieldShadow", List(Cst.Leaf(sec), Cst.Leaf(key), _)) =>
-        if key.isEmpty then errs += s"sectionFieldShadow '$name': empty field key"
-        m.get(sec) match
-          case Some(t) if isSectionBody(t) => ()
-          case Some(_) =>
-            errs += s"sectionFieldShadow '$name' references '$sec' which is not a section body"
-          case None =>
-            errs += s"sectionFieldShadow '$name' references unknown section '$sec'"
-      case Cst.Node("translationState", List(Cst.Leaf(phrase), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))) =>
-        if phrase.isEmpty then errs += s"translationState '$name': empty phrase ref"
-        else if !phraseNameExists(phrase) then
-          errs += s"translationState '$name' references unknown phrase '$phrase'"
-        if lang.isEmpty then errs += s"translationState '$name': empty lang"
-        if hash.isEmpty then errs += s"translationState '$name': empty from-hash"
-        if !checkTranslationStateTag(tag) then
-          errs += s"translationState '$name': unknown state tag '$tag'"
-      case Cst.Node("sectionFieldState", List(
-          Cst.Leaf(sec), Cst.Leaf(key), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))) =>
-        if sec.isEmpty then errs += s"sectionFieldState '$name': empty section ref"
-        else m.get(sec) match
-          case Some(t) if isSectionBody(t) => ()
-          case Some(_) =>
-            errs += s"sectionFieldState '$name' references '$sec' which is not a section body"
-          case None =>
-            errs += s"sectionFieldState '$name' references unknown section '$sec'"
-        if key.isEmpty then errs += s"sectionFieldState '$name': empty field key"
-        if lang.isEmpty then errs += s"sectionFieldState '$name': empty lang"
-        if hash.isEmpty then errs += s"sectionFieldState '$name': empty from-hash"
-        if !checkTranslationStateTag(tag) then
-          errs += s"sectionFieldState '$name': unknown state tag '$tag'"
-      case Cst.Node("basis", List(Cst.Leaf(target), Cst.Leaf(section))) =>
-        if !defined(target) then errs += s"basis '$name' references unknown product '$target'"
-        if section.isEmpty then errs += s"basis '$name' missing Law section number"
-      case Cst.Node("euSection", List(Cst.Leaf(num), Cst.Node("list", fields))) =>
-        num.toIntOption match
-          case Some(n) if checkSectionNumber(n.toString) => ()
-          case Some(n) => errs += s"euSection '$name' number $n fails sectionNumberOk"
-          case None => errs += s"euSection '$name' number '$num' is not an integer"
-        val seen = scala.collection.mutable.HashSet.empty[(String, String)]
-        for f <- fields do f match
-          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
-            if k.isEmpty then errs += s"euSection '$name': empty field key"
-            else if lang.isEmpty then errs += s"euSection '$name' field '$k': empty lang"
-            else if !seen.add((k, lang)) then
-              errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
-          case Cst.Node("sectionFieldRef", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))) =>
-            if k.isEmpty then errs += s"euSection '$name': empty field key"
-            else if lang.isEmpty then errs += s"euSection '$name' field '$k': empty lang"
-            else if ref.isEmpty then errs += s"euSection '$name' field '$k': empty phrase ref"
-            else if !defined(ref) then
-              errs += s"euSection '$name' field '$k' references unknown phrase '$ref'"
-            else if !seen.add((k, lang)) then
-              errs += s"euSection '$name' duplicate field '$k' lang '$lang'"
-          case other => errs += s"euSection '$name': bad field ${other.render}"
-      case Cst.Node(tag, fields) if typedSectionTags.contains(tag) =>
-        val keys = typedSectionKeys.getOrElse(tag, Nil)
-        val overlays = fields.lift(keys.length)
-        overlays.foreach { ov =>
-          val allowed = keys.toSet
-          val seen = scala.collection.mutable.HashSet.empty[(String, String)]
-          for row <- localeRows(ov) do row match
-            case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(_))) =>
-              if k.isEmpty then errs += s"$tag '$name': empty locale key"
-              else if !allowed.contains(k) then
-                errs += s"$tag '$name': locale key '$k' not in typed slots"
-              else if lang.isEmpty then errs += s"$tag '$name' locale '$k': empty lang"
-              else if !seen.add((k, lang)) then
-                errs += s"$tag '$name' duplicate locale '$k' lang '$lang'"
-            case Cst.Node("fieldLocaleRef", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(ref))) =>
-              if k.isEmpty then errs += s"$tag '$name': empty locale key"
-              else if !allowed.contains(k) then
-                errs += s"$tag '$name': locale key '$k' not in typed slots"
-              else if lang.isEmpty then errs += s"$tag '$name' locale '$k': empty lang"
-              else if ref.isEmpty then errs += s"$tag '$name' locale '$k': empty phrase ref"
-              else if !defined(ref) then
-                errs += s"$tag '$name' locale '$k' references unknown phrase '$ref'"
-              else if !seen.add((k, lang)) then
-                errs += s"$tag '$name' duplicate locale '$k' lang '$lang'"
-            case other => errs += s"$tag '$name': bad locale ${other.render}"
-        }
-      case _ => ()
-    val es = errs.result()
+    ) ++ typedSpecs)
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
 
   /** ΔSDS application: the generic ΔL, then the domain gate. */
@@ -312,24 +142,13 @@ final class Sds(packs: PackAccess):
       Cst.node("translationStateTag", Cst.Leaf(tag))).isRight
 
   /** Phrase / product / section names a shadow change-set overrides.
-    * Domain-aware footprint for GRANITE-style shadow rebase (base edit of an
-    * overridden phrase/product/section is a semantic conflict, even when ΔL
-    * names differ). Includes both phrase `shadow` and `sectionFieldShadow`.
+    * Domain-aware footprint for GRANITE-style shadow rebase — ctor indices
+    * only; walk is [[ModuleStructural.changeLeafRefs]].
     */
   def shadowOverrideTargets(change: Cst): Set[String] =
-    def items(c: Cst): List[Cst] = c match
-      case Cst.Node(_, List(Cst.Node("list", xs))) => xs
-      case Cst.Node(_, xs)                         => xs
-      case _                                       => List(c)
-    items(change).flatMap {
-      case Cst.Node(_, List(_, term)) => term match
-        case Cst.Node("shadow", List(Cst.Leaf(prod), Cst.Leaf(phrase), _)) =>
-          List(prod, phrase)
-        case Cst.Node("sectionFieldShadow", List(Cst.Leaf(sec), _, _)) =>
-          List(sec)
-        case _ => Nil
-      case _ => Nil
-    }.toSet
+    ModuleStructural.changeLeafRefs(
+      change,
+      Map("shadow" -> List(0, 1), "sectionFieldShadow" -> List(0)))
 
   /** Rebase an industrial shadow over a base revision. Disjoint overrides
     * merge; overlapping phrase/product edits surface as Merge.Conflict.
@@ -356,67 +175,41 @@ final class Sds(packs: PackAccess):
 
   // ---- the compiled document view (a bidirectional surface, M47) ----
 
-  val docGrammar: GrammarSpec = GrammarSpec(
-    name = "sds-document",
-    tokens = TokenSpec(List("SDS", "section", "hazard"), List(":"), None),
-    categories = List(
-      CategorySpec("doc", List(
-        ConstructorSpec("doc", List(
-          Elem.Tok("SDS"), Elem.Tok(":"), Elem.StrLeaf, Elem.Star(Elem.Cat("line")))))),
-      CategorySpec("line", List(
-        ConstructorSpec("hazardLine", List(
-          Elem.Tok("hazard"), Elem.NameLeaf, Elem.Tok(":"), Elem.StrLeaf))))),
-    precCategories = Nil,
-    printRules = List(
-      PrintRule("doc", List(
-        PrintSeg.Lit("SDS:"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Newline,
-        PrintSeg.SepFields(1, "\n"))),
-      PrintRule("hazardLine", List(
-        PrintSeg.Lit("hazard"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-        PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.StrField(1)))),
-    top = "doc")
+  /** Product-phrase document surface: `languages/sds-document.cairn` +
+    * `surfaces/default.cairn` — an ordinary pack grammar, not a host
+    * `GrammarSpec` literal. Loads without recompiling Scala, same as
+    * `sds-report`.
+    */
+  private lazy val docLanguage: ComposedLanguage = packs.requireClosed("sds-document")
+  def docGrammar: GrammarSpec = docLanguage.grammar
 
   /** Resolve a phrase (free-text or corpus) with multilingual fallback:
-    * exact lang → `en` → any.
+    * exact lang → `en` → any ([[MultilingualResolve]]).
     */
   def phraseText(m: Module, phraseName: String, lang: String): Option[String] =
-    def texts: List[(String, String)] = m.defs.collect {
-      case (_, Cst.Node("corpusPhrase" | "phrase", List(Cst.Leaf(n), Cst.Leaf(l), Cst.Leaf(t))))
-          if n == phraseName =>
-        (l, t)
-    }.toList
-    val all = texts
-    all.collectFirst { case (l, t) if l == lang => t }
-      .orElse(all.collectFirst { case (l, t) if l == "en" => t })
-      .orElse(all.headOption.map(_._2))
+    MultilingualResolve.pick(
+      ModuleFieldResolve.namedLangText(
+        m, Set("corpusPhrase", "phrase"), 0, 1, 2, phraseName),
+      lang)
 
   /** EN slot map + locale free-text rows for a typed section (refs excluded). */
   private def typedPlainRows(section: Cst): List[(String, String, String)] = section match
     case Cst.Node(tag, kids) if typedSectionTags.contains(tag) =>
       val keys = typedSectionKeys.getOrElse(tag, Nil)
-      if kids.length != keys.length + 1 then Nil
-      else
-        val en = keys.zip(kids.init).collect {
-          case (k, Cst.Leaf(v)) => (k, "en", v)
-        }
-        val loc = localeRows(kids.last).collect {
-          case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(t))) =>
-            (k, l, t)
-        }
-        en ++ loc
+      val en = ModuleFieldResolve.typedSlots(keys, kids).toList.map((k, v) => (k, "en", v))
+      val loc = kids.lastOption.toList.flatMap(ModuleFieldResolve.optListRows).collect {
+        case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(t))) => (k, l, t)
+      }
+      en ++ loc
     case _ => Nil
 
   private def typedRefRows(section: Cst): List[(String, String, String)] = section match
     case Cst.Node(tag, kids) if typedSectionTags.contains(tag) =>
-      localeRows(kids.last).collect {
+      kids.lastOption.toList.flatMap(ModuleFieldResolve.optListRows).collect {
         case Cst.Node("fieldLocaleRef", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(ref))) =>
           (k, l, ref)
       }
     case _ => Nil
-
-  private def resolveTypedKey(tag: String, fieldKey: String): String =
-    if tag == "toxicologicalSection" && fieldKey == "LD50Oral" then "ld50Oral"
-    else fieldKey
 
   /** Resolve a section field inside an `euSection` or typed section with the
     * same multilingual fallback as [[phraseText]]: exact lang → `en` → any.
@@ -424,22 +217,14 @@ final class Sds(packs: PackAccess):
   def sectionFieldText(section: Cst, fieldKey: String, lang: String): Option[String] =
     section match
       case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-        val all = fields.collect {
-          case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(t)))
-              if k == fieldKey =>
-            (l, t)
-        }
-        all.collectFirst { case (l, t) if l == lang => t }
-          .orElse(all.collectFirst { case (l, t) if l == "en" => t })
-          .orElse(all.headOption.map(_._2))
+        MultilingualResolve.pick(
+          ModuleFieldResolve.keyedRows(
+            fields, Set("sectionField"), 0, 1, 2, fieldKey),
+          lang)
       case Cst.Node(tag, _) if typedSectionTags.contains(tag) =>
-        val k = resolveTypedKey(tag, fieldKey)
-        val all = typedPlainRows(section).collect {
-          case (key, l, t) if key == k => (l, t)
-        }
-        all.collectFirst { case (l, t) if l == lang => t }
-          .orElse(all.collectFirst { case (l, t) if l == "en" => t })
-          .orElse(all.headOption.map(_._2))
+        MultilingualResolve.pick(
+          typedPlainRows(section).collect { case (k, l, t) if k == fieldKey => (l, t) },
+          lang)
       case _ => None
 
   /** Lookup [[sectionFieldText]] by module binding (section ref), applying
@@ -450,34 +235,22 @@ final class Sds(packs: PackAccess):
       : Option[String] =
     val overridden = m.defs.collectFirst {
       case (_, Cst.Node("sectionFieldShadow", List(Cst.Leaf(s), Cst.Leaf(k), Cst.Leaf(text))))
-          if s == sectionRef && (k == fieldKey || k == resolveTypedKey("", fieldKey)) =>
+          if s == sectionRef && k == fieldKey =>
         text
     }
     overridden.orElse {
       m.get(sectionRef).flatMap {
         case sec @ Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-          val refs = fields.collect {
-            case Cst.Node("sectionFieldRef", List(Cst.Leaf(k), Cst.Leaf(l), Cst.Leaf(ref)))
-                if k == fieldKey =>
-              (l, ref)
-          }
-          val viaRef =
-            refs.collectFirst { case (l, ref) if l == lang => ref }
-              .orElse(refs.collectFirst { case (l, ref) if l == "en" => ref })
-              .orElse(refs.headOption.map(_._2))
-              .flatMap(r => phraseText(m, r, lang))
-          viaRef.orElse(sectionFieldText(sec, fieldKey, lang))
+          MultilingualResolve.pickRef(
+            ModuleFieldResolve.keyedRows(
+              fields, Set("sectionFieldRef"), 0, 1, 2, fieldKey),
+            lang).flatMap(r => phraseText(m, r, lang))
+            .orElse(sectionFieldText(sec, fieldKey, lang))
         case sec @ Cst.Node(tag, _) if typedSectionTags.contains(tag) =>
-          val rk = resolveTypedKey(tag, fieldKey)
-          val refs = typedRefRows(sec).collect {
-            case (k, l, ref) if k == rk => (l, ref)
-          }
-          val viaRef =
-            refs.collectFirst { case (l, ref) if l == lang => ref }
-              .orElse(refs.collectFirst { case (l, ref) if l == "en" => ref })
-              .orElse(refs.headOption.map(_._2))
-              .flatMap(r => phraseText(m, r, lang))
-          viaRef.orElse(sectionFieldText(sec, fieldKey, lang))
+          MultilingualResolve.pickRef(
+            typedRefRows(sec).collect { case (k, l, ref) if k == fieldKey => (l, ref) },
+            lang).flatMap(r => phraseText(m, r, lang))
+            .orElse(sectionFieldText(sec, fieldKey, lang))
         case other => sectionFieldText(other, fieldKey, lang)
       }
     }

@@ -1,7 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 
 /** Multilingual phrase-staleness machine (GRANITE PROMPT §15 / Multilingual.restale).
   *
@@ -24,14 +26,27 @@ object PhraseStaleness:
 
   final case class PhraseRow(defName: String, lang: String, official: Boolean, text: String)
 
-  val stateTag: Map[State, String] = Map(
-    State.OfficialCorpus -> "officialCorpus",
-    State.HumanReviewed -> "humanReviewed",
-    State.AiDraft -> "aiDraft",
-    State.StaleBecauseSourceChanged -> "staleBecauseSourceChanged",
-    State.Rejected -> "rejected")
+  /** Tags from the SDS `translationStateTag` judgment — not a host allowlist. */
+  def officialTags(language: ComposedLanguage): Map[State, String] =
+    val leaves = language.judgments.get("translationStateTag").toList
+      .flatMap(_.rules)
+      .flatMap { r =>
+        r.conclusion match
+          case Cst.Node("translationStateTag", List(Cst.Leaf(t))) => Some(t)
+          case _ => None
+      }.toSet
+    val wanted = Map(
+      State.OfficialCorpus -> "officialCorpus",
+      State.HumanReviewed -> "humanReviewed",
+      State.AiDraft -> "aiDraft",
+      State.StaleBecauseSourceChanged -> "staleBecauseSourceChanged",
+      State.Rejected -> "rejected")
+    wanted.filter { case (_, tag) => leaves.contains(tag) }
 
-  val tagState: Map[String, State] = stateTag.map(_.swap)
+  lazy val stateTag: Map[State, String] =
+    officialTags(PackLoader(EffectContexts.forPackLoader()).requireClosed("sds"))
+
+  lazy val tagState: Map[String, State] = stateTag.map(_.swap)
 
   def textHash(text: String): Digest = Digest.of(Canon.CStr(text))
 
@@ -51,18 +66,18 @@ object PhraseStaleness:
       Cst.Leaf(fromHash.hex),
       Cst.Leaf(stateTag(state)))
 
-  /** Pure restale (GRANITE `Multilingual.restale`). Keys are lang codes. */
+  /** Pure restale via [[MultilingualRestale]] (GRANITE `Multilingual.restale`). */
   def restale(
       current: Map[String, TranslatedText],
       newEnglishHash: Digest
   ): Map[String, TranslatedText] =
-    val target = newEnglishHash.hex
-    current.map {
-      case ("en", t) => "en" -> t
-      case (lang, t) if t.state == State.OfficialCorpus => lang -> t
-      case (lang, t) if t.translatedFromHash == target => lang -> t
-      case (lang, t) => lang -> t.copy(state = State.StaleBecauseSourceChanged)
-    }
+    MultilingualRestale.restale(
+      current,
+      newEnglishHash.hex,
+      isOfficial = _.state == State.OfficialCorpus,
+      fromHash = _.translatedFromHash,
+      markStale = t => t.copy(state = State.StaleBecauseSourceChanged),
+    )
 
   private def entry(
       official: Boolean,
@@ -73,22 +88,22 @@ object PhraseStaleness:
     else TranslatedText(text, enHash.hex, State.HumanReviewed)
 
   def phraseRows(m: Module, phraseName: String): List[PhraseRow] =
-    m.defs.collect {
-      case (defName, Cst.Node("corpusPhrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
-          if n == phraseName =>
-        PhraseRow(defName, lang, true, text)
-      case (defName, Cst.Node("phrase", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(text))))
-          if n == phraseName =>
-        PhraseRow(defName, lang, false, text)
-    }.toList
+    val corpus = ModuleFieldResolve.namedBindings(
+      m, Set("corpusPhrase"), 0, 1, 2, phraseName).map {
+      case (defName, lang, text) => PhraseRow(defName, lang, true, text)
+    }
+    val free = ModuleFieldResolve.namedBindings(
+      m, Set("phrase"), 0, 1, 2, phraseName).map {
+      case (defName, lang, text) => PhraseRow(defName, lang, false, text)
+    }
+    corpus ++ free
 
   /** Persisted marks: lang → (fromHash, state). */
   def stateMarks(m: Module, phraseName: String): Map[String, (String, State)] =
-    m.defs.collect {
-      case (_, Cst.Node("translationState", List(Cst.Leaf(n), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))))
-          if n == phraseName =>
+    ModuleFieldResolve.stateMarks(m, "translationState", List(phraseName), 1, 2, 3)
+      .flatMap { case (lang, hash, tag) =>
         tagState.get(tag).map(st => lang -> (hash, st))
-    }.flatten.toMap
+      }.toMap
 
   /** Project all locale variants of a phrase name from a Module.
     * Materialized `translationState` marks override default projection.

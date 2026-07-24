@@ -5,15 +5,17 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.PackLoader
 
-/** Chemicals corpus — host maps remain convenient fixtures for EN-primary
-  * report views; **instance modules** load from `.cairn` under
-  * `languages/sds/chemicals/` via [[ChemicalSource]] (source of truth).
-  * [[EmitChemicalCairn]] regenerates those files from host maps when content
-  * changes. Not Studio.
+/** Chemicals corpus — **disk `.cairn` via [[ChemicalSource]] is SoT**.
+  * Host [[ChemicalDoc]] maps are emit fixtures ([[EmitChemicalCairn]]) and
+  * EN-primary report views for a few tests; do not add new content here
+  * without regenerating the matching `.cairn`. Not Studio.
   */
 object Chemicals:
   private lazy val sdsLanguage: ComposedLanguage =
     PackLoader(EffectContexts.forPackLoader()).requireClosed("sds")
+  private lazy val sdsPack = Sds(PackLoader(EffectContexts.forPackLoader()))
+  private lazy val typedSectionOrder: List[String] = sdsPack.typedSectionOrder
+  private lazy val typedSectionKeys: Map[String, List[String]] = sdsPack.typedSectionKeys
 
   /** One populated EU-CLP section body. Host [[fields]] stay EN-keyed (for
     * [[SectionReport]]); [[locales]] carry non-EN overlays (`lang` → key → text).
@@ -67,179 +69,16 @@ object Chemicals:
       if rows.isEmpty then Cst.Node("none", Nil)
       else Cst.Node("some", List(Cst.Node("list", rows)))
 
-    /** Typed EU-CLP section terms for numbers 1–16; unknown numbers stay `euSection`.
-      * Host map key `LD50Oral` maps to typed slot `ld50Oral`.
-      */
-    def toTypedTerm: Cst = number match
-      case 1 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"identification section missing EN key '$k'"))
-        Cst.node(
-          "identificationSection",
-          Cst.Leaf(req("productName")),
-          Cst.Leaf(req("synonyms")),
-          Cst.Leaf(req("recommendedUse")),
-          Cst.Leaf(req("usesAdvisedAgainst")),
-          Cst.Leaf(req("supplierName")),
-          Cst.Leaf(req("emergencyPhone")),
-          localeField(locales, localeRefs))
-      case 2 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"hazards section missing EN key '$k'"))
-        Cst.node(
-          "hazardsSection",
-          Cst.Leaf(req("classificationSummary")),
-          Cst.Leaf(req("hazardsNotOtherwiseClassified")),
-          Cst.Leaf(req("hazardPhrases")),
-          Cst.Leaf(req("signalWord")),
-          Cst.Leaf(req("pictograms")),
-          localeField(locales, localeRefs))
-      case 3 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"composition section missing EN key '$k'"))
-        Cst.node(
-          "compositionSection",
-          Cst.Leaf(req("componentName")),
-          Cst.Leaf(req("cas")),
-          Cst.Leaf(req("ec")),
-          Cst.Leaf(req("concentration")),
-          localeField(locales, localeRefs))
-      case 4 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"first-aid section missing EN key '$k'"))
-        Cst.node(
-          "firstAidSection",
-          Cst.Leaf(req("generalAdvice")),
-          Cst.Leaf(req("inhalation")),
-          Cst.Leaf(req("skinContact")),
-          Cst.Leaf(req("eyeContact")),
-          Cst.Leaf(req("ingestion")),
-          localeField(locales, localeRefs))
-      case 5 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"firefighting section missing EN key '$k'"))
-        Cst.node(
-          "firefightingSection",
-          Cst.Leaf(req("extinguishingMedia")),
-          Cst.Leaf(req("unsuitableExtinguishingMedia")),
-          Cst.Leaf(req("specialHazards")),
-          Cst.Leaf(req("firefighterProtection")),
-          localeField(locales, localeRefs))
-      case 6 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"accidental-release section missing EN key '$k'"))
-        Cst.node(
-          "accidentalReleaseSection",
-          Cst.Leaf(req("personalPrecautions")),
-          Cst.Leaf(req("environmentalPrecautions")),
-          Cst.Leaf(req("cleanupMethods")),
-          localeField(locales, localeRefs))
-      case 7 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"handling/storage section missing EN key '$k'"))
-        Cst.node(
-          "handlingStorageSection",
-          Cst.Leaf(req("handling")),
-          Cst.Leaf(req("storage")),
-          Cst.Leaf(req("storageIncompatibilities")),
-          localeField(locales, localeRefs))
-      case 8 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"exposure-controls section missing EN key '$k'"))
-        Cst.node(
-          "exposureControlsSection",
-          Cst.Leaf(req("occupationalExposureLimit")),
-          Cst.Leaf(req("engineeringControls")),
-          Cst.Leaf(req("eyeProtection")),
-          Cst.Leaf(req("skinProtection")),
-          Cst.Leaf(req("respiratoryProtection")),
-          localeField(locales, localeRefs))
-      case 9 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"physical/chemical section missing EN key '$k'"))
-        Cst.node(
-          "physicalChemicalSection",
-          Cst.Leaf(req("appearance")),
-          Cst.Leaf(req("odor")),
-          Cst.Leaf(req("molecularWeight")),
-          Cst.Leaf(req("meltingPoint")),
-          Cst.Leaf(req("boilingPoint")),
-          Cst.Leaf(req("flashPoint")),
-          Cst.Leaf(req("density")),
-          Cst.Leaf(req("solubility")),
-          Cst.Leaf(req("explosiveLimits")),
-          localeField(locales, localeRefs))
-      case 10 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"stability/reactivity section missing EN key '$k'"))
-        Cst.node(
-          "stabilityReactivitySection",
-          Cst.Leaf(req("stability")),
-          Cst.Leaf(req("conditionsToAvoid")),
-          Cst.Leaf(req("incompatibleMaterials")),
-          Cst.Leaf(req("hazardousDecomposition")),
-          localeField(locales, localeRefs))
-      case 11 =>
-        def req(k: String): String =
-          val host = if k == "ld50Oral" then fields.get("ld50Oral").orElse(fields.get("LD50Oral"))
-          else fields.get(k)
-          host.getOrElse(sys.error(s"toxicological section missing EN key '$k'"))
-        val remapped = locales.view.mapValues { kv =>
-          kv.map { case (k, v) => (if k == "LD50Oral" then "ld50Oral" else k) -> v }
-        }.toMap
-        Cst.node(
-          "toxicologicalSection",
-          Cst.Leaf(req("ld50Oral")),
-          Cst.Leaf(req("irritation")),
-          Cst.Leaf(req("inhalationEffects")),
-          Cst.Leaf(req("carcinogenicity")),
-          localeField(remapped, localeRefs))
-      case 12 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"ecological section missing EN key '$k'"))
-        Cst.node(
-          "ecologicalSection",
-          Cst.Leaf(req("ecotoxicity")),
-          Cst.Leaf(req("persistence")),
-          Cst.Leaf(req("bioaccumulation")),
-          Cst.Leaf(req("mobility")),
-          localeField(locales, localeRefs))
-      case 13 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"disposal section missing EN key '$k'"))
-        Cst.node(
-          "disposalSection",
-          Cst.Leaf(req("disposalMethods")),
-          Cst.Leaf(req("wasteClassification")),
-          localeField(locales, localeRefs))
-      case 14 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"transport section missing EN key '$k'"))
-        Cst.node(
-          "transportSection",
-          Cst.Leaf(req("unNumber")),
-          Cst.Leaf(req("properShippingName")),
-          Cst.Leaf(req("transportHazardClass")),
-          Cst.Leaf(req("packingGroup")),
-          localeField(locales, localeRefs))
-      case 15 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"regulatory section missing EN key '$k'"))
-        Cst.node(
-          "regulatorySection",
-          Cst.Leaf(req("regulatoryInfo")),
-          Cst.Leaf(req("reachStatus")),
-          Cst.Leaf(req("usInventory")),
-          localeField(locales, localeRefs))
-      case 16 =>
-        def req(k: String): String =
-          fields.getOrElse(k, sys.error(s"other-information section missing EN key '$k'"))
-        Cst.node(
-          "otherInformationSection",
-          Cst.Leaf(req("revisionDate")),
-          Cst.Leaf(req("otherInformation")),
-          localeField(locales, localeRefs))
-      case _ => toTerm
+    /** Typed EU-CLP section from surface slot order; unknown numbers stay `euSection`. */
+    def toTypedTerm: Cst =
+      typedSectionOrder.lift(number - 1) match
+        case None => toTerm
+        case Some(tag) =>
+          val keys = typedSectionKeys.getOrElse(tag, Nil)
+          val leaves = keys.map { k =>
+            Cst.Leaf(fields.getOrElse(k, sys.error(s"$tag missing EN key '$k'")))
+          }
+          Cst.Node(tag, leaves :+ localeField(locales, localeRefs))
 
   /** A chemical document as a (possibly sparse) map of section bodies. */
   final case class ChemicalDoc(
@@ -369,7 +208,7 @@ object Chemicals:
           "incompatibleMaterials" -> "Strong oxidizing agents, strong bases, peroxides, halogenated compounds, alkali metals, amines.",
           "hazardousDecomposition" -> "CO, CO2, formaldehyde, methanol under fire conditions.")),
         11 -> SectionBody(11, Map(
-          "LD50Oral" -> "5800 mg/kg (rat, oral)",
+          "ld50Oral" -> "5800 mg/kg (rat, oral)",
           "irritation" -> "Causes serious eye irritation. Prolonged skin contact may cause dryness.",
           "inhalationEffects" -> "Vapours may cause drowsiness and dizziness.",
           "carcinogenicity" -> "Not listed as a carcinogen by IARC, NTP, ACGIH, or OSHA.")),
@@ -537,7 +376,7 @@ object Chemicals:
           "incompatibleMaterials" -> "Strong oxidizing agents, alkali metals, strong acids, peroxides.",
           "hazardousDecomposition" -> "CO, CO2 under fire conditions.")),
         11 -> SectionBody(11, Map(
-          "LD50Oral" -> "7060 mg/kg (rat, oral)",
+          "ld50Oral" -> "7060 mg/kg (rat, oral)",
           "irritation" -> "Causes serious eye irritation. Prolonged skin contact may cause dryness.",
           "inhalationEffects" -> "High vapour concentrations may cause dizziness and narcosis.",
           "carcinogenicity" -> "IARC Group 1 for alcoholic beverages; ethanol as industrial substance not classified as a carcinogen in this demo note.")),

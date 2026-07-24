@@ -440,7 +440,7 @@ class WaveH2Suite extends munit.FunSuite:
     // broken reference rejected
     val broken = Parser.parse(dl.grammar,
       """{ replace cleaner = mixture of ( phantom pct 10 ) ; }""").fold(e => fail(e), identity)
-    assert(Sds.applySds(acetone, broken).swap.exists(_.contains("unknown substance 'phantom'")))
+    assert(Sds.applySds(acetone, broken).swap.exists(_.contains("references unknown 'phantom'")))
     // legitimate change passes
     val ok = Parser.parse(dl.grammar,
       """{ replace cleaner = mixture of ( acetone pct 80 ) ; }""").fold(e => fail(e), identity)

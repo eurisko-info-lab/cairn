@@ -1,7 +1,9 @@
 package cairn.examples.sds
+import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.PackLoader
 
 /** Multilingual section-field staleness machine — sibling of
   * [[PhraseStaleness]] for `euSection` / typed sections / `sectionField` rows.
@@ -42,86 +44,36 @@ object SectionFieldStaleness:
       Cst.Leaf(fromHash.hex),
       Cst.Leaf(stateTag(state)))
 
-  private def localeRows(overlays: Cst): List[Cst] = overlays match
-    case Cst.Node("none", _) => Nil
-    case Cst.Node("some", List(Cst.Node("list", xs))) => xs
-    case Cst.Node("list", xs) => xs
-    case _ => Nil
+  private def localeRows(overlays: Cst): List[Cst] = ModuleFieldResolve.optListRows(overlays)
 
-  /** Slot order mirrors SDS typed section ctors (see `Sds.typedSectionKeys`). */
-  private val typedSlots: Map[String, List[String]] = Map(
-    "identificationSection" -> List(
-      "productName", "synonyms", "recommendedUse", "usesAdvisedAgainst",
-      "supplierName", "emergencyPhone"),
-    "hazardsSection" -> List(
-      "classificationSummary", "hazardsNotOtherwiseClassified", "hazardPhrases",
-      "signalWord", "pictograms"),
-    "compositionSection" -> List("componentName", "cas", "ec", "concentration"),
-    "firstAidSection" -> List(
-      "generalAdvice", "inhalation", "skinContact", "eyeContact", "ingestion"),
-    "firefightingSection" -> List(
-      "extinguishingMedia", "unsuitableExtinguishingMedia", "specialHazards",
-      "firefighterProtection"),
-    "accidentalReleaseSection" -> List(
-      "personalPrecautions", "environmentalPrecautions", "cleanupMethods"),
-    "handlingStorageSection" -> List(
-      "handling", "storage", "storageIncompatibilities"),
-    "exposureControlsSection" -> List(
-      "occupationalExposureLimit", "engineeringControls", "eyeProtection",
-      "skinProtection", "respiratoryProtection"),
-    "physicalChemicalSection" -> List(
-      "appearance", "odor", "molecularWeight", "meltingPoint", "boilingPoint",
-      "flashPoint", "density", "solubility", "explosiveLimits"),
-    "stabilityReactivitySection" -> List(
-      "stability", "conditionsToAvoid", "incompatibleMaterials",
-      "hazardousDecomposition"),
-    "toxicologicalSection" -> List(
-      "ld50Oral", "irritation", "inhalationEffects", "carcinogenicity"),
-    "ecologicalSection" -> List(
-      "ecotoxicity", "persistence", "bioaccumulation", "mobility"),
-    "disposalSection" -> List("disposalMethods", "wasteClassification"),
-    "transportSection" -> List(
-      "unNumber", "properShippingName", "transportHazardClass", "packingGroup"),
-    "regulatorySection" -> List("regulatoryInfo", "reachStatus", "usInventory"),
-    "otherInformationSection" -> List("revisionDate", "otherInformation"))
+  /** Slot order from SDS surface (`SurfaceSlots` via pack façade). */
+  private lazy val typedSlots: Map[String, List[String]] =
+    Sds(PackLoader(EffectContexts.forPackLoader())).typedSectionKeys
 
   private def typedEnSlots(sec: Cst): Map[String, String] = sec match
     case Cst.Node(tag, kids) =>
-      typedSlots.get(tag) match
-        case Some(slots) if kids.length == slots.length + 1 =>
-          slots.zip(kids.init).collect { case (k, Cst.Leaf(v)) => k -> v }.toMap
-        case _ => Map.empty
+      typedSlots.get(tag).map(keys => ModuleFieldResolve.typedSlots(keys, kids)).getOrElse(Map.empty)
     case _ => Map.empty
 
   private def rowsForKey(sec: Cst, fieldKey: String): List[FieldRow] = sec match
     case Cst.Node("euSection", List(_, Cst.Node("list", fields))) =>
-      fields.collect {
-        case Cst.Node("sectionField", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
-            if k == fieldKey =>
-          FieldRow(lang, text)
-      }
-    case Cst.Node(tag, kids) if typedEnSlots(sec).nonEmpty =>
-      val resolved =
-        if tag == "toxicologicalSection" && fieldKey == "LD50Oral" then "ld50Oral"
-        else fieldKey
-      val enRow = typedEnSlots(sec).get(resolved).toList.map(t => FieldRow("en", t))
-      val loc = localeRows(kids.last).collect {
-        case Cst.Node("fieldLocale", List(Cst.Leaf(k), Cst.Leaf(lang), Cst.Leaf(text)))
-            if k == resolved =>
-          FieldRow(lang, text)
-      }
+      ModuleFieldResolve.keyedRows(fields, Set("sectionField"), 0, 1, 2, fieldKey)
+        .map { case (lang, text) => FieldRow(lang, text) }
+    case Cst.Node(_, kids) if typedEnSlots(sec).nonEmpty =>
+      val enRow = typedEnSlots(sec).get(fieldKey).toList.map(t => FieldRow("en", t))
+      val loc = ModuleFieldResolve.keyedRows(
+        localeRows(kids.last), Set("fieldLocale"), 0, 1, 2, fieldKey)
+        .map { case (lang, text) => FieldRow(lang, text) }
       enRow ++ loc
     case _ => Nil
 
   /** Persisted marks: lang → (fromHash, state). */
   def stateMarks(m: Module, sectionRef: String, fieldKey: String): Map[String, (String, State)] =
-    m.defs.collect {
-      case (_, Cst.Node("sectionFieldState", List(
-          Cst.Leaf(sec), Cst.Leaf(key), Cst.Leaf(lang), Cst.Leaf(hash), Cst.Leaf(tag))))
-          if sec == sectionRef && (key == fieldKey ||
-            (fieldKey == "LD50Oral" && key == "ld50Oral")) =>
+    ModuleFieldResolve.stateMarks(
+      m, "sectionFieldState", List(sectionRef, fieldKey), 2, 3, 4)
+      .flatMap { case (lang, hash, tag) =>
         tagState.get(tag).map(st => lang -> (hash, st))
-    }.flatten.toMap
+      }.toMap
 
   /** Project all locale variants of one field key inside a section binding. */
   def project(m: Module, sectionRef: String, fieldKey: String): Map[String, TranslatedText] =
@@ -171,14 +123,11 @@ object SectionFieldStaleness:
           case Some(slots) if kids.length != slots.length + 1 =>
             Left(s"bad $tag arity")
           case Some(slots) =>
-            val key =
-              if tag == "toxicologicalSection" && fieldKey == "LD50Oral" then "ld50Oral"
-              else fieldKey
-            if !slots.contains(key) then Left(s"unknown $tag key '$fieldKey'")
+            if !slots.contains(fieldKey) then Left(s"unknown $tag key '$fieldKey'")
             else
               val vals = kids.init.map { case Cst.Leaf(t) => t; case _ => "" }
               Right(Cst.Node(tag,
-                vals.updated(slots.indexOf(key), newEnText).map(Cst.Leaf(_)) :+ kids.last))
+                vals.updated(slots.indexOf(fieldKey), newEnText).map(Cst.Leaf(_)) :+ kids.last))
       case _ => Left("section body is not rewriteable")
 
   /** Derive a ΔSDS changeset: replace EN field and add/replace
@@ -201,16 +150,14 @@ object SectionFieldStaleness:
             rewriteEn(sec, fieldKey, newEnText).map { rewritten =>
               val oldHash = textHash(enRow.text)
               val after = restale(project(m, sectionRef, fieldKey), textHash(newEnText))
-              val markKey =
-                if fieldKey == "LD50Oral" then "ld50Oral" else fieldKey
               val ops = List.newBuilder[Cst]
               ops += Cst.Node(
                 Delta.tag(l, "replace"),
                 List(Cst.Leaf(sectionRef), rewritten))
               for (lang, t) <- after.toList.sortBy(_._1)
               if lang != "en" && t.state == State.StaleBecauseSourceChanged do
-                val name = markName(sectionRef, markKey, lang)
-                val term = stateTerm(sectionRef, markKey, lang, oldHash, State.StaleBecauseSourceChanged)
+                val name = markName(sectionRef, fieldKey, lang)
+                val term = stateTerm(sectionRef, fieldKey, lang, oldHash, State.StaleBecauseSourceChanged)
                 val op = if m.get(name).isDefined then "replace" else "add"
                 ops += Cst.Node(Delta.tag(l, op), List(Cst.Leaf(name), term))
               Cst.Node(Delta.tag(l, "changeset"), List(Cst.Node("list", ops.result())))
