@@ -1022,10 +1022,26 @@ object Cli:
                 Left(s"gossip diverge: a=${a.chainDigests} b=${b.chainDigests}")
               else
                 // --- four-node BFT ---
-                smokeBft(ledgerCtx, auth, ledgerAuth).map { certShort =>
-                  s"smoke distribution ok: gossip-pulled=a bft-cert=$certShort"
-                }
+                for
+                  certShort <- smokeBft(ledgerCtx, auth, ledgerAuth)
+                  // --- four-node BFT, primary unreachable: view-change failover ---
+                  failoverShort <- smokeBftFailover(ledgerCtx, auth, ledgerAuth)
+                yield s"smoke distribution ok: gossip-pulled=a bft-cert=$certShort $failoverShort"
         finally httpA.stop()
+
+  /** Fresh temp-dir Node per replica id, each seeded with the same genesis identity tx. */
+  private def seedBftNodes(
+      ledgerCtx: EffectContext, auth: Keypair, ledgerAuth: Map[String, Vector[Byte]],
+      ids: List[String], dirPrefix: String,
+  ): Either[String, (Map[String, java.nio.file.Path], Map[String, Node])] =
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"$dirPrefix-$id")).toMap
+    ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
+      acc.flatMap { m =>
+        val n = Node(homes(id).resolve("node"), ledgerCtx)
+        n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+          .map(_ => m + (id -> n))
+      }
+    }.map(nodes => (homes, nodes))
 
   private def smokeBft(
       ledgerCtx: EffectContext,
@@ -1035,16 +1051,7 @@ object Cli:
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     BftFinality.sealReplicaSet(replicas).flatMap { manifest =>
       val ids = manifest.ids
-      val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-smoke-$id")).toMap
-      val seeded: Either[String, Map[String, Node]] =
-        ids.foldLeft[Either[String, Map[String, Node]]](Right(Map.empty)) { (acc, id) =>
-          acc.flatMap { m =>
-            val n = Node(homes(id).resolve("node"), ledgerCtx)
-            n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
-              .map(_ => m + (id -> n))
-          }
-        }
-      seeded.flatMap { nodes =>
+      seedBftNodes(ledgerCtx, auth, ledgerAuth, ids, "cairn-smoke").flatMap { (homes, nodes) =>
         val block = nodes("r0").chainDigests.head
         val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
         try
@@ -1085,3 +1092,63 @@ object Cli:
         finally https.foreach(_.stop())
       }
     }
+
+  /** Same four-replica setup as [[smokeBft]], but the view-0 primary is never
+    * started (its URL points at an unreachable port) — demonstrates that the
+    * remaining replicas still reach finality via view-change failover.
+    */
+  private def smokeBftFailover(
+      ledgerCtx: EffectContext,
+      auth: Keypair,
+      ledgerAuth: Map[String, Vector[Byte]],
+  ): Either[String, String] =
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    for
+      manifest <- BftFinality.sealReplicaSet(replicas)
+      ids = manifest.ids
+      homesNodes <- seedBftNodes(ledgerCtx, auth, ledgerAuth, ids, "cairn-smoke-vc")
+      (homes, nodes) = homesNodes
+      block = nodes("r0").chainDigests.head
+      primary <- BftFinality.designatedPrimary(ids, 0)
+      result <-
+        val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+        try
+          val running = ids.filter(_ != primary.id)
+          val portsE = running.foldLeft[Either[String, Map[String, Int]]](Right(Map.empty)) { (acc, id) =>
+            acc.flatMap { ports =>
+              val peersRoot = homes(id)
+              BftReplica.certified(
+                replicas.find(_.name == id).get, manifest,
+                node = Some(nodes(id)), ledgerAuth = ledgerAuth).map { bft =>
+                val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+                https += http
+                ports + (id -> http.start())
+              }
+            }
+          }
+          for
+            ports <- portsE
+            urls = ids.map(id =>
+              id -> (if id == primary.id then "http://127.0.0.1:1" else s"http://127.0.0.1:${ports(id)}")).toMap
+            _ <- running.foldLeft[Either[String, Unit]](Right(())) { (acc, id) =>
+              acc.flatMap { _ =>
+                ids.foldLeft[Either[String, Unit]](Right(())) { (acc2, peer) =>
+                  acc2.flatMap { _ =>
+                    val kp = replicas.find(_.name == peer).get
+                    PeerRegistry.addBound(homes(id), kp, urls(peer), PeerRegistry.Role.Replica).map(_ => ())
+                  }
+                }
+              }
+            }
+            initiator = replicas.find(_.name == running.head).get
+            cert <- BftFinality.agreeNetworkRemote(
+              urls, block, initiator,
+              chainId = block, replicaSet = manifest.replicaSetDigest,
+              polls = 80, pollSleepMs = 40, maxViews = 8)
+            _ <- if cert.view >= 1 then Right(())
+                 else Left(s"expected a view-change (view >= 1), got view=${cert.view}")
+            _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
+              cert, manifest, nodes(running.head), ledgerAuth)
+          yield s"bft-failover ok view=${cert.view} ${cert.digest.short}"
+        finally https.foreach(_.stop())
+    yield result
