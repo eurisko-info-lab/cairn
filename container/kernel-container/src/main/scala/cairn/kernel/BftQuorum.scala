@@ -79,11 +79,17 @@ object BftQuorum:
       commits: Map[ReplicaId, Digest] = Map.empty,
       decided: Option[Value] = None)
 
-  /** Explicit cross-view lock for a sequence — installed on prepare quorum or NewView. */
+  /** Explicit cross-view lock for a sequence — installed on prepare quorum or NewView.
+    * `proof`, when present, is a fully-verified [[PreparedCert]] the lock can
+    * hand back out — carries the justification forward for a replica that
+    * only ever learned the value via NewView (no local slots/seals of its
+    * own to reconstruct one from).
+    */
   final case class PreparedLock(
       preparedView: Int,
       valueDigest: Digest,
       value: Option[Value] = None,
+      proof: Option[PreparedCert] = None,
   )
 
   final case class ReplicaState(
@@ -136,14 +142,22 @@ object BftQuorum:
       preparedView: Int,
       valueDigest: Digest,
       value: Option[Value],
+      proof: Option[PreparedCert] = None,
   ): Map[Int, PreparedLock] =
     locks.get(seq) match
       case Some(prev) if prev.preparedView > preparedView => locks
       case Some(prev) if prev.preparedView == preparedView && prev.valueDigest != valueDigest =>
         // Conflicting same-view lock — keep prior (should not arise for honest paths).
         locks
-      case _ =>
-        locks + (seq -> PreparedLock(preparedView, valueDigest, value.orElse(locks.get(seq).flatMap(_.value))))
+      case prevOpt =>
+        // Only carry a prior proof forward on an exact re-confirmation of the
+        // same (preparedView, valueDigest) claim — never attach a proof that
+        // was minted for a different, older view to a lock now recording a
+        // newer one.
+        val sameClaim = prevOpt.exists(p => p.preparedView == preparedView && p.valueDigest == valueDigest)
+        val keptProof = if sameClaim then proof.orElse(prevOpt.flatMap(_.proof)) else proof
+        locks + (seq -> PreparedLock(
+          preparedView, valueDigest, value.orElse(locks.get(seq).flatMap(_.value)), keptProof))
 
   /** Highest prior prepared value for `seq` before `beforeView`.
     * Prefers the explicit [[ReplicaState.locks]] table when its prepared view
@@ -273,10 +287,13 @@ object BftQuorum:
           acc + (vc.from -> vc)
         }
         // Every replica installs NewView-selected prepared locks — not only the primary.
+        // `pc` already passed verifyPreparedCert (verifyNewViewCertificate runs
+        // before deliverNewView is ever called) — safe to retain as the lock's proof.
         val locks = nv.prepared.foldLeft(state.locks) { (acc, pc) =>
           installLock(
             acc, pc.seq, pc.preparedView, pc.valueDigest,
-            pc.value.orElse(findValue(state, pc.valueDigest)))
+            pc.value.orElse(findValue(state, pc.valueDigest)),
+            proof = Some(pc))
         }
         val st2 = state.copy(
           view = nv.newView,

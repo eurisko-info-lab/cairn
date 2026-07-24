@@ -1082,6 +1082,109 @@ class DistributionDaemonSuite extends munit.FunSuite:
         state.prePrepareSeals.nonEmpty,
       state.toString)
 
+  test("NewView-only learner can justify the prepared value across a second view-change"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val homes = replicas.map(k => k.name -> java.nio.file.Files.createTempDirectory(s"cairn-npv2-${k.name}")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    replicas.foreach { k =>
+      BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(homes(k.name)), manifest)
+        .fold(e => fail(e), identity)
+    }
+    val bfts = replicas.map { k =>
+      k.name -> BftReplica.certified(
+        k, manifest,
+        node = Some(nodes(k.name)), ledgerAuth = ledgerAuth,
+        certStore = Some(homes(k.name).resolve("bft-certs.canon")),
+        stateStore = Some(homes(k.name).resolve("bft-state.canon")),
+        home = Some(homes(k.name))).fold(e => fail(e), identity)
+    }.toMap
+    def isCommit(sm: BftFinality.SignedMsg): Boolean = sm.msg match
+      case Msg.Commit(_, _, _, _) => true
+      case _                      => false
+    def isPrePrepare(sm: BftFinality.SignedMsg): Boolean = sm.msg match
+      case Msg.PrePrepare(_, _, _, _) => true
+      case _                          => false
+    def deliverAll(
+        from: String,
+        msgs: List[BftFinality.SignedMsg],
+        exclude: Set[String] = Set.empty,
+        dropCommits: Boolean = false,
+    ): Unit =
+      val filtered = if dropCommits then msgs.filterNot(isCommit) else msgs
+      filtered.foreach { sm =>
+        bfts.foreach { (id, r) =>
+          if id != from && !exclude.contains(id) then
+            r.receive(sm).fold(e => fail(s"$id: $e"), identity)
+        }
+      }
+    // Phase 1: r0 proposes; only r1, r2 witness the original PrePrepare/Prepare
+    // round. r3 is excluded entirely, so its own state.slots/seal maps stay
+    // empty for this seq — it can never reconstruct a PreparedCert locally.
+    val out0 = bfts("r0").propose(0, 0, block).fold(e => fail(e), identity)
+    deliverAll("r0", out0, exclude = Set("r3"), dropCommits = true)
+    var round = 0
+    var progress = true
+    while round < 16 && progress do
+      progress = false
+      List("r0", "r1", "r2").foreach { id =>
+        val out = bfts(id).drainOutbound()
+        val kept = out.filterNot(isCommit)
+        if kept.nonEmpty then
+          progress = true
+          deliverAll(id, kept, exclude = Set("r3"), dropCommits = true)
+      }
+      round += 1
+    assertEquals(bfts("r3").currentView, 0)
+    // Phase 2: primary r0 fails. All four (r3 included) request view-change
+    // to 1 — this is the only way r3 ever learns about the prepared value:
+    // via the resulting NewView, not by direct participation.
+    List("r0", "r1", "r2", "r3").foreach { id =>
+      val out = bfts(id).requestViewChange(1).fold(e => fail(e), identity)
+      deliverAll(id, out, exclude = Set("r0"))
+    }
+    round = 0
+    progress = true
+    while round < 16 && progress do
+      progress = false
+      List("r1", "r2", "r3").foreach { id =>
+        val out = bfts(id).drainOutbound()
+        // Drop the new primary's (r1's) re-propose for view 1 — simulate r1
+        // crashing immediately after taking over, before its re-proposal
+        // reaches anyone. The NewView itself still lands on everyone first.
+        val kept = if id == "r1" then out.filterNot(isPrePrepare) else out
+        if kept.nonEmpty then
+          progress = true
+          deliverAll(id, kept, exclude = Set("r0", "r1"))
+      }
+      round += 1
+    assertEquals(bfts("r3").currentView, 1)
+    // r3 never witnessed the original PrePrepare/Prepare round for this seq —
+    // it only learned the value via NewView(1), installing the lock through
+    // path (b). Confirm the fix: r3's own durable lock now carries a full
+    // PreparedCert, so its OWN outgoing ViewChange(2) can justify the value —
+    // not just refuse conflicting proposals, but actively carry the proof
+    // forward, which is exactly what was lost before this fix.
+    Thread.sleep(BftReplica.MinViewChangeIntervalMs + 10)
+    val out3 = bfts("r3").requestViewChange(2).fold(e => fail(e), identity)
+    val vc3 = out3.collectFirst { case sm if sm.msg.isInstanceOf[Msg.ViewChange] => sm.msg }
+      .collect { case vc: Msg.ViewChange => vc }
+      .getOrElse(fail(s"r3 did not emit a ViewChange: $out3"))
+    val pc = vc3.prepared.find(_.seq == 0).getOrElse(
+      fail(s"r3's ViewChange(2) has no PreparedCert for seq 0 — NewView-only proof was lost: ${vc3.prepared}"))
+    assertEquals(pc.valueDigest, BftFinality.valueOfBlock(block).digest)
+    assert(pc.prepareVotes.nonEmpty, "expected a non-empty prepare-quorum in r3's carried-forward proof")
+    assert(pc.prePrepareSeal.isDefined, "expected a signed PrePrepare seal in r3's carried-forward proof")
+
   test("restart during failover restores prepare seals and ViewChange votes"):
     import cairn.kernel.BftQuorum.*
     val auth = Keypair.dev("auth")

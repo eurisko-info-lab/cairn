@@ -1325,7 +1325,8 @@ object BftFinality:
           "preparedView" -> Canon.CInt(lock.preparedView),
           "digest" -> Canon.CStr(lock.valueDigest.hex),
           "value" -> lock.value.fold(Canon.CTag("none", Canon.CInt(0)))(v =>
-            Canon.CTag("some", Canon.CBytes(v.bytes))))
+            Canon.CTag("some", Canon.CBytes(v.bytes))),
+          "proof" -> preparedCanon(lock.proof.toList))
       }),
       "blockMeta" -> Canon.CList(meta)))
 
@@ -1407,10 +1408,13 @@ object BftFinality:
                 val value = row.asMap.get("value") match
                   case Some(CTag("some", CBytes(bs))) => Some(Value(bs))
                   case _                              => None
+                // Old on-disk state files predate the "proof" field — absent means None.
+                val proof = row.asMap.get("proof").map(parsePrepared).getOrElse(Nil).headOption
                 row.field("seq").asInt.toInt -> PreparedLock(
                   row.field("preparedView").asInt.toInt,
                   Digest(row.field("digest").asStr),
-                  value)
+                  value,
+                  proof)
               }.toMap
             case _ => Map.empty[Int, PreparedLock]
           val meta = m.field("blockMeta").asList.map { row =>
@@ -1960,9 +1964,16 @@ final class BftReplica private (
 
   /** Prepared claims with mandatory signed PrePrepare + prepare-quorum seals + value.
     * Slots that cannot be proved are omitted (not asserted bare).
+    *
+    * Local slot/seal reconstruction is preferred (freshest evidence), but a
+    * replica that only ever learned a value via NewView has nothing in its
+    * own slots/seals for that seq — falls back to the durable lock's own
+    * attached proof (already-verified, see [[BftQuorum.installLock]] path
+    * (b)) so the value's justification survives into a further view-change
+    * even when no originally-preparing replica is reachable.
     */
   private def preparedWithProofs: List[PreparedCert] =
-    preparedFromSlots(state, minSeqExclusive = finalizedHighWater.toInt).flatMap { pc =>
+    val fromSlots = preparedFromSlots(state, minSeqExclusive = finalizedHighWater.toInt).flatMap { pc =>
       val votes = prepareSeals.collect {
         case ((v, s, hex, rid), seal)
             if v == pc.preparedView && s == pc.seq && hex == pc.valueDigest.hex =>
@@ -1978,6 +1989,12 @@ final class BftReplica private (
           prePrepareSeal = pp.map(_._2),
           prePrepareFrom = pp.map(_._1)))
     }
+    val coveredSeqs = fromSlots.map(_.seq).toSet
+    val fromLocks = state.locks.iterator.collect {
+      case (seq, lock) if !coveredSeqs(seq) && seq > finalizedHighWater.toInt =>
+        lock.proof
+    }.flatten.toList
+    (fromSlots ++ fromLocks).sortBy(_.seq)
 
   /** Verify mandatory prepare-quorum evidence on a prepared claim. */
   private def verifyPreparedCert(pc: PreparedCert): Either[String, Unit] =
