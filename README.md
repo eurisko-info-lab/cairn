@@ -27,7 +27,9 @@ foundation both container and content depend on:
 |---|---|---|
 | `kernel/` | Semantic TCB (shared) | Canonical bytes, digests, artifacts, fragment IR + composition laws, grammar vocabulary, derivation checker, authority models (`AuthorizedRequest` / `AuditedRequest`), Meta validation, pure ledger transition |
 | `content/core/` | Pure proposals | Grammar engine, Meta elaboration, ΔL / change algebra, `PatchGraph`, search & tactics, tree + interaction-net engines, Rosetta projection engine, policy evaluation — no I/O |
-| `container/system-interface/` | Effect contracts | CAS trait, filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas |
+| `contracts/` | Effect contracts | Cas / filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas, `PackAccess`, `AuthorizationProver` |
+| `container/ledger-types/` | Wire types | `Tx`, `SignedTx`, `Block` |
+| `container/system-interface/` | Ledger transport contract | `LedgerTransport` only — every other effect contract lives in `contracts/` |
 | `container/system-handler/` | Privileged I/O | MemCas / DiskCas, filesystem & process handlers, PoA node, crypto, distribution, `AuthorityGate`, `EffectContext`, `RuntimeEffectRegistry`, `RevocationView` |
 | `content/user/` | Extensible data | Language packs, policies, workflows (STLC, Law, SDS, MiniTT, LeanCore, UnisonCore, AffineNet, …); may name effects, never imports handlers |
 | `app/runtime/` | Composition root | PackLoader, `EffectBootstrap`, `WorkflowRunner`, `Branches` — ties User + Handlers together |
@@ -56,13 +58,15 @@ nesting below:
 
 ```text
 kernel                                (shared)
-container/kernel-container  → kernel
+contracts                   → kernel
+container/ledger-types      → kernel
+container/kernel-container  → kernel, ledger-types
 content/kernel-rewrite      → kernel
-container/system-interface  → kernel, kernel-container
-container/system-handler    → kernel, kernel-container, core, system-interface
+container/system-interface  → kernel, ledger-types
+container/system-handler    → kernel, ledger-types, kernel-container, system-interface, contracts
 content/core                → kernel, kernel-rewrite
-content/user                → kernel, core, system-interface
-app/runtime                 → user, system-handler, core, kernel, system-interface
+content/user                → kernel, core, contracts
+app/runtime                 → user, system-handler, core, kernel, system-interface, contracts
 
 content/proof               → core, kernel
 app/rosetta                 → proof, core, system-handler

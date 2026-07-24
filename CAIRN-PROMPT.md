@@ -249,7 +249,8 @@ core             — grammar engine, Meta elaboration, ΔL / PatchGraph, search 
                    tactics, tree + net engines, Rosetta projection, policy eval
                    (pure — no I/O)
 
-system-interface — effect contracts (CAS, FS, process, …)
+system-interface — LedgerTransport contract only; CAS/FS/process/clock/random/
+                   terminal/LSP/external-backend schemas live in `contracts`
 
 system-handler   — privileged I/O: DiskCas / Branches, handlers, PoA node,
                    AuthorityGate, EffectContext, RuntimeEffectRegistry,
@@ -263,8 +264,11 @@ proof / rosetta / surface / examples / tests
                  — aggregation & façades above the DAG (not CAS/Meta owners)
 ```
 
-**Import rule:** `kernel ← core ← {system-interface} ← system-handler`;
-`user ↛ system-handler`; `runtime` ties user + handlers.
+**Import rule:** `core` and `system-interface` are independent branches off
+`kernel` — `system-interface` does not depend on `core`. `system-handler`
+depends on `system-interface` + `kernel-container` + `contracts`, not `core`.
+`user ↛ system-handler`; `runtime` ties user + handlers (see
+[docs/architecture.md](docs/architecture.md) for the live, present-tense DAG).
 
 **Bootstrap note:** Kernel/Core/Runtime host the primordial meta-language +
 grammar-language pair (§2b). Other languages and tooling are defined or
