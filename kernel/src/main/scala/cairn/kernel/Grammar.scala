@@ -35,6 +35,31 @@ enum Elem:
 final case class ConstructorSpec(tag: String, elems: List[Elem])
 final case class CategorySpec(name: String, ctors: List[ConstructorSpec]) // ordered PEG choice
 
+object ConstructorSpec:
+  /** Per-argument-position field labels for a constructor's production,
+    * one entry per [[CtorDef.argSorts]] position (same order).
+    *
+    * Grounded in the parser (`Parser.parseElem`): every [[Elem]] variant
+    * produces exactly 0 (`Elem.Tok`, pure syntax) or 1 children, so the n-th
+    * non-`Tok` element in production order corresponds exactly to the n-th
+    * `argSorts` entry. A position's label is the text of the `Tok`
+    * immediately preceding it, if any (closest label wins when multiple
+    * `Tok`s precede one argument; a trailing `Tok` with no following
+    * argument-producing element, e.g. a unit suffix, contributes no label).
+    *
+    * `keywords` restricts candidate labels to declared keyword tokens —
+    * punctuation (`(`, `)`, `,`, `;`, …) is grammar structure, not a field
+    * name, even though it's also `Elem.Tok`.
+    */
+  def argLabels(elems: List[Elem], keywords: Set[String]): List[Option[String]] =
+    def go(es: List[Elem], pending: Option[String], acc: List[Option[String]]): List[Option[String]] =
+      es match
+        case Elem.Tok(text) :: rest if keywords.contains(text) => go(rest, Some(text), acc)
+        case Elem.Tok(_) :: rest => go(rest, pending, acc)
+        case _ :: rest           => go(rest, None, acc :+ pending)
+        case Nil                 => acc
+    go(elems, None, Nil)
+
 /** Precedence climbing for bare infix surfaces (e.g. `a -> b -> c`). */
 final case class InfixOp(text: String, tag: String, prec: Int, rightAssoc: Boolean)
 final case class PrecCategory(name: String, base: String, ops: List[InfixOp])

@@ -17,6 +17,15 @@ final case class CtorDef(
     argSorts: List[String],
     /** binder positions: (binderChildIndex, scopeChildIndices) */
     binders: List[(Int, List[Int])] = Nil,
+    /** Per-position field label, derived from the surface grammar's
+      * `Tok(label) <argument>` shape (see [[SurfaceSlots]]) — `None` where no
+      * such label exists (positional-only). Grammar/surface-derived, so —
+      * like the rest of a fragment's grammar — excluded from
+      * [[FragmentCodec.toCanon]]/semantic identity; re-derived fresh each
+      * time a `.cairn` fragment is elaborated, not persisted through the
+      * canon-addressed [[Fragment]] artifact.
+      */
+    argLabels: List[Option[String]] = Nil,
 )
 
 /** Rewrite rule as data: pattern with metavariables => template (S15).
@@ -178,9 +187,26 @@ object Compose:
       val lintErrors = GrammarLint.errors(grammar).map(i =>
         ComposeError(s"grammar/lint/${i.where}", name, "-", i.msg))
       if lintErrors.nonEmpty then Left(lintErrors)
-      else Right(ComposedLanguage(
-        name, fragments, sorts, ctors, grammar,
-        rules.values.toList.sortBy(_.name), judgs, varCtors.headOption))
+      else
+        // Field labels are grammar-derived and only knowable now: a ctor's
+        // concrete syntax may come from a fragment composed separately from
+        // the one declaring its semantic arity (e.g. a SurfacePack bound by
+        // core.PackCompose.bindSurface) — only the fully composed grammar has
+        // both together. A derived-count mismatch against argSorts means this
+        // ctor's semantic decl and its own concrete syntax disagree on arity;
+        // left unlabeled rather than attaching mislabeled positions.
+        val specByTag: Map[String, ConstructorSpec] =
+          categories.flatMap(_.ctors).map(c => c.tag -> c).toMap
+        val labeledCtors = ctors.map { (tag, cd) =>
+          specByTag.get(tag) match
+            case Some(spec) =>
+              val derived = ConstructorSpec.argLabels(spec.elems, tokens.keywords.toSet)
+              if derived.length == cd.argSorts.length then tag -> cd.copy(argLabels = derived) else tag -> cd
+            case None => tag -> cd
+        }
+        Right(ComposedLanguage(
+          name, fragments, sorts, labeledCtors, grammar,
+          rules.values.toList.sortBy(_.name), judgs, varCtors.headOption))
 
 object FragmentCodec:
   import Canon.*

@@ -166,3 +166,55 @@ class BindingSuite extends munit.FunSuite:
   test("shadowing stops substitution"):
     val t = lam("x", bool, v("x"))
     assertEquals(Binding.subst(spec, "var")(t, "x", v("z")), t)
+
+class GrammarSuite extends munit.FunSuite:
+  test("ConstructorSpec.argLabels: label is the keyword immediately preceding an argument"):
+    // syntax component += component : name tok "pct" num;  (SDS's own shape)
+    val elems = List(Elem.NameLeaf, Elem.Tok("pct"), Elem.NumLeaf)
+    assertEquals(ConstructorSpec.argLabels(elems, Set("pct")), List(None, Some("pct")))
+
+  test("ConstructorSpec.argLabels: punctuation tokens are never labels even if not declared keywords"):
+    // syntax sdsObj += mixture : tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")";
+    val elems = List(
+      Elem.Tok("mixture"), Elem.Tok("of"), Elem.Tok("("),
+      Elem.SepBy1(Elem.Cat("component"), ","), Elem.Tok(")"))
+    // "(" and ")" are punctuation (not declared keywords) — must not become labels
+    // even though "(" immediately precedes the argument (it would otherwise win
+    // as the closest candidate over "of").
+    assertEquals(ConstructorSpec.argLabels(elems, Set("mixture", "of")), List(Some("of")))
+
+  test("ConstructorSpec.argLabels: no preceding keyword means no label"):
+    val elems = List(Elem.NameLeaf, Elem.NumLeaf)
+    assertEquals(ConstructorSpec.argLabels(elems, Set.empty), List(None, None))
+
+  test("ConstructorSpec.argLabels: closest keyword wins when several precede one argument"):
+    val elems = List(Elem.Tok("with"), Elem.Tok("percentage"), Elem.NumLeaf)
+    assertEquals(
+      ConstructorSpec.argLabels(elems, Set("with", "percentage")),
+      List(Some("percentage")))
+
+  test("ConstructorSpec.argLabels: a trailing keyword with no following argument contributes nothing"):
+    val elems = List(Elem.NumLeaf, Elem.Tok("percent"))
+    assertEquals(ConstructorSpec.argLabels(elems, Set("percent")), List(None))
+
+  test("ConstructorSpec.argLabels: every Elem variant except Tok claims exactly one position"):
+    val elems = List(
+      Elem.Tok("kw"), Elem.TokField("kw2"), Elem.Cat("c"), Elem.Opt(Elem.NumLeaf),
+      Elem.Star(Elem.NumLeaf), Elem.SepBy1(Elem.NumLeaf, ","), Elem.NameLeaf,
+      Elem.NumLeaf, Elem.StrLeaf, Elem.AnyIdentLeaf, Elem.Block("c"), Elem.Run("c"),
+      Elem.Adjacent1(Elem.NumLeaf), Elem.RestOfLine)
+    assertEquals(ConstructorSpec.argLabels(elems, Set.empty).length, elems.length - 1)
+
+  test("Compose.compose derives CtorDef.argLabels from the composed grammar, positions align with argSorts"):
+    val g = Fragment(
+      name = "g", provides = List("g"), requires = Nil,
+      sorts = List(SortDef("Foo", SortMode.Tree)),
+      constructors = List(CtorDef("foo", "Foo", List("A", "B"))),
+      grammar = GrammarPart(
+        keywords = List("as"),
+        categories = List(CategorySpec("Foo", List(
+          ConstructorSpec("foo", List(Elem.NumLeaf, Elem.Tok("as"), Elem.NumLeaf))))),
+        top = Some("Foo")))
+    Compose.compose("g", List(g)) match
+      case Right(cl) => assertEquals(cl.constructors("foo").argLabels, List(None, Some("as")))
+      case Left(errs) => fail(errs.map(_.render).mkString("; "))

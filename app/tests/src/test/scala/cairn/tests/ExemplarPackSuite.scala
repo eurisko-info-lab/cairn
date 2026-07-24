@@ -93,6 +93,20 @@ class ExemplarPackSuite extends munit.FunSuite:
     assert(sds.fragments.exists(_.provides.contains("law")))
     assert(sds.fragments.exists(_.provides.contains("cert")))
 
+  test("SDS component/mixture: CtorDef.argLabels derived from real grammar, position-aligned with argSorts"):
+    // component's syntax (surfaces/default.cairn): `name tok "pct" num`, ctor
+    // component : Component(Ref, Pct) — position 0 (Ref) has no preceding
+    // keyword, position 1 (Pct) is labeled by the real "pct" token.
+    val component = Sds.language.constructors("component")
+    assertEquals(component.argSorts, List("Ref", "Pct"))
+    assertEquals(component.argLabels, List(None, Some("pct")))
+    // mixture's syntax: `tok "mixture" tok "of" tok "(" sepby1 cat component "," tok ")"`
+    // — the single Components arg is preceded by keyword "of" ("(" is
+    // punctuation, excluded even though it's the immediately-preceding token).
+    val mixture = Sds.language.constructors("mixture")
+    assertEquals(mixture.argSorts, List("Components"))
+    assertEquals(mixture.argLabels, List(Some("of")))
+
   test("exemplar .cairn text round-trips the meta surface"):
     for name <- List("pki", "law", "sds") do
       val fs = packs.requireOwn(name)
