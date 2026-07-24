@@ -46,10 +46,16 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   strictly higher `activationHeight`, and a **predecessor quorum** of approvals
   from the old set. `activeAt(height)` resolves the live set; predecessors
   deactivate when a successor activates. Every propose/receive/sign and
-  certificate verify checks membership at the block height. Packaged
-  `serve replica` resolves `history.activeAt(chainTipHeight)` (not merely the
-  latest configured tip). Running replicas hot-reload history when the on-disk
-  file changes.
+  certificate verify — including view-level `ViewChange`/`NewView` traffic —
+  checks membership, so a replica dropped from the active set fails closed
+  everywhere, not only on Prepare/Commit/PrePrepare. Packaged `serve replica`
+  resolves membership via `resolveLocalManifest`: the currently active set,
+  or — for a replica whose key only appears in a staged, not-yet-active
+  successor — that staged manifest, so a newly-added replica can start its
+  process once and grow into membership automatically as its local chain
+  catches up to the activation height, rather than crash at startup and
+  require manually-timed restarts. Running replicas hot-reload history when
+  the on-disk file changes.
 - **Membership ceremony** (`BftCeremony` / `cairn bft replica-set …`): per-machine
   `keygen`, pubkey export/import, draft assemble, member `seal`, predecessor
   `approve`, `finalize`, and bundle `export`/`install` — private keys never leave

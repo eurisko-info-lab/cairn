@@ -857,7 +857,7 @@ object Cli:
             tipHeight =
               val digs = node.chainDigests
               if digs.isEmpty then 0L else (digs.length - 1).toLong
-            manifest <- hist.activeAt(tipHeight)
+            manifest <- BftFinality.resolveLocalManifest(hist, tipHeight, replicaName)
             kp <- keystoreLoadOrCreate(home, replicaName)
             bft <- BftReplica.certified(
               kp, manifest,

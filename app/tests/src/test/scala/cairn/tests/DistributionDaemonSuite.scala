@@ -919,6 +919,70 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(BftFinality.FinalityCertificate.verifyAgainstHistory(
       fakeCert, hist, node, ledgerAuth).isLeft)
 
+  test("resolveLocalManifest lets a not-yet-active joiner start; continuing members get the active set"):
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val r4 = Keypair.dev("r4")
+    val genesis = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
+    // n must stay a valid 3f+1 size (4 -> 7), so the joiner arrives alongside two others.
+    val joiners = List(r4, Keypair.dev("r5"), Keypair.dev("r6"))
+    val next = a ++ joiners
+    val draft = ReplicaSetManifest.of(
+      next.map(k => k.name -> k.publicBytes),
+      replaces = Some(genesis.digest),
+      activationHeight = 5L).fold(e => fail(e), identity)
+    val approvals = a.take(3).map(k => k.name -> k.sign(Canon.encode(draft.bodyCanon)))
+    val sealedDraft = ReplicaSetManifest.seal(
+      draft, next.map(k => k.name -> ((msg: Array[Byte]) => k.sign(msg))))
+      .fold(e => fail(e), identity)
+    val successor = ReplicaSetManifest.withPredecessorApprovals(sealedDraft, approvals)
+      .fold(e => fail(e), identity)
+    val hist = ValidatedReplicaSetHistory.verify(List(genesis, successor), Ed25519.verify)
+      .fold(e => fail(e), identity)
+    // r4 is only in the staged successor: starts there, ahead of its activation height.
+    assertEquals(
+      BftFinality.resolveLocalManifest(hist, tipHeight = 0L, "r4").map(_.digest),
+      Right(successor.digest))
+    // r0 is in both: stays on the currently active (genesis) set until it activates.
+    assertEquals(
+      BftFinality.resolveLocalManifest(hist, tipHeight = 0L, "r0").map(_.digest),
+      Right(genesis.digest))
+    // Unknown identity: clear error, not a crash.
+    assert(BftFinality.resolveLocalManifest(hist, tipHeight = 0L, "nobody").isLeft)
+
+  test("a replica removed from the active set can no longer instigate a view-change"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-departed")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val genesis = BftFinality.sealReplicaSet(a, activationHeight = 0L).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis).fold(e => fail(e), identity)
+    // r0 is removed, replaced by r4 (n must stay a valid 3f+1 size); r1..r3 continue.
+    val remaining = a.tail :+ Keypair.dev("r4")
+    val draft = ReplicaSetManifest.of(
+      remaining.map(k => k.name -> k.publicBytes),
+      replaces = Some(genesis.digest),
+      activationHeight = 1L).fold(e => fail(e), identity)
+    val approvals = a.take(3).map(k => k.name -> k.sign(Canon.encode(draft.bodyCanon)))
+    val sealedDraft = ReplicaSetManifest.seal(
+      draft, remaining.map(k => k.name -> ((msg: Array[Byte]) => k.sign(msg))))
+      .fold(e => fail(e), identity)
+    val successor = ReplicaSetManifest.withPredecessorApprovals(sealedDraft, approvals)
+      .fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), successor)
+      .fold(e => fail(e), identity)
+    val r0 = BftReplica.certified(
+      a.head, genesis, node = Some(node), ledgerAuth = ledgerAuth, home = Some(home))
+      .fold(e => fail(e), identity)
+    // Advance the local chain tip past the successor's activation height.
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
+      .fold(e => fail(e), identity) // tip height becomes 1
+    val result = r0.requestViewChange(1)
+    assert(result.isLeft, result.toString)
+    assert(result.swap.toOption.exists(_.contains("deactivated")), result.toString)
+
   test("multi-home CLI ceremony: keygen → pubkey exchange → seal → commit → install"):
     val secret = ksSecret
     val ids = List("r0", "r1", "r2", "r3")

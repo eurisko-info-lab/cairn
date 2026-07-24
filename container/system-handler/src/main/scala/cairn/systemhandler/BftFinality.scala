@@ -1282,6 +1282,24 @@ object BftFinality:
   ): Either[String, ReplicaSetManifest] =
     loadReplicaSetHistory(home).flatMap(_.activeAt(height))
 
+  /** Manifest to bootstrap a replica process with: prefer the currently active
+    * set; otherwise fall back to the most recent staged (not-yet-active)
+    * manifest that already lists `localId`, so a newly-added replica can start
+    * once and grow into membership automatically (`requireLocalActiveAt` still
+    * refuses to operate until the real activation height is reached).
+    */
+  def resolveLocalManifest(
+      history: ValidatedReplicaSetHistory,
+      tipHeight: Long,
+      localId: String,
+  ): Either[String, ReplicaSetManifest] =
+    val candidates = history.manifests.filter(_.authorities.contains(localId))
+    if candidates.isEmpty then Left(s"bft: '$localId' is not a member of any known replica-set")
+    else
+      history.activeAt(tipHeight) match
+        case Right(active) if active.authorities.contains(localId) => Right(active)
+        case _ => Right(candidates.sortBy(_.activationHeight).last)
+
   def defaultReplicaSetPath(home: java.nio.file.Path): java.nio.file.Path =
     home.resolve("replica-set.canon")
 
@@ -2027,17 +2045,19 @@ final class BftReplica private (
   /** Atomically refresh membership when history file changes **or** tip height moves
     * across an activation boundary (mtime alone is not enough for staged sets).
     */
+  private def currentTipHeight: Long =
+    node match
+      case Some(n) =>
+        val digs = n.chainDigests
+        if digs.isEmpty then 0L else (digs.length - 1).toLong
+      case None =>
+        finalizedHighWater.max(0L)
+
   def refreshHistory(): Either[String, Unit] =
     home match
       case None => Right(())
       case Some(h) =>
-        val tipHeight =
-          node match
-            case Some(n) =>
-              val digs = n.chainDigests
-              if digs.isEmpty then 0L else (digs.length - 1).toLong
-            case None =>
-              finalizedHighWater.max(0L)
+        val tipHeight = currentTipHeight
         val mt = BftReplica.historyFileMtime(h)
         val fileChanged = mt != historyMtime
         val heightMoved = tipHeight != membershipTipHeight
@@ -2105,6 +2125,14 @@ final class BftReplica private (
               else Right(active)
             }
     }
+
+  /** Height-independent guard for view-level messages (ViewChange/NewView), which
+    * unlike Prepare/Commit/PrePrepare aren't tied to a single sequence/block height —
+    * gates on whether the local replica is active at its own current ledger tip, so a
+    * deactivated replica cannot instigate, process, or sign view-change traffic.
+    */
+  private def requireLocalActiveNow: Either[String, Unit] =
+    requireLocalActiveAt(currentTipHeight).map(_ => ())
 
   private def heightForValueDigest(d: Digest): Option[Long] =
     blockMeta.collectFirst {
@@ -2299,21 +2327,23 @@ final class BftReplica private (
     */
   def requestViewChange(newView: Int): Either[String, List[SignedMsg]] =
     refuseIfCorrupt {
-      val now = System.currentTimeMillis()
-      if newView != state.view + 1 then
-        Left(
-          s"bft: only immediate successor view allowed " +
-            s"(current=${state.view}, requested=$newView)")
-      else if lastViewChangeStartedAt > 0L &&
-          now - lastViewChangeStartedAt < BftReplica.MinViewChangeIntervalMs then
-        Left(
-          s"bft: view-change rate limited " +
-            s"(min interval ${BftReplica.MinViewChangeIntervalMs}ms)")
-      else
-        lastViewChangeStartedAt = now
-        sign(keypair, Msg.ViewChange(newView, preparedWithProofs, id), setDigest, chainId).flatMap { vc =>
-          receive(vc).map(out => vc :: out)
-        }
+      requireLocalActiveNow.flatMap { _ =>
+        val now = System.currentTimeMillis()
+        if newView != state.view + 1 then
+          Left(
+            s"bft: only immediate successor view allowed " +
+              s"(current=${state.view}, requested=$newView)")
+        else if lastViewChangeStartedAt > 0L &&
+            now - lastViewChangeStartedAt < BftReplica.MinViewChangeIntervalMs then
+          Left(
+            s"bft: view-change rate limited " +
+              s"(min interval ${BftReplica.MinViewChangeIntervalMs}ms)")
+        else
+          lastViewChangeStartedAt = now
+          sign(keypair, Msg.ViewChange(newView, preparedWithProofs, id), setDigest, chainId).flatMap { vc =>
+            receive(vc).map(out => vc :: out)
+          }
+      }
     }
 
   /** Remote pacemaker trigger: like [[requestViewChange]], but additionally
@@ -2398,11 +2428,13 @@ final class BftReplica private (
             case Msg.Commit(_, seq, _, _) =>
               requireLocalActiveAt(seq.toLong).map(_ => ())
             case Msg.ViewChange(_, prepared, _) =>
-              prepared.foldLeft[Either[String, Unit]](Right(())) { (acc, pc) =>
-                acc.flatMap(_ => verifyPreparedCert(pc))
+              requireLocalActiveNow.flatMap { _ =>
+                prepared.foldLeft[Either[String, Unit]](Right(())) { (acc, pc) =>
+                  acc.flatMap(_ => verifyPreparedCert(pc))
+                }
               }
             case nv: Msg.NewView =>
-              verifyNewViewCertificate(nv)
+              requireLocalActiveNow.flatMap(_ => verifyNewViewCertificate(nv))
           bind.flatMap { _ =>
             sm.msg match
               case Msg.Commit(view, seq, d, from) =>
@@ -2459,7 +2491,7 @@ final class BftReplica private (
                         .flatMap(d => blockMeta.get(d).map(_._1).toRight("bft: unknown PrePrepare block"))
                         .flatMap(h => requireLocalActiveAt(h).map(_ => ()))
                     case Msg.ViewChange(_, _, _) | Msg.NewView(_, _, _, _) =>
-                      Right(())
+                      requireLocalActiveNow
                   activeOk.flatMap { _ =>
                     BftFinality.sign(keypair, m2, setDigest, chainId).map { s =>
                       m2 match
