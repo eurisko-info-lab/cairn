@@ -6,8 +6,16 @@ the parity matrix). Packs are real code + tests, not name-drops.
 
 **Expression:** PKI, Law, and SDS object languages live in checked-in `.cairn`
 files under [content/languages/](../content/languages/) (same meta+grammar surface as
-`stlc.cairn` / `meta.cairn`). Scala under `examples/` is host glue (crypto,
-domain gates, tutorials) — not the language definition.
+`stlc.cairn` / `meta.cairn`).
+
+**Purity invariant:** Domain apps (PKI, Law, SDS, and future packs such as
+loaner) are Cairn. Any domain-specific Scala is a failure of the platform —
+not an app feature. Statute/chemical fixtures load from disk via
+[[cairn.runtime.ModuleSource]] (e.g. `languages/law/acts/`). Forever-host
+concerns (Ed25519, CAS, FS, ledger I/O) must be generic effects, never
+domain classes. Remaining Scala under `examples/` / `user/` is **platform debt**
+(citation gate, `Sds.validate`, causal handlers, …) to be paid down — see
+“Scala orchestration residual” below.
 
 **Changes:** free ΔL only — `Delta.deltaOf(L)` derives `add` / `remove` / …
 on demand. It is **never materialized** as checked-in `.cairn` (no `dpki` /
@@ -33,7 +41,7 @@ under `SDS` via `forkFrom` / `underSds`.
 
 ## PKI — on par with GRANITE top-level
 
-`languages/pki.cairn` + `examples/pki` (`Pki` glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
+`languages/pki.cairn` + `user/pki` (pack façade) + `examples/pki` (Ed25519/chain glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
 
 - Registry object language: `cert` and optional soft `revocation` entries.
 - ΔPKI = generic free ΔL (`add` issues, `remove` hard-revokes; soft revoke =
@@ -43,11 +51,12 @@ under `SDS` via `forkFrom` / `underSds`.
 
 ## Law — middle link (PKI → Law → SDS)
 
-`languages/law.cairn` + `examples/law` (`Law` glue + `LawTutorial`):
+`languages/law.cairn` + `user/law` (pack façade) + `examples/law` (`LawTutorial`):
 
 - Statute sections + `enactedBy` citing a PKI cert name as authority.
-- Citation judgment; repeal via free ΔL `remove`; closed language includes PKI `cert`.
-- Model Chemical Safety Act slice only — full statute corpora deferred.
+- Citation judgment (host residual); repeal via free ΔL `remove`; closed language includes PKI `cert`.
+- Model Chemical Safety Act: `languages/law/acts/model-chemical-safety.cairn` via `ModuleSource` — not Scala.
+- Full statute corpora / jurisdiction profiles still deferred (loaner will add `law-*-credit` packs).
 
 ## SDS — on par with GRANITE flagship *spine* (not Studio)
 
@@ -106,9 +115,12 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- **Scala orchestration residual:** `Sds.validate` / `EuClp.conform` outline
-  walks, `SectionReport.toCst`, and effectful causal/cert minting — facts and
-  encodings are Cairn; drivers remain host.
+- **Scala orchestration residual (platform debt):** `Law.citationCheck`,
+  `Sds.validate` / `EuClp.conform` outline walks, `SectionReport.toCst`,
+  effectful causal/cert minting, PKI `$sig-ok` / chain rules still host-injected.
+  Facts and encodings are Cairn; drivers remain host until module judgments +
+  effect-bound `WorkflowRunner` land. Paying this down is a Cairn platform
+  task — domain apps must not grow new Scala.
 - Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
   research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;

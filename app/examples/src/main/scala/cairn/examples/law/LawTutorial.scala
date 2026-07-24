@@ -2,9 +2,10 @@ package cairn.examples.law
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.ModuleSource
 
-/** Thin Law tutorial: load statute language (closed over PKI), validate
-  * citations, record enacting authority as a PKI cert name, repeal via free ΔLaw.
+/** Thin Law tutorial: load statute language (closed over PKI), load the
+  * model act from `languages/law/acts/`, validate citations, repeal via free ΔLaw.
   */
 object LawTutorial:
   final case class Report(
@@ -23,7 +24,7 @@ object LawTutorial:
     val provides = lang.fragments.flatMap(_.provides).toSet
     val requires = lang.fragments.flatMap(_.requires).toSet
     val met = requires.subsetOf(provides)
-    val act = cairn.examples.law.Law.modelAct
+    val act = ModuleSource.modelChemicalSafetyAct(lang).fold(e => throw RuntimeException(e), identity)
     val citationOk = Law.validate(act).isRight
     val cert = act.get("authority") match
       case Some(Cst.Node("enactedBy", List(_, Cst.Leaf(c)))) => c

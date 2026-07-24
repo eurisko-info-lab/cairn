@@ -122,7 +122,8 @@ class ParitySuite extends munit.FunSuite:
   // ---- Law pack (GRANITE PKI→Law→SDS middle link) ----
 
   test("parity: Law statute round-trips; citation judgment; repeal via ΔLaw"):
-    val act = cairn.examples.law.Law.modelAct
+    val act = cairn.runtime.ModuleSource.modelChemicalSafetyAct(Law.language)
+      .fold(e => fail(e), identity)
     RoundTrip.check(Law.language.grammar, act.defs.find(_._1 == "s2").get._2)
       .fold(e => fail(e), identity)
     Law.validate(act).fold(e => fail(e), identity)

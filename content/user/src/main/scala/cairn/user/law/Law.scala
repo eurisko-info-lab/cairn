@@ -4,12 +4,15 @@ import cairn.kernel.*
 import cairn.systeminterface.PackAccess
 import cairn.core.*
 
-/** Law pack — middle link in `PKI → Law → SDS`.
+/** Law pack — middle link in PKI to Law to SDS.
   *
-  * Object language: [[languages/law.cairn]] (`fragment statutes provides law requires cert`).
-  * Closed composition pulls PKI's `cert` fragment; compose without PKI fails.
-  * `enactedBy` cites a PKI certificate name as enacting authority.
-  * Scala glue: citation judgment + ΔLaw gate + model act fixture.
+  * Object language: languages/law.cairn (fragment statutes provides law requires cert).
+  * Closed composition pulls PKI's cert fragment; compose without PKI fails.
+  * enactedBy cites a PKI certificate name as enacting authority.
+  *
+  * Statute fixtures live under languages/law/acts/ (load via ModuleSource).
+  * Citation check is temporary host residual until whole-module judgments
+  * land in Cairn — not domain product logic.
   */
 final class Law(packs: PackAccess):
   lazy val fragments: List[Fragment] = packs.requireOwn("law")
@@ -23,7 +26,9 @@ final class Law(packs: PackAccess):
 
   private val citation = """Section\s+(\S+)""".r
 
-  /** Citation judgment: every "Section N" mention must resolve in the module. */
+  /** Host residual: every "Section N" mention must resolve in the module.
+    * Platform debt — replace with a Cairn module judgment when available.
+    */
   def citationCheck(m: Module): List[String] =
     val byNumber = m.defs.collect {
       case (name, Cst.Node("section", List(Cst.Leaf(num), _, _))) => num -> name
@@ -49,17 +54,3 @@ final class Law(packs: PackAccess):
   def applyLaw(m: Module, change: Cst): Either[String, (Module, Delta.ValidatedChangeSet)] =
     Delta.apply(language, m, change).flatMap { out =>
       validate(out._1).map(_ => out) }
-
-object Law:
-  /** Pure fixture — no pack load. */
-  def modelAct: Module = Module(List(
-    "s1" -> Cst.node("section", Cst.Leaf("1"), Cst.Leaf("Purpose"),
-      Cst.Leaf("This Act governs chemical safety disclosure.")),
-    "s2" -> Cst.node("section", Cst.Leaf("2"), Cst.Leaf("Definitions"),
-      Cst.Leaf("Substance has the meaning in Section 1.")),
-    "s3" -> Cst.node("section", Cst.Leaf("3"), Cst.Leaf("SDS duty"),
-      Cst.Leaf("Publishers must maintain an SDS as defined in Section 2.")),
-    "act" -> Cst.node("statute", Cst.Leaf("Model Chemical Safety Act"),
-      Cst.Node("list", List(Cst.Leaf("s1"), Cst.Leaf("s2"), Cst.Leaf("s3")))),
-    "authority" -> Cst.node("enactedBy", Cst.Leaf("act"), Cst.Leaf("root"))
-  )).sorted

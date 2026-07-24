@@ -5,17 +5,15 @@ import cairn.systeminterface.PackAccess
 import cairn.core.*
 import cairn.systemhandler.{Ed25519, Keypair}
 
-/** PKI pack (S47, §5b): first link in `PKI → Law → SDS`.
+/** PKI composition-root glue: pack façade from [[cairn.user.pki.Pki]] plus
+  * Ed25519 / chain validation (generic crypto effects — not the object language).
   *
-  * Object language: [[languages/pki.cairn]] (certs + optional `revocation` entries).
-  * Changes: free ΔL only via [[Delta.deltaOf]] — `add` issues, `remove` revokes
-  * (hard); soft revoke is `add` of a `revocation` term. Never materialized.
-  * Scala here is host glue: Ed25519 + chain validation.
+  * Object language: [[languages/pki.cairn]]. Changes: free ΔL only.
   */
 final class Pki(packs: PackAccess):
-  lazy val fragments: List[Fragment] = packs.requireOwn("pki")
+  private val pack = cairn.user.pki.Pki(packs)
 
-  lazy val language: ComposedLanguage = packs.requireClosed("pki")
+  export pack.{fragments, language, revokedNames}
 
   private def hex(bs: Array[Byte]): String = bs.map(b => f"${b & 0xff}%02x").mkString
   private def unhex(s: String): Array[Byte] =
@@ -43,11 +41,6 @@ final class Pki(packs: PackAccess):
       Cst.Leaf(notAfter.toString))
 
   def rootTerm(root: Keypair): Cst = certTerm(root.name, root, root)
-
-  def revokedNames(m: Module): Set[String] =
-    m.defs.collect {
-      case (_, Cst.Node("revocation", List(Cst.Leaf(n), _, _))) => n
-    }.toSet
 
   final case class ValidationError(cert: String, reason: String):
     def render: String = s"chain validation failed at '$cert': $reason"

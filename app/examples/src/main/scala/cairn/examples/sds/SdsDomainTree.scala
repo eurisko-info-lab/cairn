@@ -1,10 +1,9 @@
 package cairn.examples.sds
 
-import cairn.runtime.Branches
+import cairn.runtime.{Branches, ModuleSource, PackLoader, EffectContexts}
 import cairn.kernel.*
 import cairn.core.Module
 import cairn.examples.pki.DemoPki
-import cairn.examples.law.Law
 
 /** Ledger domain trunk for the SDS exemplar DAG.
   *
@@ -36,7 +35,10 @@ object SdsDomainTree:
   def pkiSeed: Module =
     Module(List("registry" -> DemoPki.hierarchy().registry)).sorted
 
-  def lawSeed: Module = Law.modelAct
+  def lawSeed: Module =
+    val packs = PackLoader(EffectContexts.forPackLoader())
+    val lang = cairn.examples.law.Law(packs).language
+    ModuleSource.modelChemicalSafetyAct(lang).fold(e => throw RuntimeException(e), identity)
 
   def chemistrySeed: Module = Chemicals.Acetone.thinModule
 
