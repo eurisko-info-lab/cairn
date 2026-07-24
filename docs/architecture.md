@@ -13,7 +13,7 @@ not the history of how it got here.
 | **Kernel**            | `kernel/`                        | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
 | **Core**              | `content/core/`                   | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
 | **Contracts**         | `contracts/`                      | Effect Request/Response/Error schemas (Cas/Filesystem/Process/…), `PackAccess`, `AuthorizationProver` | Pure platform contract |
-| **System Interface**  | `container/system-interface/`     | `LedgerTransport` contract only (needs kernel-container's `SignedTx`/`Block`) | Pure platform contract             |
+| **System Interface**  | `container/system-interface/`     | `LedgerTransport` contract only (needs `ledger-types`' `SignedTx`/`Block`) | Pure platform contract             |
 | **System Handler**    | `container/system-handler/`       | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
 | **User**              | `content/user/`                   | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
 | **Runtime**           | `app/runtime/`                    | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
@@ -50,7 +50,9 @@ contracts                   → kernel                  # shared: Cas, Clock, Ef
                                                        # Lsp, PackAccess, Process,
                                                        # Random, Terminal, Workspace,
                                                        # AuthorizationProver
-container/kernel-container  → kernel                  # Merkle, Ledger, BftQuorum,
+container/ledger-types      → kernel                  # Tx, SignedTx, Block (wire types)
+container/kernel-container  → kernel, ledger-types     # Merkle, Ledger (LedgerState/
+                                                       # LedgerKernel), BftQuorum,
                                                        # BranchManifest,
                                                        # ReplicaSetManifest,
                                                        # CertificateAttach,
@@ -58,8 +60,8 @@ container/kernel-container  → kernel                  # Merkle, Ledger, BftQuo
                                                        # IdentityResolver
 content/kernel-rewrite      → kernel                  # Rename, Rewrite, Checker
 content/core                → kernel, kernel-rewrite
-container/system-interface  → kernel, kernel-container            # LedgerTransport only
-container/system-handler    → kernel, kernel-container, system-interface, contracts
+container/system-interface  → kernel, ledger-types                # LedgerTransport only
+container/system-handler    → kernel, ledger-types, kernel-container, system-interface, contracts
 content/user                → kernel, core, contracts   (↛ system-handler, ↛ container/*)
 app/runtime                 → user, system-handler, core, kernel, system-interface, contracts
 
@@ -107,12 +109,15 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
 1. **Done.** 12 of `system-interface`'s 13 files (everything except
    `LedgerTransport`) moved to a shared `contracts` project depending only
    on `kernel`; `content/user` now depends on `contracts` instead of
-   `container/system-interface`. `LedgerTransport` stayed behind in
-   `system-interface` (still needs `kernel-container`'s `SignedTx`/`Block`,
-   which are co-located with `Merkle`-dependent `LedgerState`/`LedgerKernel`
-   — hoisting them out to drop `system-interface`'s `kernelContainer`
-   dependency entirely is a separate, deliberately deferred step so it
-   doesn't collide with in-flight `Ledger.scala` work).
+   `container/system-interface`. `LedgerTransport` needed `SignedTx`/`Block`,
+   which were co-located with `Merkle`-dependent `LedgerState`/`LedgerKernel`
+   in `kernel-container` — rather than moving them into `contracts` (which
+   `content/user` depends on, and which was deliberately kept ledger-free),
+   `Tx`/`SignedTx`/`Block` were hoisted into a new minimal
+   `container/ledger-types` project (`kernel`-only, same `cairn.kernel`
+   package, no import changes needed at any of the ~13 call sites). This
+   lets `system-interface` depend on `ledger-types` instead of the full
+   `kernelContainer` (which still owns the Merkle-backed state machine).
 2. **Done.** Deleted the temporary `AuthorityGate.DefaultProver`; its
    `prover` parameter (and every companion factory that used to default it)
    is now required. 28 call sites across 4 files relied on the default: 7
