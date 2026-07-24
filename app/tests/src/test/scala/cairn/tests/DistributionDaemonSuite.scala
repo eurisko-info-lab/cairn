@@ -665,6 +665,60 @@ class DistributionDaemonSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     assertEquals(validated.activeAt(0), Right(sealedM))
 
+  /** Amendment manifest with both member seals and predecessor-quorum approvals. */
+  private def sealedAmendment(
+      a: List[Keypair],
+      predecessor: Digest,
+      activationHeight: Long,
+  ): ReplicaSetManifest =
+    val draft = ReplicaSetManifest.of(
+      a.map(k => k.name -> k.publicBytes),
+      replaces = Some(predecessor),
+      activationHeight = activationHeight).fold(e => fail(e), identity)
+    val sealedM = ReplicaSetManifest.seal(draft, a.map(k => k.name -> ((msg: Array[Byte]) => k.sign(msg))))
+      .fold(e => fail(e), identity)
+    val approvals = a.take(3).map(k => k.name -> k.sign(Canon.encode(draft.bodyCanon)))
+    ReplicaSetManifest.withPredecessorApprovals(sealedM, approvals).fold(e => fail(e), identity)
+
+  test("recordReplicaSetTransition anchors an amendment, verifyReplicaSetHistoryAnchored accepts it"):
+    val auth = Keypair.dev("ledger-auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-anchor-ok")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val genesis = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
+    val amendment = sealedAmendment(a, genesis.digest, activationHeight = 10L)
+    val history = ValidatedReplicaSetHistory.verify(List(genesis, amendment), Ed25519.verify)
+      .fold(e => fail(e), identity)
+    // Cryptographically valid but not yet anchored: rejected.
+    assert(BftFinality.verifyReplicaSetHistoryAnchored(history, node, ledgerAuth).isLeft)
+    BftFinality.recordReplicaSetTransition(node, ledgerAuth, auth, amendment)
+      .fold(e => fail(e), identity)
+    assertEquals(BftFinality.verifyReplicaSetHistoryAnchored(history, node, ledgerAuth), Right(()))
+
+  test("refreshHistory refuses to hot-reload a transition that is not anchored in ledger state"):
+    val auth = Keypair.dev("ledger-auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val home = java.nio.file.Files.createTempDirectory("cairn-bft-anchor-refuse")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    val a = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val genesis = BftFinality.sealReplicaSet(a).fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), genesis)
+      .fold(e => fail(e), identity)
+    val bft = BftReplica.certified(
+      a.head, genesis, node = Some(node), ledgerAuth = ledgerAuth, home = Some(home))
+      .fold(e => fail(e), identity)
+    // Amendment is sealed + predecessor-approved (file-valid) but never recorded on the ledger.
+    val amendment = sealedAmendment(a, genesis.digest, activationHeight = 5L)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), amendment)
+      .fold(e => fail(e), identity)
+    val refreshed = bft.refreshHistory()
+    assert(refreshed.isLeft, "an unanchored transition must not be adopted")
+
   test("corrupt bft-state.canon refuses further operate (fail closed)"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)

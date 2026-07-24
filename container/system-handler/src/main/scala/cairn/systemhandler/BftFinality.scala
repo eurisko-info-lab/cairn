@@ -1306,6 +1306,41 @@ object BftFinality:
         }
     raw.flatMap(ValidatedReplicaSetHistory.verify(_, Ed25519.verify))
 
+  /** Anchor a finalized (predecessor-quorum-approved) replica-set transition into
+    * global ledger state, so its finalization no longer rests solely on an
+    * operator distributing `replica-set-history.canon` out of band.
+    */
+  def recordReplicaSetTransition(
+      node: Node,
+      ledgerAuth: Map[String, Vector[Byte]],
+      sealer: Keypair,
+      manifest: ReplicaSetManifest,
+  ): Either[String, Block] =
+    // RecordCertificate requires a known ledger signer (identities.get / authorities.get);
+    // self-register first — idempotent no-op if `sealer` is already a registered identity.
+    node.append(sealer, ledgerAuth,
+      List(
+        sealer.signTx(Tx.RegisterIdentity(sealer.name, sealer.publicBytes)),
+        sealer.signTx(Tx.RecordCertificate(manifest.digest, "replica-set-transition"))))
+
+  /** Every non-genesis transition in `history` must be anchored in this node's own
+    * replayed ledger state — a manifest that is cryptographically well-formed but
+    * was never recorded on-chain must not be trusted as finalized.
+    */
+  def verifyReplicaSetHistoryAnchored(
+      history: ValidatedReplicaSetHistory,
+      node: Node,
+      ledgerAuth: Map[String, Vector[Byte]],
+  ): Either[String, Unit] =
+    node.state(ledgerAuth).flatMap { st =>
+      history.manifests.filter(_.replaces.isDefined).foldLeft[Either[String, Unit]](Right(())) { (acc, m) =>
+        acc.flatMap { _ =>
+          if st.certificates.contains(m.digest.hex) then Right(())
+          else Left(s"replica-set: transition ${m.digest.short} not anchored in ledger state")
+        }
+      }
+    }
+
   /** Persist a sealed replica-set as current tip and append to durable history.
     * Amendments require predecessor quorum approvals ([[ReplicaSetManifest.allowsTransition]]).
     */
@@ -2010,10 +2045,19 @@ final class BftReplica private (
         else
           val loaded =
             if fileChanged then
-              BftFinality.loadReplicaSetHistory(h).map { vh =>
-                history = vh
-                historyMtime = mt
-                vh
+              BftFinality.loadReplicaSetHistory(h).flatMap { vh =>
+                // A replica-set transition file changing on disk is not enough: the
+                // transition must also be anchored in ledger state, or a party with
+                // filesystem access to this home directory could install an
+                // unfinalized (or stale) history and have it silently adopted.
+                val anchored = (node, ledgerAuth.nonEmpty) match
+                  case (Some(n), true) => BftFinality.verifyReplicaSetHistoryAnchored(vh, n, ledgerAuth)
+                  case _               => Right(())
+                anchored.map { _ =>
+                  history = vh
+                  historyMtime = mt
+                  vh
+                }
               }
             else Right(history)
           loaded.flatMap { vh =>

@@ -783,6 +783,8 @@ object Cli:
         }
       case List("bft", "replica-set", "status") =>
         BftCeremony.status(home)
+      case List("bft", "replica-set", "anchor", signerName) =>
+        bftReplicaSetAnchor(home, signerName, ledgerCtx)
       case List("smoke", "distribution") =>
         smokeDistribution(ledgerCtx)
       case porcelainCmd :: rest
@@ -955,6 +957,24 @@ object Cli:
       sealedM <- BftFinality.sealReplicaSet(kps)
       _ <- BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), sealedM)
     yield s"replica-set ${sealedM.digest.short} n=${sealedM.n} ids=${sealedM.ids.mkString(",")}"
+
+  /** Anchor the locally-finalized replica-set tip into global ledger state, so its
+    * finalization no longer rests solely on operator-distributed files.
+    */
+  private def bftReplicaSetAnchor(
+      home: Path,
+      signerName: String,
+      ledgerCtx: EffectContext,
+  ): Either[String, String] =
+    val root = home.resolve("nodeA").toAbsolutePath.normalize
+    java.nio.file.Files.createDirectories(root)
+    val node = Node(root, ledgerCtx)
+    for
+      ledgerAuth <- defaultAuthorities(home)
+      sealer <- keystoreLoadOrCreate(home, signerName)
+      manifest <- BftFinality.loadReplicaSet(BftFinality.defaultReplicaSetPath(home))
+      block <- BftFinality.recordReplicaSetTransition(node, ledgerAuth, sealer, manifest)
+    yield s"anchored replica-set ${manifest.digest.short} in block ${Digest.of(block.canon).short}"
 
   /** In-process lab agreement bound to a local sealed block (not network). */
   private def bftAgreeLocal(home: Path, block: Digest, ledgerCtx: EffectContext): Either[String, String] =
