@@ -448,6 +448,89 @@ object BftFinality:
                 if Ed25519.verify(pk, req.payload, req.seal) then Right(())
                 else Left(s"bad view-change seal from ${req.signer.id}")
 
+  /** Signed snapshot of a replica's current view + latest installed NewView
+    * digest — lets a client determine the cluster's actual view via quorum
+    * evidence (see [[viewQuorumConfirmed]]) instead of guessing from HTTP
+    * fan-out timing.
+    */
+  final case class ViewStatus(
+      replica: ReplicaId,
+      view: Int,
+      latestNewViewDigest: Option[Digest],
+      chainId: Digest,
+      replicaSet: Digest,
+      seal: Vector[Byte],
+  ):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap(
+      "domain" -> Canon.CStr(MsgDomain),
+      "replica" -> Canon.CStr(replica.id),
+      "view" -> Canon.CInt(view),
+      "latestNewViewDigest" -> latestNewViewDigest.fold(Canon.CTag("none", Canon.CInt(0)))(d =>
+        Canon.CTag("some", Canon.CStr(d.hex))),
+      "chainId" -> Canon.CStr(chainId.hex),
+      "replicaSet" -> Canon.CStr(replicaSet.hex)))
+    def canon: Canon = Canon.CTag("bft-view-status", Canon.cmap(
+      "replica" -> Canon.CStr(replica.id),
+      "view" -> Canon.CInt(view),
+      "latestNewViewDigest" -> latestNewViewDigest.fold(Canon.CTag("none", Canon.CInt(0)))(d =>
+        Canon.CTag("some", Canon.CStr(d.hex))),
+      "chainId" -> Canon.CStr(chainId.hex),
+      "replicaSet" -> Canon.CStr(replicaSet.hex),
+      "seal" -> Canon.CBytes(seal)))
+
+  object ViewStatus:
+    def sign(
+        signer: Signer,
+        view: Int,
+        latestNewViewDigest: Option[Digest],
+        chainId: Digest,
+        replicaSet: Digest,
+    ): ViewStatus =
+      val vs = ViewStatus(ReplicaId(signer.name), view, latestNewViewDigest, chainId, replicaSet, Vector.empty)
+      vs.copy(seal = signer.sign(vs.payload))
+
+    def fromCanon(c: Canon): Either[String, ViewStatus] =
+      import Canon.*
+      c match
+        case CTag("bft-view-status", m) =>
+          try
+            m.field("seal") match
+              case CBytes(bs) =>
+                val fields = m.asMap
+                (fields.get("chainId"), fields.get("replicaSet")) match
+                  case (Some(cid), Some(rs)) =>
+                    val digest = fields.get("latestNewViewDigest") match
+                      case Some(CTag("some", CStr(h))) => Some(Digest(h))
+                      case _                            => None
+                    Right(ViewStatus(
+                      ReplicaId(m.field("replica").asStr),
+                      m.field("view").asInt.toInt,
+                      digest,
+                      Digest(cid.asStr),
+                      Digest(rs.asStr),
+                      bs))
+                  case _ => Left("bft-view-status: missing chainId/replicaSet epoch binding")
+              case other => Left(s"bad view-status seal: $other")
+          catch case e: CodecError => Left(e.getMessage)
+        case other => Left(s"not a bft-view-status: $other")
+
+  def verifyViewStatus(
+      authorities: Map[String, Vector[Byte]],
+      vs: ViewStatus,
+      expectedChainId: Digest,
+      expectedReplicaSet: Digest,
+  ): Either[String, Unit] =
+    if vs.chainId != expectedChainId then
+      Left(s"bft view-status: chainId ${vs.chainId.short} != expected ${expectedChainId.short}")
+    else if vs.replicaSet != expectedReplicaSet then
+      Left(s"bft view-status: replicaSet ${vs.replicaSet.short} != expected ${expectedReplicaSet.short}")
+    else
+      authorities.get(vs.replica.id) match
+        case None => Left(s"unknown bft replica '${vs.replica.id}'")
+        case Some(pk) =>
+          if Ed25519.verify(pk, vs.payload, vs.seal) then Right(())
+          else Left(s"bad view-status seal from ${vs.replica.id}")
+
   /** Drop slots / seals at or below the finalized high-water; drop meta for certified blocks. */
   def compactFinalized(
       state: BftQuorum.ReplicaState,
@@ -1453,6 +1536,50 @@ object BftFinality:
       }
     }
 
+  def fetchViewStatus(baseUrl: String): Either[String, ViewStatus] =
+    httpGet(s"$baseUrl/bft/status").flatMap(body => Canon.decode(body).flatMap(ViewStatus.fromCanon))
+
+  /** Ask replica URLs for a signed [[ViewStatus]] and determine, via quorum
+    * evidence (not response timing), whether the cluster has installed
+    * `targetView` or later. A lone forged or stale status can't move this —
+    * only `quorumSize(n)` distinct, verified replicas reporting
+    * `view >= targetView` count.
+    */
+  private def viewQuorumConfirmed(
+      replicaUrls: Map[String, String],
+      targetView: Int,
+      authorities: Map[String, Vector[Byte]],
+      chainId: Digest,
+      expectedReplicaSet: Digest,
+      timeoutMs: Long = 1500L,
+  ): Boolean =
+    val urls = replicaUrls.values.toList
+    if urls.isEmpty then false
+    else
+      val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(urls.size, 8).max(1))
+      try
+        val futs = urls.map { url =>
+          java.util.concurrent.CompletableFuture.supplyAsync(() => fetchViewStatus(url), exec)
+        }
+        val pending = scala.collection.mutable.ListBuffer.from(futs)
+        val results = scala.collection.mutable.ListBuffer.empty[Either[String, ViewStatus]]
+        val deadline = System.nanoTime() + timeoutMs * 1000000L
+        while pending.nonEmpty && System.nanoTime() < deadline do
+          val done = pending.filter(_.isDone).toList
+          if done.isEmpty then Thread.sleep(5)
+          else
+            done.foreach { f =>
+              try results += f.getNow(null)
+              catch case e: Exception => results += Left(e.getMessage)
+              pending -= f
+            }
+        pending.foreach(_.cancel(true))
+        val verified = results.collect { case Right(vs) => vs }
+          .filter(vs => verifyViewStatus(authorities, vs, chainId, expectedReplicaSet).isRight)
+        val q = BftQuorum.quorumSize(authorities.size)
+        verified.filter(_.view >= targetView).map(_.replica.id).distinct.length >= q
+      finally exec.shutdownNow()
+
   /** Ask the designated primary to propose (initiator needs a replica key, not the primary's).
     * Sequence is derived from block height on the primary — callers do not pick slots.
     */
@@ -1560,9 +1687,14 @@ object BftFinality:
         }
     attempt(view, maxViews, Math.max(pollSleepMs, 50L))
 
-  /** Request successor view-change. Advances the client view only when a quorum
-    * accepts; otherwise backs off and keeps the current client view so we do not
-    * outrun replicas that are still installing NewView.
+  /** Request successor view-change. Advances the client view only on
+    * quorum EVIDENCE that the cluster actually installed it — a signed
+    * [[ViewStatus]] quorum via [[viewQuorumConfirmed]] — never from this
+    * client's own fan-out response timing. This also fixes the ambiguous
+    * case where this client's own request didn't reach quorum but the
+    * cluster nonetheless advanced through another path (another initiator,
+    * gossip): the client discovers that instead of getting stuck on a
+    * stale view.
     */
   private def kickViewChange(
       replicaUrls: Map[String, String],
@@ -1576,18 +1708,20 @@ object BftFinality:
       authorities: Map[String, Vector[Byte]],
   ): Either[String, Int] =
     val target = currentView + 1
-    requestNetworkViewChange(replicaUrls, target, initiator, chainId, replicaSet) match
-      case Right(()) =>
-        // Quorum accepted — brief pause for NewView gossip (cert comes after propose).
-        Thread.sleep(Math.max(backoffMs, 40L))
-        Right(target)
-      case Left(_) =>
-        // Successor rejected or rate-limited: wait for NewView / prior VC to land.
-        Thread.sleep(backoffMs)
-        pollCert(replicaUrls, blockDigest, Math.min(polls, 4), Math.max(backoffMs / 4, 10L),
-          authorities, replicaSet) match
-          case Right(_) => Right(currentView)
-          case Left(_)  => Right(currentView)
+    // Trigger the request (needed so an honest quorum actually votes) but
+    // don't let its own accept/reject signal decide the client's view.
+    requestNetworkViewChange(replicaUrls, target, initiator, chainId, replicaSet)
+    Thread.sleep(Math.max(backoffMs, 40L))
+    if viewQuorumConfirmed(replicaUrls, target, authorities, chainId, replicaSet) then
+      Right(target)
+    else
+      // No quorum evidence yet the cluster moved on: wait for NewView / prior
+      // VC to land, then genuinely stay on the current view (not a guess —
+      // there's still no evidence to advance on).
+      pollCert(replicaUrls, blockDigest, Math.min(polls, 4), Math.max(backoffMs / 4, 10L),
+        authorities, replicaSet) match
+        case Right(_) => Right(currentView)
+        case Left(_)  => Right(currentView)
 
   /** Fan-out a request to replica URLs concurrently; succeed once a BFT quorum
     * accepts. Completes as soon as quorum is reached; remaining calls are cancelled.
@@ -1765,6 +1899,8 @@ final class BftReplica private (
   private var membershipTipHeight: Long = -1L
   /** Pacemaker: last local view-change start (ms). Rate-limits remote churn. */
   private var lastViewChangeStartedAt: Long = 0L
+  /** Digest of the most recently installed NewView, if any — surfaced via [[viewStatus]]. */
+  private var latestNewView: Option[Digest] = None
 
   certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
@@ -1961,6 +2097,14 @@ final class BftReplica private (
     }
 
   def currentView: Int = state.view
+
+  /** Signed snapshot of this replica's current view + latest installed
+    * NewView digest — for clients to determine cluster-wide view
+    * progression via quorum evidence instead of guessing from HTTP
+    * response timing (see [[BftFinality.viewQuorumConfirmed]]).
+    */
+  def viewStatus: ViewStatus =
+    ViewStatus.sign(keypair, state.view, latestNewView, chainId, setDigest)
 
   /** Prepared claims with mandatory signed PrePrepare + prepare-quorum seals + value.
     * Slots that cannot be proved are omitted (not asserted bare).
@@ -2197,6 +2341,10 @@ final class BftReplica private (
               case vc: Msg.ViewChange => deliverViewChange(state, vc, ids)
               case nv: Msg.NewView    => deliverNewView(state, nv, ids)
               case other              => deliver(state, other)
+            sm.msg match
+              case nv: Msg.NewView if st2.view == nv.newView =>
+                latestNewView = Some(Digest.of(msgCanon(nv)))
+              case _ => ()
             state = st2
             out.foldLeft[Either[String, List[SignedMsg]]](Right(Nil)) { (acc, m) =>
               acc.flatMap { xs =>

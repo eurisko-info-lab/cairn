@@ -106,6 +106,8 @@ final class HttpNode(
       )
       s.createContext("/bft/certs", ex =>
         reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
+      s.createContext("/bft/status", ex =>
+        reply(ex, 200, Canon.encode(replica.viewStatus.canon)))
       s.createContext("/bft/view-change", ex =>
         if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
         else

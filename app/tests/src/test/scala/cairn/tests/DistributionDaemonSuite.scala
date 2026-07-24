@@ -351,6 +351,87 @@ class DistributionDaemonSuite extends munit.FunSuite:
       assert(!seals.keys.exists { case (_, seq, _, _) => seq <= 0 }, seals.keys.toString)
     finally https.foreach(_.stop())
 
+  test("/bft/status serves a verifiable ViewStatus that tracks real view-changes"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val ids = manifest.ids
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-vs-$id")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    try
+      val bftsAndPorts = ids.map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += http
+        id -> (bft, http.start())
+      }.toMap
+      val bfts = bftsAndPorts.view.mapValues(_._1).toMap
+      val ports = bftsAndPorts.view.mapValues(_._2).toMap
+      // Every replica's /bft/status is verifiable and honestly reports view 0,
+      // no NewView installed yet — before any view-change has happened.
+      ids.foreach { id =>
+        val url = s"http://127.0.0.1:${ports(id)}"
+        val vs = BftFinality.fetchViewStatus(url).fold(e => fail(e), identity)
+        assertEquals(
+          BftFinality.verifyViewStatus(manifest.authorities, vs, block, manifest.replicaSetDigest),
+          Right(()))
+        assertEquals(vs.replica.id, id)
+        assertEquals(vs.view, 0)
+        assertEquals(vs.latestNewViewDigest, None)
+      }
+      // Drive a real view-change (0 -> 1) in-process across all four replicas.
+      ids.foreach { id =>
+        val out = bfts(id).requestViewChange(1).fold(e => fail(e), identity)
+        out.foreach { sm =>
+          bfts.foreach { (peerId, r) =>
+            if peerId != id then r.receive(sm).fold(e => fail(s"$peerId: $e"), identity)
+          }
+        }
+      }
+      var round = 0
+      var progress = true
+      while round < 16 && progress do
+        progress = false
+        ids.foreach { id =>
+          val out = bfts(id).drainOutbound()
+          if out.nonEmpty then
+            progress = true
+            out.foreach { sm =>
+              bfts.foreach { (peerId, r) =>
+                if peerId != id then r.receive(sm).fold(e => fail(s"$peerId: $e"), identity)
+              }
+            }
+        }
+        round += 1
+      assert(ids.forall(id => bfts(id).currentView >= 1), ids.map(id => id -> bfts(id).currentView).toString)
+      // Now the REAL /bft/status HTTP response (not the in-process bfts map)
+      // reflects the advanced view and a defined latestNewViewDigest.
+      ids.foreach { id =>
+        val url = s"http://127.0.0.1:${ports(id)}"
+        val vs = BftFinality.fetchViewStatus(url).fold(e => fail(e), identity)
+        assertEquals(
+          BftFinality.verifyViewStatus(manifest.authorities, vs, block, manifest.replicaSetDigest),
+          Right(()))
+        assertEquals(vs.view, bfts(id).currentView)
+        assert(vs.view >= 1, clues(vs.view))
+        assert(vs.latestNewViewDigest.isDefined, s"$id: expected a latestNewViewDigest after installing NewView")
+      }
+    finally https.foreach(_.stop())
+
   test("Byzantine replica races a forged certificate ahead of honest replicas — discarded, not accepted"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
