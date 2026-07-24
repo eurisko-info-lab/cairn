@@ -116,7 +116,7 @@ final class HttpNode(
             case Right(req) =>
               BftFinality.verifyViewChangeRequest(
                 replica.authorities, req, Some(replica.chainId), Some(replica.setDigest)).flatMap { _ =>
-                replica.requestViewChange(req.newView)
+                replica.requestViewChangeIfTimedOut(req.newView)
               } match
                 case Left(e) => reply(ex, 400, e.getBytes)
                 case Right(out) =>

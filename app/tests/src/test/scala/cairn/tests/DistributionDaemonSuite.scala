@@ -1367,6 +1367,62 @@ class DistributionDaemonSuite extends munit.FunSuite:
     assert(spam.isLeft, spam.toString)
     assert(spam.swap.toOption.exists(_.contains("rate limited")), spam.toString)
 
+  test("requestViewChangeIfTimedOut refuses a remote trigger without local primary-timeout evidence"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val home = java.nio.file.Files.createTempDirectory("cairn-pacemaker")
+    val node = Node(home.resolve("node"), ledgerCtx)
+    node.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+      .fold(e => fail(e), identity)
+    BftFinality.saveReplicaSet(BftFinality.defaultReplicaSetPath(home), manifest)
+      .fold(e => fail(e), identity)
+    val bft = BftReplica.certified(
+      replicas.head, manifest,
+      node = Some(node), ledgerAuth = ledgerAuth,
+      home = Some(home)).fold(e => fail(e), identity)
+    // Freshly constructed — no local evidence the primary has gone quiet yet.
+    val tooSoon = bft.requestViewChangeIfTimedOut(1)
+    assert(tooSoon.isLeft, tooSoon.toString)
+    assert(tooSoon.swap.toOption.exists(_.contains("no local primary-timeout evidence")), tooSoon.toString)
+    Thread.sleep(BftReplica.PrimaryTimeoutMs + 50)
+    val onTime = bft.requestViewChangeIfTimedOut(1)
+    assert(onTime.isRight, onTime.toString)
+
+  test("requestViewChangeIfTimedOut's clock resets on observed primary activity, not just wall-clock since start"):
+    import cairn.kernel.BftQuorum.*
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val ids = manifest.ids
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-pacemaker-$id")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    val bfts = ids.map { id =>
+      id -> BftReplica.certified(
+        replicas.find(_.name == id).get, manifest,
+        node = Some(nodes(id)), ledgerAuth = ledgerAuth)
+        .fold(e => fail(e), identity)
+    }.toMap
+    // Let r1's clock run out — it WOULD honor a remote trigger right now.
+    Thread.sleep(BftReplica.PrimaryTimeoutMs + 50)
+    // r0 (view-0 primary) proposes; deliver ONLY the resulting PrePrepare to
+    // r1 — real evidence the primary is still active, resetting r1's clock.
+    val out0 = bfts("r0").propose(0, 0, block).fold(e => fail(e), identity)
+    val prePrepare = out0.collectFirst { case sm if sm.msg.isInstanceOf[Msg.PrePrepare] => sm }
+      .getOrElse(fail(s"r0 did not emit a PrePrepare: $out0"))
+    bfts("r1").receive(prePrepare).fold(e => fail(e), identity)
+    val justReset = bfts("r1").requestViewChangeIfTimedOut(1)
+    assert(justReset.isLeft, justReset.toString)
+    assert(justReset.swap.toOption.exists(_.contains("no local primary-timeout evidence")), justReset.toString)
+
   test("follower adopts certificates then recovers after restart"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)

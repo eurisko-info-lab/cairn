@@ -1901,6 +1901,12 @@ final class BftReplica private (
   private var lastViewChangeStartedAt: Long = 0L
   /** Digest of the most recently installed NewView, if any — surfaced via [[viewStatus]]. */
   private var latestNewView: Option[Digest] = None
+  /** Pacemaker: last time this replica independently observed the current
+    * primary being active (construction time, until proven otherwise) —
+    * gates [[requestViewChangeIfTimedOut]] so a remote single-signer
+    * request alone can't make an honest replica manufacture a vote.
+    */
+  private var lastPrimaryActivityAt: Long = System.currentTimeMillis()
 
   certStore.foreach { path =>
     if java.nio.file.Files.exists(path) then
@@ -2266,6 +2272,19 @@ final class BftReplica private (
         }
     }
 
+  /** Remote pacemaker trigger: like [[requestViewChange]], but additionally
+    * requires this replica's OWN elapsed time since it last observed the
+    * current primary's activity to exceed [[BftReplica.PrimaryTimeoutMs]].
+    * A single remote signer's request is not sufficient on its own — the
+    * receiving replica must also have independently gone quiet on the
+    * primary for real time, not just be told to distrust it.
+    */
+  def requestViewChangeIfTimedOut(newView: Int): Either[String, List[SignedMsg]] =
+    val elapsed = System.currentTimeMillis() - lastPrimaryActivityAt
+    if elapsed < BftReplica.PrimaryTimeoutMs then
+      Left(s"bft: no local primary-timeout evidence yet (${elapsed}ms < ${BftReplica.PrimaryTimeoutMs}ms)")
+    else requestViewChange(newView)
+
   def receive(sm: SignedMsg): Either[String, List[SignedMsg]] =
     refuseIfCorrupt {
       val priorState = state
@@ -2348,6 +2367,10 @@ final class BftReplica private (
                 prepareSeals((view, seq, d.hex, from.id)) = sm.seal
               case Msg.PrePrepare(view, seq, value, from) =>
                 prePrepareSeals((view, seq, value.digest.hex)) = (from, sm.seal)
+                // Bona fide PrePrepare from the correct primary for our
+                // actual current round (primaryOk + bind already passed) —
+                // real evidence the primary is active, not a stale replay.
+                if view == state.view then lastPrimaryActivityAt = System.currentTimeMillis()
               case vc: Msg.ViewChange =>
                 viewChangeEvidence((vc.newView, vc.from.id)) =
                   ViewChangeEvidence(vc, sm.seal, sm.replicaSet, sm.chainId)
@@ -2359,6 +2382,9 @@ final class BftReplica private (
             sm.msg match
               case nv: Msg.NewView if st2.view == nv.newView =>
                 latestNewView = Some(Digest.of(msgCanon(nv)))
+                // Fresh primary, fresh timeout window — don't inherit the
+                // old primary's elapsed silence.
+                lastPrimaryActivityAt = System.currentTimeMillis()
               case _ => ()
             state = st2
             out.foldLeft[Either[String, List[SignedMsg]]](Right(Nil)) { (acc, m) =>
@@ -2539,6 +2565,13 @@ object BftReplica:
     * Blocks single-signer remote churn from manufacturing unbounded VC traffic.
     */
   val MinViewChangeIntervalMs: Long = 250L
+
+  /** Minimum time a replica must have gone without observing the current
+    * primary's activity before it will honor a *remote* view-change
+    * trigger (see [[BftReplica.requestViewChangeIfTimedOut]]). A single
+    * remote signer's say-so is not itself timeout evidence.
+    */
+  val PrimaryTimeoutMs: Long = 300L
 
   /** Construct only from a seal-verified manifest whose entry matches `keypair`.
     *
