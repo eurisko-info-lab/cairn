@@ -8,15 +8,15 @@ not the history of how it got here.
 
 ## Areas
 
-| Area                 | Sub-project           | Responsibility                                                        | Trust status                                     |
-| --------------------- | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| **Kernel**            | shared                | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
-| **Core**              | `content`              | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
-| **Contracts**         | shared                | Effect Request/Response/Error schemas (Cas/Filesystem/Process/…), `PackAccess`, `AuthorizationProver` | Pure platform contract |
-| **System Interface**  | `container`            | `LedgerTransport` contract only (needs kernel-container's `SignedTx`/`Block`) | Pure platform contract             |
-| **System Handler**    | `container`            | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
-| **User**              | `content`              | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
-| **Runtime**           | `app`                  | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
+| Area                 | Sub-project                     | Responsibility                                                        | Trust status                                     |
+| --------------------- | -------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| **Kernel**            | `kernel/`                        | Validate artifacts, languages, proofs, changes, authority, transitions | Semantic TCB                                      |
+| **Core**              | `content/core/`                   | Parse, derive, elaborate, search, evaluate, project, merge, propose    | Pure but not automatically trusted                |
+| **Contracts**         | `contracts/`                      | Effect Request/Response/Error schemas (Cas/Filesystem/Process/…), `PackAccess`, `AuthorizationProver` | Pure platform contract |
+| **System Interface**  | `container/system-interface/`     | `LedgerTransport` contract only (needs kernel-container's `SignedTx`/`Block`) | Pure platform contract             |
+| **System Handler**    | `container/system-handler/`       | Perform filesystem, process, crypto, network, persistence, UI effects  | Operationally privileged, semantically untrusted  |
+| **User**              | `content/user/`                   | Define languages, policies, programs, proofs, changes, workflows       | Extensible data                                   |
+| **Runtime**           | `app/runtime/`                    | Composition root — PackLoader, CLI wiring                              | Ties User + Handlers together                     |
 
 Purity alone does not place Core outside the TCB. Every Core result used for
 acceptance has an independent Kernel validation path.
@@ -278,7 +278,7 @@ branch state
 | `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Engines; opaque `ValidatedChangeSet` via apply/check |
 | `PatchGraph` | `core` | Explicit causal patch DAG (parent edges + LCA); thin vs full Pijul |
 | `BranchManifest` | `kernel` | Accepted branch state + causal digests |
-| `Branches` | `system-handler` | Effectful refs; `commitTip` = ΔL path; `importModule` = bootstrap/import only |
+| `Branches` | `runtime` | Effectful refs; `commitTip` = ΔL path; `importModule` = bootstrap/import only |
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
 | CLI `repo` | `surface` | `cairn repo branches` / `cairn repo demo` |
 

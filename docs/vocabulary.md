@@ -14,7 +14,7 @@ How the §2 vocabulary of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md) maps to code.
 | Key / digest | `Digest` (SHA-256 of canonical bytes) + `TypedKey` (valueHash + typeHash + kind) |
 | CAS | `systemhandler.MemCas` / `DiskCas` (digest re-verification) via `systeminterface.Cas` |
 | Change / ΔL | `core.Delta.deltaOf` — module-level ops + structural path edits; forced recursive `deltaOf` closure; `ValidatedChangeSet` records each gated application |
-| Branch / selection | `kernel.BranchManifest` + `systemhandler.Branches` (append-only history) |
+| Branch / selection | `kernel.BranchManifest` + `runtime.Branches` (append-only history) |
 | Claim vs proof | `proof.Claim` (proof-free ok) vs `proof.Theorem` (+ checked `Derivation`) |
 | Kernel gate | `kernel.Checker.check`, `Delta.apply` validation, `LedgerKernel.applyBlock` |
 | VM / runtime IR | `core.TreeEngine` (tree) and `core.NetEngine` (graph) — generic engines only |

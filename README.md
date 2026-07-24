@@ -18,19 +18,19 @@ Zero runtime dependencies beyond the JDK (SHA-256, Ed25519); munit for tests.
 Trust and effect boundaries are the live module story (detail in
 [docs/architecture.md](docs/architecture.md)):
 
-Reorganized into three sub-projects — **container** (CAS/Branches/ledger),
-**content** (languages/proofs/workflows), and **app** (the glue, the only
-layer allowed to depend on both) — with `kernel` as the one shared foundation
-both container and content depend on:
+Reorganized into three sub-projects — **container** (CAS/ledger),
+**content** (languages/proofs/workflows), and **app** (Branches, the glue,
+the only layer allowed to depend on both) — with `kernel` as the one shared
+foundation both container and content depend on:
 
 | Module | Role | Contents |
 |---|---|---|
 | `kernel/` | Semantic TCB (shared) | Canonical bytes, digests, artifacts, fragment IR + composition laws, grammar vocabulary, derivation checker, authority models (`AuthorizedRequest` / `AuditedRequest`), Meta validation, pure ledger transition |
 | `content/core/` | Pure proposals | Grammar engine, Meta elaboration, ΔL / change algebra, `PatchGraph`, search & tactics, tree + interaction-net engines, Rosetta projection engine, policy evaluation — no I/O |
 | `container/system-interface/` | Effect contracts | CAS trait, filesystem / workspace / process / clock / random / terminal / LSP / external-backend request schemas |
-| `container/system-handler/` | Privileged I/O | MemCas / DiskCas / Branches, filesystem & process handlers, PoA node, crypto, distribution, `AuthorityGate`, `EffectContext`, `RuntimeEffectRegistry`, `RevocationView` |
+| `container/system-handler/` | Privileged I/O | MemCas / DiskCas, filesystem & process handlers, PoA node, crypto, distribution, `AuthorityGate`, `EffectContext`, `RuntimeEffectRegistry`, `RevocationView` |
 | `content/user/` | Extensible data | Language packs, policies, workflows (STLC, Law, SDS, MiniTT, LeanCore, UnisonCore, AffineNet, …); may name effects, never imports handlers |
-| `app/runtime/` | Composition root | PackLoader, `EffectBootstrap`, `WorkflowRunner` — ties User + Handlers together |
+| `app/runtime/` | Composition root | PackLoader, `EffectBootstrap`, `WorkflowRunner`, `Branches` — ties User + Handlers together |
 
 Key prohibition: `user ↛ system-handler`.
 
@@ -47,9 +47,9 @@ L0–L6 owners of CAS / grammar / ΔL / Meta (that story is retired):
 | `app/examples/` | Host-glue demos (PKI, SDS sealing, Search, Riemann, …); never imported by Kernel/Core |
 | `app/tests/` | Acceptance suites |
 
-There is **no** `workbench/` or `ledger/` sbt project in the live graph — CAS,
-branches, and PoA live under `system-handler` / `kernel`; Meta activation and
-pack loading live under `runtime`.
+There is **no** `workbench/` or `ledger/` sbt project in the live graph — CAS
+and PoA live under `system-handler` / `kernel`; Branches, Meta activation,
+and pack loading live under `runtime`.
 
 sbt enforces the DAG (`build.sbt`); project ids are unchanged by the physical
 nesting below:

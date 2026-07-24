@@ -29,7 +29,7 @@ The ledger is also the **root of domains** — analogous to DNS TLDs (`.org`,
 
 A branch may therefore have many ancestors via references, or a single strongest
 ancestor plus optional soft refs. `DomainBranch.wellFormed` (Kernel) and
-`Branches.forkFrom` / `referTo` (system-handler) enforce known names,
+`Branches.forkFrom` / `referTo` (runtime) enforce known names,
 non-self / non-overlapping primary∩refs, and **transitive primary-cycle**
 detection via `primaryOf`. Causal `parents` on the same manifest remain
 change-digest edges for merge/LCA — not domain names.
