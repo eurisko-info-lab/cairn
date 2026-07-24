@@ -87,3 +87,11 @@ object Search:
         if Checker.isGround(result.conclusion) then Right(result)
         else Left(s"search succeeded but conclusion is not ground: ${result.conclusion.render}")
       case None => Left(s"no derivation found for ${goal.render} within depth $depth")
+
+  /** Infer then certify — the shared goal API for pack judgments.
+    * Domain code should call this instead of duplicating infer+check.
+    */
+  def prove(cfg: CheckerCfg, goal: Cst, depth: Int = 64): Either[String, Derivation] =
+    infer(cfg, goal, depth).flatMap { d =>
+      Checker.check(cfg, d).left.map(_.render).map(_ => d)
+    }

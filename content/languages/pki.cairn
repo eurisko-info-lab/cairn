@@ -4,5 +4,18 @@ language pki {
     ctor cert : RegistryItem(Name, Hex, Name, Hex, Instant, Instant);
     ctor revocation : RegistryItem(Name, Reason, Instant);
     varctor issuerRef;
+    -- Chain validation as declarative rules. Host injects $anchor / $sig-ok.
+    judgment chainOk {
+      rule chain-anchor :
+        $ctx-lookup($reg, $n, cert($n, $k, $n, $sig, $nb, $na))
+        |- chainOk($reg, $n, $now)
+        where $anchor($n), $sig-ok($n, $k, $k, $sig), $le($nb, $now), $le($now, $na);
+      rule chain-step :
+        $ctx-lookup($reg, $n, cert($n, $k, $iss, $sig, $nb, $na)),
+        $ctx-lookup($reg, $iss, cert($iss, $ik, $i2, $s2, $nb2, $na2)),
+        chainOk($reg, $iss, $now)
+        |- chainOk($reg, $n, $now)
+        where $neq($n, $iss), $sig-ok($n, $k, $ik, $sig), $le($nb, $now), $le($now, $na);
+    }
   }
 }

@@ -27,15 +27,13 @@ object SdsWorkflow:
     ChemicalSource.loadModule(language, Path.of("content/languages/sds-workflow/causal.cairn"))
       .fold(e => throw RuntimeException(e), identity)
 
+  private def cfg: CheckerCfg = CheckerCfg(language.judgments.values.toList)
+
   def checkStep(name: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("workflowStepOk", Cst.Leaf(name))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(cfg, Cst.node("workflowStepOk", Cst.Leaf(name))).isRight
 
   def checkPhase(phase: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("workflowPhaseOk", Cst.Leaf(phase))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(cfg, Cst.node("workflowPhaseOk", Cst.Leaf(phase))).isRight
 
   /** Decode + judgment-check a workflow module (ordered steps). */
   def decode(m: Module, workflowName: String = "sdsCausal"): Either[String, Decl] =

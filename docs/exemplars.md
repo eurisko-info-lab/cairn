@@ -46,7 +46,9 @@ under `SDS` via `forkFrom` / `underSds`.
 - Registry object language: `cert` and optional soft `revocation` entries.
 - ΔPKI = generic free ΔL (`add` issues, `remove` hard-revokes; soft revoke =
   `add` of a `revocation` term).
-- Chain validation + Ed25519; tutorial: issue → validate → revoke → tamper → publish.
+- **`chainOk` judgment lives in `pki.cairn`**; host only injects `$anchor` /
+  `$sig-ok` extensions (Ed25519). Validated via `Search.prove`.
+- Tutorial: issue → validate → revoke → tamper → publish.
 - X25519 encryption certificates for SDS composition sealing.
 
 ## Law — middle link (PKI → Law → SDS)
@@ -115,12 +117,13 @@ Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice)
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- **Scala orchestration residual (platform debt):** `Law.citationCheck`,
-  `Sds.validate` / `EuClp.conform` outline walks, `SectionReport.toCst`,
-  effectful causal/cert minting, PKI `$sig-ok` / chain rules still host-injected.
-  Facts and encodings are Cairn; drivers remain host until module judgments +
-  effect-bound `WorkflowRunner` land. Paying this down is a Cairn platform
-  task — domain apps must not grow new Scala.
+- **Scala orchestration residual (platform debt):** `Law.citationCheck` (free-text
+  cites), `Sds.validate` / `EuClp.conform` outline walks, `SectionReport.toCst`,
+  effectful causal step bodies (CAS/Branches/Ed25519). Shared goal API is
+  `Search.prove`; `WorkflowRunner` accepts a named-handler registry (miss fails
+  closed). Still open: whole-module judgments + pack-declared ActionKey step
+  bindings. Paying this down is a Cairn platform task — domain apps must not
+  grow new Scala.
 - Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
   research/sim only).
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;

@@ -34,6 +34,15 @@ object WorkflowRunner:
         }
     }.map { case (done, results) => Report(done, results) }
 
+  /** Run with an explicit step-name → handler registry (fail closed on miss).
+    * Packs declare order; composition roots register named effect handlers —
+    * no growing `match` on step names inside domain apps.
+    */
+  def run(steps: List[Step], handlers: Map[String, Handler]): Either[String, Report] =
+    run(steps, step =>
+      handlers.get(step.name).toRight(s"workflow: no handler registered for step '${step.name}'")
+        .flatMap(_(step)))
+
   /** Run a contiguous fragment `[fromName, untilName]` inclusive. */
   def runFragment(
       steps: List[Step],
@@ -47,3 +56,13 @@ object WorkflowRunner:
     else if untilIdx < 0 then Left(s"workflow fragment: unknown end step '$untilName'")
     else if untilIdx < fromIdx then Left(s"workflow fragment: '$untilName' before '$fromName'")
     else run(steps.slice(fromIdx, untilIdx + 1), handle)
+
+  def runFragment(
+      steps: List[Step],
+      fromName: String,
+      untilName: String,
+      handlers: Map[String, Handler],
+  ): Either[String, Report] =
+    runFragment(steps, fromName, untilName, step =>
+      handlers.get(step.name).toRight(s"workflow: no handler registered for step '${step.name}'")
+        .flatMap(_(step)))

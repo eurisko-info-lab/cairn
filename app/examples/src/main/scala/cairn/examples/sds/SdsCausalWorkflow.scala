@@ -89,12 +89,14 @@ object SdsCausalWorkflow:
       branches.commitTip(name, tip)
 
     val runnerSteps = wf.steps.map(s => WorkflowRunner.Step(s.name, s.phase))
-    val runner = WorkflowRunner.run(runnerSteps, step => step.name match
-      case "author" =>
+    // Named handler registry — pack declares order; miss fails closed (no match fallthrough).
+    val handlers: Map[String, WorkflowRunner.Handler] = Map(
+      "author" -> { _ =>
         SdsDomainTree.underSds(branches, "sds-author", Some(base))
           .fold(e => throw RuntimeException(e), identity)
         Right(base.digest.short)
-      case "shadow" =>
+      },
+      "shadow" -> { _ =>
         val shadowCs = parse(
           """{ add industrial = shadow cleanerProduct overrides h225 with "Extremely flammable - industrial grade" ; }""")
         val tip = SemanticRepository.tipAfter(lang, base, shadowCs)
@@ -102,7 +104,8 @@ object SdsCausalWorkflow:
         industrialTip = Some(tip)
         underSdsTip("sds-industrial", tip)
         Right(tip.tipDigest.short)
-      case "rebase" =>
+      },
+      "rebase" -> { _ =>
         val pctCs = parse("""{ replace cleaner = mixture of ( acetone pct 70 , secretBlend pct 15 ) ; }""")
         val pctTip = SemanticRepository.tipAfter(lang, base, pctCs)
           .fold(e => throw RuntimeException(e), identity)
@@ -114,7 +117,8 @@ object SdsCausalWorkflow:
           case Right(Left(_)) => false
           case Left(e) => throw RuntimeException(e)
         Right(if rebaseMerged then "merged" else "conflict")
-      case "conflict" =>
+      },
+      "conflict" -> { _ =>
         val shadowCs = parse(
           """{ add industrial = shadow cleanerProduct overrides h225 with "Extremely flammable - industrial grade" ; }""")
         val phraseCs = parse(
@@ -123,13 +127,15 @@ object SdsCausalWorkflow:
           case Left(c) => c.overlap
           case Right(_) => Set.empty
         Right(conflictOverlap.mkString(","))
-      case "approve" =>
+      },
+      "approve" -> { _ =>
         val tip = industrialTip.getOrElse(throw RuntimeException("shadow before approve"))
         underSdsTip("sds-approved", tip)
         val approved = branches.headModule("sds-approved").fold(e => throw RuntimeException(e), identity)
         approvedDigest = approved.digest
         Right(approvedDigest.short)
-      case "sign" =>
+      },
+      "sign" -> { _ =>
         val tip = industrialTip.getOrElse(throw RuntimeException("shadow before sign"))
         val kp = Keypair.dev("alice-sds")
         alice = Some(kp)
@@ -170,7 +176,8 @@ object SdsCausalWorkflow:
         historyFromManifestAlone =
           branches.loadChangeHistory("sds-hist", lang).fold(e => throw RuntimeException(e), _.length)
         Right(tipSigHex.take(16))
-      case "publish" =>
+      },
+      "publish" -> { _ =>
         val kp = alice.getOrElse(throw RuntimeException("sign before publish"))
         val node = Node(work.resolve("ledger"), EffectContexts.forLedger())
         val auth = Map(kp.name -> kp.publicBytes)
@@ -180,8 +187,10 @@ object SdsCausalWorkflow:
           .fold(e => throw RuntimeException(e), identity)
         ledgerPublished = node.state(auth).fold(e => throw RuntimeException(e), _.heads.contains("sds-approved"))
         Right(if ledgerPublished then "published" else "failed")
-      case other => Left(s"no handler for workflow step '$other'")
-    ).fold(e => throw RuntimeException(e), identity)
+      },
+    )
+    val runner = WorkflowRunner.run(runnerSteps, handlers)
+      .fold(e => throw RuntimeException(e), identity)
 
     if runner.completed != wf.steps.map(_.name) then
       throw RuntimeException(s"workflow runner incomplete: ${runner.completed}")

@@ -2,46 +2,23 @@ package cairn.examples.pki
 
 import cairn.kernel.*
 import cairn.core.Search
+import cairn.runtime.{EffectContexts, PackLoader}
 import cairn.systemhandler.{Ed25519, Keypair}
 
-/** PKI maximal (M46): validity windows, CRLs as signed artifacts, and — the
-  * centerpiece — chain validation as DECLARATIVE inference-rule data checked
-  * by the SAME kernel checker as STLC typing. Ed25519 verification and
-  * anchor membership are injected side-condition evaluators (M19): the
-  * checker stays the only certifier; crypto only answers its questions.
+/** PKI maximal (M46): validity windows, CRLs as signed artifacts, and chain
+  * validation via declarative `chainOk` rules in [[languages/pki.cairn]].
+  * Ed25519 verification and anchor membership are injected side-condition
+  * evaluators — the checker stays the only certifier; crypto only answers
+  * its questions.
   *
   * Certificate term: cert(name, keyHex, issuer, sigHex, notBefore, notAfter)
-  * Registry: a ctxCons/ctxNil context of (name -> cert) — so lookups are the
-  * checker's built-in computational premise, shadowing rules included.
+  * Registry: a ctxCons/ctxNil context of (name -> cert).
   */
 object PkiMax:
-  private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
-  private def mv(x: String): Cst = Cst.Leaf(s"$$$x")
+  private lazy val packs = PackLoader(EffectContexts.forPackLoader())
+  lazy val language: ComposedLanguage = packs.requireClosed("pki")
 
-  /** The chain-validation judgment as declarative rule DATA. */
-  val chainJudgment: JudgmentDef = JudgmentDef("chainOk", List(
-    InferRule("chain-anchor",
-      premises = List(n("$ctx-lookup", mv("reg"), mv("n"),
-        n("cert", mv("n"), mv("k"), mv("n"), mv("sig"), mv("nb"), mv("na")))),
-      conclusion = n("chainOk", mv("reg"), mv("n"), mv("now")),
-      conditions = List(
-        n("$anchor", mv("n")),
-        n("$sig-ok", mv("n"), mv("k"), mv("k"), mv("sig")),
-        n("$le", mv("nb"), mv("now")),
-        n("$le", mv("now"), mv("na")))),
-    InferRule("chain-step",
-      premises = List(
-        n("$ctx-lookup", mv("reg"), mv("n"),
-          n("cert", mv("n"), mv("k"), mv("iss"), mv("sig"), mv("nb"), mv("na"))),
-        n("$ctx-lookup", mv("reg"), mv("iss"),
-          n("cert", mv("iss"), mv("ik"), mv("i2"), mv("s2"), mv("nb2"), mv("na2"))),
-        n("chainOk", mv("reg"), mv("iss"), mv("now"))),
-      conclusion = n("chainOk", mv("reg"), mv("n"), mv("now")),
-      conditions = List(
-        n("$neq", mv("n"), mv("iss")),
-        n("$sig-ok", mv("n"), mv("k"), mv("ik"), mv("sig")),
-        n("$le", mv("nb"), mv("now")),
-        n("$le", mv("now"), mv("na"))))))
+  private def n(tag: String, cs: Cst*): Cst = Cst.node(tag, cs*)
 
   private def hex(bs: Array[Byte]): String = bs.map(b => f"${b & 0xff}%02x").mkString
   private def unhex(s: String): Array[Byte] = s.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray
@@ -62,7 +39,9 @@ object PkiMax:
     })
 
   def checkerCfg(anchors: Set[String]): CheckerCfg =
-    CheckerCfg(List(chainJudgment), extensions = extensions(anchors))
+    val judgments = language.judgments.values.toList
+    require(judgments.exists(_.name == "chainOk"), "pki pack must provide chainOk judgment")
+    CheckerCfg(judgments, extensions = extensions(anchors))
 
   def certTerm(name: String, subject: Keypair, issuer: Keypair, notBefore: Long, notAfter: Long): Cst =
     val keyHex = hex(subject.publicBytes.toArray)
@@ -77,13 +56,9 @@ object PkiMax:
   def goal(reg: Cst, name: String, now: Long): Cst =
     n("chainOk", reg, Cst.Leaf(name), Cst.Leaf(now.toString))
 
-  /** Untrusted proposer: search for a chain derivation. Certification is the
-    * checker's, not the search's.
-    */
+  /** Untrusted proposer + checker certification via pack-declared chainOk. */
   def validate(reg: Cst, name: String, now: Long, anchors: Set[String]): Either[String, Derivation] =
-    val cfg = checkerCfg(anchors)
-    Search.infer(cfg, goal(reg, name, now)).flatMap { d =>
-      Checker.check(cfg, d).left.map(_.render).map(_ => d) }
+    Search.prove(checkerCfg(anchors), goal(reg, name, now))
 
   // ---- CRLs as signed artifacts, anchored on the ledger ----
 

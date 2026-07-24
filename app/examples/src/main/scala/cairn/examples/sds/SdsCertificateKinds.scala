@@ -25,9 +25,9 @@ object SdsCertificateKinds:
       .fold(e => throw RuntimeException(e), identity)
 
   def checkKind(tag: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("certificateKindOk", Cst.Leaf(tag))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(
+      CheckerCfg(language.judgments.values.toList),
+      Cst.node("certificateKindOk", Cst.Leaf(tag))).isRight
 
   /** Ordered kind tags from the workflow evidence-chain module. */
   def workflowKindTags(m: Module = workflowKindsModule): Either[String, List[String]] =

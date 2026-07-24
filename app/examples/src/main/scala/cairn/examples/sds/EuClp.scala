@@ -36,20 +36,16 @@ object EuClp:
     val byName = defs.map(d => d._3 -> (d._1, d._2)).toMap
     order.flatMap(byName.get)
 
+  private def cfg: CheckerCfg = CheckerCfg(language.judgments.values.toList)
+
   def checkSectionNumber(n: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("sectionNumberOk", Cst.Leaf(n))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(cfg, Cst.node("sectionNumberOk", Cst.Leaf(n))).isRight
 
   def checkSectionTitle(n: String, title: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("sectionTitleOk", Cst.Leaf(n), Cst.Leaf(title))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(cfg, Cst.node("sectionTitleOk", Cst.Leaf(n), Cst.Leaf(title))).isRight
 
   def checkProfileVersion(v: String): Boolean =
-    val cfg = CheckerCfg(language.judgments.values.toList)
-    val goal = Cst.node("profileVersionOk", Cst.Leaf(v))
-    Search.infer(cfg, goal).flatMap(d => Checker.check(cfg, d).left.map(_.render)).isRight
+    Search.prove(cfg, Cst.node("profileVersionOk", Cst.Leaf(v))).isRight
 
   final case class ConformanceReport(
       outlineName: String,

@@ -86,9 +86,7 @@ final class Search(packs: PackAccess):
     * languages/search.cairn's judgment doc comment for why).
     */
   def checkWellFormed(m: Module, term: Cst): Either[String, Derivation] =
-    val cfg = checkerCfg
-    val goal = Cst.node("wellFormed", boardCtx(m), term)
-    DerivSearch.infer(cfg, goal).flatMap { d => Checker.check(cfg, d).left.map(_.render).map(_ => d) }
+    DerivSearch.prove(checkerCfg, Cst.node("wellFormed", boardCtx(m), term))
 
   /** Kernel-checked goalMet for one concrete (goal, fact) witness pair. The
     * EXISTENTIAL "does some such pair exist" stays [[goalMet]]'s job (a host
@@ -96,9 +94,9 @@ final class Search(packs: PackAccess):
     * target, so the judgment can only check a candidate, not find one.
     */
   def checkGoalMet(m: Module, goalName: String, factName: String): Either[String, Derivation] =
-    val cfg = checkerCfg
-    val goal = Cst.node("goalMet", boardCtx(m), Cst.Leaf(goalName), Cst.Leaf(factName))
-    DerivSearch.infer(cfg, goal).flatMap { d => Checker.check(cfg, d).left.map(_.render).map(_ => d) }
+    DerivSearch.prove(
+      checkerCfg,
+      Cst.node("goalMet", boardCtx(m), Cst.Leaf(goalName), Cst.Leaf(factName)))
 
   final case class GraphNode(name: String, kind: String, text: String)
   final case class GraphEdge(name: String, kind: String, from: String, to: String)
