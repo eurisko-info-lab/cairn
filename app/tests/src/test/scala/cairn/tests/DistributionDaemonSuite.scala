@@ -563,6 +563,189 @@ class DistributionDaemonSuite extends munit.FunSuite:
         Right(()))
     finally https.foreach(_.stop())
 
+  test("7-replica cluster tolerates 2 live nodes stopped concurrently mid-run"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = (0 to 6).map(i => Keypair.dev(s"r$i")).toList
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    assertEquals(manifest.n, 7)
+    val ids = manifest.ids
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-n7-$id")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block0 = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.Map.empty[String, HttpNode]
+    try
+      val ports = ids.map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += (id -> http)
+        id -> http.start()
+      }.toMap
+      ids.foreach { id =>
+        ids.foreach { peer =>
+          PeerRegistry.addBound(
+            homes(id), replicas.find(_.name == peer).get,
+            s"http://127.0.0.1:${ports(peer)}",
+            PeerRegistry.Role.Replica).fold(e => fail(e), identity)
+        }
+      }
+      val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
+      // Baseline: all 7 up.
+      val cert0 = BftFinality.agreeNetworkRemote(
+        urls, block0, replicas.head, chainId = block0, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      assert(cert0.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(7))
+      // Two live nodes fail at once — not sequentially observed-and-recovered-between.
+      val downed = List("r5", "r6")
+      val stoppers = downed.map(id => new Thread(() => https(id).stop()))
+      stoppers.foreach(_.start())
+      stoppers.foreach(_.join())
+      ids.foreach { id =>
+        nodes(id).append(
+          auth, ledgerAuth,
+          List(auth.signTx(Tx.RegisterIdentity("extra", auth.publicBytes))))
+          .fold(e => fail(e), identity)
+      }
+      val block1 = nodes("r0").chainDigests(1)
+      val cert1 = BftFinality.agreeNetworkRemote(
+        urls, block1, replicas.head, chainId = block0, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      assertEquals(cert1.blockDigest, block1)
+      assert(cert1.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(7))
+      assert(!cert1.commits.exists(c => downed.contains(c._1.id)), cert1.commits.toString)
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert1, manifest, nodes("r0"), ledgerAuth),
+        Right(()))
+    finally https.values.foreach(_.stop())
+
+  test("agreeNetworkRemote fails clean (not hung) when a majority of replicas is unreachable"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val homes = List("r0", "r1").map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-maj-$id")).toMap
+    val nodes = homes.map { (id, home) =>
+      val n = Node(home.resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }
+    val block = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    try
+      // Only 2 of 4 replicas ever run — quorum needs 3, majority is permanently unreachable.
+      val ports = List("r0", "r1").map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += http
+        id -> http.start()
+      }.toMap
+      val urls = manifest.ids.map { id =>
+        id -> (if ports.contains(id) then s"http://127.0.0.1:${ports(id)}" else "http://127.0.0.1:1")
+      }.toMap
+      val startedAt = System.currentTimeMillis()
+      val result = BftFinality.agreeNetworkRemote(
+        urls, block, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities, polls = 8, pollSleepMs = 20, maxViews = 2)
+      val elapsedMs = System.currentTimeMillis() - startedAt
+      assert(result.isLeft, result.toString)
+      assert(
+        result.swap.toOption.exists(e => e.contains("no certificate after") || e.contains("exceeds bound")),
+        result.toString)
+      // Bounded, not a hang: comfortably under munit's own test timeout.
+      assert(elapsedMs < 30000L, elapsedMs.toString)
+    finally https.foreach(_.stop())
+
+  test("a slow-but-connected (hung) peer doesn't stall agreement past its own timeout"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val ids = manifest.ids
+    val honestIds = ids.filterNot(_ == "r3")
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-hung-$id")).toMap
+    val nodes = honestIds.map { id =>
+      val n = Node(homes(id).resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }.toMap
+    val block = nodes("r0").chainDigests.head
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    var hung: HttpServer | Null = null
+    try
+      val ports = honestIds.map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += http
+        id -> http.start()
+      }.toMap
+      // r3 accepts every connection but replies only after outlasting the 3s per-RPC
+      // timeout — a genuinely different failure mode than instant connection-refusal.
+      val slow = HttpServer.create(InetSocketAddress(0), 0)
+      val slowHandler: com.sun.net.httpserver.HttpHandler = ex =>
+        Thread.sleep(4000L)
+        ex.sendResponseHeaders(200, -1)
+        ex.close()
+      slow.createContext("/bft/msg", slowHandler)
+      slow.createContext("/bft/propose", slowHandler)
+      slow.createContext("/bft/certs", slowHandler)
+      slow.setExecutor(java.util.concurrent.Executors.newCachedThreadPool())
+      slow.start()
+      hung = slow
+      val hungPort = slow.getAddress.getPort
+      val urls = honestIds.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap +
+        ("r3" -> s"http://127.0.0.1:$hungPort")
+      honestIds.foreach { id =>
+        ids.foreach { peer =>
+          val peerUrl = if peer == "r3" then urls("r3") else urls(peer)
+          PeerRegistry.addBound(
+            homes(id), replicas.find(_.name == peer).get, peerUrl,
+            PeerRegistry.Role.Replica).fold(e => fail(e), identity)
+        }
+      }
+      val startedAt = System.currentTimeMillis()
+      val cert = BftFinality.agreeNetworkRemote(
+        urls, block, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      val elapsedMs = System.currentTimeMillis() - startedAt
+      assert(cert.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(4))
+      assert(!cert.commits.exists(_._1.id == "r3"), cert.commits.toString)
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
+        Right(()))
+      // Reached agreement via the 3 honest replicas without ever waiting out r3's full sleep.
+      assert(elapsedMs < 4000L, elapsedMs.toString)
+    finally
+      https.foreach(_.stop())
+      if hung != null then hung.stop(0)
+
   test("multi-home provisioning: distinct keys + replica-set.canon + remote propose"):
     val auth = Keypair.dev("auth")
     val ledgerAuth = Map(auth.name -> auth.publicBytes)
