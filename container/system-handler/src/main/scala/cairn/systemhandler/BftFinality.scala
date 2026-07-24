@@ -625,6 +625,19 @@ object BftFinality:
     ): Either[String, Unit] =
       verifyAgainstChain(cert, manifest.authorities, manifest.replicaSetDigest, node, ledgerAuth)
 
+    /** Convenience overload for a cert that already passed poll-time
+      * verification — still re-checks chainId/height/parent against the
+      * local chain (a [[VerifiedFinalityCertificate]] only proves quorum +
+      * signatures, not chain/genesis binding).
+      */
+    def verifyAgainstChain(
+        cert: VerifiedFinalityCertificate,
+        manifest: ReplicaSetManifest,
+        node: Node,
+        ledgerAuth: Map[String, Vector[Byte]],
+    ): Either[String, Unit] =
+      verifyAgainstChain(cert.cert, manifest, node, ledgerAuth)
+
     /** Verify seals/chain and that `cert.replicaSet` is the active set at `cert.height`. */
     def verifyAgainstHistory(
         cert: FinalityCertificate,
@@ -639,6 +652,15 @@ object BftFinality:
               s"at height ${cert.height} (active=${active.replicaSetDigest.short})")
         else verifyAgainstChain(cert, active, node, ledgerAuth)
       }
+
+    /** Convenience overload for a cert that already passed poll-time verification. */
+    def verifyAgainstHistory(
+        cert: VerifiedFinalityCertificate,
+        history: ValidatedReplicaSetHistory,
+        node: Node,
+        ledgerAuth: Map[String, Vector[Byte]],
+    ): Either[String, Unit] =
+      verifyAgainstHistory(cert.cert, history, node, ledgerAuth)
 
     /** Verify a certificate against a candidate replayed chain, before that
       * chain is installed as this node's durable chain. */
@@ -671,6 +693,30 @@ object BftFinality:
                   }
               }
       }
+
+  /** Decoded straight off the wire — structurally well-formed, NOT verified.
+    * This is what [[FinalityCertificate.fromCanon]] produces; the alias
+    * exists purely so call sites can say what they mean.
+    */
+  type DecodedFinalityCertificate = FinalityCertificate
+
+  /** Only constructible by passing [[FinalityCertificate.verify]] — the type
+    * boundary between "a replica claimed this" and "2f+1 honest replicas
+    * actually signed this". Does NOT prove chainId/replica-set-epoch binding;
+    * [[FinalityCertificate.verifyAgainstChain]]/`verifyAgainstHistory` still
+    * do that, caller-side, once a value of this type is in hand.
+    */
+  final case class VerifiedFinalityCertificate private (cert: FinalityCertificate):
+    export cert.*
+
+  object VerifiedFinalityCertificate:
+    def verify(
+        cert: DecodedFinalityCertificate,
+        authorities: Map[String, Vector[Byte]],
+        expectedReplicaSet: Digest,
+    ): Either[String, VerifiedFinalityCertificate] =
+      FinalityCertificate.verify(cert, authorities, expectedReplicaSet)
+        .map(_ => new VerifiedFinalityCertificate(cert))
 
   def valueOfBlock(blockDigest: Digest): Value =
     Value(blockDigest.hex.getBytes(StandardCharsets.US_ASCII).toVector)
@@ -1441,9 +1487,10 @@ object BftFinality:
       blockDigest: Digest,
       replicaSet: Digest,
       chainId: Digest,
+      authorities: Map[String, Vector[Byte]],
       polls: Int = 32,
       pollSleepMs: Long = 25,
-  ): Either[String, FinalityCertificate] =
+  ): Either[String, VerifiedFinalityCertificate] =
     val ids = replicaUrls.keys.toList
     for
       primaryId <- designatedPrimary(ids, view)
@@ -1454,7 +1501,7 @@ object BftFinality:
       _ <- fanoutQuorum(replicaUrls, { (name, url) =>
         postMsg(url, pp).left.map(e => s"$e")
       })
-      cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs)
+      cert <- pollCert(replicaUrls, blockDigest, polls, pollSleepMs, authorities, replicaSet)
     yield cert
 
   /** Deployable path: ask the primary to propose; on timeout, run view-change and retry.
@@ -1470,13 +1517,14 @@ object BftFinality:
       initiator: Signer,
       chainId: Digest,
       replicaSet: Digest,
+      authorities: Map[String, Vector[Byte]],
       view: Int = 0,
       polls: Int = 64,
       pollSleepMs: Long = 30,
       maxViews: Int = 4,
-  ): Either[String, FinalityCertificate] =
+  ): Either[String, VerifiedFinalityCertificate] =
     val ids = replicaUrls.keys.toList
-    def attempt(v: Int, remaining: Int, backoffMs: Long): Either[String, FinalityCertificate] =
+    def attempt(v: Int, remaining: Int, backoffMs: Long): Either[String, VerifiedFinalityCertificate] =
       if remaining <= 0 then Left(s"bft network: no certificate after $maxViews views")
       else if v > view + maxViews then
         Left(s"bft network: view $v exceeds bound ${view + maxViews}")
@@ -1487,21 +1535,21 @@ object BftFinality:
               val shortPolls = Math.max(4, polls / 8)
               propose(primaryUrl, blockDigest, initiator, chainId, replicaSet, v) match
                 case Left(_) =>
-                  pollCert(replicaUrls, blockDigest, shortPolls, pollSleepMs) match
+                  pollCert(replicaUrls, blockDigest, shortPolls, pollSleepMs, authorities, replicaSet) match
                     case Right(c) => Right(c)
                     case Left(_) =>
                       kickViewChange(
                         replicaUrls, v, initiator, chainId, replicaSet, blockDigest,
-                        shortPolls, backoffMs).flatMap { nextV =>
+                        shortPolls, backoffMs, authorities).flatMap { nextV =>
                         attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
                       }
                 case Right(()) =>
-                  pollCert(replicaUrls, blockDigest, polls, pollSleepMs) match
+                  pollCert(replicaUrls, blockDigest, polls, pollSleepMs, authorities, replicaSet) match
                     case Right(c) => Right(c)
                     case Left(_) =>
                       kickViewChange(
                         replicaUrls, v, initiator, chainId, replicaSet, blockDigest,
-                        shortPolls, backoffMs).flatMap { nextV =>
+                        shortPolls, backoffMs, authorities).flatMap { nextV =>
                         attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
                       }
           }
@@ -1521,6 +1569,7 @@ object BftFinality:
       blockDigest: Digest,
       polls: Int,
       backoffMs: Long,
+      authorities: Map[String, Vector[Byte]],
   ): Either[String, Int] =
     val target = currentView + 1
     requestNetworkViewChange(replicaUrls, target, initiator, chainId, replicaSet) match
@@ -1531,7 +1580,8 @@ object BftFinality:
       case Left(_) =>
         // Successor rejected or rate-limited: wait for NewView / prior VC to land.
         Thread.sleep(backoffMs)
-        pollCert(replicaUrls, blockDigest, Math.min(polls, 4), Math.max(backoffMs / 4, 10L)) match
+        pollCert(replicaUrls, blockDigest, Math.min(polls, 4), Math.max(backoffMs / 4, 10L),
+          authorities, replicaSet) match
           case Right(_) => Right(currentView)
           case Left(_)  => Right(currentView)
 
@@ -1605,18 +1655,27 @@ object BftFinality:
   ): Either[String, FinalityCertificate] =
     Left("bft: agreeNetworkRemote requires chainId and replicaSet epoch binding")
 
+  /** Polls replica URLs for a certificate for `blockDigest`, verifying each
+    * candidate (quorum + signatures, [[VerifiedFinalityCertificate.verify]])
+    * before it can win the race — an unverified value never escapes this
+    * function. A Byzantine replica racing a fabricated certificate ahead of
+    * honest replicas has its candidate silently discarded; polling continues
+    * exactly as if that replica hadn't answered.
+    */
   private def pollCert(
       replicaUrls: Map[String, String],
       blockDigest: Digest,
       polls: Int,
       pollSleepMs: Long,
-  ): Either[String, FinalityCertificate] =
-    def fetchOnce(): Option[FinalityCertificate] =
+      authorities: Map[String, Vector[Byte]],
+      expectedReplicaSet: Digest,
+  ): Either[String, VerifiedFinalityCertificate] =
+    def fetchOnce(): Option[VerifiedFinalityCertificate] =
       val urls = replicaUrls.values.toList
       if urls.isEmpty then None
       else
         val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(urls.size, 8).max(1))
-        val found = new java.util.concurrent.atomic.AtomicReference[FinalityCertificate](null)
+        val found = new java.util.concurrent.atomic.AtomicReference[VerifiedFinalityCertificate](null)
         val remaining = new java.util.concurrent.atomic.AtomicInteger(urls.size)
         val done = new java.util.concurrent.CountDownLatch(1)
         try
@@ -1626,8 +1685,12 @@ object BftFinality:
                 fetchCerts(url).toOption.toList.flatten
                   .find(_.blockDigest == blockDigest)
                   .foreach { c =>
-                    found.compareAndSet(null, c)
-                    done.countDown()
+                    VerifiedFinalityCertificate.verify(c, authorities, expectedReplicaSet) match
+                      case Right(verified) =>
+                        found.compareAndSet(null, verified)
+                        done.countDown()
+                      case Left(_) =>
+                        () // invalid candidate — discard, keep waiting on other replicas
                   }
               finally
                 if remaining.decrementAndGet() == 0 then done.countDown()
@@ -1637,7 +1700,7 @@ object BftFinality:
           Option(found.get())
         finally
           exec.shutdownNow()
-    def loop(n: Int): Either[String, FinalityCertificate] =
+    def loop(n: Int): Either[String, VerifiedFinalityCertificate] =
       if n <= 0 then Left("bft network: no certificate minted")
       else
         fetchOnce() match

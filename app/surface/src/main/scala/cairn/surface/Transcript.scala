@@ -928,10 +928,11 @@ object Cli:
       initiator <- localReplicaSigner(home, manifest.ids)
       genesis <- BftFinality.chainId(node)
       cert <- BftFinality.agreeNetworkRemote(
-        urls, block, initiator, chainId = genesis, replicaSet = manifest.replicaSetDigest)
+        urls, block, initiator, chainId = genesis, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities)
       hist <- BftFinality.loadReplicaSetHistory(home)
       _ <- BftFinality.FinalityCertificate.verifyAgainstHistory(cert, hist, node, ledgerAuth)
-      _ <- BftFinality.advanceCheckpoint(home, cert)
+      _ <- BftFinality.advanceCheckpoint(home, cert.cert)
     yield s"bft network finality ${cert.digest.short} for block ${block.short} commits=${cert.commits.size}"
 
   /** First local keystore identity that is a member of the replica set. */
@@ -1085,6 +1086,7 @@ object Cli:
             cert <- BftFinality.agreeNetworkRemote(
               urls, block, replicas.head,
               chainId = block, replicaSet = manifest.replicaSetDigest,
+              authorities = manifest.authorities,
               polls = 64, pollSleepMs = 30)
             _ <- BftFinality.FinalityCertificate.verifyAgainstChain(
               cert, manifest, nodes("r0"), ledgerAuth)
@@ -1149,6 +1151,7 @@ object Cli:
             cert <- BftFinality.agreeNetworkRemote(
               urls, block, initiator,
               chainId = block, replicaSet = manifest.replicaSetDigest,
+              authorities = manifest.authorities,
               polls = 160, pollSleepMs = 80, maxViews = 16)
             _ <- if cert.view >= 1 then Right(())
                  else Left(s"expected a view-change (view >= 1), got view=${cert.view}")

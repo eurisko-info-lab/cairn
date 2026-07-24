@@ -3,6 +3,8 @@ import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.systemhandler.*
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
 
 /** Peer discovery, HTTP gossip daemon, and BFT finality certificates. */
 class DistributionDaemonSuite extends munit.FunSuite:
@@ -314,7 +316,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
       val cert = BftFinality.agreeNetworkRemote(
         urls, block, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
-        polls = 64, pollSleepMs = 30)
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
@@ -333,7 +335,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       assert(nodes.values.forall(_.chainDigests == nodes("r0").chainDigests))
       val cert1 = BftFinality.agreeNetworkRemote(
         urls, block1, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
-        polls = 64, pollSleepMs = 30)
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert1.blockDigest, block1)
       assertEquals(cert1.seq, 1)
@@ -348,6 +350,82 @@ class DistributionDaemonSuite extends munit.FunSuite:
       assert(!st.slots.keys.exists { case (_, seq) => seq <= 0 }, st.slots.keys.toString)
       assert(!seals.keys.exists { case (_, seq, _, _) => seq <= 0 }, seals.keys.toString)
     finally https.foreach(_.stop())
+
+  test("Byzantine replica races a forged certificate ahead of honest replicas — discarded, not accepted"):
+    val auth = Keypair.dev("auth")
+    val ledgerAuth = Map(auth.name -> auth.publicBytes)
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val ids = manifest.ids
+    // r3 is Byzantine: no real BftReplica process, only a hand-rolled HTTP
+    // server that answers /bft/certs instantly with a forged, quorum-invalid
+    // certificate — racing far ahead of the honest replicas' real signing
+    // latency (propose -> sign -> gossip commits).
+    val honestIds = ids.filterNot(_ == "r3")
+    val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-byz-$id")).toMap
+    val nodes = honestIds.map { id =>
+      val n = Node(homes(id).resolve("node"), ledgerCtx)
+      n.append(auth, ledgerAuth, List(auth.signTx(Tx.RegisterIdentity(auth.name, auth.publicBytes))))
+        .fold(e => fail(e), identity)
+      id -> n
+    }.toMap
+    val block = nodes("r0").chainDigests.head
+    val forged = BftFinality.FinalityCertificate(
+      blockDigest = block, view = 0, seq = 0,
+      commits = List(cairn.kernel.BftQuorum.ReplicaId("r3") -> Vector.fill(64)(0.toByte)), // garbage seal, under quorum
+      replicaSet = manifest.replicaSetDigest, height = 0, parent = Digest.of(Canon.CStr("cairn-genesis")),
+      chainId = block)
+    val https = scala.collection.mutable.ListBuffer.empty[HttpNode]
+    var byzantine: HttpServer | Null = null
+    try
+      val ports = honestIds.map { id =>
+        val peersRoot = homes(id)
+        val bft = BftReplica.certified(
+          replicas.find(_.name == id).get, manifest,
+          node = Some(nodes(id)), ledgerAuth = ledgerAuth,
+          certStore = Some(peersRoot.resolve("bft-certs.canon")),
+          stateStore = Some(peersRoot.resolve("bft-state.canon")))
+          .fold(e => fail(e), identity)
+        val http = HttpNode(nodes(id), ledgerAuth, peersRoot = Some(peersRoot), bft = Some(bft))
+        https += http
+        id -> http.start()
+      }.toMap
+      val byz = HttpServer.create(InetSocketAddress(0), 0)
+      byz.createContext("/bft/certs", ex =>
+        val body = Canon.encode(Canon.CList(List(forged.canon)))
+        ex.sendResponseHeaders(200, body.length)
+        ex.getResponseBody.write(body)
+        ex.close())
+      byz.setExecutor(java.util.concurrent.Executors.newCachedThreadPool())
+      byz.start()
+      byzantine = byz
+      val byzPort = byz.getAddress.getPort
+      val urls = honestIds.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
+        + ("r3" -> s"http://127.0.0.1:$byzPort")
+      honestIds.foreach { id =>
+        ids.foreach { peer =>
+          val peerUrl = if peer == "r3" then urls("r3") else urls(peer)
+          PeerRegistry.addBound(
+            homes(id), replicas.find(_.name == peer).get, peerUrl,
+            PeerRegistry.Role.Replica).fold(e => fail(e), identity)
+        }
+      }
+      val cert = BftFinality.agreeNetworkRemote(
+        urls, block, replicas.head, chainId = block, replicaSet = manifest.replicaSetDigest,
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
+        .fold(e => fail(e), identity)
+      // The forged cert answered fastest and matched blockDigest, but it must
+      // never have been returned — the type system guarantees `cert` passed
+      // FinalityCertificate.verify, which the forged cert (1 unknown/garbage
+      // commit) cannot.
+      assertNotEquals(cert.digest, forged.digest)
+      assert(cert.commits.map(_._1.id).distinct.length >= BftQuorum.quorumSize(4))
+      assertEquals(
+        BftFinality.FinalityCertificate.verifyAgainstChain(cert, manifest, nodes("r0"), ledgerAuth),
+        Right(()))
+    finally
+      https.foreach(_.stop())
+      if byzantine != null then byzantine.stop(0)
 
   test("HTTP view-change failover when primary is unreachable"):
     val auth = Keypair.dev("auth")
@@ -395,7 +473,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val initiator = replicas.find(_.name == "r1").get
       val cert = BftFinality.agreeNetworkRemote(
         urls, block, initiator, chainId = block, replicaSet = manifest.replicaSetDigest,
-        polls = 80, pollSleepMs = 40, maxViews = 8)
+        authorities = manifest.authorities, polls = 80, pollSleepMs = 40, maxViews = 8)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assert(cert.view >= 1, clues(cert.view))
@@ -452,7 +530,7 @@ class DistributionDaemonSuite extends munit.FunSuite:
       val urls = ids.map(id => id -> s"http://127.0.0.1:${ports(id)}").toMap
       val cert = BftFinality.agreeNetworkRemote(
         urls, block, kps.head, chainId = block, replicaSet = manifest.replicaSetDigest,
-        polls = 64, pollSleepMs = 30)
+        authorities = manifest.authorities, polls = 64, pollSleepMs = 30)
         .fold(e => fail(e), identity)
       assertEquals(cert.blockDigest, block)
       assertEquals(cert.seq, 0)
