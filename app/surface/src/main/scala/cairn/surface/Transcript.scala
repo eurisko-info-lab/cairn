@@ -615,9 +615,12 @@ object Cli:
                   _ = branches.importModule("demo-base", m0)
                   tipA <- SemanticRepository.tipAfter(lang, m0, cA)
                   tipB <- SemanticRepository.tipAfter(lang, m0, cB)
-                  _ = branches.commitTip("demo-a", tipA)
-                  _ = branches.commitTip("demo-b", tipB)
-                  outcome <- branches.mergeBranches(lang, "demo-main", "demo-a", "demo-b")
+                  acceptedA <- AcceptedTip.checkTip(lang, tipA.asTip, AcceptancePolicy.open)
+                  acceptedB <- AcceptedTip.checkTip(lang, tipB.asTip, AcceptancePolicy.open)
+                  _ = branches.commitTip("demo-a", acceptedA)
+                  _ = branches.commitTip("demo-b", acceptedB)
+                  outcome <- branches.mergeBranches(
+                    lang, "demo-main", "demo-a", "demo-b", policy = AcceptancePolicy.open)
                 yield outcome match
                   case Left(conflict) =>
                     s"conflict: ${conflict.render}"

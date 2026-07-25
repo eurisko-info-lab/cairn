@@ -1,7 +1,7 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{ChangeAlgebra, Delta, LangMigration, Merge, Module, ModuleGate, PatchGraph, SemanticRepository}
+import cairn.core.{AcceptancePolicy, AcceptanceEvidence, AcceptedTip, ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
 import cairn.systeminterface.PackAccess
@@ -125,9 +125,14 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         * crash-recovery so [[applyRefs]] can restore [[BranchManifest.gateEvidence]]).
         */
       gateJudgment: Option[String] = None,
+      /** Digest of the [[cairn.core.AcceptanceEvidence]] artifact backing this
+        * accept, if any (survives crash-recovery so [[applyRefs]] can restore
+        * [[BranchManifest.acceptanceEvidence]]).
+        */
+      acceptanceEvidence: Option[Digest] = None,
   ):
     def rootDigests: List[Digest] =
-      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras
+      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList
 
     def encode: String =
       val lines = List(
@@ -139,7 +144,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         s"historyAppend=$historyAppend",
         s"phase=$phase",
         s"extras=${extras.map(_.hex).mkString(",")}",
-        s"gateJudgment=${gateJudgment.getOrElse("")}")
+        s"gateJudgment=${gateJudgment.getOrElse("")}",
+        s"acceptanceEvidence=${acceptanceEvidence.map(_.hex).getOrElse("")}")
       lines.mkString("\n")
 
   private object AcceptJournal:
@@ -159,7 +165,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         phase <- m.get("phase").toRight("accept journal: missing phase")
         extras = m.getOrElse("extras", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
         gateJudgment = m.get("gateJudgment").filter(_.nonEmpty)
-      yield AcceptJournal(branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras, gateJudgment)
+        acceptanceEvidence = m.get("acceptanceEvidence").filter(_.nonEmpty).map(Digest(_))
+      yield AcceptJournal(
+        branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras,
+        gateJudgment, acceptanceEvidence)
 
   private def writeJournal(j: AcceptJournal): Unit =
     refsMkdirs()
@@ -191,7 +200,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       acceptedChange = Some(vcsArt.key.valueHash),
       parents = j.parents,
       causalHistoryRoot = j.causalHistoryRoot,
-      gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil))
+      gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil),
+      acceptanceEvidence = j.acceptanceEvidence)
 
   /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
     * On ledger failure after refs, journal stays at phase=publish for recovery.
@@ -215,6 +225,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       historyAppend: Boolean = true,
       extraPuts: List[Artifact] = Nil,
       gateJudgment: Option[String] = None,
+      acceptanceEvidence: Option[Digest] = None,
   ): Either[String, BranchManifest] =
     if module.digest != vcs.result then
       Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
@@ -234,7 +245,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       val extras = extraKeys.map(_.valueHash) :+ provDig
       var journal = AcceptJournal(
         branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras,
-        gateJudgment)
+        gateJudgment, acceptanceEvidence)
       writeJournal(journal)
       val manifest = applyRefs(journal)
       journal = journal.copy(phase = "refs")
@@ -508,6 +519,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         * un-gated advance genuinely does not carry forward a prior gate's claim.
         */
       gateEvidence: List[(String, Digest)] = Nil,
+      /** Digest of the [[cairn.core.AcceptanceEvidence]] artifact backing this
+        * accept, if any. Same overwrite-not-accumulate semantics as `gateEvidence`.
+        */
+      acceptanceEvidence: Option[Digest] = None,
   ): BranchManifest =
     val cur = load(branch)
     val nextHistory = acceptedChange match
@@ -525,6 +540,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeHistory = nextHistory,
       certificates = cur.certificates,
       gateEvidence = gateEvidence,
+      acceptanceEvidence = acceptanceEvidence,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)
@@ -931,22 +947,27 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   def commitModule(branch: String, module: Module): BranchManifest =
     importModule(branch, module)
 
-  /** Persist a [[SemanticRepository.ValidatedTip]] via journaled transactional
-    * accept (CAS → journal → refs → clear).
+  /** Persist an [[AcceptedTip]] via journaled transactional accept (CAS →
+    * journal → refs → clear). `AcceptedTip` is only mintable after both ΔL
+    * replay and an explicit [[AcceptancePolicy]] succeed — there is no
+    * overload of this method that skips either check.
     */
-  def commitTip(branch: String, tip: SemanticRepository.ValidatedTip): BranchManifest =
+  def commitTip(branch: String, accepted: AcceptedTip): BranchManifest =
     val cur = load(branch)
-    val histRoot = cur.causalHistoryRoot.orElse(Some(tip.vcs.base))
+    val histRoot = cur.causalHistoryRoot.orElse(Some(accepted.vcs.base))
+    val evidence = accepted.evidence
     transactionalAccept(
       branch,
-      tip.tip,
-      tip.vcs,
+      accepted.module,
+      accepted.vcs,
       parents = cur.head.toList.map(_.valueHash),
       causalHistoryRoot = histRoot,
       publish = None,
-      provenanceParents = List(tip.baseDigest),
+      provenanceParents = List(accepted.base.digest),
       provenanceTool = "semantic-commit",
-      extraPuts = List(tip.base.artifact),
+      extraPuts = List(accepted.base.artifact, evidence.artifact),
+      gateJudgment = if accepted.policy.gate.judgment.isEmpty then None else Some(accepted.policy.gate.judgment),
+      acceptanceEvidence = Some(evidence.digest),
     ).fold(e => throw RuntimeException(e), identity)
 
   /** Load + replay-check the tip ValidatedChangeSet.
@@ -1016,6 +1037,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeHistory = cur.changeHistory,
       certificates = cur.certificates,
       gateEvidence = cur.gateEvidence,
+      acceptanceEvidence = cur.acceptanceEvidence,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)
@@ -1029,6 +1051,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * artifact is stored in CAS and the branch head is left unchanged.
     * Ledger publish is opt-in via `publish`.
     *
+    * `policy` has no default — every merge must name an explicit
+    * [[AcceptancePolicy]] ([[AcceptancePolicy.open]] for "no domain gate,"
+    * a real one otherwise). Domain validation can no longer be skipped by
+    * omission.
+    *
     * @return `Right(manifest)` on accept, `Left(conflict)` on overlap.
     */
   def merge(
@@ -1038,25 +1065,29 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       changeOurs: Cst,
       changeTheirs: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
-      gate: ModuleGate = ModuleGate.passthrough,
       publish: Option[Publish] = None,
       parentBranches: List[String] = Nil,
+      policy: AcceptancePolicy,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, gate).flatMap {
+    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, policy.gate).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
         Right(Left(markConflict(into, conflict)))
-      case SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
-        val parentDigests =
-          if parentBranches.nonEmpty then
-            parentBranches.flatMap(b => load(b).head.map(_.valueHash))
-          else load(into).head.toList.map(_.valueHash)
-        transactionalAccept(
-          into, module, vcs, parentDigests, Some(base.digest), publish,
-          provenanceParents = List(base.digest),
-          provenanceTool = "semantic-merge",
-          extraPuts = List(base.artifact),
-          gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment),
-        ).map(Right(_))
+      case outcome @ SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
+        AcceptedTip.checkMerged(language, base, outcome, policy).flatMap { accepted =>
+          val parentDigests =
+            if parentBranches.nonEmpty then
+              parentBranches.flatMap(b => load(b).head.map(_.valueHash))
+            else load(into).head.toList.map(_.valueHash)
+          val evidence = accepted.evidence
+          transactionalAccept(
+            into, module, vcs, parentDigests, Some(base.digest), publish,
+            provenanceParents = List(base.digest),
+            provenanceTool = "semantic-merge",
+            extraPuts = List(base.artifact, evidence.artifact),
+            gateJudgment = if policy.gate.judgment.isEmpty then None else Some(policy.gate.judgment),
+            acceptanceEvidence = Some(evidence.digest),
+          ).map(Right(_))
+        }
     }
 
   /** Everyday merge: causal LCA via [[PatchGraph]] when histories form a DAG,
@@ -1069,8 +1100,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       ours: String,
       theirs: String,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
-      gate: ModuleGate = ModuleGate.passthrough,
       publish: Option[Publish] = None,
+      policy: AcceptancePolicy,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
       histA <- loadChangeHistory(ours, language)
@@ -1100,7 +1131,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDig.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
       parentDigests = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash))
+      gate = policy.gate
       gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment)
+      evidenceFor = (changeDigest: Digest, result: Module) => AcceptanceEvidence(
+        language = language.digest, base = baseDig, change = changeDigest,
+        result = result.digest, policy = policy.digest, judgment = gate.judgment)
       out <- (stackedA, stackedB) match
         case (None, None) =>
           headModule(ours).flatMap { m =>
@@ -1112,15 +1147,18 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
               case Right(()) =>
                 val modKey = putArt(m.artifact)
+                val evidence = evidenceFor(load(ours).acceptedChange.getOrElse(baseDig), m)
+                putArt(evidence.artifact)
                 Right(Right(advance(
                   into, modKey,
                   acceptedChange = load(ours).acceptedChange,
                   parents = parentDigests,
                   causalHistoryRoot = Some(baseDig),
-                  gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil))))
+                  gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil),
+                  acceptanceEvidence = Some(evidence.digest))))
           }
         case (Some((_, chA)), Some((_, chB))) =>
-          merge(language, into, base, chA, chB, migration, gate, publish, List(ours, theirs))
+          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs), policy)
         case (Some((_, chA)), None) =>
           SemanticRepository.commit(language, base, chA).flatMap { (mod, vcs) =>
             gate(mod) match
@@ -1128,11 +1166,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
               case Right(()) =>
+                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
+                val evidence = evidenceFor(chgDig, mod)
                 transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
                   provenanceTool = "semantic-merge",
+                  extraPuts = List(evidence.artifact),
                   gateJudgment = gateJudgment,
+                  acceptanceEvidence = Some(evidence.digest),
                 ).map(Right(_))
           }
         case (None, Some((_, chB))) =>
@@ -1142,11 +1184,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
               case Right(()) =>
+                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
+                val evidence = evidenceFor(chgDig, mod)
                 transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
                   provenanceTool = "semantic-merge",
+                  extraPuts = List(evidence.artifact),
                   gateJudgment = gateJudgment,
+                  acceptanceEvidence = Some(evidence.digest),
                 ).map(Right(_))
           }
     yield out

@@ -19,6 +19,23 @@ import cairn.kernel.*
   * value — by replaying the walk against the actual term and language,
   * never by trusting the claim's self-reported fields.
   */
+private[core] final case class SemanticPathRepr(
+    language: Digest,
+    rootSort: String,
+    steps: List[SemanticPath.Step],
+    focusSort: String,
+    /** Recovered legacy `List[Int]` indices. Format-preserving splice keys
+      * source spans by `Cst` node INSTANCE identity (`SpanMap` is an
+      * `IdentityHashMap`) — callers that must walk the exact original `Cst`
+      * (not a reconstruction) use these with the existing
+      * `Delta.subtreeAt`/`replaceAt`, which `SemanticPath` wraps rather
+      * than replaces.
+      */
+    indices: List[Int],
+)
+
+opaque type SemanticPath = SemanticPathRepr
+
 object SemanticPath:
 
   /** One hop in a path. */
@@ -74,23 +91,6 @@ object SemanticPath:
       focusSort: Option[String] = None,
   )
 
-  private[SemanticPath] final case class Repr(
-      language: Digest,
-      rootSort: String,
-      steps: List[Step],
-      focusSort: String,
-      /** Recovered legacy `List[Int]` indices. Format-preserving splice keys
-        * source spans by `Cst` node INSTANCE identity (`SpanMap` is an
-        * `IdentityHashMap`) — callers that must walk the exact original `Cst`
-        * (not a reconstruction) use these with the existing
-        * `Delta.subtreeAt`/`replaceAt`, which `SemanticPath` wraps rather
-        * than replaces.
-        */
-      indices: List[Int],
-  )
-
-  opaque type SemanticPath = Repr
-
   extension (p: SemanticPath)
     def language: Digest = p.language
     def rootSort: String = p.rootSort
@@ -105,7 +105,7 @@ object SemanticPath:
 
   private def mint(
       language: Digest, rootSort: String, steps: List[Step], focusSort: String, indices: List[Int],
-  ): SemanticPath = Repr(language, rootSort, steps, focusSort, indices)
+  ): SemanticPath = SemanticPathRepr(language, rootSort, steps, focusSort, indices)
 
   /** One hop of the shared walk: step into constructor `node`'s child at
     * `position`. `claimedCtor`/`claimedLabel`, when `Some`, are checked

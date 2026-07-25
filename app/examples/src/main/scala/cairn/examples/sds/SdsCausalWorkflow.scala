@@ -63,6 +63,10 @@ object SdsCausalWorkflow:
     val branches = Branches(cas, work.resolve("refs"), EffectContexts.forBranches())
     val base = SdsTutorial.acetoneBase
     Sds.validate(base).fold(e => throw RuntimeException(e), identity)
+    // The real domain gate, wired into the acceptance path itself — every
+    // commit/merge onto an SDS work branch in this workflow must now pass
+    // sds.validate, not just the one-off validate() call above.
+    val sdsPolicy = AcceptancePolicy.gated(ModuleGate.fromJudgment("sds.validate")(Sds.validate))
     EuClp.conform(Chemicals.Acetone.thinModule) match
       case r if !r.ok => throw RuntimeException(s"EU-CLP conform: ${r.errors.mkString("; ")}")
       case _ => ()
@@ -86,7 +90,8 @@ object SdsCausalWorkflow:
 
     def underSdsTip(name: String, tip: SemanticRepository.ValidatedTip): Unit =
       SdsDomainTree.underSds(branches, name).fold(e => throw RuntimeException(e), identity)
-      branches.commitTip(name, tip)
+      val accepted = AcceptedTip.checkTip(lang, tip.asTip, sdsPolicy).fold(e => throw RuntimeException(e), identity)
+      branches.commitTip(name, accepted)
 
     val runnerSteps = wf.steps.map(s => WorkflowRunner.Step(s.name, s.phase))
     // Pack binds step→handlerId; composition root supplies implementations by id.
@@ -112,7 +117,8 @@ object SdsCausalWorkflow:
         underSdsTip("sds-base-rev", pctTip)
         SdsDomainTree.underSds(branches, "sds-merged")
           .fold(e => throw RuntimeException(e), identity)
-        rebaseMerged = branches.mergeBranches(lang, "sds-merged", "sds-base-rev", "sds-industrial") match
+        rebaseMerged = branches.mergeBranches(
+          lang, "sds-merged", "sds-base-rev", "sds-industrial", policy = sdsPolicy) match
           case Right(Right(_)) => true
           case Right(Left(_)) => false
           case Left(e) => throw RuntimeException(e)
@@ -169,7 +175,8 @@ object SdsCausalWorkflow:
         val tip2 = SemanticRepository.tipAfter(lang, tip.tip, parse(
           """{ add labelShadow = shadow cleanerProduct overrides h319 with "Eye hazard - industrial SDS wording" ; }"""))
           .fold(e => throw RuntimeException(e), identity)
-        branches.commitTip("sds-hist", tip2)
+        val accepted2 = AcceptedTip.checkTip(lang, tip2.asTip, sdsPolicy).fold(e => throw RuntimeException(e), identity)
+        branches.commitTip("sds-hist", accepted2)
         val refs = work.resolve("refs")
         Files.deleteIfExists(refs.resolve("sds-hist.change"))
         Files.deleteIfExists(refs.resolve("sds-hist.changes"))

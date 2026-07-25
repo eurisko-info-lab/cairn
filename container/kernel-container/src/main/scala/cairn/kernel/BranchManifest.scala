@@ -51,6 +51,14 @@ final case class BranchManifest(
       * acceptance, not full merge history; empty when no gate ran.
       */
     gateEvidence: List[(String, Digest)] = Nil,
+    /** Digest of the [[cairn.core.AcceptanceEvidence]] artifact backing the
+      * current head's acceptance — the language/base/change/result/policy
+      * digests a second node needs to independently replay the decision,
+      * not just the judgment name `gateEvidence` already carries. Reflects
+      * only the current head, same as `gateEvidence`; `None` when the head
+      * was accepted without a policy (or is a bootstrap import).
+      */
+    acceptanceEvidence: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -67,7 +75,8 @@ final case class BranchManifest(
     "references" -> Canon.CList(references.map(Canon.CStr.apply)),
     "domainAgreement" -> optDigest(domainAgreement),
     "gateEvidence" -> Canon.CList(gateEvidence.map { (j, d) =>
-      Canon.cmap("judgment" -> Canon.CStr(j), "evidence" -> Canon.CStr(d.hex)) }))
+      Canon.cmap("judgment" -> Canon.CStr(j), "evidence" -> Canon.CStr(d.hex)) }),
+    "acceptanceEvidence" -> optDigest(acceptanceEvidence))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -106,7 +115,8 @@ object BranchManifest:
       domainAgreement = m.get("domainAgreement").flatMap(dig),
       gateEvidence = m.get("gateEvidence").map(_.asList.map { c =>
         c.field("judgment").asStr -> Digest(c.field("evidence").asStr)
-      }).getOrElse(Nil))
+      }).getOrElse(Nil),
+      acceptanceEvidence = m.get("acceptanceEvidence").flatMap(dig))
 
 /** Pure checks for ledger domain ancestry (trunk / primary / references). */
 object DomainBranch:

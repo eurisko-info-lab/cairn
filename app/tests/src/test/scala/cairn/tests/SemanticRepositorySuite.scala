@@ -23,6 +23,12 @@ class SemanticRepositorySuite extends munit.FunSuite:
   def branchesAt(dir: java.nio.file.Path): Branches =
     Branches(DiskCas(dir.resolve("cas")), dir.resolve("refs"), casCtx)
 
+  /** Test convenience: wrap an already ΔL-replayed [[SemanticRepository.ValidatedTip]]
+    * into an [[AcceptedTip]] under `policy` (default: no domain gate).
+    */
+  def accept(tip: SemanticRepository.ValidatedTip, policy: AcceptancePolicy = AcceptancePolicy.open): AcceptedTip =
+    AcceptedTip.checkTip(lang, tip.asTip, policy).fold(e => fail(e), identity)
+
   test("spine: commit → tip → commute → integrate → accepted head"):
     val cA = parseChange("{ replace a = false ; add fromA = true ; }")
     val cB = parseChange("{ replace b = true ; add fromB = false ; }")
@@ -62,9 +68,9 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.importModule("base", m0)
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", tipA)
-    branches.commitTip("feat-b", tipB)
-    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
+    branches.commitTip("feat-a", accept(tipA))
+    branches.commitTip("feat-b", accept(tipB))
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b", policy = AcceptancePolicy.open) match
       case Right(Right(manifest)) =>
         assertEquals(manifest.branch, "main")
         assert(manifest.head.isDefined)
@@ -119,17 +125,20 @@ class SemanticRepositorySuite extends munit.FunSuite:
     branches.importModule("base", m0)
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, m0, cB).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", tipA)
-    branches.commitTip("feat-b", tipB)
-    // Without a gate: the everyday repository path used to accept this silently.
-    branches.mergeBranches(lang, "main-ungated", "feat-a", "feat-b") match
+    branches.commitTip("feat-a", accept(tipA))
+    branches.commitTip("feat-b", accept(tipB))
+    // AcceptancePolicy.open must now be named explicitly — passthrough is no
+    // longer a silent default — but it's still a real, reachable choice, and
+    // the everyday repository path still accepts this domain-invalid module
+    // under it.
+    branches.mergeBranches(lang, "main-ungated", "feat-a", "feat-b", policy = AcceptancePolicy.open) match
       case Right(Right(manifest)) =>
         val head = branches.headModule("main-ungated").fold(e => fail(e), identity)
         assertEquals(head.defs.size, 4) // a, b, fromA, fromB — over the gate's cap of 3
         assertEquals(manifest.gateEvidence, Nil)
       case other => fail(other.toString)
-    // With the gate supplied: the same merge is caught as a domain-validation conflict.
-    branches.mergeBranches(lang, "main-gated", "feat-a", "feat-b", gate = gate) match
+    // With a real policy supplied: the same merge is caught as a domain-validation conflict.
+    branches.mergeBranches(lang, "main-gated", "feat-a", "feat-b", policy = AcceptancePolicy.gated(gate)) match
       case Right(Left(conflict)) =>
         assert(conflict.witness.exists {
           case Merge.ConflictWitness.DomainValidationFailed("test.capacity", _) => true
@@ -143,18 +152,19 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val cas = DiskCas(dir.resolve("cas"))
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val gate = capacityGate(3)
+    val policy = AcceptancePolicy.gated(gate)
     val cAnchor = parseChange("{ add anchor = true ; }")
     val tipAnchor = SemanticRepository.tipAfter(lang, m0, cAnchor).fold(e => fail(e), identity)
     // theirs is exactly the shared anchor commit — nothing beyond it, so any
     // merge here is one-sided (theirs's suffix past the LCA is empty).
-    branches.commitTip("theirs", tipAnchor)
+    branches.commitTip("theirs", accept(tipAnchor))
 
     // ours diverges beyond theirs with an over-capacity addition (3 -> 5 defs).
-    branches.commitTip("ours-over", tipAnchor)
+    branches.commitTip("ours-over", accept(tipAnchor))
     val cOver = parseChange("{ add fromA = true ; add fromA2 = true ; }")
     val tipOver = SemanticRepository.tipAfter(lang, tipAnchor.tip, cOver).fold(e => fail(e), identity)
-    branches.commitTip("ours-over", tipOver)
-    branches.mergeBranches(lang, "into-gated", "ours-over", "theirs", gate = gate) match
+    branches.commitTip("ours-over", accept(tipOver))
+    branches.mergeBranches(lang, "into-gated", "ours-over", "theirs", policy = policy) match
       case Right(Left(conflict)) =>
         assert(conflict.witness.exists {
           case Merge.ConflictWitness.DomainValidationFailed("test.capacity", _) => true
@@ -164,14 +174,15 @@ class SemanticRepositorySuite extends munit.FunSuite:
 
     // ours diverges beyond theirs with a capacity-preserving edit (stays at 3 defs) — accepts,
     // and the accepted manifest retains the judgment + evidence digest.
-    branches.commitTip("ours-ok", tipAnchor)
+    branches.commitTip("ours-ok", accept(tipAnchor))
     val cOk = parseChange("{ replace anchor = false ; }")
     val tipOk = SemanticRepository.tipAfter(lang, tipAnchor.tip, cOk).fold(e => fail(e), identity)
-    branches.commitTip("ours-ok", tipOk)
-    branches.mergeBranches(lang, "into-gated-ok", "ours-ok", "theirs", gate = gate) match
+    branches.commitTip("ours-ok", accept(tipOk))
+    branches.mergeBranches(lang, "into-gated-ok", "ours-ok", "theirs", policy = policy) match
       case Right(Right(manifest)) =>
         val head = branches.headModule("into-gated-ok").fold(e => fail(e), identity)
         assertEquals(manifest.gateEvidence, List("test.capacity" -> head.digest))
+        assert(manifest.acceptanceEvidence.isDefined, manifest.toString)
       case other => fail(other.toString)
 
   test("Branches.publishHead: optional ledger SetBranchHead after accept"):
@@ -180,8 +191,8 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val tipA = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
-    branches.commitTip("feat", tipA)
-    branches.merge(lang, "main", m0, cA, parseChange("{ replace b = true ; }")) match
+    branches.commitTip("feat", accept(tipA))
+    branches.merge(lang, "main", m0, cA, parseChange("{ replace b = true ; }"), policy = AcceptancePolicy.open) match
       case Right(Right(_)) =>
         val alice = Keypair.dev("alice")
         val auth = Map("alice" -> alice.publicBytes)
@@ -203,11 +214,11 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val c1 = parseChange("{ replace a = false ; }")
     val tip1 = SemanticRepository.tipAfter(lang, m0, c1).fold(e => fail(e), identity)
-    branches.commitTip("feat", tip1)
+    branches.commitTip("feat", accept(tip1))
     val c2 = parseChange("{ replace b = true ; }")
     val tip2 = SemanticRepository.tipAfter(lang, tip1.tip, c2).fold(e => fail(e), identity)
     // Second tip on same branch: history log grows; tip sidecar is latest
-    branches.commitTip("feat", tip2)
+    branches.commitTip("feat", accept(tip2))
     val loaded = branches.loadTip("feat", lang).fold(e => fail(e), identity)
     assertEquals(loaded.tipDigest, tip2.tipDigest)
     assertEquals(loaded.baseDigest, tip2.baseDigest)
@@ -237,13 +248,13 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val tipA2 = SemanticRepository.tipAfter(lang, tipA1.tip, cA2).fold(e => fail(e), identity)
     val tipB1 = SemanticRepository.tipAfter(lang, m0, cB1).fold(e => fail(e), identity)
     val tipB2 = SemanticRepository.tipAfter(lang, tipB1.tip, cB2).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", tipA1)
-    branches.commitTip("feat-a", tipA2)
-    branches.commitTip("feat-b", tipB1)
-    branches.commitTip("feat-b", tipB2)
+    branches.commitTip("feat-a", accept(tipA1))
+    branches.commitTip("feat-a", accept(tipA2))
+    branches.commitTip("feat-b", accept(tipB1))
+    branches.commitTip("feat-b", accept(tipB2))
     // Tip-only would fail: tipA2.base = tipA1.tip ≠ tipB2.base = tipB1.tip
     assertNotEquals(tipA2.baseDigest, tipB2.baseDigest)
-    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b", policy = AcceptancePolicy.open) match
       case Right(Right(_)) =>
         val head = branches.headModule("main").fold(e => fail(e), identity)
         assertEquals(head.get("a"), Some(Stlc.fls))
@@ -258,7 +269,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
-    branches.merge(lang, "main", m0, cA, cB) match
+    branches.merge(lang, "main", m0, cA, cB, policy = AcceptancePolicy.open) match
       case Right(Left(conflict)) =>
         assertEquals(conflict.overlap, Set("a"))
         assert(CasEffects.contains(cas, conflict.artifact.digest, casCtx).contains(true))
@@ -272,14 +283,14 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
-    val conflict = branches.merge(lang, "main", m0, cA, cB) match
+    val conflict = branches.merge(lang, "main", m0, cA, cB, policy = AcceptancePolicy.open) match
       case Right(Left(c)) => c
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)
     // Resolve by hand: an ordinary tip commit on the same branch.
     val resolving = parseChange("{ replace a = false ; }")
     val tip = SemanticRepository.tipAfter(lang, m0, resolving).fold(e => fail(e), identity)
-    val manifest = branches.commitTip("main", tip)
+    val manifest = branches.commitTip("main", accept(tip))
     val hops = Provenance.why(dir.resolve("cas"), manifest.head.get.valueHash, casCtx)
       .fold(e => fail(e), identity)
     assert(
@@ -298,12 +309,45 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val okClaim = real.vcs.claim
     assert(Delta.ValidatedChangeSet.check(lang, m0, okClaim).isRight)
 
+  test("AcceptedTip: minted only after both ΔL replay and an explicit AcceptancePolicy succeed"):
+    val cA = parseChange("{ add fromA = true ; }")
+    val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val gate = capacityGate(1) // m0 already has 2 defs — always over capacity
+    assert(AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.gated(gate)).isLeft)
+    val ok = AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.open).fold(e => fail(e), identity)
+    assertEquals(ok.module.digest, tip.tip.digest)
+    assertEquals(ok.evidence.result, tip.tip.digest)
+    assertEquals(ok.evidence.language, lang.digest)
+    // Independent re-verification (a second node's job): never trust the
+    // evidence's self-reported success, only its identity fields.
+    assertEquals(AcceptanceEvidence.verify(AcceptancePolicy.open, ok.module, ok.evidence), Right(()))
+    val wrongResult = Module(m0.defs :+ ("bogus" -> Stlc.tru))
+    assert(AcceptanceEvidence.verify(AcceptancePolicy.open, wrongResult, ok.evidence).isLeft)
+
+  test("Branches.commitTip: no overload accepts a bare ValidatedTip — AcceptedTip is the only way in"):
+    // Compile-time property, asserted via typecheck failure: passing a
+    // ValidatedTip directly (skipping AcceptedTip.checkTip's policy check)
+    // must not type-check.
+    val errs = scala.compiletime.testing.typeCheckErrors(
+      """
+      val dir = java.nio.file.Files.createTempDirectory("cairn-bypass-check")
+      val branches = cairn.runtime.Branches(
+        cairn.systemhandler.DiskCas(dir.resolve("cas")), dir.resolve("refs"),
+        cairn.runtime.EffectContexts.forBranches())
+      val lang = cairn.examples.stlc.Stlc.language
+      val m0 = cairn.core.Module(List("a" -> cairn.examples.stlc.Stlc.tru))
+      val cA = cairn.core.Cst.node("replace", cairn.core.Cst.Leaf("a"), cairn.examples.stlc.Stlc.fls)
+      val tip = cairn.core.SemanticRepository.tipAfter(lang, m0, cA).toOption.get
+      branches.commitTip("feat", tip)
+      """)
+    assert(errs.nonEmpty, "commitTip must not accept a bare ValidatedTip")
+
   test("Branches.commitTip records causal digests on BranchManifest"):
     val dir = Files.createTempDirectory("cairn-manifest-causal")
     val branches = branchesAt(dir)
     val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
       .fold(e => fail(e), identity)
-    val m = branches.commitTip("feat", tip)
+    val m = branches.commitTip("feat", accept(tip))
     assert(m.acceptedChange.isDefined, m.toString)
     assertEquals(m.causalHistoryRoot, Some(m0.digest))
     assertEquals(m.acceptedChange, Some(tip.vcs.artifact.digest))
@@ -313,7 +357,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = branchesAt(dir)
     val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
       .fold(e => fail(e), identity)
-    branches.commitTip("feat", tip)
+    branches.commitTip("feat", accept(tip))
     assertEquals(branches.recoverPendingAccepts(), Right(Nil))
     assert(branches.headModule("feat").isRight)
 
@@ -324,7 +368,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = Branches(cas, dir.resolve("refs"), casCtx)
     val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
       .fold(e => fail(e), identity)
-    branches.commitTip("feat", tip)
+    branches.commitTip("feat", accept(tip))
     val orphan = Artifact(ArtifactKind.Claim, Canon.CStr("orphan-accept-blob"))
     val orphanDig = CasEffects.put(cas, orphan, casCtx).fold(e => fail(e.toString), _.valueHash)
     assert(CasEffects.contains(cas, orphanDig, casCtx).contains(true))
@@ -341,7 +385,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val branches = branchesAt(dir)
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
-    branches.merge(lang, "main", m0, cA, cB) match
+    branches.merge(lang, "main", m0, cA, cB, policy = AcceptancePolicy.open) match
       case Right(Left(conflict)) =>
         val roots = branches.liveCasRoots().fold(e => fail(e), identity)
         assert(roots.contains(conflict.artifact.digest), roots.toString)
@@ -368,14 +412,14 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val cFromB = parseChange("{ add fromB = false ; }")
     val tipA = SemanticRepository.tipAfter(lang, tip1ab.tip, cFromA).fold(e => fail(e), identity)
     val tipB = SemanticRepository.tipAfter(lang, tip2ba.tip, cFromB).fold(e => fail(e), identity)
-    branches.commitTip("feat-a", tip1a)
-    branches.commitTip("feat-a", tip1ab)
-    branches.commitTip("feat-a", tipA)
-    branches.commitTip("feat-b", tip2b)
-    branches.commitTip("feat-b", tip2ba)
-    branches.commitTip("feat-b", tipB)
+    branches.commitTip("feat-a", accept(tip1a))
+    branches.commitTip("feat-a", accept(tip1ab))
+    branches.commitTip("feat-a", accept(tipA))
+    branches.commitTip("feat-b", accept(tip2b))
+    branches.commitTip("feat-b", accept(tip2ba))
+    branches.commitTip("feat-b", accept(tipB))
     // Linear identical-prefix would be 0 (change objects differ); LCA by result finds the shared module.
-    branches.mergeBranches(lang, "main", "feat-a", "feat-b") match
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b", policy = AcceptancePolicy.open) match
       case Right(Right(_)) =>
         val head = branches.headModule("main").fold(e => fail(e), identity)
         assertEquals(head.get("a"), Some(Stlc.fls))
@@ -422,22 +466,22 @@ class SemanticRepositorySuite extends munit.FunSuite:
       val tipB = SemanticRepository.tipAfter(lang, afterShared,
         parseChange(s"{ add $sufB = false ; }")).fold(e => fail(e), identity)
       if rng.nextBoolean() then
-        branches.commitTip(s"a$trial", tip1a)
-      branches.commitTip(s"a$trial", tip1ab)
+        branches.commitTip(s"a$trial", accept(tip1a))
+      branches.commitTip(s"a$trial", accept(tip1ab))
       if trial >= 24 then
         val midA = SemanticRepository.tipAfter(lang, tip1ab.tip,
           parseChange(s"{ replace ${names(2)} = false ; }")).fold(e => fail(e), identity)
-        branches.commitTip(s"a$trial", midA)
-      branches.commitTip(s"a$trial", tipA)
+        branches.commitTip(s"a$trial", accept(midA))
+      branches.commitTip(s"a$trial", accept(tipA))
       if rng.nextBoolean() then
-        branches.commitTip(s"b$trial", tip2b)
-      branches.commitTip(s"b$trial", tip2ba)
+        branches.commitTip(s"b$trial", accept(tip2b))
+      branches.commitTip(s"b$trial", accept(tip2ba))
       if trial >= 24 then
         val midB = SemanticRepository.tipAfter(lang, tip2ba.tip,
           parseChange(s"{ replace ${names(2)} = false ; }")).fold(e => fail(e), identity)
-        branches.commitTip(s"b$trial", midB)
-      branches.commitTip(s"b$trial", tipB)
-      branches.mergeBranches(lang, s"m$trial", s"a$trial", s"b$trial") match
+        branches.commitTip(s"b$trial", accept(midB))
+      branches.commitTip(s"b$trial", accept(tipB))
+      branches.mergeBranches(lang, s"m$trial", s"a$trial", s"b$trial", policy = AcceptancePolicy.open) match
         case Right(Right(_)) =>
           val head = branches.headModule(s"m$trial").fold(e => fail(e), identity)
           assertEquals(head.get(pair(0)), Some(Stlc.fls))

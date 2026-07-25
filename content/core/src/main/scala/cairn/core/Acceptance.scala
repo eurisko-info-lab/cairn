@@ -1,0 +1,134 @@
+package cairn.core
+
+import cairn.kernel.*
+
+/** What must additionally hold, beyond ΔL replay, before a proposed module
+  * may become a branch's new head. [[AcceptancePolicy.open]] is
+  * passthrough — always available, but a NAMED, visible choice a caller
+  * must make explicitly; there is no default policy parameter anywhere in
+  * [[cairn.runtime.Branches]]' acceptance API, so skipping domain
+  * validation can no longer happen by omission.
+  *
+  * Scope note: this governs the domain-invariant ([[ModuleGate]]) dimension
+  * of acceptance specifically. Domain ancestry ([[DomainAgreement]]) and
+  * certificate/approval requirements are separate, existing mechanisms not
+  * yet folded into one policy object — a further unification, not
+  * attempted here.
+  */
+final case class AcceptancePolicy(gate: ModuleGate):
+  def digest: Digest = Digest.of(Canon.cmap("judgment" -> Canon.CStr(gate.judgment)))
+
+object AcceptancePolicy:
+  val open: AcceptancePolicy = AcceptancePolicy(ModuleGate.passthrough)
+  def gated(gate: ModuleGate): AcceptancePolicy = AcceptancePolicy(gate)
+
+/** Proof that a specific (language, base, change, result) transition was
+  * checked against a specific [[AcceptancePolicy]] — what a second node
+  * needs to independently replay/verify an acceptance decision instead of
+  * trusting it. Referenced from `BranchManifest.gateEvidence`.
+  */
+final case class AcceptanceEvidence(
+    language: Digest,
+    base: Digest,
+    change: Digest,
+    result: Digest,
+    policy: Digest,
+    judgment: String,
+):
+  def canon: Canon = Canon.cmap(
+    "language" -> Canon.CStr(language.hex),
+    "base" -> Canon.CStr(base.hex),
+    "change" -> Canon.CStr(change.hex),
+    "result" -> Canon.CStr(result.hex),
+    "policy" -> Canon.CStr(policy.hex),
+    "judgment" -> Canon.CStr(judgment))
+  def artifact: Artifact = Artifact(ArtifactKind.AcceptanceEvidence, canon)
+  def digest: Digest = artifact.digest
+
+object AcceptanceEvidence:
+  def fromCanon(c: Canon): Either[String, AcceptanceEvidence] =
+    try
+      Right(AcceptanceEvidence(
+        Digest(c.field("language").asStr), Digest(c.field("base").asStr),
+        Digest(c.field("change").asStr), Digest(c.field("result").asStr),
+        Digest(c.field("policy").asStr), c.field("judgment").asStr))
+    catch case CodecError(m) => Left(m)
+
+  /** Independently re-derive whether `evidence` genuinely holds: the claimed
+    * policy/judgment/result digests match `policy`/`result`, and re-running
+    * `policy.gate` against `result` succeeds — never trusts the evidence's
+    * self-reported success, only its identity fields.
+    */
+  def verify(policy: AcceptancePolicy, result: Module, evidence: AcceptanceEvidence): Either[String, Unit] =
+    if evidence.policy != policy.digest then
+      Left(s"AcceptanceEvidence: policy mismatch (${evidence.policy.short} ≠ ${policy.digest.short})")
+    else if evidence.judgment != policy.gate.judgment then
+      Left(s"AcceptanceEvidence: judgment mismatch ('${evidence.judgment}' ≠ '${policy.gate.judgment}')")
+    else if evidence.result != result.digest then
+      Left(s"AcceptanceEvidence: result mismatch (${evidence.result.short} ≠ ${result.digest.short})")
+    else ModuleGate.require(policy.gate, result)
+
+/** The only way to advance a branch head under a policy: a module that has
+  * both replayed cleanly against ΔL (carries a genuine
+  * [[Delta.ValidatedChangeSet]] — itself only mintable by a successful
+  * [[Delta.apply]]/[[Delta.applyTyped]], never forgeable) AND satisfied an
+  * explicit [[AcceptancePolicy]]. Modeled on
+  * [[SemanticRepository.ValidatedTip]] / [[Delta.ValidatedChangeSet]]:
+  * opaque type, privately-gated mint, and `check*` functions as the only
+  * path in — never trusts a caller's self-reported success.
+  */
+private[core] final case class AcceptedTipRepr(
+    base: Module,
+    module: Module,
+    change: Cst,
+    vcs: Delta.ValidatedChangeSet,
+    policy: AcceptancePolicy,
+    languageDigest: Digest,
+)
+
+opaque type AcceptedTip = AcceptedTipRepr
+
+object AcceptedTip:
+  private def mint(
+      base: Module, module: Module, change: Cst,
+      vcs: Delta.ValidatedChangeSet, policy: AcceptancePolicy, languageDigest: Digest,
+  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest)
+
+  /** Check a proposed [[SemanticRepository.Tip]]: ΔL replay, then `policy`. */
+  def checkTip(
+      language: ComposedLanguage,
+      proposed: SemanticRepository.Tip,
+      policy: AcceptancePolicy,
+  ): Either[String, AcceptedTip] =
+    SemanticRepository.ValidatedTip.check(language, proposed).flatMap { vt =>
+      ModuleGate.require(policy.gate, vt.tip).map(_ =>
+        mint(vt.base, vt.tip, vt.change, vt.vcs, policy, language.digest))
+    }
+
+  /** Wrap an already ΔL-replayed merge/integrate [[SemanticRepository.Outcome.Accepted]]
+    * (its `vcs` is only constructible by a successful `Delta.applyTyped` /
+    * `Merge.threeWay` — never forgeable) with a `policy` check.
+    */
+  def checkMerged(
+      language: ComposedLanguage,
+      base: Module,
+      outcome: SemanticRepository.Outcome.Accepted,
+      policy: AcceptancePolicy,
+  ): Either[String, AcceptedTip] =
+    ModuleGate.require(policy.gate, outcome.module).map(_ =>
+      mint(base, outcome.module, outcome.mergedChange, outcome.vcs, policy, language.digest))
+
+  extension (a: AcceptedTip)
+    def base: Module = a.base
+    def module: Module = a.module
+    def change: Cst = a.change
+    def vcs: Delta.ValidatedChangeSet = a.vcs
+    def policy: AcceptancePolicy = a.policy
+    def languageDigest: Digest = a.languageDigest
+    def evidence: AcceptanceEvidence = AcceptanceEvidence(
+      language = a.languageDigest,
+      base = a.base.digest,
+      change = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(a.change)).digest,
+      result = a.module.digest,
+      policy = a.policy.digest,
+      judgment = a.policy.gate.judgment)
