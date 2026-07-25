@@ -85,9 +85,11 @@ object SemanticPath:
         val label = m.field("label") match
           case Canon.CTag("some", Canon.CStr(l)) => Some(l)
           case _                                 => None
-        val fieldId = m.field("fieldId") match
-          case Canon.CTag("some", Canon.CStr(f)) => Some(f)
-          case _                                 => None
+        // Absent on any Step canon persisted before fieldId existed — default
+        // to None rather than throwing (`m.field` would on a missing key).
+        val fieldId = m.asMap.get("fieldId") match
+          case Some(Canon.CTag("some", Canon.CStr(f))) => Some(f)
+          case _                                       => None
         Right(Step.Field(m.field("ctor").asStr, label, m.field("position").asInt.toInt, fieldId))
       case Canon.CTag("index", m) =>
         Right(Step.Index(m.field("position").asInt.toInt))

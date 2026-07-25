@@ -26,11 +26,20 @@ object AcceptancePolicy:
   * checked against a specific [[AcceptancePolicy]] — what a second node
   * needs to independently replay/verify an acceptance decision instead of
   * trusting it. Referenced from `BranchManifest.gateEvidence`.
+  *
+  * `validatedChangeSet` is the digest of the real
+  * [[Delta.ValidatedChangeSet]]'s own artifact (`vcs.artifact.digest`) —
+  * the SAME digest [[cairn.runtime.Branches]] already records as
+  * `BranchManifest.acceptedChange` — never a bespoke digest of the raw
+  * change term alone; a raw-term digest doesn't bind language/base/result,
+  * so it can't be replayed against. `None` when the accept had no
+  * underlying ΔL change at all (a pure `importModule` bootstrap, or a
+  * fast-forward of one).
   */
 final case class AcceptanceEvidence(
     language: Digest,
     base: Digest,
-    change: Digest,
+    validatedChangeSet: Option[Digest],
     result: Digest,
     policy: Digest,
     judgment: String,
@@ -38,7 +47,7 @@ final case class AcceptanceEvidence(
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex),
     "base" -> Canon.CStr(base.hex),
-    "change" -> Canon.CStr(change.hex),
+    "validatedChangeSet" -> validatedChangeSet.fold(Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
     "result" -> Canon.CStr(result.hex),
     "policy" -> Canon.CStr(policy.hex),
     "judgment" -> Canon.CStr(judgment))
@@ -48,25 +57,61 @@ final case class AcceptanceEvidence(
 object AcceptanceEvidence:
   def fromCanon(c: Canon): Either[String, AcceptanceEvidence] =
     try
+      val vcsDigest = c.field("validatedChangeSet") match
+        case Canon.CTag("some", Canon.CStr(s)) => Some(Digest(s))
+        case _                                 => None
       Right(AcceptanceEvidence(
         Digest(c.field("language").asStr), Digest(c.field("base").asStr),
-        Digest(c.field("change").asStr), Digest(c.field("result").asStr),
+        vcsDigest, Digest(c.field("result").asStr),
         Digest(c.field("policy").asStr), c.field("judgment").asStr))
     catch case CodecError(m) => Left(m)
 
-  /** Independently re-derive whether `evidence` genuinely holds: the claimed
-    * policy/judgment/result digests match `policy`/`result`, and re-running
-    * `policy.gate` against `result` succeeds — never trusts the evidence's
-    * self-reported success, only its identity fields.
+  /** Independently re-derive whether `evidence` genuinely holds — never
+    * trusts the evidence's self-reported fields, only what can be
+    * recomputed from `language`/`base`/`vcs`/`result`/`policy` themselves:
+    *
+    *   - `evidence.language`/`evidence.base` bind to the real language/base.
+    *   - `evidence.validatedChangeSet`, when present, must equal the real
+    *     `vcs.artifact.digest` — `vcs` itself is only constructible by a
+    *     successful ΔL replay ([[Delta.ValidatedChangeSet.check]]/`apply`),
+    *     so this is a genuine replay check, not a stored-claim comparison —
+    *     and `vcs`'s own `base`/`result` must agree with `base`/`result`.
+    *   - absence must agree on both sides (an evidence claiming "no change"
+    *     against a supplied real `vcs`, or vice versa, is rejected).
+    *   - `policy`/`judgment` identity, then re-running `policy.gate` against
+    *     `result` — never trusting the evidence's self-reported success.
     */
-  def verify(policy: AcceptancePolicy, result: Module, evidence: AcceptanceEvidence): Either[String, Unit] =
-    if evidence.policy != policy.digest then
+  def verify(
+      language: ComposedLanguage,
+      base: Module,
+      vcs: Option[Delta.ValidatedChangeSet],
+      policy: AcceptancePolicy,
+      result: Module,
+      evidence: AcceptanceEvidence,
+  ): Either[String, Unit] =
+    if evidence.language != language.digest then
+      Left(s"AcceptanceEvidence: language mismatch (${evidence.language.short} ≠ ${language.digest.short})")
+    else if evidence.base != base.digest then
+      Left(s"AcceptanceEvidence: base mismatch (${evidence.base.short} ≠ ${base.digest.short})")
+    else if evidence.result != result.digest then
+      Left(s"AcceptanceEvidence: result mismatch (${evidence.result.short} ≠ ${result.digest.short})")
+    else if evidence.policy != policy.digest then
       Left(s"AcceptanceEvidence: policy mismatch (${evidence.policy.short} ≠ ${policy.digest.short})")
     else if evidence.judgment != policy.gate.judgment then
       Left(s"AcceptanceEvidence: judgment mismatch ('${evidence.judgment}' ≠ '${policy.gate.judgment}')")
-    else if evidence.result != result.digest then
-      Left(s"AcceptanceEvidence: result mismatch (${evidence.result.short} ≠ ${result.digest.short})")
-    else ModuleGate.require(policy.gate, result)
+    else
+      (evidence.validatedChangeSet, vcs) match
+        case (None, None) => ModuleGate.require(policy.gate, result)
+        case (Some(evDig), Some(v)) =>
+          if v.base != base.digest then
+            Left(s"AcceptanceEvidence: supplied ValidatedChangeSet base ${v.base.short} ≠ base ${base.digest.short}")
+          else if v.result != result.digest then
+            Left(s"AcceptanceEvidence: supplied ValidatedChangeSet result ${v.result.short} ≠ result ${result.digest.short}")
+          else if v.artifact.digest != evDig then
+            Left(s"AcceptanceEvidence: validatedChangeSet mismatch (${evDig.short} ≠ ${v.artifact.digest.short})")
+          else ModuleGate.require(policy.gate, result)
+        case (evOpt, vOpt) =>
+          Left(s"AcceptanceEvidence: validatedChangeSet presence mismatch (evidence has one: ${evOpt.isDefined}, supplied one: ${vOpt.isDefined})")
 
 /** The only way to advance a branch head under a policy: a module that has
   * both replayed cleanly against ΔL (carries a genuine
@@ -128,7 +173,7 @@ object AcceptedTip:
     def evidence: AcceptanceEvidence = AcceptanceEvidence(
       language = a.languageDigest,
       base = a.base.digest,
-      change = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(a.change)).digest,
+      validatedChangeSet = Some(a.vcs.artifact.digest),
       result = a.module.digest,
       policy = a.policy.digest,
       judgment = a.policy.gate.judgment)

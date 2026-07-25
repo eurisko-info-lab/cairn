@@ -319,10 +319,50 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assertEquals(ok.evidence.result, tip.tip.digest)
     assertEquals(ok.evidence.language, lang.digest)
     // Independent re-verification (a second node's job): never trust the
-    // evidence's self-reported success, only its identity fields.
-    assertEquals(AcceptanceEvidence.verify(AcceptancePolicy.open, ok.module, ok.evidence), Right(()))
+    // evidence's self-reported success — replay against the real language,
+    // base, and ValidatedChangeSet, never just the evidence's own claims.
+    assertEquals(
+      AcceptanceEvidence.verify(lang, ok.base, Some(ok.vcs), AcceptancePolicy.open, ok.module, ok.evidence),
+      Right(()))
     val wrongResult = Module(m0.defs :+ ("bogus" -> Stlc.tru))
-    assert(AcceptanceEvidence.verify(AcceptancePolicy.open, wrongResult, ok.evidence).isLeft)
+    assert(AcceptanceEvidence.verify(
+      lang, ok.base, Some(ok.vcs), AcceptancePolicy.open, wrongResult, ok.evidence).isLeft)
+
+  test("AcceptanceEvidence.verify rejects forged language/base/validatedChangeSet fields, not just a wrong result"):
+    val cA = parseChange("{ add fromA = true ; }")
+    val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val ok = AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.open).fold(e => fail(e), identity)
+    val realVerify = AcceptanceEvidence.verify(lang, ok.base, Some(ok.vcs), AcceptancePolicy.open, ok.module, _: AcceptanceEvidence)
+    assert(realVerify(ok.evidence).isRight)
+
+    val forgedLanguage = ok.evidence.copy(language = Digest.of(Canon.CStr("not-the-real-language")))
+    assert(realVerify(forgedLanguage).swap.exists(_.contains("language mismatch")))
+
+    val forgedBase = ok.evidence.copy(base = Digest.of(Canon.CStr("not-the-real-base")))
+    assert(realVerify(forgedBase).swap.exists(_.contains("base mismatch")))
+
+    val forgedChange = ok.evidence.copy(validatedChangeSet = Some(Digest.of(Canon.CStr("not-the-real-change"))))
+    assert(realVerify(forgedChange).swap.exists(_.contains("validatedChangeSet mismatch")))
+
+    // A claimed "no underlying change" against a real supplied vcs must also
+    // be rejected — presence, not just value, is checked.
+    val claimedNoChange = ok.evidence.copy(validatedChangeSet = None)
+    assert(realVerify(claimedNoChange).swap.exists(_.contains("presence mismatch")))
+
+  test("AcceptanceEvidence.verify handles the no-underlying-change case (pure import / fast-forward)"):
+    val cA = parseChange("{ add fromA = true ; }")
+    val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val ok = AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.open).fold(e => fail(e), identity)
+    val noChangeEvidence = ok.evidence.copy(validatedChangeSet = None)
+    // Symmetric: no vcs supplied either — this is the legitimate shape for a
+    // fast-forward of a pure `importModule` bootstrap (no ΔL change exists).
+    assertEquals(
+      AcceptanceEvidence.verify(lang, ok.base, None, AcceptancePolicy.open, ok.module, noChangeEvidence),
+      Right(()))
+    // But a real vcs supplied against a "no change" claim is still rejected.
+    assert(AcceptanceEvidence.verify(
+      lang, ok.base, Some(ok.vcs), AcceptancePolicy.open, ok.module, noChangeEvidence)
+      .swap.exists(_.contains("presence mismatch")))
 
   test("Branches.commitTip: no overload accepts a bare ValidatedTip — AcceptedTip is the only way in"):
     // Compile-time property, asserted via typecheck failure: passing a
@@ -379,6 +419,22 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assert(branches.headModule("feat").isRight)
     val after = CasAdminEffects.stats(casRoot, casCtx).fold(e => fail(e.toString), identity)
     assert(after.objects < before.objects)
+
+  test("Branches.reclaimOrphanBlobs: does not sweep the live head's AcceptanceEvidence artifact"):
+    // Regression: liveCasRoots previously omitted BranchManifest.acceptanceEvidence,
+    // so GC could sweep the evidence artifact a live branch head still references.
+    val dir = Files.createTempDirectory("cairn-reclaim-evidence")
+    val casRoot = dir.resolve("cas")
+    val cas = DiskCas(casRoot)
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
+      .fold(e => fail(e), identity)
+    val manifest = branches.commitTip("feat", accept(tip))
+    val evidenceDigest = manifest.acceptanceEvidence.getOrElse(fail("expected acceptanceEvidence on the manifest"))
+    assert(CasEffects.contains(cas, evidenceDigest, casCtx).contains(true))
+    branches.reclaimOrphanBlobs(casRoot).fold(e => fail(e), identity)
+    assert(CasEffects.contains(cas, evidenceDigest, casCtx).contains(true),
+      "AcceptanceEvidence artifact was swept even though the live head still references it")
 
   test("Branches.merge: conflict writes .conflict sidecar as live root"):
     val dir = Files.createTempDirectory("cairn-conflict-root")

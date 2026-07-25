@@ -320,8 +320,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     }
 
   /** Digests that must survive CAS GC: branch heads, change sidecars /
-    * histories, conflict sidecars, pending accept-journal digests, and
-    * causal digests reachable from stored [[BranchManifest]]s.
+    * histories, conflict sidecars, pending accept-journal digests, causal
+    * digests reachable from stored [[BranchManifest]]s, and each manifest's
+    * [[cairn.core.AcceptanceEvidence]] artifact digest.
     */
   def liveCasRoots(): Either[String, Set[Digest]] =
     if !refsExists(refsDir) then Right(Set.empty)
@@ -357,6 +358,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     m.parents.foreach(roots += _)
                     m.certificates.foreach(roots += _)
                     m.history.foreach(k => roots += k.valueHash)
+                    m.acceptanceEvidence.foreach(roots += _)
                 }
               }
           Right(roots.toSet)
@@ -1133,8 +1135,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       parentDigests = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash))
       gate = policy.gate
       gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment)
-      evidenceFor = (changeDigest: Digest, result: Module) => AcceptanceEvidence(
-        language = language.digest, base = baseDig, change = changeDigest,
+      // `validatedChangeSet` is always the real `vcs.artifact.digest` — the
+      // SAME digest `advance`/`transactionalAccept` record as
+      // `BranchManifest.acceptedChange` — never a bespoke raw-change digest,
+      // so `AcceptanceEvidence.verify` can replay it. `None` only for a true
+      // fast-forward of a branch that itself has no ΔL change (pure import).
+      evidenceFor = (vcsDigest: Option[Digest], result: Module) => AcceptanceEvidence(
+        language = language.digest, base = baseDig, validatedChangeSet = vcsDigest,
         result = result.digest, policy = policy.digest, judgment = gate.judgment)
       out <- (stackedA, stackedB) match
         case (None, None) =>
@@ -1147,7 +1154,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
               case Right(()) =>
                 val modKey = putArt(m.artifact)
-                val evidence = evidenceFor(load(ours).acceptedChange.getOrElse(baseDig), m)
+                val evidence = evidenceFor(load(ours).acceptedChange, m)
                 putArt(evidence.artifact)
                 Right(Right(advance(
                   into, modKey,
@@ -1166,8 +1173,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
               case Right(()) =>
-                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
-                val evidence = evidenceFor(chgDig, mod)
+                val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
                 transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
@@ -1184,8 +1190,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
               case Right(()) =>
-                val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
-                val evidence = evidenceFor(chgDig, mod)
+                val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
                 transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),

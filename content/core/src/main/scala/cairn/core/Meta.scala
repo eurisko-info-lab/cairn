@@ -361,6 +361,10 @@ object Meta:
             case _ => Nil
           val args = argDecls.map(_._2)
           val fieldIdsRaw = argDecls.map(_._1)
+          val named = fieldIdsRaw.flatten
+          val dupes = named.groupBy(identity).collect { case (id, xs) if xs.sizeIs > 1 => id }
+          if dupes.nonEmpty then
+            err ++= s"ctor '$c': duplicate fieldId(s) ${dupes.toList.sorted.mkString(", ")}"
           // Nil (not all-None) is the "no field identity ever declared" marker,
           // matching argLabels's convention — keeps encode/elaborate a round
           // trip for the common bare-ctorDecl case instead of manufacturing

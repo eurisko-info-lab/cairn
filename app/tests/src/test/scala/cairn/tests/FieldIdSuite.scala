@@ -81,3 +81,35 @@ class FieldIdSuite extends munit.FunSuite:
 
     val badClaim = Claim(lang.digest, lang.grammar.top, List(Step.Field("foo", None, 0, Some("wrong"))))
     assert(SemanticPath.verify(lang, term, badClaim).swap.exists(_.contains("fieldId")))
+
+  test("duplicate fieldIds within one ctorDecl are rejected"):
+    val src = """language t {
+      |  fragment t {
+      |    sort Bar tree;
+      |    ctor foo : Bar(x: X, x: Y);
+      |    top Bar;
+      |  }
+      |}""".stripMargin
+    assert(Meta.parseLanguageAst(src).swap.exists(_.contains("duplicate fieldId")))
+
+  test("FragmentCodec.fromCanon defaults fieldIds to Nil when the key is absent (pre-FieldId canon)"):
+    val f = singleFragment(namedSrc)
+    val canon = f.canon
+    val topEntries = canon.asMap
+    val strippedCtors = Canon.CList(topEntries("constructors").asList.map { k =>
+      Canon.cmap(k.asMap.filterNot(_._1 == "fieldIds").toSeq*)
+    })
+    val strippedCanon = Canon.cmap(topEntries.map {
+      case ("constructors", _) => "constructors" -> strippedCtors
+      case other                => other
+    }.toSeq*)
+    val back = FragmentCodec.fromCanon(strippedCanon)
+    assert(back.constructors.nonEmpty)
+    assertEquals(back.constructors.map(_.fieldIds), List.fill(back.constructors.length)(Nil))
+
+  test("SemanticPath.Step.fromCanon defaults fieldId to None when the key is absent (pre-FieldId canon)"):
+    val field = Step.Field("foo", Some("lbl"), 0, Some("fid"))
+    val stripped = field.canon match
+      case Canon.CTag("field", m) => Canon.CTag("field", Canon.cmap(m.asMap.filterNot(_._1 == "fieldId").toSeq*))
+      case other                  => fail(other.toString)
+    assertEquals(Step.fromCanon(stripped), Right(Step.Field("foo", Some("lbl"), 0, None)))

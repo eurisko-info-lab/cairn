@@ -272,10 +272,14 @@ object FragmentCodec:
         k.field("argSorts").asList.map(_.asStr),
         k.field("binders").asList.map(b =>
           (b.field("binder").asInt.toInt, b.field("scope").asList.map(_.asInt.toInt))),
-        fieldIds = k.field("fieldIds").asList.map {
+        // Absent on any Fragment canon persisted before fieldIds existed —
+        // default to Nil (no field identity ever declared) rather than
+        // throwing, same as every other schema addition to a durable,
+        // content-addressed artifact must tolerate older encodings.
+        fieldIds = k.asMap.get("fieldIds").map(_.asList.map {
           case CTag("some", CStr(s)) => Some(s)
           case _                     => None
-        })),
+        }).getOrElse(Nil))),
       grammar = GrammarPart(),
       rewriteRules = c.field("rewriteRules").asList.map(ruleFromCanon),
       judgments = c.field("judgments").asList.map(j => JudgmentDef(
