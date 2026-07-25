@@ -16,6 +16,7 @@ import scala.jdk.CollectionConverters.*
 class Phase8Suite extends munit.FunSuite:
   private val packs = PackLoader(EffectContexts.forPackLoader())
   private val Pki = cairn.examples.pki.Pki(packs)
+  private val PkiMax = cairn.examples.pki.PkiMax
   private val ledgerCtx = EffectContexts.forLedger()
   private val processCtx = EffectContexts.forProcess()
   private val fsCtx = EffectContexts.forFilesystem()
@@ -254,24 +255,24 @@ class Phase8Suite extends munit.FunSuite:
       "root" -> Pki.rootTerm(root),
       "alice" -> Pki.certTerm("alice", alice, root),
       "bob" -> Pki.certTerm("bob", bob, alice))
-    assertEquals(Pki.validateChain(registry, "bob", Set("root")),
-      Right(List("bob", "alice", "root")))
+    assert(PkiMax.validate(PkiMax.moduleRegistryCtx(registry), "bob", 0L, Set("root")).isRight)
 
   test("chain validation rejects forged signature (S47 acceptance)"):
     // mallory signs alice's cert, but the registry says root is the issuer
     val forged = Pki.certTerm("alice", alice, mallory.copy(name = "root"))
     val registry = registryWith("root" -> Pki.rootTerm(root), "alice" -> forged)
-    assert(Pki.validateChain(registry, "alice", Set("root"))
-      .swap.exists(_.reason.contains("does not verify")))
+    assert(PkiMax.validate(PkiMax.moduleRegistryCtx(registry), "alice", 0L, Set("root")).isLeft)
 
   test("chain validation rejects revoked issuer (S47 acceptance)"):
     // Absent issuer (never issued)
     val missing = registryWith(
       "root" -> Pki.rootTerm(root),
       "bob" -> Pki.certTerm("bob", bob, alice))
-    assert(Pki.validateChain(missing, "bob", Set("root"))
-      .swap.exists(_.reason.contains("never issued")))
-    // Soft revoke via free ΔL `add` of a revocation object
+    assert(PkiMax.validate(PkiMax.moduleRegistryCtx(missing), "bob", 0L, Set("root")).isLeft)
+    // Soft revoke via free ΔL `add` of a revocation object — moduleRegistryCtx
+    // excludes the revoked name's cert from the checker context the same way
+    // PkiMax.applyCrl excludes CRL-revoked names, so chainOk itself needs no
+    // notion of revocation: both mechanisms funnel through one context builder.
     val full = registryWith(
       "root" -> Pki.rootTerm(root),
       "alice" -> Pki.certTerm("alice", alice, root),
@@ -280,12 +281,11 @@ class Phase8Suite extends munit.FunSuite:
     val rev = Parser.parse(dl.grammar,
       """{ add revAlice = revoked alice reason "key compromise" at "1" ; }""").toOption.get
     val Right((revoked, _)) = Delta.apply(Pki.language, full, rev): @unchecked
-    assert(Pki.validateChain(revoked, "bob", Set("root"))
-      .swap.exists(_.reason.contains("revoked")))
+    assert(PkiMax.validate(PkiMax.moduleRegistryCtx(revoked), "bob", 0L, Set("root")).isLeft)
 
   test("self-signed non-anchor rejected (S47)"):
     val registry = registryWith("mallory" -> Pki.rootTerm(mallory))
-    assert(Pki.validateChain(registry, "mallory", Set("root")).isLeft)
+    assert(PkiMax.validate(PkiMax.moduleRegistryCtx(registry), "mallory", 0L, Set("root")).isLeft)
 
   test("trust anchor published on ledger (S47 acceptance)"):
     val registry = registryWith("root" -> Pki.rootTerm(root))

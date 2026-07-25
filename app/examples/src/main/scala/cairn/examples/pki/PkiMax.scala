@@ -53,6 +53,17 @@ object PkiMax:
   def registryCtx(entries: List[(String, Cst)]): Cst =
     entries.foldRight(n("ctxNil")) { case ((name, cert), acc) => n("ctxCons", Cst.Leaf(name), cert, acc) }
 
+  /** A free-ΔL-authored registry `Module` (certs plus in-registry `revocation`
+    * defs, `cairn.user.pki.Pki`'s model) as a checker context: revoked names'
+    * certs are excluded, the same way [[applyCrl]] excludes CRL-revoked names —
+    * one context-building step covers both revocation mechanisms, so `chainOk`
+    * itself needs no notion of revocation at all.
+    */
+  def moduleRegistryCtx(m: cairn.core.Module): Cst =
+    val revoked = cairn.user.pki.Pki.revokedNames(m)
+    val certs = m.defs.collect { case (name, t @ Cst.Node("cert", _)) if !revoked.contains(name) => name -> t }
+    registryCtx(certs)
+
   def goal(reg: Cst, name: String, now: Long): Cst =
     n("chainOk", reg, Cst.Leaf(name), Cst.Leaf(now.toString))
 

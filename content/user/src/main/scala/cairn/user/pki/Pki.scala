@@ -15,6 +15,10 @@ final class Pki(packs: PackAccess):
 
   lazy val language: ComposedLanguage = packs.requireClosed("pki")
 
+object Pki:
+  /** Names with an in-registry `revocation` def (free-ΔL soft revoke) —
+    * pure over `Module`, no pack access needed.
+    */
   def revokedNames(m: Module): Set[String] =
     m.defs.collect {
       case (_, Cst.Node("revocation", List(Cst.Leaf(n), _, _))) => n

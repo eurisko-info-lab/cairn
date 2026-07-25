@@ -72,6 +72,13 @@ under `SDS` via `forkFrom` / `underSds`.
   `add` of a `revocation` term).
 - **`chainOk` judgment lives in `pki.cairn`**; host only injects `$anchor` /
   `$sig-ok` extensions (Ed25519). Validated via `Search.prove`.
+- One certifier for both revocation mechanisms: `PkiMax.moduleRegistryCtx`
+  excludes a `Module`'s soft-`revocation`-flagged names from the checker
+  context the same way `PkiMax.applyCrl` excludes CRL-revoked names, so
+  `chainOk` needs no revocation-specific rule at all. (A second, hand-rolled
+  Scala chain-walk checking the in-registry revocation case used to live
+  alongside the judgment — paid off; `Search.prove` is now the only chain
+  certifier, for either revocation source.)
 - Tutorial: issue → validate → revoke → tamper → publish.
 - X25519 encryption certificates for SDS composition sealing.
 
