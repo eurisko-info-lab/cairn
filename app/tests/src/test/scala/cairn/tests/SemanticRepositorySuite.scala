@@ -382,6 +382,32 @@ class SemanticRepositorySuite extends munit.FunSuite:
       """)
     assert(errs.nonEmpty, "commitTip must not accept a bare ValidatedTip")
 
+  test("Branches.advanceRaw is not reachable from outside cairn.runtime"):
+    // Compile-time property: advanceRaw is private[runtime] specifically so
+    // callers outside cairn.runtime cannot bypass commitTip/merge/mergeBranches
+    // by writing a branch head directly.
+    val errs = scala.compiletime.testing.typeCheckErrors(
+      """
+      val dir = java.nio.file.Files.createTempDirectory("cairn-advanceraw-check")
+      val branches = cairn.runtime.Branches(
+        cairn.systemhandler.DiskCas(dir.resolve("cas")), dir.resolve("refs"),
+        cairn.runtime.EffectContexts.forBranches())
+      val m0 = cairn.core.Module(Nil)
+      val key = cairn.systemhandler.CasEffects.put(
+        cairn.systemhandler.DiskCas(dir.resolve("cas")), m0.artifact,
+        cairn.runtime.EffectContexts.forBranches()).toOption.get
+      branches.advanceRaw("feat", key)
+      """)
+    assert(errs.nonEmpty, "advanceRaw must not be callable from outside cairn.runtime")
+
+  test("Branches.importModule rejects re-import over an already-governed branch"):
+    val dir = Files.createTempDirectory("cairn-import-governed")
+    val branches = branchesAt(dir)
+    val tip = SemanticRepository.tipAfter(lang, m0, parseChange("{ replace a = false ; }"))
+      .fold(e => fail(e), identity)
+    branches.commitTip("feat", accept(tip)) // real ΔL acceptance governs "feat" now
+    intercept[RuntimeException](branches.importModule("feat", m0))
+
   test("Branches.commitTip records causal digests on BranchManifest"):
     val dir = Files.createTempDirectory("cairn-manifest-causal")
     val branches = branchesAt(dir)

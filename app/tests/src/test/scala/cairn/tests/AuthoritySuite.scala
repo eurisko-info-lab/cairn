@@ -688,17 +688,10 @@ class AuthoritySuite extends munit.FunSuite:
     assert(hops.exists(_.nonEmpty), hops.toString)
     assert(Provenance.why(dir, out, EffectContexts.forPackLoader()).isLeft)
 
-  test("Branches refs FS: gated under forBranches; denied under forCas-only"):
-    val dir = java.nio.file.Files.createTempDirectory("cairn-refs-auth")
-    val cas = MemCas()
-    val art = Artifact(ArtifactKind.Term, Canon.CStr("branch-seed"))
-    val key = CasEffects.put(cas, art, EffectContexts.forCas()).fold(e => fail(e.toString), identity)
-    val denied = Branches(cas, dir.resolve("refs"), EffectContexts.forCas())
-    intercept[RuntimeException](denied.advance("main", key))
-    val ok = Branches(cas, dir.resolve("refs"), EffectContexts.forBranches())
-    ok.advance("main", key)
-    assertEquals(ok.load("main").head, Some(key))
-    assertEquals(ok.list(), List("main"))
+  // "Branches refs FS: gated under forBranches; denied under forCas-only"
+  // moved to cairn.runtime.BranchRefMechanicsSuite (app/runtime/src/test) —
+  // it exercised advanceRaw, which is package-private to cairn.runtime now
+  // that the acceptance boundary is sealed (commitTip/merge/mergeBranches only).
 
   test("Node chain FS: gated under forLedger; denied under forCas-only"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-chain-auth")

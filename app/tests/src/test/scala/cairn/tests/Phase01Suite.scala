@@ -209,52 +209,11 @@ class BranchSuite extends munit.FunSuite:
   private def idsOf(kps: Keypair*): IdentityResolver =
     IdentityResolver.bootstrapOnly(kps.map(k => k.name -> k.publicBytes).toMap)
 
-  test("branch manifests: append-only history surviving restart (S18)"):
-    val dir = java.nio.file.Files.createTempDirectory("cairn-branches")
-    val cas = DiskCas(dir)
-    val branches = Branches(cas, dir.resolve("refs"), casCtx)
-    val k1 = CasEffects.put(cas, Stlc.base.artifact, casCtx).fold(e => fail(e.toString), identity)
-    val k2 = CasEffects.put(cas, Stlc.types.artifact, casCtx).fold(e => fail(e.toString), identity)
-    branches.advance("main", k1)
-    branches.advance("main", k2)
-    // fresh instances = process restart
-    val branches2 = Branches(DiskCas(dir), dir.resolve("refs"), casCtx)
-    val m = branches2.load("main")
-    assertEquals(m.head, Some(k2))
-    assertEquals(m.history, List(k1))
-    assertEquals(branches2.list(), List("main"))
-
-  test("domain trunk: LAW off ledger; SDS primary=LAW + refer CHEMISTRY"):
-    val dir = java.nio.file.Files.createTempDirectory("cairn-domain")
-    val cas = DiskCas(dir)
-    val branches = Branches(cas, dir.resolve("refs"), casCtx)
-    val mLaw = Module(List("law" -> Stlc.tru))
-    val mChem = Module(List("chem" -> Stlc.fls))
-    val mSds = Module(List("sds" -> Stlc.tru))
-    val law = branches.forkFrom("LAW", primary = None, module = Some(mLaw))
-      .fold(e => fail(e), identity)
-    assertEquals(law.primaryAncestor, None)
-    assertEquals(law.references, Nil)
-    val chem = branches.forkFrom("CHEMISTRY", primary = None, module = Some(mChem))
-      .fold(e => fail(e), identity)
-    assertEquals(chem.primaryAncestor, None)
-    val sds = branches.forkFrom(
-        "SDS", primary = Some("LAW"), module = Some(mSds), references = List("CHEMISTRY"))
-      .fold(e => fail(e), identity)
-    assertEquals(sds.primaryAncestor, Some("LAW"))
-    assertEquals(sds.references, List("CHEMISTRY"))
-    // advance preserves domain ancestry
-    val k = CasEffects.put(cas, Module(List("sds2" -> Stlc.fls)).artifact, casCtx)
-      .fold(e => fail(e.toString), identity)
-    val advanced = branches.advance("SDS", k)
-    assertEquals(advanced.primaryAncestor, Some("LAW"))
-    assertEquals(advanced.references, List("CHEMISTRY"))
-    // soft ref can be added later
-    val onlyLaw = branches.forkFrom("TAX", primary = Some("LAW")).fold(e => fail(e), identity)
-    assertEquals(onlyLaw.references, Nil)
-    val withChem = branches.referTo("TAX", "CHEMISTRY").fold(e => fail(e), identity)
-    assertEquals(withChem.primaryAncestor, Some("LAW"))
-    assertEquals(withChem.references, List("CHEMISTRY"))
+  // "branch manifests: append-only history surviving restart (S18)" and
+  // "domain trunk: LAW off ledger; SDS primary=LAW + refer CHEMISTRY" moved to
+  // cairn.runtime.BranchRefMechanicsSuite (app/runtime/src/test) — they
+  // exercised advanceRaw, which is package-private to cairn.runtime now that
+  // the acceptance boundary is sealed (commitTip/merge/mergeBranches only).
 
   test("forkFrom rejects self-ref / primary∩refs / duplicate refs (no silent normalize)"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-fork-strict")

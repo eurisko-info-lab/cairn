@@ -14,6 +14,16 @@ import cairn.kernel.*
   * certificate/approval requirements are separate, existing mechanisms not
   * yet folded into one policy object — a further unification, not
   * attempted here.
+  *
+  * Known limitation: [[digest]] identifies a policy by its judgment NAME
+  * only, not the semantics of `gate.check` itself — two different
+  * `ModuleGate`s sharing a judgment string are indistinguishable by digest.
+  * A verifying node re-runs whichever gate function it locally supplies for
+  * that name; [[AcceptanceEvidence]] proves "some policy named `judgment`
+  * held," not "the exact constraint semantics the accepting node used."
+  * Closing this needs policies to carry a canonical descriptor (e.g. a
+  * digest of a loaded judgment/constraint pack), not a host Scala closure —
+  * not attempted here.
   */
 final case class AcceptancePolicy(gate: ModuleGate):
   def digest: Digest = Digest.of(Canon.cmap("judgment" -> Canon.CStr(gate.judgment)))
@@ -24,8 +34,13 @@ object AcceptancePolicy:
 
 /** Proof that a specific (language, base, change, result) transition was
   * checked against a specific [[AcceptancePolicy]] — what a second node
-  * needs to independently replay/verify an acceptance decision instead of
-  * trusting it. Referenced from `BranchManifest.gateEvidence`.
+  * needs to independently replay a transition and re-run a policy against
+  * it, rather than trusting a self-reported success. Referenced from
+  * `BranchManifest.gateEvidence`. Subject to [[AcceptancePolicy.digest]]'s
+  * own limitation: replay confirms the transition really produced `result`
+  * and that a gate named `judgment` accepted it, not that the verifying
+  * node's locally-supplied gate has the same semantics the accepting node
+  * used.
   *
   * `validatedChangeSet` is the digest of the real
   * [[Delta.ValidatedChangeSet]]'s own artifact (`vcs.artifact.digest`) —

@@ -194,7 +194,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     else
       refsMkdirs()
       refsWrite(changeRefPath(j.branch), vcsArt.key.valueHash.hex)
-    advance(
+    advanceRaw(
       j.branch,
       modArt.key,
       acceptedChange = Some(vcsArt.key.valueHash),
@@ -508,8 +508,14 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * Optional causal digests are recorded on the manifest. When
     * `acceptedChange` is set, it is appended to [[BranchManifest.changeHistory]]
     * (sidecars remain write-through caches of the same digests).
+    *
+    * Raw manifest/ref mechanics — no ΔL replay, no [[AcceptancePolicy]], no
+    * domain gate. `package`-private on purpose: this is not part of the
+    * sealed semantic-acceptance surface ([[commitTip]] / [[merge]] /
+    * [[mergeBranches]]); [[importModule]] is the only sanctioned caller for
+    * planting a module without ΔL, and only on a pristine branch.
     */
-  def advance(
+  private[runtime] def advanceRaw(
       branch: String,
       newHead: TypedKey,
       acceptedChange: Option[Digest] = None,
@@ -938,12 +944,31 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   /** Bootstrap / import acceptance: plant a module tip **without** a
     * [[Delta.ValidatedChangeSet]]. Ordinary semantic advancement must use
-    * [[commitTip]] (ValidatedTip / ΔL only). This is not a silent bypass of
-    * ΔL discipline — call sites that seed demo/base modules should prefer
-    * [[importModule]] by name.
+    * [[commitTip]] (ValidatedTip / ΔL only).
+    *
+    * Only legal on a branch that has never been governed: no head, history,
+    * accepted change, conflict, certificate, gate/acceptance evidence, or
+    * domain agreement recorded yet. `primaryAncestor`/`references` are
+    * exempt — [[forkFrom]] legitimately establishes a domain fork's ancestry
+    * before planting its first module, and that ancestry alone is not
+    * governance. Re-importing over an already-governed branch would let
+    * import silently undo the very acceptance discipline [[commitTip]] /
+    * [[merge]] exist to enforce; administrative replacement of a governed
+    * branch is a distinct, not-yet-designed operation.
     */
   def importModule(branch: String, module: Module): BranchManifest =
-    advance(branch, putArt(module.artifact))
+    val cur = load(branch)
+    val pristine =
+      cur.head.isEmpty && cur.history.isEmpty && cur.acceptedChange.isEmpty &&
+      cur.changeHistory.isEmpty && cur.causalHistoryRoot.isEmpty &&
+      cur.conflictState.isEmpty && cur.certificates.isEmpty &&
+      cur.gateEvidence.isEmpty && cur.acceptanceEvidence.isEmpty &&
+      cur.domainAgreement.isEmpty
+    if !pristine then
+      throw RuntimeException(
+        s"importModule: branch '$branch' is already governed (bootstrap/import only applies " +
+          "to a branch with no prior head, history, or acceptance evidence)")
+    advanceRaw(branch, putArt(module.artifact))
 
   /** @deprecated Use [[importModule]] for bootstrap/import seeds; [[commitTip]] for ΔL. */
   def commitModule(branch: String, module: Module): BranchManifest =
@@ -1156,7 +1181,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val modKey = putArt(m.artifact)
                 val evidence = evidenceFor(load(ours).acceptedChange, m)
                 putArt(evidence.artifact)
-                Right(Right(advance(
+                Right(Right(advanceRaw(
                   into, modKey,
                   acceptedChange = load(ours).acceptedChange,
                   parents = parentDigests,
