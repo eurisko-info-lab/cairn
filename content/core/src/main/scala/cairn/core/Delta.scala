@@ -267,14 +267,16 @@ object Delta:
           if refs.nonEmpty then Left(Rejection.StillReferenced(name, refs))
           else Right(Module(m.defs.filterNot(_._1 == name)))
       case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
-        // M15: structural path edit — replace the subtree at child-index path
+        // M15: structural path edit — replace the subtree addressed by a
+        // Kernel-checked SemanticPath (fromLegacyPath recovers ctor/label/
+        // sort at each hop from the raw child-index Cst encoding).
         val path = pathOf(pathCst)
         m.get(name) match
           case None => Left(Rejection.NotDefined("edit", name))
           case Some(old) =>
             for
-              sort <- LanguageChecker.expectedSortAt(l, old, path).left.map(Rejection.PathError(name, _))
-              _    <- checkAgainst(name, sort, term)
+              sp      <- SemanticPath.fromLegacyPath(l, old, path).left.map(Rejection.PathError(name, _))
+              _       <- checkAgainst(name, sp.focusSort, term)
               updated <- replaceAt(old, path, term).left.map(Rejection.PathError(name, _))
             yield Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0)))
       case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
@@ -399,9 +401,16 @@ object Delta:
           case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
             findDef(defs, name) match
               case Some(Cst.Node(_, List(_, termInstance))) =>
-                subtreeAt(termInstance, pathOf(pathCst)).flatMap { target =>
-                  Concrete.splice(mg, source, out, target, term)
-                }
+                SemanticPath.fromLegacyPath(l, termInstance, pathOf(pathCst))
+                  .left.map(e => s"ΔL edit (format-preserving): $e")
+                  .flatMap { sp =>
+                    // SemanticPath is index-based; subtreeAt still performs the
+                    // actual instance-preserving walk (Concrete.splice keys spans
+                    // by Cst node identity, so the exact parsed node is required).
+                    subtreeAt(termInstance, sp.indices).flatMap { target =>
+                      Concrete.splice(mg, source, out, target, term)
+                    }
+                  }
               case _ => Left(s"ΔL edit (format-preserving): '$name' not defined")
 
           case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>

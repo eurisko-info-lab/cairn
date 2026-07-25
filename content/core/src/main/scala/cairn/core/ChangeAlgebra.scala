@@ -76,7 +76,8 @@ object ChangeAlgebra:
           case Cst.Node(t, List(Cst.Leaf(n), pathCst, _)) if t == tag(l, "edit") =>
             for
               old <- m.get(n).toRight(s"invert edit: '$n' not in module")
-              sub <- Delta.subtreeAt(old, Delta.pathOf(pathCst))
+              sp  <- SemanticPath.fromLegacyPath(l, old, Delta.pathOf(pathCst))
+              sub <- Delta.subtreeAt(old, sp.indices)
             yield Cst.Node(tag(l, "edit"), List(Cst.Leaf(n), pathCst, sub))
           case other => Left(s"cannot invert: ${other.render}")
         for
