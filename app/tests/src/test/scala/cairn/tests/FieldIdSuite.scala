@@ -82,6 +82,34 @@ class FieldIdSuite extends munit.FunSuite:
     val badClaim = Claim(lang.digest, lang.grammar.top, List(Step.Field("foo", None, 0, Some("wrong"))))
     assert(SemanticPath.verify(lang, term, badClaim).swap.exists(_.contains("fieldId")))
 
+  test("SemanticPath.verify follows a fieldId to its real position when the stored position witness is stale"):
+    val lang = Meta.parseFile(namedSrc).fold(e => fail(e), identity)
+    val term = Cst.Node("foo", List(Cst.Leaf("a"), Cst.Leaf("b")))
+    // "y" is really at position 1 — claim (falsely) that it's at position 0.
+    // fieldId is authoritative: verify must resolve the REAL position (1)
+    // rather than either failing or trusting the stale claimed position.
+    val staleClaim = Claim(lang.digest, lang.grammar.top, List(Step.Field("foo", None, 0, Some("y"))))
+    val sp = SemanticPath.verify(lang, term, staleClaim).fold(e => fail(e), identity)
+    sp.steps match
+      case List(Step.Field("foo", _, 1, Some("y"))) => () // position corrected to 1
+      case other => fail(other.toString)
+    assertEquals(sp.indices, List(1)) // recovered legacy index also reflects the real position
+
+  test("SemanticPath.verify rejects a fieldId no longer declared on the constructor at all"):
+    val lang = Meta.parseFile(namedSrc).fold(e => fail(e), identity)
+    val term = Cst.Node("foo", List(Cst.Leaf("a"), Cst.Leaf("b")))
+    val claim = Claim(lang.digest, lang.grammar.top, List(Step.Field("foo", None, 0, Some("nonexistent"))))
+    assert(SemanticPath.verify(lang, term, claim).swap.exists(_.contains("no longer has a field")))
+
+  test("SemanticPath.verify: fieldId = None still resolves by bare position (unchanged behavior)"):
+    val lang = Meta.parseFile(bareSrc).fold(e => fail(e), identity)
+    val term = Cst.Node("foo", List(Cst.Leaf("a"), Cst.Leaf("b")))
+    val claim = Claim(lang.digest, lang.grammar.top, List(Step.Field("foo", None, 1, None)))
+    val sp = SemanticPath.verify(lang, term, claim).fold(e => fail(e), identity)
+    sp.steps match
+      case List(Step.Field("foo", _, 1, None)) => ()
+      case other => fail(other.toString)
+
   test("duplicate fieldIds within one ctorDecl are rejected"):
     val src = """language t {
       |  fragment t {

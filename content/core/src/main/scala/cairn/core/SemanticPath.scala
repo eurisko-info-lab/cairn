@@ -40,13 +40,17 @@ object SemanticPath:
 
   /** One hop in a path. */
   enum Step:
-    /** The child at `position` of a node built by constructor `ctor`
-      * (checked against [[CtorDef.argSorts]]). `label`, when `Some`, must
-      * match that position's grammar-derived label
-      * ([[CtorDef.argLabels]]) — an additional consistency check, not an
-      * alternative resolution mechanism; `position` always resolves the
-      * walk, so a `None` label (positional-only constructors, e.g. every
-      * hand-authored Scala fragment) is always legal.
+    /** The child of a node built by constructor `ctor`. When [[fieldId]] is
+      * `Some`, it is AUTHORITATIVE: the real position is resolved fresh via
+      * `cd.fieldIds.indexOf(Some(fieldId))` every time, and `position` is
+      * only a witness/cache — a stale `position` (the field moved since
+      * this path was captured) is silently corrected, not a failure, as
+      * long as the fieldId still resolves to some position. Only when
+      * [[fieldId]] is `None` (positional-only constructors, e.g. every
+      * hand-authored Scala fragment) does `position` itself resolve the
+      * walk. `label`, when `Some`, is always an additional same-commit
+      * consistency check against whichever position the walk actually
+      * used — never an alternative resolution mechanism.
       */
     case Field(
       ctor: String, label: Option[String], position: Int,
@@ -124,11 +128,19 @@ object SemanticPath:
       language: Digest, rootSort: String, steps: List[Step], focusSort: String, indices: List[Int],
   ): SemanticPath = SemanticPathRepr(language, rootSort, steps, focusSort, indices)
 
-  /** One hop of the shared walk: step into constructor `node`'s child at
-    * `position`. `claimedCtor`/`claimedLabel`, when `Some`, are checked
-    * against the node actually encountered rather than trusted — `None`
-    * means "read from the node" (self-deriving / discovery use, see
-    * [[fromLegacyPath]]). Returns the child's sort and the child itself.
+  /** One hop of the shared walk: step into constructor `node`'s child.
+    * `claimedCtor`/`claimedLabel`, when `Some`, are checked against the node
+    * actually encountered rather than trusted — `None` means "read from the
+    * node" (self-deriving / discovery use, see [[fromLegacyPath]]).
+    *
+    * When `claimedFieldId` is `Some`, it — not `position` — resolves which
+    * child to step into: the real position is looked up fresh via
+    * `cd.fieldIds.indexOf(Some(id))`, so a `position` witness that's gone
+    * stale (the field moved since the path was captured) is corrected
+    * rather than rejected. `claimedFieldId = None` falls back to `position`
+    * exactly as before (positional-only constructors). Returns the child's
+    * sort, the child itself, and the position actually used (== `position`
+    * unless a fieldId resolution corrected it).
     */
   private def stepField(
       language: ComposedLanguage,
@@ -137,7 +149,7 @@ object SemanticPath:
       claimedLabel: Option[String],
       claimedFieldId: Option[String],
       position: Int,
-  ): Either[String, (String, Cst)] = node match
+  ): Either[String, (String, Cst, Int)] = node match
     case Cst.Node(ctor, children) =>
       claimedCtor match
         case Some(claimed) if claimed != ctor =>
@@ -146,51 +158,65 @@ object SemanticPath:
           language.constructors.get(ctor) match
             case None => Left(s"SemanticPath: unknown constructor '$ctor'")
             case Some(cd) =>
-              if position < 0 || position >= cd.argSorts.length || position >= children.length then
-                Left(s"path index $position out of range for '$ctor' (${children.length} children)")
-              else
-                val labelOk = claimedLabel.forall(l => cd.argLabels.lift(position).flatten.contains(l))
-                val fieldIdOk = claimedFieldId.forall(f => cd.fieldIds.lift(position).flatten.contains(f))
-                if !labelOk then
-                  Left(s"SemanticPath: '$ctor' position $position is not labeled '${claimedLabel.getOrElse("")}'")
-                else if !fieldIdOk then
-                  Left(s"SemanticPath: '$ctor' position $position does not have fieldId '${claimedFieldId.getOrElse("")}'")
-                else Right((cd.argSorts(position), children(position)))
+              val resolvedPos = claimedFieldId match
+                case Some(id) =>
+                  cd.fieldIds.indexOf(Some(id)) match
+                    case -1  => Left(s"SemanticPath: '$ctor' no longer has a field with fieldId '$id'")
+                    case idx => Right(idx)
+                case None => Right(position)
+              resolvedPos.flatMap { pos =>
+                if pos < 0 || pos >= cd.argSorts.length || pos >= children.length then
+                  Left(s"path index $pos out of range for '$ctor' (${children.length} children)")
+                else
+                  val labelOk = claimedLabel.forall(l => cd.argLabels.lift(pos).flatten.contains(l))
+                  if !labelOk then
+                    Left(s"SemanticPath: '$ctor' position $pos is not labeled '${claimedLabel.getOrElse("")}'")
+                  else Right((cd.argSorts(pos), children(pos), pos))
+              }
     case Cst.Leaf(x) => Left(s"path descends into leaf '$x'")
 
   /** The only way to obtain a [[SemanticPath]] from an untrusted [[Claim]]:
     * walk `root` per `claim.steps` from `claim.rootSort`, checking at each
     * step that (a) the node encountered matches `Field`'s claimed
-    * constructor and has an argSort at `position`, (b) a claimed `label`
-    * matches that position's grammar-derived label, (c) `Index` steps only
-    * address `list`/`some`/`none` wrapper nodes, (d) the resulting focus
-    * sort matches `claim.focusSort` when supplied, and (e) `claim.language`
-    * equals `language.digest`. Never trusts the claim's self-reported
-    * fields — every one is re-derived from `root`/`language` and compared.
+    * constructor and has an argSort at the resolved position, (b) a claimed
+    * `label` matches that position's grammar-derived label, (c) `Index`
+    * steps only address `list`/`some`/`none` wrapper nodes, (d) the
+    * resulting focus sort matches `claim.focusSort` when supplied, and (e)
+    * `claim.language` equals `language.digest`. Never trusts the claim's
+    * self-reported fields — every one is re-derived from `root`/`language`
+    * and compared.
+    *
+    * The minted [[SemanticPath]]'s steps carry the RESOLVED position for
+    * each `Field` hop, not the claim's — when a hop's `fieldId` is `Some`
+    * and its stale `position` witness was corrected mid-walk (see
+    * [[stepField]]), the correction is baked into the result, so a later
+    * caller reading `.steps`/`.indices` sees where the field actually is
+    * now, not where the claim thought it was.
     */
   def verify(language: ComposedLanguage, root: Cst, claim: Claim): Either[String, SemanticPath] =
-    def go(t: Cst, sort: String, steps: List[Step], idx: List[Int]): Either[String, (String, List[Int])] =
+    def go(t: Cst, sort: String, steps: List[Step], idx: List[Int]): Either[String, (String, List[Int], List[Step])] =
       steps match
-        case Nil => Right((sort, idx))
+        case Nil => Right((sort, idx, Nil))
         case Step.Index(pos) :: rest =>
           t match
             case Cst.Node("list" | "some" | "none", children) if pos >= 0 && pos < children.length =>
-              go(children(pos), sort, rest, idx :+ pos)
+              go(children(pos), sort, rest, idx :+ pos).map((s, i, tail) => (s, i, Step.Index(pos) :: tail))
             case Cst.Node(c, _) =>
               Left(s"SemanticPath: Index($pos) is not legal at '$c' (expected a list/some/none wrapper)")
             case Cst.Leaf(x) => Left(s"SemanticPath: Index($pos) descends into leaf '$x'")
         case Step.Field(ctor, label, pos, fieldId) :: rest =>
-          stepField(language, t, Some(ctor), label, fieldId, pos).flatMap { (childSort, child) =>
-            go(child, childSort, rest, idx :+ pos)
+          stepField(language, t, Some(ctor), label, fieldId, pos).flatMap { (childSort, child, resolvedPos) =>
+            go(child, childSort, rest, idx :+ resolvedPos).map((s, i, tail) =>
+              (s, i, Step.Field(ctor, label, resolvedPos, fieldId) :: tail))
           }
     if language.digest != claim.language then
       Left(s"SemanticPath language mismatch: claim ${claim.language.short} ≠ ${language.digest.short}")
     else
-      go(root, claim.rootSort, claim.steps, Nil).flatMap { (discovered, idx) =>
+      go(root, claim.rootSort, claim.steps, Nil).flatMap { (discovered, idx, correctedSteps) =>
         claim.focusSort match
           case Some(expected) if expected != discovered =>
             Left(s"SemanticPath: expected focus sort '$expected', walk reached '$discovered'")
-          case _ => Right(mint(claim.language, claim.rootSort, claim.steps, discovered, idx))
+          case _ => Right(mint(claim.language, claim.rootSort, correctedSteps, discovered, idx))
       }
 
   /** Build a [[SemanticPath]] from the legacy raw `List[Int]` representation
@@ -216,7 +242,7 @@ object SemanticPath:
             case Cst.Node("list" | "some" | "none", children) =>
               Left(s"SemanticPath: path index $i out of range (${children.length} children)")
             case Cst.Node(ctor, _) =>
-              stepField(language, t, None, None, None, i).flatMap { (childSort, child) =>
+              stepField(language, t, None, None, None, i).flatMap { (childSort, child, _) =>
                 val label = language.constructors.get(ctor).flatMap(_.argLabels.lift(i).flatten)
                 val fieldId = language.constructors.get(ctor).flatMap(_.fieldIds.lift(i).flatten)
                 go(child, childSort, rest, steps :+ Step.Field(ctor, label, i, fieldId))
