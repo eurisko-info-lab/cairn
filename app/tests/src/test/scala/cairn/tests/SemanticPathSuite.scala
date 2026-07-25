@@ -4,6 +4,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.core.SemanticPath.{Claim, Step}
 import cairn.examples.stlc.Stlc
+import cairn.runtime.{EffectContexts, PackLoader}
 
 /** Unit tests for [[SemanticPath]] — the Kernel-checked typed replacement
   * for raw `List[Int]` structural-edit paths. `LanguageCheckerSuite`'s
@@ -28,7 +29,7 @@ class SemanticPathSuite extends munit.FunSuite:
     // Stlc is hand-authored Scala, not .cairn-composed, so labels are None throughout —
     // position remains the authoritative resolver regardless.
     sp.steps match
-      case List(Step.Field("app", None, 0), Step.Field("lam", None, 1)) => ()
+      case List(Step.Field("app", None, 0, None), Step.Field("lam", None, 1, None)) => ()
       case other => fail(other.toString)
 
   test("fromLegacyPath fails clean (out of range) matching expectedSortAt's contract"):
@@ -96,3 +97,27 @@ class SemanticPathSuite extends munit.FunSuite:
     assertEquals(c.field("focusSort").asStr, "Term")
     assertEquals(c.field("rootSort").asStr, stlc.grammar.top)
     assertEquals(c.field("language").asStr, stlc.digest.hex)
+
+  test("Step canon round-trips a Field carrying a fieldId"):
+    val field = Step.Field("mixture", Some("of"), 0, Some("components"))
+    assertEquals(Step.fromCanon(field.canon), Right(field))
+
+  test("verify accepts a matching claimed fieldId and rejects one the ctor doesn't have"):
+    val term = Stlc.app1(Stlc.idBool, Stlc.tru)
+    // Stlc's `app` ctor has no derived fieldIds (hand-authored, not .cairn-composed) —
+    // any claimed fieldId at a real position must be rejected, same as label.
+    val claim = Claim(stlc.digest, stlc.grammar.top, List(Step.Field("app", None, 0, Some("fn"))))
+    assert(SemanticPath.verify(stlc, term, claim).swap.exists(_.contains("fieldId")))
+
+  test("real .cairn grammar: SDS's component ctor carries persistent fieldIds independent of its label"):
+    // Grounds fieldId against a real, non-synthetic .cairn grammar (not just a
+    // unit-tested synthetic fragment) — SDS's own `component : Component(ref: Ref, pct: Pct)`,
+    // the review's own running example.
+    val packs = PackLoader(EffectContexts.forPackLoader())
+    val sds = cairn.examples.sds.Sds(packs)
+    val component = sds.language.constructors("component")
+    assertEquals(component.fieldIds, List(Some("ref"), Some("pct")))
+    // the surface grammar's derived label ("pct", from `tok "pct" num`) is a
+    // SEPARATE, independent annotation from the persistent fieldId ("pct" here
+    // too, coincidentally — but nothing in the design requires them to agree).
+    assertEquals(component.argLabels, List(None, Some("pct")))

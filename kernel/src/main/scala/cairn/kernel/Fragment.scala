@@ -26,6 +26,15 @@ final case class CtorDef(
       * canon-addressed [[Fragment]] artifact.
       */
     argLabels: List[Option[String]] = Nil,
+    /** Per-position persistent field identity, declared directly in `ctorDecl`
+      * (`ctor foo : Sort(name: X, Y);` — `name` is `Some("name")`, the bare
+      * `Y` is `None`) — unlike [[argLabels]], this is author-assigned at
+      * declaration time, not derived from the surface grammar, and it IS
+      * part of [[FragmentCodec.toCanon]]/semantic identity: it's meant to
+      * stay stable across surface-syntax changes (reordering, relabeling),
+      * which is exactly why it can't follow the grammar-derived pattern.
+      */
+    fieldIds: List[Option[String]] = Nil,
 )
 
 /** Rewrite rule as data: pattern with metavariables => template (S15).
@@ -236,7 +245,8 @@ object FragmentCodec:
       "name" -> CStr(c.name), "sort" -> CStr(c.sort),
       "argSorts" -> Canon.cstrs(c.argSorts),
       "binders" -> CList(c.binders.map((b, sc) => Canon.cmap(
-        "binder" -> CInt(b), "scope" -> CList(sc.map(i => CInt(i))))))))),
+        "binder" -> CInt(b), "scope" -> CList(sc.map(i => CInt(i)))))),
+      "fieldIds" -> CList(c.fieldIds.map(_.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s)))))))),
     "grammar" -> emptyGrammarCanon,
     "rewriteRules" -> CList(f.rewriteRules.map(ruleToCanon)),
     "judgments" -> CList(f.judgments.map(j => Canon.cmap(
@@ -261,7 +271,11 @@ object FragmentCodec:
         k.field("name").asStr, k.field("sort").asStr,
         k.field("argSorts").asList.map(_.asStr),
         k.field("binders").asList.map(b =>
-          (b.field("binder").asInt.toInt, b.field("scope").asList.map(_.asInt.toInt))))),
+          (b.field("binder").asInt.toInt, b.field("scope").asList.map(_.asInt.toInt))),
+        fieldIds = k.field("fieldIds").asList.map {
+          case CTag("some", CStr(s)) => Some(s)
+          case _                     => None
+        })),
       grammar = GrammarPart(),
       rewriteRules = c.field("rewriteRules").asList.map(ruleFromCanon),
       judgments = c.field("judgments").asList.map(j => JudgmentDef(

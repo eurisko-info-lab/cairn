@@ -70,7 +70,13 @@ object Meta:
             Elem.Tok("judgment"), Elem.AnyIdentLeaf, Elem.Tok("{"), Elem.Star(Elem.Cat("judgRule")), Elem.Tok("}"))),
           ConstructorSpec("topDecl", List(Elem.Tok("top"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
         CategorySpec("argList", List(
-          ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.AnyIdentLeaf, ","), Elem.Tok(")"))))),
+          ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.Cat("argDecl"), ","), Elem.Tok(")"))))),
+        // Named form declared before bare (GrammarLint: an earlier alternative
+        // that's a proper prefix of a later one is a hard error — bare
+        // `anyident` is a proper prefix of `anyident ":" anyident`).
+        CategorySpec("argDecl", List(
+          ConstructorSpec("argDeclNamed", List(Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.AnyIdentLeaf)),
+          ConstructorSpec("argDeclBare", List(Elem.AnyIdentLeaf)))),
         CategorySpec("bindsClause", List(
           ConstructorSpec("binds", List(
             Elem.Tok("binds"), Elem.NumLeaf, Elem.Tok("in"), Elem.SepBy1(Elem.NumLeaf, ","))))),
@@ -123,6 +129,8 @@ object Meta:
           PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
         PrintRule("topDecl", List(PrintSeg.Lit("top"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
         PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
+        PrintRule("argDeclNamed", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
+        PrintRule("argDeclBare", List(PrintSeg.Field(0))),
         PrintRule("binds", List(
           PrintSeg.Space, PrintSeg.Lit("binds"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
           PrintSeg.Lit("in"), PrintSeg.Space, PrintSeg.SepFields(1, ", "))),
@@ -344,14 +352,25 @@ object Meta:
         case Cst.Node("sortTree", List(Cst.Leaf(s)))  => sorts += SortDef(s, SortMode.Tree)
         case Cst.Node("sortGraph", List(Cst.Leaf(s))) => sorts += SortDef(s, SortMode.Graph)
         case Cst.Node("ctorDecl", List(Cst.Leaf(c), Cst.Leaf(sort), argsOpt, bindsList)) =>
-          val args = argsOpt match
-            case Cst.Node("some", List(Cst.Node("argList", List(ns)))) => names(ns)
+          val argDecls: List[(Option[String], String)] = argsOpt match
+            case Cst.Node("some", List(Cst.Node("argList", List(Cst.Node("list", ds))))) =>
+              ds.collect {
+                case Cst.Node("argDeclNamed", List(Cst.Leaf(fid), Cst.Leaf(s))) => (Some(fid), s)
+                case Cst.Node("argDeclBare", List(Cst.Leaf(s)))                => (None, s)
+              }
             case _ => Nil
+          val args = argDecls.map(_._2)
+          val fieldIdsRaw = argDecls.map(_._1)
+          // Nil (not all-None) is the "no field identity ever declared" marker,
+          // matching argLabels's convention — keeps encode/elaborate a round
+          // trip for the common bare-ctorDecl case instead of manufacturing
+          // an all-None list that wasn't the original value.
+          val fieldIds = if fieldIdsRaw.forall(_.isEmpty) then Nil else fieldIdsRaw
           val binders = bindsList match
             case Cst.Node("list", bs) => bs.collect {
               case Cst.Node("binds", List(Cst.Leaf(bi), scope)) => (bi.toInt, names(scope).map(_.toInt)) }
             case _ => Nil
-          ctors += CtorDef(c, sort, args, binders)
+          ctors += CtorDef(c, sort, args, binders, fieldIds = fieldIds)
         case Cst.Node("varCtorDecl", List(Cst.Leaf(v)))  => varCtor = Some(v)
         case Cst.Node("keywordDecl", List(Cst.Leaf(k)))  => keywords += k
         case Cst.Node("punctDecl", List(Cst.Leaf(p)))    => puncts += p
@@ -494,8 +513,15 @@ object Meta:
     for s <- f.sorts do
       items += (if s.mode == SortMode.Tree then n("sortTree", leaf(s.name)) else n("sortGraph", leaf(s.name)))
     for c <- f.constructors do
+      val argDecls: List[Cst] =
+        if c.fieldIds.length == c.argSorts.length then
+          c.argSorts.zip(c.fieldIds).map {
+            case (s, Some(fid)) => n("argDeclNamed", leaf(fid), leaf(s))
+            case (s, None)      => n("argDeclBare", leaf(s))
+          }
+        else c.argSorts.map(s => n("argDeclBare", leaf(s)))
       items += n("ctorDecl", leaf(c.name), leaf(c.sort),
-        if c.argSorts.isEmpty then n("none") else n("some", n("argList", lst(c.argSorts.map(leaf)))),
+        if c.argSorts.isEmpty then n("none") else n("some", n("argList", lst(argDecls))),
         lst(c.binders.map((bi, scope) => n("binds", leaf(bi.toString), lst(scope.map(i => leaf(i.toString)))))))
     for v <- f.varCtor do items += n("varCtorDecl", leaf(v))
     for k <- f.grammar.keywords do items += n("keywordDecl", leaf(k))

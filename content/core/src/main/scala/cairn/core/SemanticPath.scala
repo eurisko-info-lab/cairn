@@ -48,7 +48,18 @@ object SemanticPath:
       * walk, so a `None` label (positional-only constructors, e.g. every
       * hand-authored Scala fragment) is always legal.
       */
-    case Field(ctor: String, label: Option[String], position: Int)
+    case Field(
+      ctor: String, label: Option[String], position: Int,
+      /** Persistent semantic field identity ([[CtorDef.fieldIds]]) —
+        * author-assigned in `ctorDecl`, independent of [[label]] (which is
+        * grammar/surface-derived and may drift across surface revisions).
+        * `None` where the constructor's argument was declared with the bare
+        * (unnamed) `ctorDecl` form. Trailing with a default so every
+        * existing 3-arg `Step.Field(ctor, label, position)` call site keeps
+        * compiling unchanged.
+        */
+      fieldId: Option[String] = None,
+    )
     /** The child at `position` of a `list`/`some`/`none` wrapper node
       * (Star/Opt/SepBy1 grammar productions) — sort-preserving, no
       * constructor involved. Not a keyed selector: this is the honest
@@ -59,11 +70,12 @@ object SemanticPath:
     case Index(position: Int)
 
     def canon: Canon = this match
-      case Field(ctor, label, position) =>
+      case Field(ctor, label, position, fieldId) =>
         Canon.CTag("field", Canon.cmap(
           "ctor" -> Canon.CStr(ctor),
           "label" -> label.fold(Canon.CTag("none", Canon.CInt(0)))(l => Canon.CTag("some", Canon.CStr(l))),
-          "position" -> Canon.CInt(position)))
+          "position" -> Canon.CInt(position),
+          "fieldId" -> fieldId.fold(Canon.CTag("none", Canon.CInt(0)))(f => Canon.CTag("some", Canon.CStr(f)))))
       case Index(position) =>
         Canon.CTag("index", Canon.cmap("position" -> Canon.CInt(position)))
 
@@ -73,7 +85,10 @@ object SemanticPath:
         val label = m.field("label") match
           case Canon.CTag("some", Canon.CStr(l)) => Some(l)
           case _                                 => None
-        Right(Step.Field(m.field("ctor").asStr, label, m.field("position").asInt.toInt))
+        val fieldId = m.field("fieldId") match
+          case Canon.CTag("some", Canon.CStr(f)) => Some(f)
+          case _                                 => None
+        Right(Step.Field(m.field("ctor").asStr, label, m.field("position").asInt.toInt, fieldId))
       case Canon.CTag("index", m) =>
         Right(Step.Index(m.field("position").asInt.toInt))
       case other => Left(s"unknown SemanticPath step: $other")
@@ -118,6 +133,7 @@ object SemanticPath:
       node: Cst,
       claimedCtor: Option[String],
       claimedLabel: Option[String],
+      claimedFieldId: Option[String],
       position: Int,
   ): Either[String, (String, Cst)] = node match
     case Cst.Node(ctor, children) =>
@@ -132,8 +148,11 @@ object SemanticPath:
                 Left(s"path index $position out of range for '$ctor' (${children.length} children)")
               else
                 val labelOk = claimedLabel.forall(l => cd.argLabels.lift(position).flatten.contains(l))
+                val fieldIdOk = claimedFieldId.forall(f => cd.fieldIds.lift(position).flatten.contains(f))
                 if !labelOk then
                   Left(s"SemanticPath: '$ctor' position $position is not labeled '${claimedLabel.getOrElse("")}'")
+                else if !fieldIdOk then
+                  Left(s"SemanticPath: '$ctor' position $position does not have fieldId '${claimedFieldId.getOrElse("")}'")
                 else Right((cd.argSorts(position), children(position)))
     case Cst.Leaf(x) => Left(s"path descends into leaf '$x'")
 
@@ -158,8 +177,8 @@ object SemanticPath:
             case Cst.Node(c, _) =>
               Left(s"SemanticPath: Index($pos) is not legal at '$c' (expected a list/some/none wrapper)")
             case Cst.Leaf(x) => Left(s"SemanticPath: Index($pos) descends into leaf '$x'")
-        case Step.Field(ctor, label, pos) :: rest =>
-          stepField(language, t, Some(ctor), label, pos).flatMap { (childSort, child) =>
+        case Step.Field(ctor, label, pos, fieldId) :: rest =>
+          stepField(language, t, Some(ctor), label, fieldId, pos).flatMap { (childSort, child) =>
             go(child, childSort, rest, idx :+ pos)
           }
     if language.digest != claim.language then
@@ -195,9 +214,10 @@ object SemanticPath:
             case Cst.Node("list" | "some" | "none", children) =>
               Left(s"SemanticPath: path index $i out of range (${children.length} children)")
             case Cst.Node(ctor, _) =>
-              stepField(language, t, None, None, i).flatMap { (childSort, child) =>
+              stepField(language, t, None, None, None, i).flatMap { (childSort, child) =>
                 val label = language.constructors.get(ctor).flatMap(_.argLabels.lift(i).flatten)
-                go(child, childSort, rest, steps :+ Step.Field(ctor, label, i))
+                val fieldId = language.constructors.get(ctor).flatMap(_.fieldIds.lift(i).flatten)
+                go(child, childSort, rest, steps :+ Step.Field(ctor, label, i, fieldId))
               }
             case Cst.Leaf(x) => Left(s"SemanticPath: path index $i descends into leaf '$x'")
     go(root, language.grammar.top, path, Nil).map { (focusSort, steps) =>

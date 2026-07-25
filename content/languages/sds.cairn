@@ -6,7 +6,7 @@ language sds {
     ctor corpusPhrase : SdsObj(Name, Lang, Text);
     ctor translationState : SdsObj(PhraseRef, Lang, FromHash, StateTag);
     ctor sectionFieldState : SdsObj(SectionRef, FieldKey, Lang, FromHash, StateTag);
-    ctor component : Component(Ref, Pct);
+    ctor component : Component(ref: Ref, pct: Pct);
     ctor mixture : SdsObj(Components);
     ctor product : SdsObj(Label, Ref, PhraseRefs);
     ctor shadow : SdsObj(Ref, Ref, Text);

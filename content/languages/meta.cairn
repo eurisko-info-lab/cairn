@@ -41,7 +41,9 @@ language meta {
     syntax item += ruleDecl : tok "rule" anyident tok ":" cat pat tok "=>" cat pat tok ";";
     syntax item += judgmentDecl : tok "judgment" anyident tok "{" star cat judgRule tok "}";
     syntax item += topDecl : tok "top" anyident tok ";";
-    syntax argList += argList : tok "(" sepby1 anyident "," tok ")";
+    syntax argList += argList : tok "(" sepby1 cat argDecl "," tok ")";
+    syntax argDecl += argDeclNamed : anyident tok ":" anyident;
+    syntax argDecl += argDeclBare : anyident;
     syntax bindsClause += binds : tok "binds" num tok "in" sepby1 num ",";
     syntax pat += patMetaNode : tok "$" anyident tok "(" opt sepby1 cat pat "," tok ")";
     syntax pat += patMeta : tok "$" anyident;
@@ -63,6 +65,8 @@ language meta {
     print judgmentDecl : lit "judgment" sp field 0 sp lit "{" nl indent sep 1 "\n" nl dedent lit "}";
     print topDecl : lit "top" sp field 0 lit ";";
     print argList : lit "(" sep 0 ", " lit ")";
+    print argDeclNamed : field 0 lit ":" sp field 1;
+    print argDeclBare : field 0;
     print binds : sp lit "binds" sp field 0 sp lit "in" sp sep 1 ", ";
     print patMetaNode : lit "$" field 0 lit "(" field 1 lit ")";
     print patMeta : lit "$" field 0;
