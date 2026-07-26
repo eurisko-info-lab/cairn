@@ -48,7 +48,8 @@ object Delta:
     // span multiple sorts (Search's "searchObj" admits both "Fact"- and
     // "Intent"-sorted constructors — there is no single correct sort name to
     // put here).
-    val termCat = l.grammar.top
+    val hasTargetSurface = l.grammar.top.nonEmpty
+    val termCat = if hasTargetSurface then l.grammar.top else s"Δ$p.target"
     val chg = s"Δ$p.change"
     val chgs = s"Δ$p.changeset"
     val changeSort = s"Δ$p.Change"
@@ -64,7 +65,12 @@ object Delta:
       grammar = GrammarPart(
         keywords = ChangeModelInterp.keywordsFor(model),
         puncts = ChangeModelInterp.punctsFor(model),
-        categories = List(
+        categories = (if hasTargetSurface then Nil else List(
+          // A semantic-only language (notably the grammar language) has no
+          // concrete top category. Δ closure must still exist, so give its
+          // change surface an opaque target-term slot rather than referring
+          // to the invalid empty category name.
+          CategorySpec(termCat, List(ConstructorSpec(s"Δ$p.opaque-target", List(Elem.AnyIdentLeaf)))))) ++ List(
           CategorySpec(chgs, List(
             ConstructorSpec(tag(l, "changeset"), List(
               Elem.Tok("{"), Elem.Star(Elem.Cat(chg)), Elem.Tok("}"))))),
@@ -82,6 +88,10 @@ object Delta:
     capability.model match
       case Left(e)      => Left(List(ComposeError("change-capability", "semantics", "surface", e)))
       case Right(model) => deltaOf(l, model)
+
+  /** Bundle-selected closure: no separately supplied language/change model. */
+  def deltaOf(capabilities: ResolvedLanguageCapabilities): Either[List[ComposeError], ResolvedLanguageCapabilities] =
+    capabilities.delta
 
   /** Kernel-gated record of an applied change-set. Opaque: mint only via
     * [[apply]] / [[applyTyped]], or [[ValidatedChangeSet.check]] after replay.
@@ -254,6 +264,11 @@ object Delta:
           (result.sorted, vcs) }
     }
 
+  def applyTyped(
+      capabilities: ResolvedLanguageCapabilities, module: Module, change: Cst,
+  ): Either[Rejection, (Module, ValidatedChangeSet)] =
+    applyTyped(capabilities.language, module, change, capabilities.changeModel)
+
   /** Validate + apply a ΔL change-set term to a module. Structured errors;
     * no silent overwrites; renames must carry an exact footprint. See
     * [[applyTyped]] for the same check with [[Rejection]] left unstringified.
@@ -262,6 +277,11 @@ object Delta:
       l: ComposedLanguage, module: Module, change: Cst, model: ChangeModel = ChangeModel.default,
   ): Either[String, (Module, ValidatedChangeSet)] =
     applyTyped(l, module, change, model).left.map(_.render)
+
+  def apply(
+      capabilities: ResolvedLanguageCapabilities, module: Module, change: Cst,
+  ): Either[String, (Module, ValidatedChangeSet)] =
+    applyTyped(capabilities, module, change).left.map(_.render)
 
   /** Accept either a `changeset` node or a single bare change term (same
     * tolerance as [[apply]]) and return its flat list of change items.
@@ -322,6 +342,10 @@ object Delta:
         acc.flatMap(applyOnePreserving(l, moduleGrammar, model, _, ch))
       }
     }
+
+  def applyPreservingFormat(capabilities: ResolvedLanguageCapabilities, moduleGrammar: GrammarSpec,
+                            source: String, change: Cst): Either[String, String] =
+    applyPreservingFormat(capabilities.language, moduleGrammar, source, change, capabilities.changeModel)
 
   private def applyOnePreserving(l: ComposedLanguage, mg: GrammarSpec, model: ChangeModel, source: String, ch: Cst): Either[String, String] =
     Parser.parseFull(mg, source).flatMap { out =>

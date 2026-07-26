@@ -23,6 +23,41 @@ import cairn.kernel.*
   */
 object SemanticRepository:
 
+  /** Bundle-selected variants are the authoritative runtime entry points;
+    * language/model/gate are all selected by one checked descriptor. */
+  def commit(
+      capabilities: ResolvedLanguageCapabilities, tip: Module, change: Cst,
+  ): Either[String, (Module, Delta.ValidatedChangeSet)] =
+    commit(capabilities.language, tip, change, capabilities.changeModel)
+
+  def merge(
+      capabilities: ResolvedLanguageCapabilities, base: Module, changeA: Cst, changeB: Cst,
+  ): Either[Merge.Conflict, (Module, Delta.ValidatedChangeSet)] =
+    merge(capabilities.language, base, changeA, changeB,
+      capabilities.moduleGate(), capabilities.changeModel)
+
+  def integrate(
+      capabilities: ResolvedLanguageCapabilities,
+      base: Module,
+      changeA: Cst,
+      changeB: Cst,
+      migration: Option[(Digest, ResolvedLanguageCapabilities)],
+  ): Either[String, Outcome] =
+    migration match
+      case None => integrate(capabilities.language, base, changeA, changeB,
+        gate = capabilities.moduleGate(), model = capabilities.changeModel)
+      case Some((migrationDigest, target)) =>
+        capabilities.migration(migrationDigest).flatMap { mig =>
+          integrate(capabilities.language, base, changeA, changeB,
+            migration = Some((mig, target.language)),
+            gate = target.moduleGate(), model = capabilities.changeModel,
+            targetModel = target.changeModel)
+        }
+
+  def integrate(
+      capabilities: ResolvedLanguageCapabilities, base: Module, changeA: Cst, changeB: Cst,
+  ): Either[String, Outcome] = integrate(capabilities, base, changeA, changeB, None)
+
   /** Proposed tip — Core may construct this; Branches accepts only
     * [[ValidatedTip]] after `apply(language, base, change) = tip`.
     */

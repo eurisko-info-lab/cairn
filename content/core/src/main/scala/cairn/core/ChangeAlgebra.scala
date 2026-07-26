@@ -284,6 +284,26 @@ final case class LangMigration(
       }))*))
   def artifact: Artifact = Artifact(ArtifactKind.Migration, Canon.CTag("lang-migration", canon))
 
+object LangMigration:
+  def fromCanon(c: Canon): LangMigration =
+    val body = c match
+      case Canon.CTag("lang-migration", b) => b
+      case other                           => other
+    LangMigration(
+      Digest(body.field("from").asStr), Digest(body.field("to").asStr),
+      body.field("ctorRenames").asMap.map((k, v) => k -> v.asStr),
+      body.field("arityChanges").asMap.map((k, v) =>
+        k -> (v.field("arity").asInt.toInt, Cst.fromCanon(v.field("default")))),
+      body.asMap.get("fieldRemap").map(_.asMap.map((k, v) => k -> v.asList.map {
+        case Canon.CTag("carry", Canon.CStr(field)) => Left(field)
+        case Canon.CTag("default", term)            => Right(Cst.fromCanon(term))
+        case other => throw CodecError(s"not a migration field remap slot: $other")
+      })).getOrElse(Map.empty))
+
+  def fromArtifact(artifact: Artifact): Either[String, LangMigration] =
+    if artifact.kind != ArtifactKind.Migration then Left("expected migration artifact")
+    else scala.util.Try(fromCanon(artifact.body)).toEither.left.map(e => s"invalid migration artifact: ${e.getMessage}")
+
 object Migrate:
   private val structuralTags = Set("list", "some", "none", "group", "$error")
 
