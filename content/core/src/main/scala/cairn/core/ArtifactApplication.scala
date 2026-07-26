@@ -66,4 +66,6 @@ object ArtifactDependencies:
     case ArtifactKind.ChangeCapability => scala.util.Try(List(
       Digest(artifact.body.field("semantics").asStr), Digest(artifact.body.field("surface").asStr)))
       .toEither.left.map(e => s"invalid change capability graph: ${e.getMessage}")
+    case ArtifactKind.EcosystemBundle => SignedEcosystemBundle.fromArtifact(artifact).map { bundle =>
+      bundle.release.root :: bundle.release.migrations ::: bundle.release.previous }
     case _ => Right(Nil)

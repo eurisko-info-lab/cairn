@@ -74,6 +74,7 @@ enum ArtifactKind(val name: String):
   case LanguageCapabilities extends ArtifactKind("language-capabilities")
   case ValidationModel extends ArtifactKind("validation-model")
   case Application extends ArtifactKind("application")
+  case EcosystemBundle extends ArtifactKind("ecosystem-bundle")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =
