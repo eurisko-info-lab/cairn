@@ -66,11 +66,12 @@ final case class AcceptanceEvidence(
     result: Digest,
     policy: Digest,
     judgment: String,
-    /** The [[ChangeModel]] that interpreted ΔL for this transition. Every
-      * accept path today mints under [[ChangeModel.default]] — threading a
-      * custom model through the CREATE side of `SemanticRepository`/`Merge`/
-      * `AcceptedTip` is a materially bigger change, explicitly deferred the
-      * same way PR6 deferred it for those same call sites.
+    /** The [[ChangeModel]] that actually interpreted ΔL for this transition —
+      * read from the minting [[Delta.ValidatedChangeSet]]'s own
+      * `changeModel` (stamped by [[Delta.apply]]/[[Delta.applyTyped]] at
+      * apply time), never a separately-threaded value that could drift from
+      * what was really used. Defaults to [[ChangeModel.default]]'s digest
+      * only for legacy-decoded evidence minted before this field existed.
       */
     changeModel: Digest = ChangeModel.default.digest,
     /** The [[ValidationModel]] governing acceptance, when the accepting
@@ -205,8 +206,9 @@ object AcceptedTip:
       language: ComposedLanguage,
       proposed: SemanticRepository.Tip,
       policy: AcceptancePolicy,
+      model: ChangeModel = ChangeModel.default,
   ): Either[String, AcceptedTip] =
-    SemanticRepository.ValidatedTip.check(language, proposed).flatMap { vt =>
+    SemanticRepository.ValidatedTip.check(language, proposed, model).flatMap { vt =>
       ModuleGate.require(policy.gate, vt.tip).map(_ =>
         mint(vt.base, vt.tip, vt.change, vt.vcs, policy, language.digest))
     }
@@ -238,5 +240,6 @@ object AcceptedTip:
       result = a.module.digest,
       policy = a.policy.digest,
       judgment = a.policy.gate.judgment,
+      changeModel = a.vcs.changeModel,
       validationModel = a.policy.gate.descriptor,
       providers = a.policy.gate.providers)

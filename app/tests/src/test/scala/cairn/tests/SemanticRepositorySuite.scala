@@ -352,6 +352,19 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assert(AcceptanceEvidence.verify(
       lang, ok.base, Some(ok.vcs), AcceptancePolicy.open, wrongResult, ok.evidence).isLeft)
 
+  test("AcceptedTip.checkTip: a custom-model tip passes, and its evidence reports the REAL model used, not the default"):
+    val customModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val base = Module(List("x" -> Stlc.tru))
+    val dlCustom = Delta.deltaOf(lang, customModel).toOption.get
+    val ch = Parser.parse(dlCustom.grammar, "{ copy x to y ; }").fold(e => fail(e), identity)
+    val tip = SemanticRepository.tipAfter(lang, base, ch, customModel).fold(e => fail(e), identity)
+    val accepted = AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.open, customModel).fold(e => fail(e), identity)
+    assertEquals(accepted.module.get("y"), Some(Stlc.tru))
+    assertEquals(accepted.evidence.changeModel, customModel.digest)
+    assert(accepted.evidence.changeModel != ChangeModel.default.digest)
+    // Checking the SAME tip against the default model (no `copy` op) must fail before apply.
+    assert(AcceptedTip.checkTip(lang, tip.asTip, AcceptancePolicy.open).isLeft)
+
   test("AcceptanceEvidence.verify rejects forged language/base/validatedChangeSet fields, not just a wrong result"):
     val cA = parseChange("{ add fromA = true ; }")
     val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
