@@ -66,6 +66,22 @@ object ModuleGate:
     ModuleGate(judgment, m => f(m).left.map(Canon.CStr.apply),
       descriptor = Some(Digest.of(Canon.CList(specs.map(_.canon)))))
 
+  /** Builds `check` entirely from `model` — unlike [[fromSpecs]], no
+    * separately-supplied `f`: a [[ValidationModel]] already fully describes
+    * what to check (unlike a bare `Spec` list, which needed callers like
+    * `Sds.validate` to separately wrap `ModuleStructural.run` — in practice
+    * always the same "run everything, join errors" recipe). `descriptor` is
+    * exactly `model.digest`, not a re-hashed spec list, so it also commits to
+    * every judgment-provider language `model.specs` names.
+    */
+  def fromValidationModel(
+      judgment: String, model: ValidationModel, resolveProvider: Digest => Option[ComposedLanguage],
+  ): ModuleGate =
+    ModuleGate(judgment, m => {
+      val es = ModuleStructural.run(m, model.specs, resolveProvider)
+      if es.isEmpty then Right(()) else Left(Canon.CStr(es.mkString("; ")))
+    }, descriptor = Some(model.digest))
+
   /** Run `gate` after a successful ΔL apply (migration, branch accept,
     * structured edit). Failure is a judgment-tagged [[Canon]] detail.
     */

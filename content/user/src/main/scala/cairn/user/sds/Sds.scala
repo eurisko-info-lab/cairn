@@ -131,10 +131,21 @@ final class Sds(packs: PackAccess):
 
   /** The judgment-providing languages `validationSpecs`'s [[JudgmentRef]]s
     * name, keyed by their own digest — SDS's own `language` (translationStateTag)
-    * and `euClpLanguage` (sectionNumberOk).
+    * and `euClpLanguage` (sectionNumberOk). Public: external callers building
+    * a `ModuleGate.fromValidationModel`/`ModuleStructural.run` resolver
+    * (e.g. `EuClp.conform`, `SdsCausalWorkflow`) need the same mapping.
     */
-  private lazy val judgmentProviders: Map[Digest, ComposedLanguage] =
+  lazy val judgmentProviders: Map[Digest, ComposedLanguage] =
     Map(language.digest -> language, euClpLanguage.digest -> euClpLanguage)
+
+  /** Canonical, content-addressed identity for the complete `sds.validate`
+    * gate — `ModuleGate.fromValidationModel`'s descriptor binds to this
+    * digest directly, so two gates built from the same model are provably
+    * the same check (including which judgment-provider languages it uses),
+    * not just same-named.
+    */
+  lazy val validationModel: ValidationModel =
+    ValidationModel(language.digest, validationSpecs, judgmentProviders.keys.toList.sortBy(_.hex))
 
   def validate(m: Module): Either[String, Unit] =
     val es = ModuleStructural.run(m, validationSpecs, judgmentProviders.get)
@@ -183,7 +194,7 @@ final class Sds(packs: PackAccess):
     else
       Merge.threeWay(
         language, base, baseChange, shadowChange,
-        ModuleGate.fromSpecs("sds.validate", validationSpecs)(validate))
+        ModuleGate.fromValidationModel("sds.validate", validationModel, judgmentProviders.get))
 
   // ---- the compiled document view (a bidirectional surface, M47) ----
 

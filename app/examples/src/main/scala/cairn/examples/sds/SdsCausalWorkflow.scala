@@ -67,7 +67,7 @@ object SdsCausalWorkflow:
     // commit/merge onto an SDS work branch in this workflow must now pass
     // sds.validate, not just the one-off validate() call above.
     val sdsPolicy = AcceptancePolicy.gated(
-      ModuleGate.fromSpecs("sds.validate", Sds.validationSpecs)(Sds.validate))
+      ModuleGate.fromValidationModel("sds.validate", Sds.validationModel, Sds.judgmentProviders.get))
     EuClp.conform(Chemicals.Acetone.thinModule) match
       case r if !r.ok => throw RuntimeException(s"EU-CLP conform: ${r.errors.mkString("; ")}")
       case _ => ()
