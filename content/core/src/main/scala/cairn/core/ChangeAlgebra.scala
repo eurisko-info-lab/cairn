@@ -218,22 +218,47 @@ final case class LangMigration(
     fromLang: Digest,
     toLang: Digest,
     ctorRenames: Map[String, String],
-    /** ctor (post-rename) -> (new arity, default child appended to reach it) */
+    /** ctor (post-rename) -> (new arity, default child appended to reach it).
+      * Tail-padding only — cannot reposition or rename a field. Ignored for
+      * any ctor also listed in [[fieldRemap]] (that ctor's shape is fully
+      * described by the remap instead).
+      */
     arityChanges: Map[String, (Int, Cst)],
+    /** ctor (post-rename) -> for each NEW position, how to derive that
+      * child: `Left(fieldId)` carries over whichever child the SOURCE
+      * ctor's [[CtorDef.fieldIds]] identifies as `fieldId` — found by field
+      * identity via [[Migrate.term]]'s `source` language, not by position,
+      * so a field that moved or a ctor whose arity changed by more than
+      * "grew at the end" still transports correctly. `Right(default)` is a
+      * genuinely new field with no old counterpart. A ctor listed here must
+      * not also appear in [[arityChanges]] (ambiguous authoring — reject
+      * rather than silently pick one).
+      */
+    fieldRemap: Map[String, List[Either[String, Cst]]] = Map.empty,
 ):
   def canon: Canon = Canon.cmap(
     "from" -> Canon.CStr(fromLang.hex),
     "to" -> Canon.CStr(toLang.hex),
     "ctorRenames" -> Canon.cmap(ctorRenames.toList.map((k, v) => k -> Canon.CStr(v))*),
     "arityChanges" -> Canon.cmap(arityChanges.toList.map((k, v) =>
-      k -> Canon.cmap("arity" -> Canon.CInt(v._1), "default" -> Cst.toCanon(v._2)))*))
+      k -> Canon.cmap("arity" -> Canon.CInt(v._1), "default" -> Cst.toCanon(v._2)))*),
+    "fieldRemap" -> Canon.cmap(fieldRemap.toList.map((k, slots) =>
+      k -> Canon.CList(slots.map {
+        case Left(fieldId) => Canon.CTag("carry", Canon.CStr(fieldId))
+        case Right(default) => Canon.CTag("default", Cst.toCanon(default))
+      }))*))
   def artifact: Artifact = Artifact(ArtifactKind.Migration, Canon.CTag("lang-migration", canon))
 
 object Migrate:
   private val structuralTags = Set("list", "some", "none", "group", "$error")
 
-  /** Transport a term across a migration; validated against the target. */
-  def term(mig: LangMigration, target: ComposedLanguage, t: Cst): Either[String, Cst] =
+  /** Transport a term across a migration; validated against the target.
+    * `source` is only consulted for [[LangMigration.fieldRemap]] lookups
+    * (finding an old ctor's fieldId->position mapping) — the plain
+    * rename/arity-pad path never needed the source language, since it
+    * walks whatever shape the term already has.
+    */
+  def term(mig: LangMigration, source: ComposedLanguage, target: ComposedLanguage, t: Cst): Either[String, Cst] =
     def go(t: Cst): Either[String, Cst] = t match
       case Cst.Leaf(_) => Right(t)
       case Cst.Node(c, cs) =>
@@ -241,19 +266,44 @@ object Migrate:
         cs.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, ch) =>
           for xs <- acc; x <- go(ch) yield xs :+ x
         }.flatMap { kids =>
-          val padded = mig.arityChanges.get(c2) match
-            case Some((arity, default)) if kids.length < arity =>
-              kids ++ List.fill(arity - kids.length)(default)
-            case _ => kids
+          mig.fieldRemap.get(c2) match
+            case Some(remap) =>
+              if mig.arityChanges.contains(c2) then
+                Left(s"migration: '$c2' listed in both fieldRemap and arityChanges (ambiguous)")
+              else
+                source.constructors.get(c) match
+                  case None => Left(s"migration: source ctor '$c' not found for fieldRemap of '$c2'")
+                  case Some(oldCd) =>
+                    remap.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, slot) =>
+                      acc.flatMap { xs =>
+                        slot match
+                          case Right(default) => Right(xs :+ default)
+                          case Left(fieldId) =>
+                            oldCd.fieldIds.indexOf(Some(fieldId)) match
+                              case -1 =>
+                                Left(s"migration: '$c' has no field '$fieldId' to carry into '$c2'")
+                              case oldPos if oldPos < kids.length =>
+                                Right(xs :+ kids(oldPos))
+                              case oldPos =>
+                                Left(s"migration: '$c' field '$fieldId' position $oldPos " +
+                                  s"out of range (${kids.length} children)")
+                      }
+                    }
+            case None =>
+              Right(mig.arityChanges.get(c2) match
+                case Some((arity, default)) if kids.length < arity =>
+                  kids ++ List.fill(arity - kids.length)(default)
+                case _ => kids)
+        }.flatMap { finalKids =>
           if structuralTags.contains(c2) || target.constructors.contains(c2) then
-            Right(Cst.Node(c2, padded))
+            Right(Cst.Node(c2, finalKids))
           else Left(s"migrated term uses '$c2', which is not a constructor of '${target.name}'")
         }
     go(t)
 
-  def module(mig: LangMigration, target: ComposedLanguage, m: Module): Either[String, Module] =
+  def module(mig: LangMigration, source: ComposedLanguage, target: ComposedLanguage, m: Module): Either[String, Module] =
     m.defs.foldLeft[Either[String, List[(String, Cst)]]](Right(Nil)) { case (acc, (n, t)) =>
-      for xs <- acc; t2 <- term(mig, target, t).left.map(e => s"def '$n': $e") yield xs :+ (n, t2)
+      for xs <- acc; t2 <- term(mig, source, target, t).left.map(e => s"def '$n': $e") yield xs :+ (n, t2)
     }.map(Module(_).sorted)
 
   /** Transport a ΔL change-set across a migration: re-qualify the change tags
@@ -276,5 +326,5 @@ object Migrate:
           for xs <- acc; x <- goChild(ch) yield xs :+ x
         }.map(Cst.Node(c, _))
       case Cst.Leaf(_) => Right(t)
-      case termNode    => term(mig, target, termNode) // an embedded object-language term
+      case termNode    => term(mig, source, target, termNode) // an embedded object-language term
     go(change)

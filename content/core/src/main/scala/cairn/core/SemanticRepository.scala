@@ -111,11 +111,12 @@ object SemanticRepository:
     */
   def migrateModule(
       mig: LangMigration,
+      source: ComposedLanguage,
       target: ComposedLanguage,
       module: Module,
       gate: ModuleGate = ModuleGate.passthrough,
   ): Either[String, Module] =
-    Migrate.module(mig, target, module).flatMap { m2 =>
+    Migrate.module(mig, source, target, module).flatMap { m2 =>
       ModuleGate.require(gate, m2).map(_ => m2)
     }
 
@@ -152,7 +153,7 @@ object SemanticRepository:
             migrateChange(mig, language, target, vcs.change).flatMap { ch2 =>
               // Transport base without re-running the merge gate; gate the
               // post-migration tip instead (module shape may have changed).
-              Migrate.module(mig, target, base).flatMap { base2 =>
+              Migrate.module(mig, language, target, base).flatMap { base2 =>
                 Delta.apply(target, base2, ch2).flatMap { (mod2, vcs2) =>
                   ModuleGate.require(gate, mod2).map(_ =>
                     Outcome.Accepted(mod2, vcs2, ch2, migrated = true))

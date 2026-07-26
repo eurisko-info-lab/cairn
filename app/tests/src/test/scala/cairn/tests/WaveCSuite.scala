@@ -191,7 +191,7 @@ class WaveCSuite extends munit.FunSuite:
       ctorRenames = Map("if" -> "cond"),
       arityChanges = Map("cond" -> (4, Cst.Leaf("default"))))
     val m = Module(List("branchy" -> Stlc.node3if))
-    Migrate.module(mig, v2, m) match
+    Migrate.module(mig, lang, v2, m) match
       case Right(m2) =>
         m2.get("branchy") match
           case Some(Cst.Node("cond", List(_, _, _, Cst.Leaf("default")))) => ()
@@ -205,7 +205,7 @@ class WaveCSuite extends munit.FunSuite:
       e => fail(e.map(_.render).mkString("\n")), identity) // no booleans in v2!
     val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)
     val m = Module(List("branchy" -> Stlc.node3if))
-    Migrate.module(mig, v2, m) match
+    Migrate.module(mig, lang, v2, m) match
       case Left(err) => assert(err.contains("is not a constructor of 'stlc2'"), err)
       case Right(_)  => fail("expected failure")
 
@@ -221,3 +221,58 @@ class WaveCSuite extends munit.FunSuite:
         // and the transported change applies in the target language
         assert(Delta.apply(v2, Module(Nil), c2).isRight)
       case Left(e) => fail(e)
+
+  // ---- fieldRemap: FieldId-driven migration transport, not just tail-padding ----
+
+  private def fieldIdLang(src: String) = Meta.parseFile(src).fold(e => fail(e), identity)
+
+  private def fooLang(argList: String) =
+    fieldIdLang(s"""language t {
+      |  fragment t {
+      |    sort Bar tree;
+      |    ctor foo : Bar($argList);
+      |    top Bar;
+      |  }
+      |}""".stripMargin)
+
+  test("fieldRemap: reorders fields by fieldId, not position (arityChanges could not express this)"):
+    val v1 = fooLang("x: X, y: Y")
+    val v2 = fooLang("y: Y, x: X, z: Z") // reordered + a genuinely new field
+    val mig = LangMigration(v1.digest, v2.digest,
+      ctorRenames = Map.empty,
+      arityChanges = Map.empty,
+      fieldRemap = Map("foo" -> List(Left("y"), Left("x"), Right(Cst.Leaf("zDefault")))))
+    val term = Cst.Node("foo", List(Cst.Leaf("valX"), Cst.Leaf("valY")))
+    Migrate.term(mig, v1, v2, term) match
+      case Right(Cst.Node("foo", List(Cst.Leaf("valY"), Cst.Leaf("valX"), Cst.Leaf("zDefault")))) => ()
+      case other => fail(other.toString)
+
+  test("fieldRemap: a ctor with no remap entry still uses arityChanges (backward compatible)"):
+    val v1 = fooLang("x: X")
+    val v2 = fooLang("x: X, y: Y")
+    val mig = LangMigration(v1.digest, v2.digest,
+      ctorRenames = Map.empty,
+      arityChanges = Map("foo" -> (2, Cst.Leaf("yDefault"))),
+      fieldRemap = Map.empty)
+    val term = Cst.Node("foo", List(Cst.Leaf("valX")))
+    Migrate.term(mig, v1, v2, term) match
+      case Right(Cst.Node("foo", List(Cst.Leaf("valX"), Cst.Leaf("yDefault")))) => ()
+      case other => fail(other.toString)
+
+  test("fieldRemap: a fieldId absent from the source ctor is a structured error"):
+    val v1 = fooLang("x: X, y: Y")
+    val v2 = fooLang("x: X, z: Z")
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty, Map.empty,
+      fieldRemap = Map("foo" -> List(Left("x"), Left("nonexistent"))))
+    val term = Cst.Node("foo", List(Cst.Leaf("valX"), Cst.Leaf("valY")))
+    assert(Migrate.term(mig, v1, v2, term).swap.exists(_.contains("has no field 'nonexistent'")))
+
+  test("fieldRemap: a ctor listed in both fieldRemap and arityChanges is rejected as ambiguous"):
+    val v1 = fooLang("x: X, y: Y")
+    val v2 = fooLang("y: Y, x: X")
+    val mig = LangMigration(v1.digest, v2.digest,
+      ctorRenames = Map.empty,
+      arityChanges = Map("foo" -> (2, Cst.Leaf("unused"))),
+      fieldRemap = Map("foo" -> List(Left("y"), Left("x"))))
+    val term = Cst.Node("foo", List(Cst.Leaf("valX"), Cst.Leaf("valY")))
+    assert(Migrate.term(mig, v1, v2, term).swap.exists(_.contains("ambiguous")))
