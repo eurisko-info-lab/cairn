@@ -726,7 +726,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       // fast-forward of a branch that itself has no ΔL change (pure import).
       evidenceFor = (vcsDigest: Option[Digest], result: Module) => AcceptanceEvidence(
         language = language.digest, base = baseDig, validatedChangeSet = vcsDigest,
-        result = result.digest, policy = policy.digest, judgment = gate.judgment)
+        result = result.digest, policy = policy.digest, judgment = gate.judgment,
+        validationModel = gate.descriptor, providers = gate.providers)
       out <- (stackedA, stackedB) match
         case (None, None) =>
           headModule(ours).flatMap { m =>

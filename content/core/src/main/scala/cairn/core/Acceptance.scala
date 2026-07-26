@@ -66,6 +66,23 @@ final case class AcceptanceEvidence(
     result: Digest,
     policy: Digest,
     judgment: String,
+    /** The [[ChangeModel]] that interpreted ΔL for this transition. Every
+      * accept path today mints under [[ChangeModel.default]] — threading a
+      * custom model through the CREATE side of `SemanticRepository`/`Merge`/
+      * `AcceptedTip` is a materially bigger change, explicitly deferred the
+      * same way PR6 deferred it for those same call sites.
+      */
+    changeModel: Digest = ChangeModel.default.digest,
+    /** The [[ValidationModel]] governing acceptance, when the accepting
+      * gate was built via [[ModuleGate.fromValidationModel]] — exactly
+      * `policy.gate.descriptor` at construction time. `None` for gates with
+      * no data-described form (open-ended host closures).
+      */
+    validationModel: Option[Digest] = None,
+    /** Judgment-provider language digests `validationModel` (when present)
+      * transitively names — `policy.gate.providers` at construction time.
+      */
+    providers: List[Digest] = Nil,
 ):
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex),
@@ -73,7 +90,10 @@ final case class AcceptanceEvidence(
     "validatedChangeSet" -> validatedChangeSet.fold(Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
     "result" -> Canon.CStr(result.hex),
     "policy" -> Canon.CStr(policy.hex),
-    "judgment" -> Canon.CStr(judgment))
+    "judgment" -> Canon.CStr(judgment),
+    "changeModel" -> Canon.CStr(changeModel.hex),
+    "validationModel" -> validationModel.fold(Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "providers" -> Canon.CList(providers.map(d => Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.AcceptanceEvidence, canon)
   def digest: Digest = artifact.digest
 
@@ -83,10 +103,21 @@ object AcceptanceEvidence:
       val vcsDigest = c.field("validatedChangeSet") match
         case Canon.CTag("some", Canon.CStr(s)) => Some(Digest(s))
         case _                                 => None
+      // changeModel/validationModel/providers are absent on canon minted
+      // before PR9 — default to ChangeModel.default/None/Nil, the same
+      // mandatory-on-type/defaulted-on-legacy-decode split every prior
+      // schema addition to a durable, content-addressed type has used.
+      val changeModel = c.asMap.get("changeModel").map(v => Digest(v.asStr)).getOrElse(ChangeModel.default.digest)
+      val validationModel = c.asMap.get("validationModel").flatMap {
+        case Canon.CTag("some", Canon.CStr(s)) => Some(Digest(s))
+        case _                                 => None
+      }
+      val providers = c.asMap.get("providers").map(_.asList.map(v => Digest(v.asStr))).getOrElse(Nil)
       Right(AcceptanceEvidence(
         Digest(c.field("language").asStr), Digest(c.field("base").asStr),
         vcsDigest, Digest(c.field("result").asStr),
-        Digest(c.field("policy").asStr), c.field("judgment").asStr))
+        Digest(c.field("policy").asStr), c.field("judgment").asStr,
+        changeModel, validationModel, providers))
     catch case CodecError(m) => Left(m)
 
   /** Independently re-derive whether `evidence` genuinely holds — never
@@ -111,6 +142,7 @@ object AcceptanceEvidence:
       policy: AcceptancePolicy,
       result: Module,
       evidence: AcceptanceEvidence,
+      model: ChangeModel = ChangeModel.default,
   ): Either[String, Unit] =
     if evidence.language != language.digest then
       Left(s"AcceptanceEvidence: language mismatch (${evidence.language.short} ≠ ${language.digest.short})")
@@ -122,6 +154,12 @@ object AcceptanceEvidence:
       Left(s"AcceptanceEvidence: policy mismatch (${evidence.policy.short} ≠ ${policy.digest.short})")
     else if evidence.judgment != policy.gate.judgment then
       Left(s"AcceptanceEvidence: judgment mismatch ('${evidence.judgment}' ≠ '${policy.gate.judgment}')")
+    else if evidence.changeModel != model.digest then
+      Left(s"AcceptanceEvidence: changeModel mismatch (${evidence.changeModel.short} ≠ ${model.digest.short})")
+    else if evidence.validationModel != policy.gate.descriptor then
+      Left(s"AcceptanceEvidence: validationModel mismatch (${evidence.validationModel.map(_.short)} ≠ ${policy.gate.descriptor.map(_.short)})")
+    else if evidence.providers != policy.gate.providers then
+      Left(s"AcceptanceEvidence: providers mismatch (${evidence.providers.map(_.short)} ≠ ${policy.gate.providers.map(_.short)})")
     else
       (evidence.validatedChangeSet, vcs) match
         case (None, None) => ModuleGate.require(policy.gate, result)
@@ -199,4 +237,6 @@ object AcceptedTip:
       validatedChangeSet = Some(a.vcs.artifact.digest),
       result = a.module.digest,
       policy = a.policy.digest,
-      judgment = a.policy.gate.judgment)
+      judgment = a.policy.gate.judgment,
+      validationModel = a.policy.gate.descriptor,
+      providers = a.policy.gate.providers)

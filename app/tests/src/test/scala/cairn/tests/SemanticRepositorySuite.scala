@@ -373,6 +373,25 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val claimedNoChange = ok.evidence.copy(validatedChangeSet = None)
     assert(realVerify(claimedNoChange).swap.exists(_.contains("presence mismatch")))
 
+  test("AcceptanceEvidence.verify uses the exact ValidationModel identity (via ModuleGate.fromValidationModel)"):
+    val cA = parseChange("{ add fromB = true ; }")
+    val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)
+    val vm = ValidationModel(lang.digest, Nil, Nil) // no specs — trivially passes, only identity is under test
+    val gate = ModuleGate.fromValidationModel("test.validate", vm, _ => None)
+    val policy = AcceptancePolicy.gated(gate)
+    val ok = AcceptedTip.checkTip(lang, tip.asTip, policy).fold(e => fail(e), identity)
+    assertEquals(ok.evidence.validationModel, Some(vm.digest))
+    assertEquals(ok.evidence.providers, vm.providers)
+    assert(AcceptanceEvidence.verify(lang, ok.base, Some(ok.vcs), policy, ok.module, ok.evidence).isRight)
+
+    val forgedModel = ok.evidence.copy(validationModel = Some(Digest.of(Canon.CStr("not-the-real-model"))))
+    assert(AcceptanceEvidence.verify(lang, ok.base, Some(ok.vcs), policy, ok.module, forgedModel)
+      .swap.exists(_.contains("validationModel mismatch")))
+
+    val forgedProviders = ok.evidence.copy(providers = List(Digest.of(Canon.CStr("bogus-provider"))))
+    assert(AcceptanceEvidence.verify(lang, ok.base, Some(ok.vcs), policy, ok.module, forgedProviders)
+      .swap.exists(_.contains("providers mismatch")))
+
   test("AcceptanceEvidence.verify handles the no-underlying-change case (pure import / fast-forward)"):
     val cA = parseChange("{ add fromA = true ; }")
     val tip = SemanticRepository.tipAfter(lang, m0, cA).fold(e => fail(e), identity)

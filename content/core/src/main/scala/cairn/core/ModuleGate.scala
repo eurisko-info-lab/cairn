@@ -22,6 +22,13 @@ final case class ModuleGate(
       * judgment-name-only, same as every gate before this field existed.
       */
     descriptor: Option[Digest] = None,
+    /** Judgment-provider language digests `descriptor` (when built via
+      * [[fromValidationModel]]) transitively names — carried alongside
+      * `descriptor` so [[AcceptanceEvidence]] can record them directly
+      * without threading a whole [[ValidationModel]] value through the
+      * accept path, only this already-present gate.
+      */
+    providers: List[Digest] = Nil,
 ):
   /** `None` when this gate is a no-op (empty judgment). */
   def apply(m: Module): Either[Merge.ConflictWitness, Unit] =
@@ -80,7 +87,7 @@ object ModuleGate:
     ModuleGate(judgment, m => {
       val es = ModuleStructural.run(m, model.specs, resolveProvider)
       if es.isEmpty then Right(()) else Left(Canon.CStr(es.mkString("; ")))
-    }, descriptor = Some(model.digest))
+    }, descriptor = Some(model.digest), providers = model.providers)
 
   /** Run `gate` after a successful ΔL apply (migration, branch accept,
     * structured edit). Failure is a judgment-tagged [[Canon]] detail.
