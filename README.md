@@ -1,11 +1,20 @@
 # Cairn
 
+[![CI](https://github.com/eurisko-info-lab/cairn/actions/workflows/ci.yml/badge.svg)](https://github.com/eurisko-info-lab/cairn/actions/workflows/ci.yml)
+[![Scala](https://img.shields.io/badge/scala-3.3.4-DC322F.svg)](https://www.scala-lang.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 A landmark for semantic software: you compose language fragments into a typed,
 hash-addressed definition; the same definition yields parser and printer, evaluator or
 interaction-net machine, claims and checked proofs, and projections into familiar proof
 assistants and functional languages; local work stays in a content-addressed store; when
 you publish, a small proof-of-authority ledger records what was certified and where to
 fetch it — so meaning, not merely text, is what moves between machines.
+
+**Who this is for:** people building language workbenches, content-addressed or
+patch-based version control, proof-carrying artifacts, or durable multi-host state for
+agentic systems — and who want those things backed by one typed, hash-addressed
+substrate instead of stitched together from a parser, a VCS, a prover, and a wire format.
 
 ## Host decision
 

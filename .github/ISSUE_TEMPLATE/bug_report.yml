@@ -1,0 +1,36 @@
+name: Bug report
+description: Something behaves differently than the docs/transcripts say it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you observe instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        A minimal `.cairn` transcript, test case, or exact CLI commands that
+        reproduce it. Cairn's acceptance mechanism is transcripts — a
+        reproducible one is worth far more than a description.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit / branch
+      description: The commit hash or branch you're on (`git rev-parse HEAD`)
+    validations:
+      required: false
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: JDK version, OS, `sbt --version`
+    validations:
+      required: false
