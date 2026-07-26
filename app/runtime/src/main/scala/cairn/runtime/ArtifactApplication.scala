@@ -4,6 +4,25 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.systeminterface.Cas
 
+final case class DependencyCacheStats(hits: Long, misses: Long, entries: Int)
+
+/** Semantics-neutral acceleration of canonical dependency discovery. The key
+  * is the artifact's content digest, never process identity or object identity. */
+final class ArtifactDependencyCache:
+  private val entries = scala.collection.mutable.Map.empty[Digest, Either[String, List[Digest]]]
+  private var hitCount = 0L
+  private var missCount = 0L
+  def direct(artifact: Artifact): Either[String, List[Digest]] = synchronized {
+    entries.get(artifact.digest) match
+      case Some(result) => hitCount += 1; result
+      case None =>
+        missCount += 1
+        val result = ArtifactDependencies.direct(artifact)
+        entries(artifact.digest) = result
+        result
+  }
+  def stats: DependencyCacheStats = synchronized(DependencyCacheStats(hitCount, missCount, entries.size))
+
 final case class ResolvedApplication(
     root: Digest,
     manifest: ApplicationManifest,
@@ -14,7 +33,7 @@ final case class ResolvedApplication(
 
 /** Installs and resolves an application from one digest. The resolver is the
   * composition root; it accepts no host language/entry maps. */
-final class ArtifactApplicationResolver(local: Cas):
+final class ArtifactApplicationResolver(local: Cas, val dependencyCache: ArtifactDependencyCache = ArtifactDependencyCache()):
   def install(root: Digest, source: Cas): Either[String, Set[Digest]] =
     def pull(todo: List[Digest], seen: Set[Digest]): Either[String, Set[Digest]] = todo match
       case Nil => Right(seen)
@@ -24,7 +43,7 @@ final class ArtifactApplicationResolver(local: Cas):
           bytes <- source.getBytes(digest)
           _ <- Either.cond(Digest.ofBytes(bytes) == digest, (), s"artifact ${digest.short} failed digest verification")
           artifact <- Artifact.decode(bytes)
-          dependencies <- ArtifactDependencies.direct(artifact)
+          dependencies <- dependencyCache.direct(artifact)
           _ = local.putBytes(bytes)
           result <- pull(dependencies ++ rest, seen + digest)
         yield result
@@ -90,7 +109,18 @@ final class ArtifactApplicationResolver(local: Cas):
       case d :: rest =>
         for
           artifact <- local.getByDigest(d)
-          deps <- ArtifactDependencies.direct(artifact)
+          deps <- dependencyCache.direct(artifact)
           result <- walk(deps ++ rest, seen + d)
         yield result
     walk(List(root), Set.empty)
+
+/** Produces content-addressed evidence after full application resolution. A
+  * report cannot be produced for a partial graph or failed capability check. */
+final class ApplicationHardeningAuditor(local: Cas, resolver: ArtifactApplicationResolver):
+  def audit(root: Digest): Either[String, HardeningAuditReport] = for
+    application <- resolver.resolve(root)
+    artifacts <- application.installed.toList.foldLeft[Either[String, List[Artifact]]](Right(Nil)) {
+      (acc, digest) => for xs <- acc; artifact <- local.getByDigest(digest) yield artifact :: xs }
+    kinds = artifacts.groupMapReduce(_.kind.name)(_ => 1)(_ + _)
+  yield HardeningAuditReport(root, application.manifest.name, application.installed.toList.sortBy(_.hex),
+    kinds, application.languages.view.mapValues(_.language.digest).toMap, TrustedBoundary.minimal)

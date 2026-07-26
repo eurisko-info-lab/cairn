@@ -2,7 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
-import cairn.runtime.{ArtifactApplicationResolver, EffectContexts, PackLoader}
+import cairn.runtime.{ApplicationHardeningAuditor, ArtifactApplicationResolver, EffectContexts, PackLoader}
 import cairn.systemhandler.MemCas
 import cairn.user.quicksort.QuickSort2
 
@@ -71,3 +71,35 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     val resolver = ArtifactApplicationResolver(installed)
     resolver.install(badRoot.digest, origin).toOption.get
     assert(resolver.resolve(badRoot.digest).left.exists(_.contains("expected theorem")))
+
+  test("digest-keyed dependency cache accelerates without changing closure"):
+    val origin = source()
+    val installed = MemCas()
+    val resolver = ArtifactApplicationResolver(installed)
+    resolver.install(manifest.digest, origin).fold(e => fail(e), identity)
+    val first = resolver.audit(manifest.digest).fold(e => fail(e), identity)
+    val before = resolver.dependencyCache.stats
+    val second = resolver.audit(manifest.digest).fold(e => fail(e), identity)
+    val after = resolver.dependencyCache.stats
+    assertEquals(second, first)
+    assert(after.hits > before.hits)
+    assertEquals(after.entries, before.entries)
+
+  test("hardening audit is canonical, complete, and records the reduced TCB"):
+    val origin = source()
+    val installed = MemCas()
+    val resolver = ArtifactApplicationResolver(installed)
+    val closure = resolver.install(manifest.digest, origin).fold(e => fail(e), identity)
+    val report = ApplicationHardeningAuditor(installed, resolver).audit(manifest.digest).fold(e => fail(e), identity)
+    assertEquals(report.closure.toSet, closure)
+    assertEquals(report.languages, Map("stlc" -> language.digest))
+    assertEquals(report.kinds(ArtifactKind.Application.name), 1)
+    assert(report.trustedBoundary.excluded.contains("language-studio"))
+    assert(!report.trustedBoundary.mechanisms.contains("language-studio"))
+    assertEquals(HardeningAuditReport.fromArtifact(report.artifact), Right(report))
+
+  test("hardening audit fails closed and emits no evidence for an incomplete graph"):
+    val partial = MemCas()
+    partial.put(manifest.artifact)
+    val resolver = ArtifactApplicationResolver(partial)
+    assert(ApplicationHardeningAuditor(partial, resolver).audit(manifest.digest).isLeft)

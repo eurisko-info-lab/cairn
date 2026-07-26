@@ -80,3 +80,31 @@ class LanguageStudioSuite extends munit.FunSuite:
     val result = LanguageStudio.propose(project, List(LanguageStudioEdit(
       ids(LanguageAssetKind.Grammar), Artifact(ArtifactKind.Language, Canon.CStr("not grammar")))), meta, grammar)
     assert(result.isLeft)
+
+  test("Cairn self-host edits retain both ΔMeta and ΔGrammar replay evidence"):
+    val before = version(1).copy(targetLanguage = Meta.language.digest)
+    val after0 = version(2).copy(targetLanguage = Meta.language.digest)
+    // Rebind target-aware assets while retaining real Meta/Grammar interpreters.
+    val validation = ValidationModel(Meta.language.digest, Nil, Nil)
+    val beforeFixed = before.copy(assets = before.assets
+      .updated(ids(LanguageAssetKind.Language), Meta.language.artifact)
+      .updated(ids(LanguageAssetKind.Grammar), Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(Meta.language.grammar)))
+      .updated(ids(LanguageAssetKind.ValidationModel), validation.artifact)
+      .removed(ids(LanguageAssetKind.LanguageCapabilities))
+      .removed(ids(LanguageAssetKind.Migration))
+      .removed(ids(LanguageAssetKind.ForeignSurface))
+      .removed(ids(LanguageAssetKind.StudioProfileSemantics))
+      .removed(ids(LanguageAssetKind.StudioProfileSurface)))
+    val revisedGrammar = Meta.language.grammar.copy(tokens = Meta.language.grammar.tokens.copy(
+      keywords = Meta.language.grammar.tokens.keywords :+ "pr25-self-host"))
+    val after = beforeFixed.copy(assets = beforeFixed.assets
+      .updated(ids(LanguageAssetKind.Grammar), Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(revisedGrammar)))
+      .updated(ids(LanguageAssetKind.ChangeSurface), after0.assets(ids(LanguageAssetKind.ChangeSurface))))
+    val edits = after.assets.toList.collect { case (id, artifact) if beforeFixed.assets(id).digest != artifact.digest =>
+      LanguageStudioEdit(id, artifact) }
+    val (proposal, witness) = SelfHosting.propose(beforeFixed, edits, meta, grammar).fold(e => fail(e), identity)
+    assertEquals(proposal.result, after)
+    assert(witness.deltaMeta.nonEmpty)
+    assert(witness.deltaGrammar.nonEmpty)
+    assertEquals(witness.trustedBoundary, TrustedBoundary.minimal.digest)
+    assertEquals(witness.artifact.kind, ArtifactKind.Provenance)

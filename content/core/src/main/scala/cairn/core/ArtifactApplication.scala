@@ -68,4 +68,6 @@ object ArtifactDependencies:
       .toEither.left.map(e => s"invalid change capability graph: ${e.getMessage}")
     case ArtifactKind.EcosystemBundle => SignedEcosystemBundle.fromArtifact(artifact).map { bundle =>
       bundle.release.root :: bundle.release.migrations ::: bundle.release.previous }
+    case ArtifactKind.AuditReport => HardeningAuditReport.fromArtifact(artifact).map { report =>
+      (report.root :: report.closure).distinct }
     case _ => Right(Nil)

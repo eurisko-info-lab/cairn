@@ -37,6 +37,7 @@ thinner than the phase's full ambition · ⬜ not started.
 | PR22 | Proof and Projection Studio: goals, checked derivations/proof terms/certificates, Rosetta output evidence, and Lean/HVM agreement envelopes | ✅ |
 | PR23 | Artifact-only application startup: one root digest, recursive dependency installation/audit, language reconstruction, and exact capability/entry checks | ✅ |
 | PR24 | Pack and application ecosystem: signed releases, semantic-version discovery, migration routing, ledger publication, recursive replication, and namespace trust policy | ✅ |
+| PR25 | Self-hosting and hardening: Language Studio self-edit witnesses, digest-keyed dependency acceleration, canonical application audits, and an explicit minimal TCB | ✅ |
 
 Studio is the generated interaction surface of a `LanguageCapabilities`
 bundle; SDS is its first complete domain inhabitant. It emits ordinary ΔL,
