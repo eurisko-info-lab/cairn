@@ -57,6 +57,7 @@ enum ArtifactKind(val name: String):
   case ReplaySnapshot extends ArtifactKind("replay-snapshot")
   case AcceptanceEvidence extends ArtifactKind("acceptance-evidence")
   case ChangeModel    extends ArtifactKind("change-model")
+  case ValidationModel extends ArtifactKind("validation-model")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =
