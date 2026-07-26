@@ -404,6 +404,10 @@ class SemanticRepositorySuite extends munit.FunSuite:
         assertEquals(conflict.overlap.map(_.definitionName), Set("a"))
         assert(CasEffects.contains(cas, conflict.artifact.digest, casCtx).contains(true))
         assertEquals(branches.load("main").head, None)
+        val studio = branches.studioStatus("main").fold(e => fail(e), identity)
+        assertEquals(studio.conflict, Some(conflict.artifact.digest))
+        assertEquals(studio.overlappingLocations, conflict.overlap)
+        assertEquals(studio.certificates, Nil)
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)
 

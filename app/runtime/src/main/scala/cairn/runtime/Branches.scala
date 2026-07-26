@@ -966,3 +966,21 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         refs.refsWrite(refs.refPath(branch), key.valueHash.hex)
         Right((next, dig))
     }
+
+  /** Read-only Studio status assembled from durable branch/conflict/evidence
+    * artifacts. It carries semantic overlap locations, never just names. */
+  def studioStatus(branch: String): Either[String, StudioBranchStatus] =
+    val manifest = refs.load(branch)
+    val conflictDigest = refs.pendingConflict(branch)
+    for
+      overlap <- conflictDigest.fold[Either[String, Set[SemanticLocation]]](Right(Set.empty)) { digest =>
+        refs.getByDigest(digest).flatMap(Merge.Conflict.fromArtifact).map(_.overlap)
+      }
+      migration <- manifest.acceptanceEvidence.fold[Either[String, Option[Digest]]](Right(None)) { digest =>
+        refs.getByDigest(digest).flatMap { artifact =>
+          if artifact.kind != ArtifactKind.AcceptanceEvidence then Left("branch acceptance evidence has the wrong kind")
+          else AcceptanceEvidence.fromCanon(artifact.body).map(_.migration)
+        }
+      }
+    yield StudioBranchStatus(branch, manifest.changeHistory, conflictDigest, overlap, migration,
+      manifest.acceptanceEvidence, manifest.certificates)

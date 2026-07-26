@@ -411,7 +411,16 @@ object Delta:
       out.spans.get(oldSubtree) match
         case None => Left(s"ΔL edit (format-preserving): '$name' subtree has no recorded span (not from this parse)")
         case Some((startTok, endTok)) =>
-          Printer.print(mg, newSubtree).map { printed =>
+          val replacement = (newSubtree, out.tokens.lift(startTok), endTok == startTok + 1) match
+            // A bare leaf has no constructor print rule of its own. Preserve
+            // the lexical class of the selected source token so Studio edits
+            // of strings remain quoted/escaped and numeric/name leaves remain
+            // valid surface text.
+            case (Cst.Leaf(text), Some(token), true) => token.kind match
+              case TokKind.Str => Right("\"" + text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"")
+              case _ => Right(text)
+            case _ => Printer.print(mg, newSubtree)
+          replacement.map { printed =>
             val (startOff, endOff) = spanOffsets(out, startTok, endTok)
             List((startOff, endOff, printed))
           }

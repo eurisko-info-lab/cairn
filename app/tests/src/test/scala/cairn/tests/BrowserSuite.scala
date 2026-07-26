@@ -24,6 +24,31 @@ class BrowserSuite extends munit.FunSuite:
       HttpResponse.BodyHandlers.ofString())
     (resp.statusCode(), resp.body())
 
+  private def post(port: Int, path: String, body: String): (Int, String) =
+    val resp = client.send(
+      HttpRequest.newBuilder(URI.create(s"http://127.0.0.1:$port$path"))
+        .header("Content-Type", "application/json")
+        .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+      HttpResponse.BodyHandlers.ofString())
+    (resp.statusCode(), resp.body())
+
+  test("SDS Studio endpoint emits a replayed delta and does not mutate the CAS module"):
+    val root = Files.createTempDirectory("cairn-studio-api")
+    val node = Node(root, EffectContexts.forLedger())
+    val language = cairn.examples.stlc.Stlc.language
+    val module = Module(List("sheet" -> cairn.examples.stlc.Stlc.tru))
+    casPut(node, module.artifact)
+    val srv = BrowserServer(node, Map("sds" -> language), 0)
+    val port = srv.start()
+    try
+      val request = s"""{"lang":"sds","digest":"${module.artifact.digest.hex}","definition":"sheet","path":"","term":"false"}"""
+      val (code, response) = post(port, "/api/studio/propose", request)
+      assertEquals(code, 200, response)
+      assert(response.contains("\"mutation\":\"delta-only\""), response)
+      assert(response.contains("replace") || response.contains("edit"), response)
+      assertEquals(Module.fromCanon(node.cas.get(module.artifact.key).toOption.get.body), module)
+    finally srv.stop()
+
   test("browser API serves overview, chain, blocks, typed artifact view"):
     val root = Files.createTempDirectory("cairn-ui")
     val node = Node(root, EffectContexts.forLedger())

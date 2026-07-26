@@ -3,6 +3,7 @@ import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.Branches
 import cairn.systemhandler.{CasAdminEffects, CasEffects, DelegationLog, EffectContext, Node, RevocationLog}
 import com.sun.net.httpserver.{HttpExchange, HttpServer}
 import java.net.InetSocketAddress
@@ -24,6 +25,8 @@ import java.nio.file.Path
  *   GET  /api/trust/revocations, POST /api/trust/revoke
  *   GET  /api/trust/delegations, POST /api/trust/delegate
  *   POST /api/parse  body JSON lang+text — validate editor buffer
+ *   POST /api/studio/propose — compile/replay a semantic widget edit as ΔL
+ *   GET  /api/studio/status/<branch> — history/conflict/migration/acceptance state
  *   GET  / and /ui/... — static UI assets
  */
 final class BrowserServer(
@@ -193,10 +196,38 @@ final class BrowserServer(
                 case None => err(ex, 404, s"unknown language '$lang'")
                 case Some(l) =>
                   val ctors = l.constructors.values.filter(_.sort == sort).toList.sortBy(_.name)
-                  json(ex, 200, Json.arr(ctors.map(c => Json.obj(
-                    "name" -> Json.str(c.name),
-                    "argSorts" -> Json.arr(c.argSorts.map(Json.str))))))
+                  val rows = ctors.map { c =>
+                    val fields = c.argSorts.indices.toList.map(i => Json.obj(
+                      "position" -> Json.num(i.toLong),
+                      "sort" -> Json.str(c.argSorts(i)),
+                      "fieldId" -> c.fieldIds.lift(i).flatten.fold(Json.nul)(Json.str),
+                      "label" -> c.argLabels.lift(i).flatten.fold(Json.nul)(Json.str)))
+                    Json.obj(
+                      "name" -> Json.str(c.name),
+                      "argSorts" -> Json.arr(c.argSorts.map(Json.str)),
+                      "fields" -> Json.arr(fields),
+                      "keyedBy" -> l.keys.get(sort).fold(Json.nul)(k => Json.str(k.keyField)))
+                  }
+                  json(ex, 200, Json.arr(rows))
             case _ => err(ex, 404, "expected /api/schema/<lang>/<sort>")
+        case ("POST", "studio/propose") =>
+          val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
+          studioProposal(body) match
+            case Left(e)  => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("GET", p) if p.startsWith("studio/status/") =>
+          val branch = p.stripPrefix("studio/status/")
+          val branches = Branches(node.cas, node.root.resolve("refs"), EffectContexts.forBranches())
+          branches.studioStatus(branch) match
+            case Left(e) => err(ex, 404, e)
+            case Right(status) => json(ex, 200, Json.obj(
+              "branch" -> Json.str(status.branch),
+              "history" -> Json.arr(status.history.map(d => Json.str(d.hex))),
+              "conflict" -> status.conflict.fold(Json.nul)(d => Json.str(d.hex)),
+              "overlap" -> Json.arr(status.overlappingLocations.toList.sortBy(_.render).map(x => Json.str(x.render))),
+              "migration" -> status.migration.fold(Json.nul)(d => Json.str(d.hex)),
+              "acceptanceEvidence" -> status.acceptanceEvidence.fold(Json.nul)(d => Json.str(d.hex)),
+              "certificates" -> Json.arr(status.certificates.map(d => Json.str(d.hex)))))
         case ("GET", "board") =>
           boardJson(params.get("digest")) match
             case Left(e)  => err(ex, 404, e)
@@ -445,6 +476,38 @@ final class BrowserServer(
       "cst" -> Json.ofCst(cst),
       "printed" -> Json.str(printed))
 
+  /** Read/propose-only SDS Studio boundary. Every request becomes a replayed
+    * ΔL term; this API intentionally has no direct module-write operation. */
+  private def studioProposal(raw: String): Either[String, String] =
+    for
+      langName <- jsonField(raw, "lang")
+      digest <- jsonField(raw, "digest")
+      definition <- jsonField(raw, "definition")
+      pathText <- jsonField(raw, "path")
+      termText <- jsonField(raw, "term")
+      language <- languages.get(langName).toRight(s"unknown language '$langName'")
+      artifact <- loadArtifact(digest)
+      _ <- Either.cond(artifact.kind == ArtifactKind.Ir, (), s"artifact $digest is not an IR module")
+      module = Module.fromCanon(artifact.body)
+      root <- module.get(definition).toRight(s"module has no definition '$definition'")
+      indices <- pathText.split(',').toList.filter(_.nonEmpty).foldLeft[Either[String, List[Int]]](Right(Nil)) {
+        (acc, rawIndex) => for xs <- acc; index <- rawIndex.trim.toIntOption.toRight(s"bad path index '$rawIndex'")
+          yield xs :+ index
+      }
+      path <- Studio.pathFromTraversal(language, root, indices)
+      term <- Parser.parse(language.grammar, termText)
+      proposal <- Studio.propose(language, module, StudioAction.ReplaceAt(definition, path, term))
+      delta <- Delta.deltaOf(language).left.map(_.mkString("; "))
+      changeText <- Printer.print(delta.grammar, proposal.change)
+    yield Json.obj(
+      "ok" -> Json.bool(true), "mutation" -> Json.str("delta-only"),
+      "language" -> Json.str(language.digest.hex), "base" -> Json.str(module.digest.hex),
+      "result" -> Json.str(proposal.result.digest.hex), "change" -> Json.str(changeText),
+      "validatedChange" -> Json.str(proposal.validatedChange.artifact.digest.hex),
+      "location" -> Json.str(SemanticLocation.Subtree(definition, path).render),
+      "accesses" -> Json.arr(proposal.accesses.accesses.map(a => Json.obj(
+        "mode" -> Json.str(a.mode.toString.toLowerCase), "location" -> Json.str(a.location.render)))))
+
   private def jsonField(raw: String, name: String): Either[String, String] =
     val key = s"\"$name\""
     val i = raw.indexOf(key)
@@ -481,7 +544,7 @@ final class BrowserServer(
       "delegationCount" -> Json.num(delegations.snapshot.size.toLong),
       "delegationDigests" -> Json.arr(delegations.digests.toList.sortBy(_.hex).map(d => Json.str(d.hex))),
       "note" -> Json.str(
-        "Explorer surfaces over ReplayReplication / RevocationLog / DelegationLog — digest-merge, not BFT; no Studio."))
+        "Explorer surfaces over ReplayReplication / RevocationLog / DelegationLog — digest-merge, not BFT."))
 
   private def revocationsJson: String =
     Json.obj(

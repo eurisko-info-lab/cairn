@@ -6,6 +6,7 @@ const state = {
   cas: null,
   board: null,
   trust: null,
+  studio: { schemas: [] },
   selection: null,
 };
 
@@ -227,6 +228,20 @@ sbt "examples/runMain cairn.examples.Main ui &lt;node-dir&gt; 8765"</pre>
           <div class="meta">${short(l.digest)} · top ${esc(l.top)}</div>
         </button>`).join("");
     bindListClicks();
+    return;
+  }
+  if (state.route === "studio") {
+    const sds = (state.languages || []).find((l) => l.name === "sds");
+    list.innerHTML = `<h2 style="margin-top:0">SDS Studio</h2>
+      <p class="muted">Grammar-derived, ΔSDS-only editing.</p>
+      <div class="card"><h2>Status</h2>
+        <div class="status-row"><span class="pill">history</span> branch-backed</div>
+        <div class="status-row"><span class="pill">conflicts</span> semantic locations</div>
+        <div class="status-row"><span class="pill">migration</span> assisted</div>
+        <div class="status-row"><span class="pill">acceptance</span> evidence + certificates</div>
+      </div>` + (sds ? `<button class="list-item active"><div class="title">${esc(sds.name)}</div>
+        <div class="meta">${short(sds.digest)} · ${esc(sds.top)}</div></button>` :
+        `<p class="bad">Load the SDS language bundle to edit.</p>`);
   }
 }
 
@@ -587,7 +602,43 @@ async function render() {
         <p class="muted">Select a node for detail. Edges are <code>supports</code> / <code>spawns</code>.</p>
         <pre class="view">${esc(renderAsciiGraph(state.board))}</pre>
       </div>`;
+  } else if (state.route === "studio") {
+    renderStudio();
   }
+}
+
+function renderStudio() {
+  const detail = $("detail");
+  detail.innerHTML = `
+    <div class="card studio-hero"><h2>SDS Studio <span class="pill">ΔSDS only</span></h2>
+      <p class="muted">Fields come from grammar metadata and persistent FieldIds. List identity comes from declared keys; positions are traversal hints only.</p>
+    </div>
+    <div class="studio-grid">
+      <div class="card"><h2>Semantic edit</h2>
+        <label>Module digest<input id="studioDigest" type="text" placeholder="IR artifact digest"></label>
+        <label>Definition<input id="studioDefinition" type="text" placeholder="sheet"></label>
+        <label>Traversal path<input id="studioPath" type="text" placeholder="0,1,2"></label>
+        <label>Replacement term<textarea id="studioTerm" class="studio-term" placeholder="SDS term"></textarea></label>
+        <button class="btn primary" id="studioPropose">Build ΔSDS proposal</button>
+        <p id="studioStatus" class="muted"></p>
+      </div>
+      <div class="card"><h2>Proposal</h2><pre class="view" id="studioDelta">No proposal yet.</pre>
+        <div id="studioEvidence" class="evidence-grid"></div></div>
+    </div>`;
+  $("studioPropose").onclick = async () => {
+    const status = $("studioStatus");
+    try {
+      const r = await api("studio/propose", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lang: "sds", digest: $("studioDigest").value.trim(),
+          definition: $("studioDefinition").value.trim(), path: $("studioPath").value.trim(), term: $("studioTerm").value }) });
+      $("studioDelta").textContent = r.change;
+      $("studioEvidence").innerHTML = `<div><b>Location</b><span>${esc(r.location)}</span></div>
+        <div><b>Validated change</b><span>${short(r.validatedChange)}</span></div>
+        <div><b>Preview result</b><span>${short(r.result)}</span></div>
+        <div><b>Mutation path</b><span>${esc(r.mutation)}</span></div>`;
+      status.innerHTML = `<span class="ok">Valid ΔSDS proposal.</span> The module has not been mutated.`;
+    } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  };
 }
 
 loadOverview().then(render).catch((e) => {

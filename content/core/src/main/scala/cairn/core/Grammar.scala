@@ -243,7 +243,8 @@ object Parser:
         if peek.text == text && peek.kind != TokKind.Str && peek.kind != TokKind.Rest then { pos += 1; Right(Nil) }
         else Left(fail(s"'$text'"))
       case Elem.TokField(text) =>
-        if peek.text == text && peek.kind != TokKind.Str then { pos += 1; Right(List(Cst.Leaf(text))) }
+        if peek.text == text && peek.kind != TokKind.Str then
+          val start = pos; pos += 1; Right(List(spanned(Cst.Leaf(text), start)))
         else Left(fail(s"'$text'"))
       case Elem.Cat(n) => parseCategory(n).map(List(_))
       case Elem.Opt(inner) =>
@@ -299,16 +300,19 @@ object Parser:
         else Left(fail("identifier"))
       case Elem.AnyIdentLeaf =>
         if peek.kind == TokKind.Name || peek.kind == TokKind.Keyword then
-          { val t = peek.text; pos += 1; Right(List(Cst.Leaf(t))) }
+          { val start = pos; val t = peek.text; pos += 1; Right(List(spanned(Cst.Leaf(t), start))) }
         else Left(fail("identifier or keyword"))
       case Elem.NumLeaf =>
-        if peek.kind == TokKind.Num then { val t = peek.text; pos += 1; Right(List(Cst.Leaf(t))) }
+        if peek.kind == TokKind.Num then
+          val start = pos; val t = peek.text; pos += 1; Right(List(spanned(Cst.Leaf(t), start)))
         else Left(fail("number"))
       case Elem.StrLeaf =>
-        if peek.kind == TokKind.Str then { val t = peek.text; pos += 1; Right(List(Cst.Leaf(t))) }
+        if peek.kind == TokKind.Str then
+          val start = pos; val t = peek.text; pos += 1; Right(List(spanned(Cst.Leaf(t), start)))
         else Left(fail("string literal"))
       case Elem.RestOfLine =>
-        if peek.kind == TokKind.Rest then { val t = peek.text; pos += 1; Right(List(Cst.Leaf(t))) }
+        if peek.kind == TokKind.Rest then
+          val start = pos; val t = peek.text; pos += 1; Right(List(spanned(Cst.Leaf(t), start)))
         else Left(fail("rest-of-line"))
       case Elem.Block(itemCat) =>
         // offside rule (M6): the first item fixes the column; items repeat at
