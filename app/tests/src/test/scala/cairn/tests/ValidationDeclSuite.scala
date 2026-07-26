@@ -98,3 +98,52 @@ class ValidationDeclSuite extends munit.FunSuite:
     val f = singleFragment(allKindsSrc)
     val back = Meta.elaborateFragment(Meta.encode(f)).fold(e => fail(e), identity)
     assertEquals(back, f)
+
+  private def judgmentProviderSrc = """language jp {
+    |  fragment jp {
+    |    sort Dummy tree;
+    |    ctor dummy : Dummy;
+    |    judgment myJudgment {
+    |      rule ok : |- myJudgment("ok");
+    |    }
+    |    top Dummy;
+    |  }
+    |}""".stripMargin
+
+  private def judgmentTargetSrc = """language t2 {
+    |  fragment t2 {
+    |    sort Foo tree;
+    |    ctor foo : Foo(bar: Bar);
+    |    provider jp = language jp;
+    |    validate leafok foo 0 satisfies jp.myJudgment;
+    |    top Foo;
+    |  }
+    |}""".stripMargin
+
+  test("ValidationModelLoader.resolve: a second node reconstructs the ValidationModel from artifacts and reproduces validation"):
+    def freshTarget(): ComposedLanguage = Meta.parseFile(judgmentTargetSrc).fold(e => fail(e), identity)
+    def freshResolver(langName: String): ComposedLanguage =
+      if langName == "jp" then Meta.parseFile(judgmentProviderSrc).fold(e => fail(e), identity)
+      else fail(s"unknown provider language '$langName'")
+
+    // "Node 1": elaborates + resolves once.
+    val model1 = ValidationModelLoader.resolve(freshTarget(), freshResolver)
+
+    // "Node 2": completely independent re-parse + re-resolve (fresh Scala
+    // objects throughout, no shared state with node 1) — identity must match exactly.
+    val model2 = ValidationModelLoader.resolve(freshTarget(), freshResolver)
+    assertEquals(model2, model1)
+    assertEquals(model2.digest, model1.digest)
+
+    // Reproduces the SAME validation result a fresh module is checked against.
+    val provider = freshResolver("jp")
+    val okModule = Module(List("a" -> Cst.node("foo", Cst.Leaf("ok"))))
+    val badModule = Module(List("a" -> Cst.node("foo", Cst.Leaf("nope"))))
+    val resolverMap: Map[Digest, ComposedLanguage] = Map(provider.digest -> provider)
+    assertEquals(ModuleStructural.run(okModule, model2.specs, resolverMap.get), Nil)
+    assert(ModuleStructural.run(badModule, model2.specs, resolverMap.get).nonEmpty)
+
+  test("ValidationModelLoader.resolve throws on an undeclared provider alias"):
+    val danglingSrc = judgmentTargetSrc.replace("provider jp = language jp;\n    ", "")
+    val target = Meta.parseFile(danglingSrc).fold(e => fail(e), identity)
+    intercept[RuntimeException](ValidationModelLoader.resolve(target, _ => fail("resolver should not be called")))
