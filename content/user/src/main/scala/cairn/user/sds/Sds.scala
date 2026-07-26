@@ -43,6 +43,13 @@ final class Sds(packs: PackAccess):
 
   lazy val typedSectionTags: Set[String] = typedSectionOrder.toSet
 
+  /** Typed section tag → its 1-indexed EU-CLP number (pack declaration
+    * order) — pure data feeding [[ModuleStructural.NumberSource.ByTag]],
+    * replacing the Scala-side lookup [[sectionNumber]] used to do inline.
+    */
+  private lazy val typedSectionNumbers: Map[String, Int] =
+    typedSectionOrder.zipWithIndex.map((tag, i) => tag -> (i + 1)).toMap
+
   /** Ordered EN slot keys from the SDS surface (`Tok(label) StrLeaf`), not host maps. */
   lazy val typedSectionKeys: Map[String, List[String]] =
     typedSectionOrder.map(tag => tag -> SurfaceSlots.labeledStrSlots(language.grammar, tag)).toMap
@@ -98,24 +105,17 @@ final class Sds(packs: PackAccess):
         "translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
       ModuleStructural.Spec.NonEmptyLeaves(
         "translationState", List(1, 2), List("lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk(
-        "translationState", 3, checkTranslationStateTag,
-        s => s"$s: unknown state tag"),
+      ModuleStructural.Spec.LeafOk("translationState", 3, "translationStateTag"),
       ModuleStructural.Spec.UniqueTuples(
         "sectionFieldState", List(List(0), List(1), List(2)), "sectionFieldState"),
       ModuleStructural.Spec.RefTagIn(
         "sectionFieldState", 0, sectionBodyTags, "sectionFieldState"),
       ModuleStructural.Spec.NonEmptyLeaves(
         "sectionFieldState", List(1, 2, 3), List("field key", "lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk(
-        "sectionFieldState", 4, checkTranslationStateTag,
-        s => s"$s: unknown state tag"),
+      ModuleStructural.Spec.LeafOk("sectionFieldState", 4, "translationStateTag"),
       ModuleStructural.Spec.DefinedRef("basis", 0, "basis"),
       ModuleStructural.Spec.NonEmptyLeaves("basis", List(1), List("Law section number")),
-      ModuleStructural.Spec.LeafOk(
-        "euSection", 0,
-        v => v.toIntOption.exists(n => checkSectionNumber(n.toString)),
-        s => s"$s fails sectionNumberOk"),
+      ModuleStructural.Spec.LeafOk("euSection", 0, "sectionNumberOk"),
       ModuleStructural.Spec.UniqueTuplesInList(
         "euSection", 1, List(List(0), List(1)), "euSection",
         Some(Set("sectionField", "sectionFieldRef"))),
@@ -123,18 +123,15 @@ final class Sds(packs: PackAccess):
         "euSection", 1, Map("sectionFieldRef" -> List(List(2))), "euSection"),
       ModuleStructural.Spec.OutlineNums(
         "outline", 2,
-        (mod, ref) => mod.get(ref) match
-          case None => Left(s"references unknown section '$ref'")
-          case Some(sec) =>
-            sectionNumber(sec) match
-              case None => Left(s"references '$ref' which is not a section body")
-              case Some(n) if checkSectionNumber(n.toString) => Right(n)
-              case Some(n) => Left(s"section '$ref' number $n fails sectionNumberOk"),
-        "outline"),
+        List(
+          ModuleStructural.NumberSource.FromLeaf("euSection", 0),
+          ModuleStructural.NumberSource.ByTag(typedSectionNumbers)),
+        "sectionNumberOk", "outline"),
     ) ++ typedSpecs
 
   def validate(m: Module): Either[String, Unit] =
-    val es = ModuleStructural.run(m, validationSpecs)
+    val es = ModuleStructural.run(
+      m, validationSpecs, language.judgments.values.toList ++ euClpLanguage.judgments.values.toList)
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
 
   /** ΔSDS application: the generic ΔL, then the domain gate. */
