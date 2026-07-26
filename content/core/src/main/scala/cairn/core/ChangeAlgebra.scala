@@ -328,3 +328,108 @@ object Migrate:
       case Cst.Leaf(_) => Right(t)
       case termNode    => term(mig, source, target, termNode) // an embedded object-language term
     go(change)
+
+  /** Outcome of transporting a single [[SemanticPath.Step.Field]] hop across
+    * a migration, by field identity rather than position.
+    */
+  enum FieldTransport:
+    /** The field survived, at `newPosition` (unchanged from before when the
+      * ctor has no [[LangMigration.fieldRemap]] entry, corrected when it does).
+      */
+    case Transported(newPosition: Int)
+    /** No slot in the migrated ctor carries this fieldId anymore — removed,
+      * not moved.
+      */
+    case Deleted(fieldId: String)
+    /** More than one slot in [[LangMigration.fieldRemap]] claims this
+      * fieldId (the same old field was fanned out into multiple new
+      * positions) — there is no single unambiguous new target.
+      */
+    case Ambiguous(fieldId: String, candidates: List[Int])
+
+  /** Outcome of transporting a whole [[SemanticPath]] across a migration. */
+  enum PathTransport:
+    case Transported(path: SemanticPath)
+    case Deleted(fieldId: String)
+    case Ambiguous(fieldId: String, candidates: List[Int])
+
+  /** Where a single fieldId ends up under `mig`'s post-rename ctor `ctor2`:
+    * looked up in [[LangMigration.fieldRemap]] when `ctor2` has an entry
+    * (reordered/inserted shape), otherwise in `target`'s own (unchanged-
+    * position) [[CtorDef.fieldIds]] for ctor2 — a ctor with no remap entry
+    * only ever grows via [[LangMigration.arityChanges]]' tail-padding, so
+    * existing fields keep their position.
+    */
+  private def transportField(mig: LangMigration, target: ComposedLanguage, ctor2: String, fieldId: String): FieldTransport =
+    mig.fieldRemap.get(ctor2) match
+      case Some(remap) =>
+        val candidates = remap.zipWithIndex.collect { case (Left(id), i) if id == fieldId => i }
+        candidates match
+          case Nil          => FieldTransport.Deleted(fieldId)
+          case List(single) => FieldTransport.Transported(single)
+          case many         => FieldTransport.Ambiguous(fieldId, many)
+      case None =>
+        target.constructors.get(ctor2).flatMap(_.fieldIds.indexOf(Some(fieldId)) match
+          case -1  => None
+          case idx => Some(idx)
+        ) match
+          case Some(idx) => FieldTransport.Transported(idx)
+          case None      => FieldTransport.Deleted(fieldId)
+
+  /** Transport a [[SemanticPath]] across a migration by field identity, not
+    * position. Every [[SemanticPath.Step.Field]] hop is rebuilt against
+    * `target` (ctor renamed via [[LangMigration.ctorRenames]], position
+    * resolved via [[transportField]], label re-derived fresh from `target`'s
+    * own grammar metadata — the old label may not even apply under a
+    * different surface grammar); [[SemanticPath.Step.Index]] hops (list/
+    * some/none wrappers) pass through unchanged, since migrations don't
+    * (yet) model wrapper-shape changes.
+    *
+    * A `Step.Field` with no `fieldId` (a positional-only constructor arg)
+    * hitting a ctor with a `fieldRemap` entry cannot be transported at all —
+    * there is no identity to look up, and the ctor's shape may have
+    * genuinely reordered — this is a hard `Left`, not one of the three
+    * structured outcomes below (those describe what happens to a field
+    * that DOES have an identity).
+    *
+    * On success, the rebuilt claim is re-verified via [[SemanticPath.verify]]
+    * against `migratedRoot` (the term [[term]] already produced) — never
+    * trusting the rebuilt steps without replaying them for real.
+    */
+  def path(
+      mig: LangMigration,
+      target: ComposedLanguage,
+      migratedRoot: Cst,
+      p: SemanticPath,
+  ): Either[String, PathTransport] =
+    if p.language != mig.fromLang then
+      Left(s"Migrate.path: path's language ${p.language.short} ≠ migration's fromLang ${mig.fromLang.short}")
+    else
+      def go(steps: List[SemanticPath.Step]): Either[String, Either[FieldTransport, List[SemanticPath.Step]]] =
+        steps match
+          case Nil => Right(Right(Nil))
+          case (idx: SemanticPath.Step.Index) :: rest =>
+            go(rest).map(_.map(idx :: _))
+          case SemanticPath.Step.Field(ctor, _, _, None) :: _ if mig.fieldRemap.contains(mig.ctorRenames.getOrElse(ctor, ctor)) =>
+            Left(s"Migrate.path: '$ctor' has no fieldId to transport, but its migrated shape is a fieldRemap " +
+              "(position alone cannot survive a reorder)")
+          case SemanticPath.Step.Field(ctor, _, position, None) :: rest =>
+            // No remap for this ctor: position is preserved (arityChanges-only growth).
+            go(rest).map(_.map(SemanticPath.Step.Field(mig.ctorRenames.getOrElse(ctor, ctor), None, position, None) :: _))
+          case SemanticPath.Step.Field(ctor, _, _, Some(fieldId)) :: rest =>
+            val ctor2 = mig.ctorRenames.getOrElse(ctor, ctor)
+            transportField(mig, target, ctor2, fieldId) match
+              case FieldTransport.Transported(newPos) =>
+                val label = target.constructors.get(ctor2).flatMap(_.argLabels.lift(newPos).flatten)
+                go(rest).map(_.map(SemanticPath.Step.Field(ctor2, label, newPos, Some(fieldId)) :: _))
+              case d: FieldTransport.Deleted     => Right(Left(d))
+              case a: FieldTransport.Ambiguous   => Right(Left(a))
+      go(p.steps).flatMap {
+        case Left(FieldTransport.Deleted(fieldId))              => Right(PathTransport.Deleted(fieldId))
+        case Left(FieldTransport.Ambiguous(fieldId, candidates)) => Right(PathTransport.Ambiguous(fieldId, candidates))
+        case Left(FieldTransport.Transported(_)) =>
+          Left("Migrate.path: internal error, transportField result leaked into the early-exit path")
+        case Right(newSteps) =>
+          val claim = SemanticPath.Claim(mig.toLang, p.rootSort, newSteps)
+          SemanticPath.verify(target, migratedRoot, claim).map(PathTransport.Transported(_))
+      }

@@ -2,6 +2,7 @@ package cairn.tests
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.core.SemanticPath.Step
 import cairn.examples.stlc.Stlc
 
 /** Wave C acceptance (M13–M18). */
@@ -276,3 +277,100 @@ class WaveCSuite extends munit.FunSuite:
       fieldRemap = Map("foo" -> List(Left("y"), Left("x"))))
     val term = Cst.Node("foo", List(Cst.Leaf("valX"), Cst.Leaf("valY")))
     assert(Migrate.term(mig, v1, v2, term).swap.exists(_.contains("ambiguous")))
+
+  // ---- Migrate.path: transport a SemanticPath across a migration by fieldId ----
+
+  private def componentLang(argList: String) = Meta.parseFile(s"""language t {
+    |  fragment t {
+    |    sort Bar tree;
+    |    ctor component : Bar($argList);
+    |    top Bar;
+    |  }
+    |}""".stripMargin).fold(e => fail(e), identity)
+
+  test("Migrate.path: exit condition — reorder + insert, fieldId 'ref' survives 0 -> 2"):
+    val v1 = componentLang("ref: Ref, pct: Pct")
+    val v2 = componentLang("notes: Notes, pct: Pct, ref: Ref")
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal"), Cst.Leaf("pctVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty, Map.empty,
+      fieldRemap = Map("component" -> List(Right(Cst.Leaf("notesDefault")), Left("pct"), Left("ref"))))
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+
+    Migrate.path(mig, v2, term2, p1) match
+      case Right(Migrate.PathTransport.Transported(p2)) =>
+        p2.steps match
+          case List(Step.Field("component", _, 2, Some("ref"))) => ()
+          case other => fail(s"unexpected transported steps: $other")
+        assertEquals(p2.indices, List(2))
+      case other => fail(other.toString)
+
+  test("Migrate.path: ctor rename is applied, fieldId still resolves"):
+    val v1 = componentLang("ref: Ref, pct: Pct")
+    val v2 = Meta.parseFile("""language t {
+      |  fragment t {
+      |    sort Bar tree;
+      |    ctor part : Bar(ref: Ref, pct: Pct);
+      |    top Bar;
+      |  }
+      |}""".stripMargin).fold(e => fail(e), identity)
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal"), Cst.Leaf("pctVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+    val mig = LangMigration(v1.digest, v2.digest, ctorRenames = Map("component" -> "part"), arityChanges = Map.empty)
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+    Migrate.path(mig, v2, term2, p1) match
+      case Right(Migrate.PathTransport.Transported(p2)) =>
+        p2.steps match
+          case List(Step.Field("part", _, 0, Some("ref"))) => ()
+          case other => fail(s"unexpected transported steps: $other")
+      case other => fail(other.toString)
+
+  test("Migrate.path: a field with no remap keeps its position (arityChanges-only growth)"):
+    val v1 = componentLang("ref: Ref")
+    val v2 = componentLang("ref: Ref, pct: Pct")
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty,
+      arityChanges = Map("component" -> (2, Cst.Leaf("pctDefault"))))
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+    Migrate.path(mig, v2, term2, p1) match
+      case Right(Migrate.PathTransport.Transported(p2)) =>
+        p2.steps match
+          case List(Step.Field("component", _, 0, Some("ref"))) => ()
+          case other => fail(s"unexpected transported steps: $other")
+      case other => fail(other.toString)
+
+  test("Migrate.path: a deleted field is reported as Deleted, not silently retargeted"):
+    val v1 = componentLang("ref: Ref, pct: Pct")
+    val v2 = componentLang("notes: Notes, pct: Pct")
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal"), Cst.Leaf("pctVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty, Map.empty,
+      fieldRemap = Map("component" -> List(Right(Cst.Leaf("notesDefault")), Left("pct"))))
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+    assertEquals(Migrate.path(mig, v2, term2, p1), Right(Migrate.PathTransport.Deleted("ref")))
+
+  test("Migrate.path: a fieldId fanned out to multiple new positions is Ambiguous"):
+    val v1 = componentLang("ref: Ref, pct: Pct")
+    val v2 = componentLang("ref: Ref, refCopy: Ref2, pct: Pct")
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal"), Cst.Leaf("pctVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+    // "ref" fanned out into two new slots — a real (if unusual) migration authoring.
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty, Map.empty,
+      fieldRemap = Map("component" -> List(Left("ref"), Left("ref"), Left("pct"))))
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+    assertEquals(Migrate.path(mig, v2, term2, p1), Right(Migrate.PathTransport.Ambiguous("ref", List(0, 1))))
+
+  test("Migrate.path: a positional-only (no fieldId) step through a remapped ctor is a hard error"):
+    val v1 = componentLang("Ref, pct: Pct") // bare first arg: no fieldId
+    val v2 = componentLang("pct: Pct, Ref")
+    val term1 = Cst.Node("component", List(Cst.Leaf("refVal"), Cst.Leaf("pctVal")))
+    val p1 = SemanticPath.fromLegacyPath(v1, term1, List(0)).fold(e => fail(e), identity)
+    p1.steps match
+      case List(Step.Field("component", _, 0, None)) => ()
+      case other => fail(s"expected a fieldId-less step: $other")
+    val mig = LangMigration(v1.digest, v2.digest, Map.empty, Map.empty,
+      fieldRemap = Map("component" -> List(Left("pct"), Right(Cst.Leaf("refDefault")))))
+    val term2 = Migrate.term(mig, v1, v2, term1).fold(e => fail(e), identity)
+    assert(Migrate.path(mig, v2, term2, p1).swap.exists(_.contains("no fieldId to transport")))
