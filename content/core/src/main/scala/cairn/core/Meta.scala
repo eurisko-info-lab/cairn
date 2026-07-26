@@ -35,8 +35,8 @@ object Meta:
     sorts = List(SortDef("FragmentD", SortMode.Tree)),
     grammar = GrammarPart(
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
-        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by"),
-      puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$"),
+        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by", "provider"),
+      puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$", "="),
       identContExtra = "-",
       categories = List(
         CategorySpec("file", List(
@@ -70,7 +70,9 @@ object Meta:
             Elem.Tok("judgment"), Elem.AnyIdentLeaf, Elem.Tok("{"), Elem.Star(Elem.Cat("judgRule")), Elem.Tok("}"))),
           ConstructorSpec("topDecl", List(Elem.Tok("top"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
           ConstructorSpec("keyDecl", List(
-            Elem.Tok("key"), Elem.AnyIdentLeaf, Elem.Tok("by"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
+            Elem.Tok("key"), Elem.AnyIdentLeaf, Elem.Tok("by"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("providerDecl", List(
+            Elem.Tok("provider"), Elem.AnyIdentLeaf, Elem.Tok("="), Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
         CategorySpec("argList", List(
           ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.Cat("argDecl"), ","), Elem.Tok(")"))))),
         // Named form declared before bare (GrammarLint: an earlier alternative
@@ -133,6 +135,9 @@ object Meta:
         PrintRule("keyDecl", List(
           PrintSeg.Lit("key"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("by"),
           PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
+        PrintRule("providerDecl", List(
+          PrintSeg.Lit("provider"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("="),
+          PrintSeg.Space, PrintSeg.Lit("language"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
         PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
         PrintRule("argDeclNamed", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
         PrintRule("argDeclBare", List(PrintSeg.Field(0))),
@@ -339,6 +344,8 @@ object Meta:
       val sorts = List.newBuilder[SortDef]
       val ctors = List.newBuilder[CtorDef]
       val keys = List.newBuilder[KeyDef]
+      val providers = List.newBuilder[(String, String)]
+      val validations = List.newBuilder[Canon]
       var varCtor: Option[String] = None
       val keywords = List.newBuilder[String]
       val puncts = List.newBuilder[String]
@@ -426,6 +433,7 @@ object Meta:
             case Left(e)    => err ++= e
         case Cst.Node("topDecl", List(Cst.Leaf(t))) => top = Some(t)
         case Cst.Node("keyDecl", List(Cst.Leaf(sort), Cst.Leaf(field))) => keys += KeyDef(sort, field)
+        case Cst.Node("providerDecl", List(Cst.Leaf(alias), Cst.Leaf(langName))) => providers += (alias -> langName)
         case other => err ++= s"unknown item: ${other.render}; "
 
       if err.nonEmpty then Left(err.result())
@@ -446,7 +454,9 @@ object Meta:
         rewriteRules = rules.result(),
         judgments = judgments.result(),
         varCtor = varCtor,
-        keys = keys.result()))
+        keys = keys.result(),
+        providers = providers.result().toMap,
+        validations = validations.result()))
     case other => Left(s"not a fragment declaration: ${other.render}")
 
   def parseFragment(src: String): Either[String, Fragment] =
@@ -557,6 +567,7 @@ object Meta:
           else n("some", n("whereC", lst(ir.conditions.map(cstToPat))))) }))
     for t <- f.grammar.top do items += n("topDecl", leaf(t))
     for k <- f.keys do items += n("keyDecl", leaf(k.sort), leaf(k.keyField))
+    for (alias, langName) <- f.providers.toList.sortBy(_._1) do items += n("providerDecl", leaf(alias), leaf(langName))
     n("fragmentDecl", leaf(f.name),
       if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
       if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),

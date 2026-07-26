@@ -20,6 +20,7 @@ language meta {
     keyword where;
     keyword key;
     keyword by;
+    keyword provider;
     punct "{";
     punct "}";
     punct "(";
@@ -30,6 +31,7 @@ language meta {
     punct "=>";
     punct "|-";
     punct "$";
+    punct "=";
     identcont "-";
     syntax file += file : tok "language" anyident tok "{" star cat fragmentDecl tok "}";
     syntax file += surfaceFile : tok "surface" anyident tok "for" anyident tok "{" star cat fragmentDecl tok "}";
@@ -44,6 +46,7 @@ language meta {
     syntax item += judgmentDecl : tok "judgment" anyident tok "{" star cat judgRule tok "}";
     syntax item += topDecl : tok "top" anyident tok ";";
     syntax item += keyDecl : tok "key" anyident tok "by" anyident tok ";";
+    syntax item += providerDecl : tok "provider" anyident tok "=" tok "language" anyident tok ";";
     syntax argList += argList : tok "(" sepby1 cat argDecl "," tok ")";
     syntax argDecl += argDeclNamed : anyident tok ":" anyident;
     syntax argDecl += argDeclBare : anyident;
@@ -68,6 +71,7 @@ language meta {
     print judgmentDecl : lit "judgment" sp field 0 sp lit "{" nl indent sep 1 "\n" nl dedent lit "}";
     print topDecl : lit "top" sp field 0 lit ";";
     print keyDecl : lit "key" sp field 0 sp lit "by" sp field 1 lit ";";
+    print providerDecl : lit "provider" sp field 0 sp lit "=" sp lit "language" sp field 1 lit ";";
     print argList : lit "(" sep 0 ", " lit ")";
     print argDeclNamed : field 0 lit ":" sp field 1;
     print argDeclBare : field 0;
