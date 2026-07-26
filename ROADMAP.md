@@ -35,7 +35,7 @@ thinner than the phase's full ambition · ⬜ not started.
 | PR20 | Durable distributed workspaces: content-addressed drafts, signed review/approval/handoff, restart-safe offline revisions, rebase, and verified replication | ✅ |
 | PR21 | Language Studio: atomic language/capability projects edited through ΔMeta and ΔGrammar, with whole-graph revision validation | ✅ |
 | PR22 | Proof and Projection Studio: goals, checked derivations/proof terms/certificates, Rosetta output evidence, and Lean/HVM agreement envelopes | ✅ |
-| PR23 | Self-hosting, artifact-only startup, performance, and audit hardening | ⬜ next |
+| PR23 | Artifact-only application startup: one root digest, recursive dependency installation/audit, language reconstruction, and exact capability/entry checks | ✅ |
 
 Studio is the generated interaction surface of a `LanguageCapabilities`
 bundle; SDS is its first complete domain inhabitant. It emits ordinary ΔL,

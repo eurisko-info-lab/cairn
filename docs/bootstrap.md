@@ -79,6 +79,23 @@ semantics vs surfaces under `languages/<name>/surfaces/`; meta itself is now
 split the same way, into composition IR (`meta.cairn`) and grammar vocabulary
 (`grammar.cairn`) — the primordial meta-language/grammar-language pair.
 
+## Artifact-only application root
+
+Once an application manifest and its graph are present in a CAS, startup needs
+only its root digest:
+
+```text
+cairn app install <root-digest> <source-cas> <local-cas>
+cairn app start   <root-digest> <local-cas>
+```
+
+The install path discovers dependencies from artifact bodies, verifies bytes
+against every digest, and copies the complete closure. Startup reconstructs
+languages from fragment and grammar artifacts, resolves each
+`LanguageCapabilities` bundle exactly, checks typed entries, and audits the
+closure. These commands return before the legacy example composition branch is
+built; the CAS path is only the storage endpoint, not application identity.
+
 What stays host-backed:
 
 - the initial Scala seed (`Meta.fragment`, STLC fragment constructors) for

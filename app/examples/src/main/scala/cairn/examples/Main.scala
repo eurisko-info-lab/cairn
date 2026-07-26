@@ -2,8 +2,10 @@ package cairn.examples
 import cairn.runtime.EffectContexts
 
 import cairn.runtime.PackLoader
+import cairn.runtime.ArtifactApplicationResolver
 import cairn.surface.Cli
-import cairn.systemhandler.Filesystem
+import cairn.systemhandler.{DiskCas, Filesystem}
+import cairn.kernel.Digest
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
 
@@ -12,6 +14,33 @@ import java.nio.file.Path
   * layer stays domain-free, §4.11).
   */
 @main def Main(args: String*): Unit =
+    // Artifact-only application path: resolve/install before constructing any
+    // example wrappers or host language/port maps. The CAS location is an I/O
+    // endpoint, not application assembly; the root digest supplies all of it.
+    args.toList match
+      case List("app", "start", rootText, storeText) =>
+        val store = DiskCas(Path.of(storeText))
+        val resolved = for
+          root <- Digest.parse(rootText)
+          app <- ArtifactApplicationResolver(store).resolve(root)
+        yield app
+        resolved match
+          case Right(app) =>
+            println(s"application ${app.manifest.name} ${app.root.hex}")
+            app.languages.keys.toList.sorted.foreach(n => println(s"language $n ${app.languages(n).language.digest.hex}"))
+            app.entries.keys.toList.sorted.foreach(n => println(s"entry $n ${app.entries(n).digest.hex}"))
+          case Left(error) => System.err.println(s"error: $error"); sys.exit(1)
+        return
+      case List("app", "install", rootText, sourceText, storeText) =>
+        val installed = for
+          root <- Digest.parse(rootText)
+          graph <- ArtifactApplicationResolver(DiskCas(Path.of(storeText))).install(root, DiskCas(Path.of(sourceText)))
+        yield graph
+        installed match
+          case Right(graph) => println(s"installed ${graph.size} artifacts from root $rootText")
+          case Left(error) => System.err.println(s"error: $error"); sys.exit(1)
+        return
+      case _ => ()
     // Composition roots use narrow deployment policies (not allow-all bootstrap).
     val workspaceCtx = EffectContexts.forPackLoader()
     val packLoader = PackLoader(workspaceCtx)
