@@ -205,12 +205,11 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
     * On ledger failure after refs, journal stays at phase=publish for recovery.
     *
     * If `branch` carries a pending [[cairn.core.Merge.Conflict]] ref
-    * (`conflictRefPath`), this accept is treated as resolving it: the
-    * conflict's digest is folded into this accept's provenance inputs, so
-    * the resolution is not just an ordinary commit that happens to supersede
-    * the conflict marker — [[Provenance.why]] on the resulting head surfaces
-    * the resolved conflict as a direct lineage input, permanently, even
-    * after [[clearConflict]] removes the branch's live ref.
+    * (`conflictRefPath`), only a validated ΔConflict artifact may resolve it.
+    * The conflict's digest is folded into that accept's provenance inputs, so
+    * [[Provenance.why]] on the resulting head surfaces the resolved conflict
+    * as a direct lineage input even after [[clearConflict]] removes the live
+    * ref. An ordinary commit fails closed instead of selecting a side.
     */
   private[runtime] def transactionalAccept(
       branch: String,
@@ -225,6 +224,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       extraPuts: List[Artifact] = Nil,
       gateJudgment: Option[String] = None,
       acceptanceEvidence: Option[Digest] = None,
+      conflictResolution: Option[Artifact] = None,
   ): Either[String, BranchManifest] =
     if module.digest != vcs.result then
       Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
@@ -232,7 +232,9 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       val resolvedConflict =
         if refsExists(conflictRefPath(branch)) then Some(Digest(refsRead(conflictRefPath(branch)).trim))
         else None
-      val extraKeys = extraPuts.map(putArt)
+      if resolvedConflict.nonEmpty && conflictResolution.isEmpty then
+        return Left("accept rejected: branch has an unresolved conflict; submit a validated ΔConflict resolution")
+      val extraKeys = (extraPuts ++ conflictResolution.toList).map(putArt)
       val vcsKey = putArt(vcs.artifact)
       val modKey = putArt(module.artifact)
       val provDig =
@@ -405,6 +407,10 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
     else
       val d = Digest(refsRead(p).trim)
       getByDigest(d).map(a => BranchManifest.fromCanon(a.body)).fold(e => throw RuntimeException(e), identity)
+
+  private[runtime] def pendingConflict(branch: String): Option[Digest] =
+    if refsExists(conflictRefPath(branch)) then Some(Digest(refsRead(conflictRefPath(branch)).trim))
+    else None
 
   /** Append: new head goes to history head; manifest itself stored in CAS.
     * Optional causal digests are recorded on the manifest. When

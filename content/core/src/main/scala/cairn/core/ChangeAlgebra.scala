@@ -192,6 +192,25 @@ object Merge:
       if overlap.nonEmpty then s"merge conflict on {${overlap.toList.map(_.render).sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
       else s"merge conflict between ${changeA.short} and ${changeB.short}: ${witness.map(_.render).getOrElse("order-dependent result")}"
 
+  object Conflict:
+    /** Decode the actionable portion of a persisted conflict. The original
+      * artifact digest remains the causal identity; witnesses explain why a
+      * conflict exists but are not executable resolution input. */
+    def fromArtifact(artifact: Artifact): Either[String, Conflict] =
+      if artifact.kind != ArtifactKind.ChangeSet then Left("not a merge-conflict artifact")
+      else artifact.body match
+        case Canon.CTag("merge-conflict", fields) =>
+          try
+            val overlap = fields.field("overlap").asList.foldRight[Either[String, List[SemanticLocation]]](Right(Nil)) {
+              (raw, acc) => for location <- SemanticLocation.fromCanon(raw); rest <- acc yield location :: rest
+            }
+            overlap.map(locations => Conflict(
+              locations.toSet,
+              Digest(fields.field("changeA").asStr),
+              Digest(fields.field("changeB").asStr)))
+          catch case e: Exception => Left(s"invalid merge-conflict artifact: ${e.getMessage}")
+        case _ => Left("not a merge-conflict artifact")
+
   /** Access-compatible branches merge automatically — but access analysis
     * is not a proof of commutation: a whole-module domain gate (SDS's
     * percentage-sum check, LanguageChecker's structural gate, a judgment

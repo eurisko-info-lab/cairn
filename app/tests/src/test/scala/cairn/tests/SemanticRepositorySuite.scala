@@ -5,7 +5,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.systemhandler.{CasAdminEffects, CasEffects, DiskCas, Provenance, Keypair, Node}
-import cairn.runtime.Branches
+import cairn.runtime.{Branches, ConflictResolutionOutcome}
 import java.nio.file.Files
 
 /** End-to-end semantic repository spine: Branches + ΔL + ChangeAlgebra +
@@ -417,15 +417,38 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(Left(c)) => c
       case Right(Right(_)) => fail("expected conflict")
       case Left(e) => fail(e)
-    // Resolve by hand: an ordinary tip commit on the same branch.
+    // An unrelated ordinary commit may no longer silently clear the marker.
     val resolving = parseChange("{ replace a = false ; }")
     val tip = SemanticRepository.tipAfter(lang, m0, resolving).fold(e => fail(e), identity)
-    val manifest = branches.commitTip("main", accept(tip))
+    intercept[RuntimeException](branches.commitTip("main", accept(tip)))
+
+    val resolutionLanguage = ConflictDelta.deltaOf(lang).fold(es => fail(es.mkString(", ")), identity)
+    val deferredProgram = Parser.parse(resolutionLanguage.grammar, "{ defer \"definition:a\"; }")
+      .fold(e => fail(e), identity)
+    branches.resolveConflict(lang, "main", m0, cA, cB, deferredProgram, AcceptancePolicy.open) match
+      case Right(ConflictResolutionOutcome.Deferred(artifact, unresolved)) =>
+        assertEquals(artifact.kind, ArtifactKind.ConflictResolution)
+        assert(unresolved.exists(_.disposition == ConflictDelta.Disposition.Deferred))
+        assert(unresolved.exists(_.disposition == ConflictDelta.Disposition.Pending))
+        assertEquals(branches.load("main").head, None)
+      case other => fail(s"expected deferred resolution, got $other")
+
+    val program = Parser.parse(resolutionLanguage.grammar, "{ accept-left; }").fold(e => fail(e), identity)
+    val (manifest, resolutionArtifact) =
+      branches.resolveConflict(lang, "main", m0, cA, cB, program, AcceptancePolicy.open) match
+        case Right(ConflictResolutionOutcome.Accepted(m, artifact)) => (m, artifact)
+        case other => fail(s"expected accepted resolution, got $other")
+    assert(CasEffects.contains(cas, resolutionArtifact.digest, casCtx).contains(true))
+    assertEquals(branches.headModule("main").toOption.flatMap(_.get("a")), Some(Stlc.fls))
     val hops = Provenance.why(dir.resolve("cas"), manifest.head.get.valueHash, casCtx)
       .fold(e => fail(e), identity)
     assert(
       hops.exists(_.record.inputs.contains(conflict.artifact.digest)),
       s"resolving accept's provenance does not cite the resolved conflict: $hops")
+    val causal = Set(
+      Artifact(ArtifactKind.ChangeSet, Cst.toCanon(cA)).digest,
+      Artifact(ArtifactKind.ChangeSet, Cst.toCanon(cB)).digest)
+    assert(hops.exists(h => causal.subsetOf(h.record.inputs.toSet)))
 
   test("ValidatedTip forgery: claimed tip digest must match apply"):
     val cA = parseChange("{ replace a = false ; }")

@@ -7,6 +7,10 @@ import cairn.systeminterface.PackAccess
 import cairn.systemhandler.{EffectContext, Ed25519, Keypair}
 import java.nio.file.Path
 
+enum ConflictResolutionOutcome:
+  case Deferred(resolution: Artifact, unresolved: List[ConflictDelta.Unresolved])
+  case Accepted(manifest: BranchManifest, resolution: Artifact)
+
 /** Semantic acceptance façade over a [[BranchRefStore]]: named branch refs,
   * with every head advance either ΔL-replayed and policy-checked
   * ([[commitTip]] / [[merge]] / [[mergeBranches]]) or an explicit,
@@ -891,6 +895,56 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     ).map(Right(_))
           }
     yield out
+
+  /** Interpret a ΔConflict program into an ordinary validated ΔL change.
+    * Partial programs persist their explicit deferred/split remainder but do
+    * not advance the head. Complete programs pass the same constitution gate
+    * as any other accept and cite both conflicting changes in provenance. */
+  def resolveConflict(
+      language: ComposedLanguage,
+      branch: String,
+      base: Module,
+      left: Cst,
+      right: Cst,
+      program: Cst,
+      policy: AcceptancePolicy,
+      constitution: Option[AcceptanceConstitution] = None,
+      model: ChangeModel = ChangeModel.default,
+  ): Either[String, ConflictResolutionOutcome] =
+    for
+      conflictDigest <- refs.pendingConflict(branch).toRight(s"branch '$branch' has no unresolved conflict")
+      conflictArtifact <- refs.getByDigest(conflictDigest)
+      conflict <- Merge.Conflict.fromArtifact(conflictArtifact)
+      governing = constitution.getOrElse(AcceptanceConstitution.fromPolicy(policy, model.digest))
+      facts <- acceptanceFacts(branch, None, None)
+      resolution <- ConflictDelta.resolve(
+        language, base, conflict, left, right, program, model, policy.gate, governing, facts,
+        conflictDigest = Some(conflictDigest))
+      outcome <-
+        if resolution.unresolved.nonEmpty then
+          val artifact = resolution.artifact
+          refs.putArt(artifact)
+          Right(ConflictResolutionOutcome.Deferred(artifact, resolution.unresolved))
+        else
+          val evidence = AcceptanceEvidence(
+            language.digest, base.digest, Some(resolution.validatedChange.artifact.digest),
+            resolution.result.digest, policy.digest, policy.gate.judgment,
+            model.digest, policy.gate.descriptor, policy.gate.providers,
+            Some(governing.digest), facts.domainAgreement, facts.certificates.map(_.digest),
+            facts.authorities.toList.sorted, facts.migration, facts.publicationRequested)
+          refs.transactionalAccept(
+            branch, resolution.result, resolution.validatedChange,
+            parents = refs.load(branch).head.toList.map(_.valueHash),
+            causalHistoryRoot = Some(base.digest), publish = None,
+            provenanceParents = base.digest :: resolution.causalChanges,
+            provenanceTool = "conflict-resolution",
+            extraPuts = List(base.artifact, governing.artifact, evidence.artifact),
+            gateJudgment = Option.when(policy.gate.judgment.nonEmpty)(policy.gate.judgment),
+            acceptanceEvidence = Some(evidence.digest),
+            conflictResolution = Some(resolution.artifact)).map { manifest =>
+              ConflictResolutionOutcome.Accepted(manifest, resolution.artifact)
+            }
+    yield outcome
 
   /** Put a certificate artifact and append its digest to the branch manifest
     * `certificates` list (linked CAS reference from branch state).

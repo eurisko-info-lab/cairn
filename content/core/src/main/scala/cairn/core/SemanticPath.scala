@@ -136,7 +136,28 @@ object SemanticPath:
       "language" -> Canon.CStr(p.language.hex),
       "rootSort" -> Canon.CStr(p.rootSort),
       "steps" -> Canon.CList(p.steps.map(_.canon)),
-      "focusSort" -> Canon.CStr(p.focusSort))
+      "focusSort" -> Canon.CStr(p.focusSort),
+      "indices" -> Canon.CList(p.indices.map(Canon.CInt(_))))
+
+  /** Decode a path previously emitted by [[canon]]. This restores a
+    * Kernel-validated value from a content-addressed artifact; callers must
+    * still verify that the enclosing artifact digest is the referenced one.
+    */
+  def fromCanon(c: Canon): Either[String, SemanticPath] =
+    try
+      val m = c.asMap
+      for
+        steps <- m("steps").asList.foldRight[Either[String, List[Step]]](Right(Nil)) { (raw, acc) =>
+          for step <- Step.fromCanon(raw); rest <- acc yield step :: rest
+        }
+      yield
+        val indices = m.get("indices").map(_.asList.map(_.asInt.toInt)).getOrElse(
+          steps.collect {
+            case Step.Field(_, _, position, _) => position
+            case Step.Index(position)          => position
+          })
+        mint(Digest(m("language").asStr), m("rootSort").asStr, steps, m("focusSort").asStr, indices)
+    catch case e: Exception => Left(s"invalid SemanticPath: ${e.getMessage}")
 
   private def mint(
       language: Digest, rootSort: String, steps: List[Step], focusSort: String, indices: List[Int],

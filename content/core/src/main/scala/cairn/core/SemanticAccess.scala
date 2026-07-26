@@ -24,6 +24,14 @@ enum SemanticLocation:
     case Subtree(n, path) => s"subtree:$n/${path.steps.map(SemanticLocation.stepRender).mkString("/")}"
 
 object SemanticLocation:
+  def fromCanon(c: Canon): Either[String, SemanticLocation] = c match
+    case Canon.CTag("binding", Canon.CStr(name)) => Right(Binding(name))
+    case Canon.CTag("whole-definition", Canon.CStr(name)) => Right(WholeDefinition(name))
+    case Canon.CTag("subtree", fields) =>
+      try SemanticPath.fromCanon(fields.field("path")).map(Subtree(fields.field("name").asStr, _))
+      catch case e: Exception => Left(s"invalid subtree location: ${e.getMessage}")
+    case other => Left(s"invalid semantic location: $other")
+
   private def sameStep(a: SemanticPath.Step, b: SemanticPath.Step): Boolean = (a, b) match
     case (SemanticPath.Step.Field(ac, _, ap, af), SemanticPath.Step.Field(bc, _, bp, bf)) =>
       ac == bc && ((af, bf) match
