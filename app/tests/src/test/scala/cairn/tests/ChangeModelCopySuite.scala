@@ -157,6 +157,24 @@ class ChangeModelCopySuite extends munit.FunSuite:
         assertEquals(vcs.claim.changeModel, model2.digest)
       case Left(c) => fail(s"expected the disjoint copy changes to merge under model2: ${c.render}")
 
+  test("SemanticRepository.commit/tipAfter: a custom-model change works when the model is supplied, and fails before apply when it isn't"):
+    val base = Module(List("a" -> Stlc.tru))
+    val ch = parseChange("{ copy a to b ; }")
+    SemanticRepository.commit(lang, base, ch, model2) match
+      case Right((m, vcs)) =>
+        assertEquals(m.get("b"), Some(Stlc.tru))
+        assertEquals(vcs.claim.changeModel, model2.digest)
+      case Left(e) => fail(s"expected commit under model2 to succeed: $e")
+    SemanticRepository.commit(lang, base, ch) match
+      case Left(e) => assert(e.contains("unrecognized operation"), e)
+      case Right(_) => fail("commit under the default model must reject `copy` before apply")
+    SemanticRepository.tipAfter(lang, base, ch, model2) match
+      case Right(vt) => assertEquals(vt.tip.get("b"), Some(Stlc.tru))
+      case Left(e) => fail(s"expected tipAfter under model2 to succeed: $e")
+    SemanticRepository.tipAfter(lang, base, ch) match
+      case Left(e) => assert(e.contains("unrecognized operation"), e)
+      case Right(_) => fail("tipAfter under the default model must reject `copy` before apply")
+
   test("Merge.threeWay: the same `copy` changes fail under the default model with an unrecognized-operation witness, not a false footprint pass"):
     val base = Module(List("a" -> Stlc.tru, "c" -> Stlc.tru))
     val changeA = parseChange("{ copy a to b ; }")

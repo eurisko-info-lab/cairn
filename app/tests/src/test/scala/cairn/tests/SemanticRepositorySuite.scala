@@ -630,3 +630,66 @@ class SemanticRepositorySuite extends munit.FunSuite:
         assertEquals(merged.get("b"), Some(Stlc.tru))
       case Right(SemanticRepository.Outcome.Conflicted(c)) => fail(c.render)
       case Left(e) => fail(e)
+
+  // -- PR10: a migration's source-side merge and post-migration apply can use distinct ChangeModels --
+
+  private val copyOp = ChangeOpDef(
+    name = "copy",
+    params = List(
+      ChangeParam("from", ChangeParamKind.NameK),
+      ChangeParam("to", ChangeParamKind.NameK, precedingToken = Some("to"))),
+    program = List(
+      ChangeStep.Check(BoolExpr.IsDefined(ValueRef.Param(0)), RejectionSpec.NotDefinedR("copy", ValueRef.Param(0))),
+      ChangeStep.Check(BoolExpr.Not(BoolExpr.IsDefined(ValueRef.Param(1))), RejectionSpec.AlreadyDefinedR("copy", ValueRef.Param(1))),
+      ChangeStep.Bind("term", ChangeQuery.ReadTerm(ValueRef.Param(0))),
+      ChangeStep.Mutate(Mutation.InsertDef(ValueRef.Param(1), ValueRef.Bound("term")))),
+    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0), FootprintExpr.NameOf(1))),
+    inverse = InverseExpr("remove", List(InverseArg.Copy(1))),
+    printSegs = List(
+      PrintSeg.Lit("copy"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+      PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";")))
+
+  test("SemanticRepository.integrate: a migration can use distinct source and target ChangeModels"):
+    val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get
+    val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)
+    // Source model and target model both add a "copy" op under the SAME
+    // name/params (so the migrated changeset's retagged "copy" tag is
+    // recognized on both sides), but with DIFFERENT footprint semantics —
+    // a genuinely distinct ChangeModel identity per side, not the same
+    // model reused twice.
+    val sourceModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val targetModel = ChangeModel(ChangeModel.default.operations :+ copyOp.copy(footprint = FootprintExpr.NameOf(1)))
+    assert(sourceModel.digest != targetModel.digest, "the two models must have distinct identities")
+
+    val base = Module(List("x" -> Stlc.tru, "y" -> Stlc.fls))
+    val dlSrc = Delta.deltaOf(lang, sourceModel).toOption.get
+    def parseSrc(src: String): Cst = Parser.parse(dlSrc.grammar, src).fold(e => fail(e), identity)
+    val cA = parseSrc("{ copy x to xCopy ; }")
+    val cB = parseSrc("{ replace y = true ; }")
+
+    SemanticRepository.integrate(lang, base, cA, cB, Some(mig -> v2), model = sourceModel, targetModel = targetModel) match
+      case Right(SemanticRepository.Outcome.Accepted(merged, vcs, _, migrated)) =>
+        assert(migrated)
+        assertEquals(vcs.language, v2.digest)
+        assertEquals(vcs.claim.changeModel, targetModel.digest, "post-migration apply must be stamped with the TARGET model, not the source model")
+        assertEquals(merged.get("xCopy"), Some(Stlc.tru))
+        assertEquals(merged.get("y"), Some(Stlc.tru))
+      case Right(SemanticRepository.Outcome.Conflicted(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  test("SemanticRepository.integrate: omitting the target model rejects a migrated change the source model alone would accept"):
+    val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get
+    val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)
+    val sourceModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val base = Module(List("x" -> Stlc.tru, "y" -> Stlc.fls))
+    val dlSrc = Delta.deltaOf(lang, sourceModel).toOption.get
+    def parseSrc(src: String): Cst = Parser.parse(dlSrc.grammar, src).fold(e => fail(e), identity)
+    val cA = parseSrc("{ copy x to xCopy ; }")
+    val cB = parseSrc("{ replace y = true ; }")
+
+    // targetModel left at its default (ChangeModel.default, no `copy` op):
+    // the migrated changeset still carries a retagged `copy` item, which
+    // the default target model doesn't recognize.
+    SemanticRepository.integrate(lang, base, cA, cB, Some(mig -> v2), model = sourceModel) match
+      case Left(e) => assert(e.contains("unrecognized operation"), e)
+      case other => fail(s"expected the post-migration apply to reject the unrecognized 'copy' op under the default target model, got: $other")

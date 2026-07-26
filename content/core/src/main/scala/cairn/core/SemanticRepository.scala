@@ -81,20 +81,24 @@ object SemanticRepository:
       language: ComposedLanguage,
       tip: Module,
       change: Cst,
+      model: ChangeModel = ChangeModel.default,
   ): Either[String, (Module, Delta.ValidatedChangeSet)] =
-    Delta.apply(language, tip, change)
+    ChangeAlgebra.checkRecognized(language, change, model).flatMap { _ =>
+      Delta.apply(language, tip, change, model)
+    }
 
   /** Mint a [[ValidatedTip]] by applying `change` to `base`. */
   def tipAfter(
       language: ComposedLanguage,
       base: Module,
       change: Cst,
+      model: ChangeModel = ChangeModel.default,
   ): Either[String, ValidatedTip] =
-    commit(language, base, change).map((tip, vcs) => ValidatedTip.mint(base, tip, change, vcs))
+    commit(language, base, change, model).map((tip, vcs) => ValidatedTip.mint(base, tip, change, vcs))
 
   /** Footprint commutation (M16): disjoint writes ⇒ reorderable. */
-  def commutes(language: ComposedLanguage, a: Cst, b: Cst): Boolean =
-    ChangeAlgebra.commutes(language, a, b)
+  def commutes(language: ComposedLanguage, a: Cst, b: Cst, model: ChangeModel = ChangeModel.default): Boolean =
+    ChangeAlgebra.commutes(language, a, b, model)
 
   /** Three-way semantic merge over change histories (M17). Optional
     * [[ModuleGate]] re-checks the merged module (SDS / Search / …).
@@ -105,8 +109,9 @@ object SemanticRepository:
       changeA: Cst,
       changeB: Cst,
       gate: ModuleGate = ModuleGate.passthrough,
+      model: ChangeModel = ChangeModel.default,
   ): Either[Merge.Conflict, (Module, Delta.ValidatedChangeSet)] =
-    Merge.threeWay(language, base, changeA, changeB, gate)
+    Merge.threeWay(language, base, changeA, changeB, gate, model)
 
   /** Transport a module across a language migration (M18), then require an
     * optional [[ModuleGate]] on the transported module.
@@ -144,8 +149,10 @@ object SemanticRepository:
       changeB: Cst,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
       gate: ModuleGate = ModuleGate.passthrough,
+      model: ChangeModel = ChangeModel.default,
+      targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Outcome] =
-    merge(language, base, changeA, changeB, gate) match
+    merge(language, base, changeA, changeB, gate, model) match
       case Left(conflict) => Right(Outcome.Conflicted(conflict))
       case Right((merged, vcs)) =>
         migration match
@@ -156,9 +163,11 @@ object SemanticRepository:
               // Transport base without re-running the merge gate; gate the
               // post-migration tip instead (module shape may have changed).
               Migrate.module(mig, language, target, base).flatMap { base2 =>
-                Delta.apply(target, base2, ch2).flatMap { (mod2, vcs2) =>
-                  ModuleGate.require(gate, mod2).map(_ =>
-                    Outcome.Accepted(mod2, vcs2, ch2, migrated = true))
+                ChangeAlgebra.checkRecognized(target, ch2, targetModel).flatMap { _ =>
+                  Delta.apply(target, base2, ch2, targetModel).flatMap { (mod2, vcs2) =>
+                    ModuleGate.require(gate, mod2).map(_ =>
+                      Outcome.Accepted(mod2, vcs2, ch2, migrated = true))
+                  }
                 }
               }
             }
@@ -169,7 +178,9 @@ object SemanticRepository:
       ours: ValidatedTip,
       theirs: ValidatedTip,
       migration: Option[(LangMigration, ComposedLanguage)] = None,
+      model: ChangeModel = ChangeModel.default,
+      targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Outcome] =
     if ours.baseDigest != theirs.baseDigest then
       Left(s"branch tips do not share a base: ${ours.baseDigest.short} vs ${theirs.baseDigest.short}")
-    else integrate(language, ours.base, ours.change, theirs.change, migration)
+    else integrate(language, ours.base, ours.change, theirs.change, migration, model = model, targetModel = targetModel)
