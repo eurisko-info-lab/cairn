@@ -35,7 +35,7 @@ object Meta:
     sorts = List(SortDef("FragmentD", SortMode.Tree)),
     grammar = GrammarPart(
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
-        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where"),
+        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by"),
       puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$"),
       identContExtra = "-",
       categories = List(
@@ -68,7 +68,9 @@ object Meta:
             Elem.Cat("pat"), Elem.Tok(";"))),
           ConstructorSpec("judgmentDecl", List(
             Elem.Tok("judgment"), Elem.AnyIdentLeaf, Elem.Tok("{"), Elem.Star(Elem.Cat("judgRule")), Elem.Tok("}"))),
-          ConstructorSpec("topDecl", List(Elem.Tok("top"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
+          ConstructorSpec("topDecl", List(Elem.Tok("top"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("keyDecl", List(
+            Elem.Tok("key"), Elem.AnyIdentLeaf, Elem.Tok("by"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
         CategorySpec("argList", List(
           ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.Cat("argDecl"), ","), Elem.Tok(")"))))),
         // Named form declared before bare (GrammarLint: an earlier alternative
@@ -128,6 +130,9 @@ object Meta:
           PrintSeg.Newline, PrintSeg.IndentIn, PrintSeg.SepFields(1, "\n"),
           PrintSeg.Newline, PrintSeg.IndentOut, PrintSeg.Lit("}"))),
         PrintRule("topDecl", List(PrintSeg.Lit("top"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
+        PrintRule("keyDecl", List(
+          PrintSeg.Lit("key"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("by"),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
         PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
         PrintRule("argDeclNamed", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
         PrintRule("argDeclBare", List(PrintSeg.Field(0))),
@@ -333,6 +338,7 @@ object Meta:
         case _ => Nil
       val sorts = List.newBuilder[SortDef]
       val ctors = List.newBuilder[CtorDef]
+      val keys = List.newBuilder[KeyDef]
       var varCtor: Option[String] = None
       val keywords = List.newBuilder[String]
       val puncts = List.newBuilder[String]
@@ -419,6 +425,7 @@ object Meta:
             case Right(irs) => judgments += JudgmentDef(jn, irs)
             case Left(e)    => err ++= e
         case Cst.Node("topDecl", List(Cst.Leaf(t))) => top = Some(t)
+        case Cst.Node("keyDecl", List(Cst.Leaf(sort), Cst.Leaf(field))) => keys += KeyDef(sort, field)
         case other => err ++= s"unknown item: ${other.render}; "
 
       if err.nonEmpty then Left(err.result())
@@ -438,7 +445,8 @@ object Meta:
           identContExtra = identCont),
         rewriteRules = rules.result(),
         judgments = judgments.result(),
-        varCtor = varCtor))
+        varCtor = varCtor,
+        keys = keys.result()))
     case other => Left(s"not a fragment declaration: ${other.render}")
 
   def parseFragment(src: String): Either[String, Fragment] =
@@ -548,6 +556,7 @@ object Meta:
           if ir.conditions.isEmpty then n("none")
           else n("some", n("whereC", lst(ir.conditions.map(cstToPat))))) }))
     for t <- f.grammar.top do items += n("topDecl", leaf(t))
+    for k <- f.keys do items += n("keyDecl", leaf(k.sort), leaf(k.keyField))
     n("fragmentDecl", leaf(f.name),
       if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
       if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),

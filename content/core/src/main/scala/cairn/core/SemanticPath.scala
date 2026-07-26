@@ -66,12 +66,19 @@ object SemanticPath:
     )
     /** The child at `position` of a `list`/`some`/`none` wrapper node
       * (Star/Opt/SepBy1 grammar productions) — sort-preserving, no
-      * constructor involved. Not a keyed selector: this is the honest
-      * positional equivalent of what wrapper-node indexing already does
-      * today; resolving a list element by a key match against a field
-      * (e.g. SDS's mixture components by `Ref`) is future work.
+      * constructor involved. Not a keyed selector — see [[KeyedElement]]
+      * for that.
       */
     case Index(position: Int)
+    /** The single element of a `list` wrapper node whose declared key field
+      * ([[cairn.kernel.KeyDef]], `key <elementSort> by <keyField>;`) equals
+      * `keyValue` — identity-addressed, not positional (SDS's mixture
+      * components by `ref`, e.g.). No position witness at all: unlike
+      * [[Field]], there's nothing to cache — resolution always scans by
+      * value, and a duplicate or missing key is a structured failure, never
+      * a guess.
+      */
+    case KeyedElement(elementSort: String, keyField: String, keyValue: String)
 
     def canon: Canon = this match
       case Field(ctor, label, position, fieldId) =>
@@ -82,6 +89,11 @@ object SemanticPath:
           "fieldId" -> fieldId.fold(Canon.CTag("none", Canon.CInt(0)))(f => Canon.CTag("some", Canon.CStr(f)))))
       case Index(position) =>
         Canon.CTag("index", Canon.cmap("position" -> Canon.CInt(position)))
+      case KeyedElement(elementSort, keyField, keyValue) =>
+        Canon.CTag("keyedElement", Canon.cmap(
+          "elementSort" -> Canon.CStr(elementSort),
+          "keyField" -> Canon.CStr(keyField),
+          "keyValue" -> Canon.CStr(keyValue)))
 
   object Step:
     def fromCanon(c: Canon): Either[String, Step] = c match
@@ -97,6 +109,8 @@ object SemanticPath:
         Right(Step.Field(m.field("ctor").asStr, label, m.field("position").asInt.toInt, fieldId))
       case Canon.CTag("index", m) =>
         Right(Step.Index(m.field("position").asInt.toInt))
+      case Canon.CTag("keyedElement", m) =>
+        Right(Step.KeyedElement(m.field("elementSort").asStr, m.field("keyField").asStr, m.field("keyValue").asStr))
       case other => Left(s"unknown SemanticPath step: $other")
 
   /** Unchecked claim about a path into a term — decode input, never trust
@@ -175,6 +189,47 @@ object SemanticPath:
               }
     case Cst.Leaf(x) => Left(s"path descends into leaf '$x'")
 
+  /** Resolve a [[Step.KeyedElement]] hop: `t` must be a `list` wrapper node;
+    * exactly one child, built by the sole constructor whose `.sort` is
+    * `elementSort`, may have its `keyField`-identified argument equal to
+    * `keyValue`. Requires the language to have declared `elementSort`'s key
+    * as exactly `keyField` (a same-commit consistency check, same posture
+    * as [[Step.Field.label]]) — zero matches, 2+ matches (duplicate key),
+    * and a mismatched/missing key declaration are all structured failures,
+    * never a guess. Returns the matched child and its list position (for
+    * `indices` tracking, same as [[Step.Index]]).
+    */
+  private def stepKeyedElement(
+      language: ComposedLanguage, t: Cst, elementSort: String, keyField: String, keyValue: String,
+  ): Either[String, (Cst, Int)] =
+    language.keys.get(elementSort) match
+      case None =>
+        Left(s"SemanticPath: sort '$elementSort' has no declared key (missing 'key $elementSort by ...;')")
+      case Some(KeyDef(_, declaredField)) if declaredField != keyField =>
+        Left(s"SemanticPath: sort '$elementSort''s declared key field is '$declaredField', not '$keyField'")
+      case Some(_) =>
+        language.constructors.values.filter(_.sort == elementSort).toList match
+          case List(cd) =>
+            cd.fieldIds.indexOf(Some(keyField)) match
+              case -1 => Left(s"SemanticPath: ctor '${cd.name}' for sort '$elementSort' has no field '$keyField'")
+              case keyPos =>
+                t match
+                  case Cst.Node("list", children) =>
+                    val matches = children.zipWithIndex.collect {
+                      case (Cst.Node(actualCtor, kids), i)
+                          if actualCtor == cd.name && kids.lift(keyPos).contains(Cst.Leaf(keyValue)) => i
+                    }
+                    matches match
+                      case List(i) => Right((children(i), i))
+                      case Nil => Left(s"SemanticPath: no '$elementSort' with $keyField='$keyValue'")
+                      case many =>
+                        Left(s"SemanticPath: ${many.length} '$elementSort' elements with " +
+                          s"$keyField='$keyValue' (duplicate key)")
+                  case Cst.Node(c, _) => Left(s"SemanticPath: KeyedElement is not legal at '$c' (expected a list)")
+                  case Cst.Leaf(x)    => Left(s"SemanticPath: KeyedElement descends into leaf '$x'")
+          case Nil  => Left(s"SemanticPath: no constructor declares sort '$elementSort'")
+          case many => Left(s"SemanticPath: sort '$elementSort' has ${many.length} constructors (ambiguous)")
+
   /** The only way to obtain a [[SemanticPath]] from an untrusted [[Claim]]:
     * walk `root` per `claim.steps` from `claim.rootSort`, checking at each
     * step that (a) the node encountered matches `Field`'s claimed
@@ -208,6 +263,11 @@ object SemanticPath:
           stepField(language, t, Some(ctor), label, fieldId, pos).flatMap { (childSort, child, resolvedPos) =>
             go(child, childSort, rest, idx :+ resolvedPos).map((s, i, tail) =>
               (s, i, Step.Field(ctor, label, resolvedPos, fieldId) :: tail))
+          }
+        case Step.KeyedElement(elementSort, keyField, keyValue) :: rest =>
+          stepKeyedElement(language, t, elementSort, keyField, keyValue).flatMap { (child, i) =>
+            go(child, elementSort, rest, idx :+ i).map((s, ix, tail) =>
+              (s, ix, Step.KeyedElement(elementSort, keyField, keyValue) :: tail))
           }
     if language.digest != claim.language then
       Left(s"SemanticPath language mismatch: claim ${claim.language.short} ≠ ${language.digest.short}")

@@ -11,6 +11,15 @@ enum SortMode:
 
 final case class SortDef(name: String, mode: SortMode)
 
+/** Declares that elements of `sort` (in a list) are uniquely identified by
+  * their `keyField` value, not by list position — `key Component by ref;`.
+  * The addressing counterpart to [[CtorDef.fieldIds]]: a
+  * [[cairn.core.SemanticPath.Step.KeyedElement]] resolves a list child by
+  * scanning for the one whose `keyField` matches, the same "identity, not
+  * position" discipline `fieldIds` brought to constructor arguments.
+  */
+final case class KeyDef(sort: String, keyField: String)
+
 final case class CtorDef(
     name: String,
     sort: String,
@@ -77,6 +86,8 @@ final case class Fragment(
     rewriteRules: List[RewriteRule] = Nil,
     judgments: List[JudgmentDef] = Nil,
     varCtor: Option[String] = None,
+    /** `key <sort> by <field>;` declarations — see [[KeyDef]]. */
+    keys: List[KeyDef] = Nil,
 ):
   /** Semantic identity only — grammar/surface is excluded (Phase 2). */
   def canon: Canon = FragmentCodec.toCanon(this)
@@ -100,6 +111,8 @@ final case class ComposedLanguage(
     rewriteRules: List[RewriteRule],
     judgments: Map[String, JudgmentDef],
     varCtor: Option[String],
+    /** `key <sort> by <field>;` declarations, by sort name — see [[KeyDef]]. */
+    keys: Map[String, KeyDef] = Map.empty,
 ):
   def binderSpec: BinderSpec = BinderSpec(
     constructors.values.filter(_.binders.nonEmpty).map(c => c.name -> c.binders).toMap)
@@ -131,6 +144,7 @@ object Compose:
 
     val sorts = mergeNamed("sorts", fragments.flatMap(f => f.sorts.map(s => (s.name, f.name, s))))
     val ctors = mergeNamed("constructors", fragments.flatMap(f => f.constructors.map(c => (c.name, f.name, c))))
+    val keys = mergeNamed("keys", fragments.flatMap(f => f.keys.map(k => (k.sort, f.name, k))))
     // Grammar categories AMALGAMATE: fragments contribute alternatives to a
     // shared category. Alternative order is canonical: fragments in name
     // order, each fragment's declaration order preserved. Same tag with
@@ -215,7 +229,7 @@ object Compose:
         }
         Right(ComposedLanguage(
           name, fragments, sorts, labeledCtors, grammar,
-          rules.values.toList.sortBy(_.name), judgs, varCtors.headOption))
+          rules.values.toList.sortBy(_.name), judgs, varCtors.headOption, keys))
 
 object FragmentCodec:
   import Canon.*
@@ -256,7 +270,8 @@ object FragmentCodec:
         "premises" -> CList(r.premises.map(Cst.toCanon)),
         "conclusion" -> Cst.toCanon(r.conclusion),
         "conditions" -> CList(r.conditions.map(Cst.toCanon)))))))),
-    "varCtor" -> f.varCtor.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))))
+    "varCtor" -> f.varCtor.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))),
+    "keys" -> CList(f.keys.map(k => Canon.cmap("sort" -> CStr(k.sort), "keyField" -> CStr(k.keyField)))))
 
   def fromCanon(c: Canon): Fragment =
     // Grammar in fragment canon is ignored (Phase 2); bind a SurfacePack for parse/print.
@@ -291,4 +306,8 @@ object FragmentCodec:
           r.field("conditions").asList.map(Cst.fromCanon))))),
       varCtor = c.field("varCtor") match
         case CTag("some", CStr(s)) => Some(s)
-        case _                     => None)
+        case _                     => None,
+      // Absent on any Fragment canon persisted before keys existed — default
+      // to Nil, same tolerance as fieldIds above.
+      keys = c.asMap.get("keys").map(_.asList.map(k =>
+        KeyDef(k.field("sort").asStr, k.field("keyField").asStr))).getOrElse(Nil))

@@ -410,6 +410,12 @@ object Migrate:
           case Nil => Right(Right(Nil))
           case (idx: SemanticPath.Step.Index) :: rest =>
             go(rest).map(_.map(idx :: _))
+          case (keyed: SemanticPath.Step.KeyedElement) :: rest =>
+            // Names a sort + field + value, not a ctor position — untouched
+            // by ctorRenames/fieldRemap. Passes through unchanged; the final
+            // verify() call still catches a genuinely broken key (the sort's
+            // ctor removed, or the key field itself deleted from it).
+            go(rest).map(_.map(keyed :: _))
           case SemanticPath.Step.Field(ctor, _, _, None) :: _ if mig.fieldRemap.contains(mig.ctorRenames.getOrElse(ctor, ctor)) =>
             Left(s"Migrate.path: '$ctor' has no fieldId to transport, but its migrated shape is a fieldRemap " +
               "(position alone cannot survive a reorder)")

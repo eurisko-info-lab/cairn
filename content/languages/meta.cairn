@@ -18,6 +18,8 @@ language meta {
     keyword judgment;
     keyword top;
     keyword where;
+    keyword key;
+    keyword by;
     punct "{";
     punct "}";
     punct "(";
@@ -41,6 +43,7 @@ language meta {
     syntax item += ruleDecl : tok "rule" anyident tok ":" cat pat tok "=>" cat pat tok ";";
     syntax item += judgmentDecl : tok "judgment" anyident tok "{" star cat judgRule tok "}";
     syntax item += topDecl : tok "top" anyident tok ";";
+    syntax item += keyDecl : tok "key" anyident tok "by" anyident tok ";";
     syntax argList += argList : tok "(" sepby1 cat argDecl "," tok ")";
     syntax argDecl += argDeclNamed : anyident tok ":" anyident;
     syntax argDecl += argDeclBare : anyident;
@@ -64,6 +67,7 @@ language meta {
     print ruleDecl : lit "rule" sp field 0 sp lit ":" sp field 1 sp lit "=>" sp field 2 lit ";";
     print judgmentDecl : lit "judgment" sp field 0 sp lit "{" nl indent sep 1 "\n" nl dedent lit "}";
     print topDecl : lit "top" sp field 0 lit ";";
+    print keyDecl : lit "key" sp field 0 sp lit "by" sp field 1 lit ";";
     print argList : lit "(" sep 0 ", " lit ")";
     print argDeclNamed : field 0 lit ":" sp field 1;
     print argDeclBare : field 0;
