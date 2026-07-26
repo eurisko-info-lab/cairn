@@ -13,6 +13,39 @@ class ModuleStructuralSuite extends munit.FunSuite:
   private val langA = Digest.of(Canon.CStr("lang-a"))
   private val langB = Digest.of(Canon.CStr("lang-b"))
 
+  /** A minimal real language declaring one judgment, `myJudgment`, over a
+    * single-string goal — enough to prove/reject via `Search.prove` without
+    * pulling in a whole exemplar pack.
+    */
+  private val judgmentLang: ComposedLanguage =
+    val jd = JudgmentDef("myJudgment", List(InferRule("ok-rule", Nil, Cst.node("myJudgment", Cst.Leaf("ok")), Nil)))
+    val frag = Fragment(name = "judgtest", provides = List("judgtest"), requires = Nil, judgments = List(jd))
+    Compose.compose("judgtest", List(frag)).fold(e => fail(e.map(_.render).mkString), identity)
+
+  private val leafModule = Module(List("a" -> Cst.node("leaf", Cst.Leaf("ok"))))
+  private def leafOkSpec(lang: Digest) = Spec.LeafOk("leaf", 0, JudgmentRef(lang, "myJudgment"))
+
+  test("run/check: resolver returning None for the referenced provider fails BEFORE Search.prove"):
+    val errs = ModuleStructural.run(leafModule, List(leafOkSpec(judgmentLang.digest)), _ => None)
+    assert(errs.exists(_.contains("unknown judgment provider")), errs.toString)
+
+  test("run/check: resolver returning a language whose OWN digest differs from the requested key is rejected, not trusted"):
+    // A misbehaving/mis-keyed resolver: asked for `judgmentLang.digest`, hands
+    // back a language whose digest is actually something else entirely.
+    val wrongDigest = Digest.of(Canon.CStr("not-judgtest"))
+    val errs = ModuleStructural.run(leafModule, List(leafOkSpec(wrongDigest)), _ => Some(judgmentLang))
+    assert(errs.exists(_.contains("provider digest mismatch")), errs.toString)
+
+  test("run/check: a resolved language that doesn't declare the referenced judgment name fails before Search.prove"):
+    val bareFrag = Fragment(name = "bare", provides = List("bare"), requires = Nil)
+    val bareLang = Compose.compose("bare", List(bareFrag)).fold(e => fail(e.map(_.render).mkString), identity)
+    val errs = ModuleStructural.run(leafModule, List(leafOkSpec(bareLang.digest)), _ => Some(bareLang))
+    assert(errs.exists(_.contains("does not declare judgment")), errs.toString)
+
+  test("run/check: correct provider digest + declared judgment succeeds"):
+    val errs = ModuleStructural.run(leafModule, List(leafOkSpec(judgmentLang.digest)), d => Option.when(d == judgmentLang.digest)(judgmentLang))
+    assertEquals(errs, Nil)
+
   test("Spec.canon is deterministic for identical specs"):
     val a = Spec.DefinedRef("foo", 0, "foo")
     val b = Spec.DefinedRef("foo", 0, "foo")

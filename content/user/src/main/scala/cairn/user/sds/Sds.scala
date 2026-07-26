@@ -129,9 +129,15 @@ final class Sds(packs: PackAccess):
         JudgmentRef(euClpLanguage.digest, "sectionNumberOk"), "outline"),
     ) ++ typedSpecs
 
+  /** The judgment-providing languages `validationSpecs`'s [[JudgmentRef]]s
+    * name, keyed by their own digest — SDS's own `language` (translationStateTag)
+    * and `euClpLanguage` (sectionNumberOk).
+    */
+  private lazy val judgmentProviders: Map[Digest, ComposedLanguage] =
+    Map(language.digest -> language, euClpLanguage.digest -> euClpLanguage)
+
   def validate(m: Module): Either[String, Unit] =
-    val es = ModuleStructural.run(
-      m, validationSpecs, language.judgments.values.toList ++ euClpLanguage.judgments.values.toList)
+    val es = ModuleStructural.run(m, validationSpecs, judgmentProviders.get)
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
 
   /** ΔSDS application: the generic ΔL, then the domain gate. */

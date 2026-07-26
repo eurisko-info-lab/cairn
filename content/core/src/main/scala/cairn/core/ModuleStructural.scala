@@ -234,10 +234,37 @@ object ModuleStructural:
           m.field("langIdx").asInt.toInt, m.field("valueIdx").asInt.toInt, m.field("label").asStr)
       case other => throw CodecError(s"unknown Spec: $other")
 
-  def run(m: Module, specs: List[Spec], judgments: List[JudgmentDef] = Nil): List[String] =
-    specs.flatMap(check(m, _, judgments))
+  /** `resolveProvider` must return the EXACT language a [[JudgmentRef]]
+    * names — every judgment-referencing spec (`LeafOk`/`OutlineNums`) is
+    * checked against `resolveProvider(ref.language)` directly, never against
+    * an arbitrary flat judgment pool, and defensively re-verifies the
+    * resolved language's OWN digest before trusting its judgments (a
+    * resolver keyed wrong, or a locally-supplied same-named judgment under a
+    * different digest, is rejected here — before [[Search.prove]] ever runs,
+    * not deep inside proof search).
+    */
+  def run(m: Module, specs: List[Spec], resolveProvider: Digest => Option[ComposedLanguage]): List[String] =
+    specs.flatMap(check(m, _, resolveProvider))
 
-  def check(m: Module, spec: Spec, judgments: List[JudgmentDef] = Nil): List[String] = spec match
+  /** Resolves `ref` against `resolveProvider`, verifying both the provider
+    * digest and that it actually declares `ref.judgment`, before running
+    * `prove` against that judgment's own rules only (never the whole
+    * language's judgment set, and never a caller-supplied flat pool).
+    */
+  private def proveJudgment(ref: JudgmentRef, goal: Cst, resolveProvider: Digest => Option[ComposedLanguage]): Either[String, Unit] =
+    resolveProvider(ref.language) match
+      case None => Left(s"unknown judgment provider ${ref.language.short} for '${ref.judgment}'")
+      case Some(lang) if lang.digest != ref.language =>
+        Left(s"judgment provider digest mismatch: resolver returned ${lang.digest.short} for ${ref.language.short}")
+      case Some(lang) =>
+        lang.judgments.get(ref.judgment) match
+          case None => Left(s"language ${lang.digest.short} does not declare judgment '${ref.judgment}'")
+          case Some(jd) =>
+            Search.prove(CheckerCfg(List(jd)), goal) match
+              case Right(_) => Right(())
+              case Left(_)  => Left(s"fails judgment '${ref.judgment}'")
+
+  def check(m: Module, spec: Spec, resolveProvider: Digest => Option[ComposedLanguage]): List[String] = spec match
     case Spec.SumLeavesAtMost(ctor, leafPath, max, label) =>
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
@@ -293,9 +320,9 @@ object ModuleStructural:
             numberOf(sec, tag) match
               case None => Left(s"references '$ref' which is not a section body")
               case Some(num) =>
-                Search.prove(CheckerCfg(judgments), Cst.node(judgment.judgment, Cst.Leaf(num.toString))) match
-                  case Right(_) => Right(num)
-                  case Left(_)  => Left(s"section '$ref' number $num fails ${judgment.judgment}")
+                proveJudgment(judgment, Cst.node(judgment.judgment, Cst.Leaf(num.toString)), resolveProvider) match
+                  case Right(_)  => Right(num)
+                  case Left(err) => Left(s"section '$ref' number $num $err")
           case Some(_) => Left(s"references '$ref' which is not a section body")
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
@@ -319,7 +346,7 @@ object ModuleStructural:
       }.flatten
 
     case Spec.DefinedRef(ctor, idx, label) =>
-      check(m, Spec.DefinedRefs(ctor, List(idx), label))
+      check(m, Spec.DefinedRefs(ctor, List(idx), label), resolveProvider)
 
     case Spec.DefinedRefs(ctor, idxs, label) =>
       m.defs.collect {
@@ -366,16 +393,15 @@ object ModuleStructural:
       }.flatten
 
     case Spec.LeafOk(ctor, idx, judgment) =>
-      def satisfies(v: String): Boolean =
-        Search.prove(CheckerCfg(judgments), Cst.node(judgment.judgment, Cst.Leaf(v))).isRight
+      def satisfies(v: String): Either[String, Unit] =
+        proveJudgment(judgment, Cst.node(judgment.judgment, Cst.Leaf(v)), resolveProvider)
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
           fields.lift(idx) match
             case Some(Cst.Leaf(v)) if v.isEmpty =>
               Some(s"$ctor '$name': empty field $idx")
-            case Some(Cst.Leaf(v)) if !satisfies(v) =>
-              Some(s"$ctor '$name': '$v' does not satisfy judgment '${judgment.judgment}'")
-            case Some(Cst.Leaf(_)) => None
+            case Some(Cst.Leaf(v)) =>
+              satisfies(v).left.toOption.map(err => s"$ctor '$name': '$v' $err")
             case Some(other) => Some(s"$ctor '$name': bad field ${other.render}")
             case None => Some(s"$ctor '$name': missing field $idx")
       }.flatten
