@@ -653,8 +653,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish: Option[Publish] = None,
       parentBranches: List[String] = Nil,
       policy: AcceptancePolicy,
+      model: ChangeModel = ChangeModel.default,
+      targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
-    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, policy.gate).flatMap {
+    SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, policy.gate, model, targetModel).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
         Right(Left(markConflict(into, conflict)))
       case outcome @ SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
@@ -688,6 +690,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish: Option[Publish] = None,
       policy: AcceptancePolicy,
       model: ChangeModel = ChangeModel.default,
+      targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
       histA <- loadChangeHistory(ours, language, model)
@@ -724,22 +727,26 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       // `BranchManifest.acceptedChange` — never a bespoke raw-change digest,
       // so `AcceptanceEvidence.verify` can replay it. `None` only for a true
       // fast-forward of a branch that itself has no ΔL change (pure import).
-      evidenceFor = (vcsDigest: Option[Digest], result: Module) => AcceptanceEvidence(
+      evidenceFor = (vcsDigest: Option[Digest], result: Module, changeModel: Digest) => AcceptanceEvidence(
         language = language.digest, base = baseDig, validatedChangeSet = vcsDigest,
         result = result.digest, policy = policy.digest, judgment = gate.judgment,
-        validationModel = gate.descriptor, providers = gate.providers)
+        changeModel = changeModel, validationModel = gate.descriptor, providers = gate.providers)
       out <- (stackedA, stackedB) match
         case (None, None) =>
           headModule(ours).flatMap { m =>
-            // Fast-forward: no new ΔL apply happens here, but `into` is still
-            // accepting a module it has never gate-checked under `into`'s own
-            // domain gate — require it, same as every other acceptance path.
+            // Fast-forward: no new ΔL apply happens here (already covered by
+            // the replay-side loadChangeHistory check above), but `into` is
+            // still accepting a module it has never gate-checked under
+            // `into`'s own domain gate — require it, same as every other
+            // acceptance path. No apply means no vcs to read a real model
+            // digest from, so the caller-supplied `model` IS the identity
+            // this transition is recorded under.
             gate(m) match
               case Left(w) =>
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
               case Right(()) =>
                 val modKey = refs.putArt(m.artifact)
-                val evidence = evidenceFor(refs.load(ours).acceptedChange, m)
+                val evidence = evidenceFor(refs.load(ours).acceptedChange, m, model.digest)
                 refs.putArt(evidence.artifact)
                 Right(Right(refs.advanceRaw(
                   into, modKey,
@@ -750,15 +757,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                   acceptanceEvidence = Some(evidence.digest))))
           }
         case (Some((_, chA)), Some((_, chB))) =>
-          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs), policy)
+          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs), policy, model, targetModel)
         case (Some((_, chA)), None) =>
-          SemanticRepository.commit(language, base, chA).flatMap { (mod, vcs) =>
+          SemanticRepository.commit(language, base, chA, model).flatMap { (mod, vcs) =>
             gate(mod) match
               case Left(w) =>
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
               case Right(()) =>
-                val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
+                val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
                 refs.transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
@@ -769,13 +776,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 ).map(Right(_))
           }
         case (None, Some((_, chB))) =>
-          SemanticRepository.commit(language, base, chB).flatMap { (mod, vcs) =>
+          SemanticRepository.commit(language, base, chB, model).flatMap { (mod, vcs) =>
             gate(mod) match
               case Left(w) =>
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
               case Right(()) =>
-                val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
+                val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
                 refs.transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),

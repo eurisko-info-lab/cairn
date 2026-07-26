@@ -26,8 +26,11 @@ class SemanticRepositorySuite extends munit.FunSuite:
   /** Test convenience: wrap an already ΔL-replayed [[SemanticRepository.ValidatedTip]]
     * into an [[AcceptedTip]] under `policy` (default: no domain gate).
     */
-  def accept(tip: SemanticRepository.ValidatedTip, policy: AcceptancePolicy = AcceptancePolicy.open): AcceptedTip =
-    AcceptedTip.checkTip(lang, tip.asTip, policy).fold(e => fail(e), identity)
+  def accept(
+      tip: SemanticRepository.ValidatedTip, policy: AcceptancePolicy = AcceptancePolicy.open,
+      model: ChangeModel = ChangeModel.default,
+  ): AcceptedTip =
+    AcceptedTip.checkTip(lang, tip.asTip, policy, model).fold(e => fail(e), identity)
 
   test("spine: commit → tip → commute → integrate → accepted head"):
     val cA = parseChange("{ replace a = false ; add fromA = true ; }")
@@ -82,6 +85,109 @@ class SemanticRepositorySuite extends munit.FunSuite:
         val hops = Provenance.why(dir.resolve("cas"), head.digest, casCtx)
           .fold(e => fail(e), identity)
         assert(hops.exists(_.record.tool == "semantic-merge"), hops.toString)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  // -- PR10: mergeBranches/merge use the explicit ChangeModel across every path --
+
+  private def evidenceOf(cas: DiskCas, ctx: cairn.systemhandler.EffectContext, digest: Digest): AcceptanceEvidence =
+    val art = CasEffects.get(cas, digest, ctx).fold(e => fail(e.toString), identity)
+    AcceptanceEvidence.fromCanon(art.body).fold(e => fail(e), identity)
+
+  test("Branches.mergeBranches: two-sided merge of disjoint custom-model `copy` changes succeeds under the explicit model, with no default-model fallback"):
+    val dir = Files.createTempDirectory("cairn-model-twosided")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val customModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val dlCustom = Delta.deltaOf(lang, customModel).toOption.get
+    def parseCustom(src: String): Cst = Parser.parse(dlCustom.grammar, src).fold(e => fail(e), identity)
+    val base = Module(List("x" -> Stlc.tru, "z" -> Stlc.tru))
+    branches.importModule("base", base)
+    val tipA = SemanticRepository.tipAfter(lang, base, parseCustom("{ copy x to xCopy ; }"), customModel).fold(e => fail(e), identity)
+    val tipB = SemanticRepository.tipAfter(lang, base, parseCustom("{ copy z to zCopy ; }"), customModel).fold(e => fail(e), identity)
+    branches.commitTip("feat-a", accept(tipA, model = customModel))
+    branches.commitTip("feat-b", accept(tipB, model = customModel))
+    branches.mergeBranches(lang, "main", "feat-a", "feat-b", policy = AcceptancePolicy.open, model = customModel) match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.get("xCopy"), Some(Stlc.tru))
+        assertEquals(head.get("zCopy"), Some(Stlc.tru))
+        val evDigest = manifest.acceptanceEvidence.getOrElse(fail("expected acceptanceEvidence on the manifest"))
+        assertEquals(evidenceOf(cas, casCtx, evDigest).changeModel, customModel.digest)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  test("Branches.mergeBranches: one-sided commit path uses the supplied model"):
+    val dir = Files.createTempDirectory("cairn-model-onesided")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val customModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val dlCustom = Delta.deltaOf(lang, customModel).toOption.get
+    def parseCustom(src: String): Cst = Parser.parse(dlCustom.grammar, src).fold(e => fail(e), identity)
+    val base = Module(List("x" -> Stlc.tru))
+    val tipAnchor = SemanticRepository.tipAfter(lang, base, parseCustom("{ add anchor = true ; }"), customModel).fold(e => fail(e), identity)
+    // theirs is exactly the shared anchor commit — nothing beyond it, so any
+    // merge here is one-sided (theirs's suffix past the LCA is empty).
+    branches.commitTip("ours", accept(tipAnchor, model = customModel))
+    branches.commitTip("theirs", accept(tipAnchor, model = customModel))
+    val tipA = SemanticRepository.tipAfter(lang, tipAnchor.tip, parseCustom("{ copy x to xCopy ; }"), customModel).fold(e => fail(e), identity)
+    branches.commitTip("ours", accept(tipA, model = customModel))
+    branches.mergeBranches(lang, "main", "ours", "theirs", policy = AcceptancePolicy.open, model = customModel) match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.get("xCopy"), Some(Stlc.tru))
+        val evDigest = manifest.acceptanceEvidence.getOrElse(fail("expected acceptanceEvidence on the manifest"))
+        assertEquals(evidenceOf(cas, casCtx, evDigest).changeModel, customModel.digest)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  test("Branches.mergeBranches: fast-forward path is unaffected by a supplied model (regression)"):
+    val dir = Files.createTempDirectory("cairn-model-fastforward")
+    val branches = branchesAt(dir)
+    val customModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val dlCustom = Delta.deltaOf(lang, customModel).toOption.get
+    def parseCustom(src: String): Cst = Parser.parse(dlCustom.grammar, src).fold(e => fail(e), identity)
+    val tipAnchor = SemanticRepository.tipAfter(lang, m0, parseCustom("{ add anchor = true ; }"), customModel).fold(e => fail(e), identity)
+    // Both branches sit at the exact same tip — no divergence on either side,
+    // so this merge takes the (None, None) fast-forward path, which performs
+    // no Delta.apply itself; the model is still consulted (and must match)
+    // by the replay-side loadChangeHistory check that runs before it.
+    branches.commitTip("ours", accept(tipAnchor, model = customModel))
+    branches.commitTip("theirs", accept(tipAnchor, model = customModel))
+    branches.mergeBranches(lang, "main", "ours", "theirs", policy = AcceptancePolicy.open, model = customModel) match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.digest, tipAnchor.tip.digest)
+      case Right(Left(c)) => fail(c.render)
+      case Left(e) => fail(e)
+
+  test("Branches.mergeBranches: a migration can use distinct source and target ChangeModels end-to-end"):
+    val dir = Files.createTempDirectory("cairn-model-migration")
+    val cas = DiskCas(dir.resolve("cas"))
+    val branches = Branches(cas, dir.resolve("refs"), casCtx)
+    val v2 = Compose.compose("stlc2", Stlc.fragments).toOption.get
+    val mig = LangMigration(lang.digest, v2.digest, Map.empty, Map.empty)
+    val sourceModel = ChangeModel(ChangeModel.default.operations :+ copyOp)
+    val targetModel = ChangeModel(ChangeModel.default.operations :+ copyOp.copy(footprint = FootprintExpr.NameOf(1)))
+    val base = Module(List("x" -> Stlc.tru, "y" -> Stlc.fls))
+    val dlSrc = Delta.deltaOf(lang, sourceModel).toOption.get
+    def parseSrc(src: String): Cst = Parser.parse(dlSrc.grammar, src).fold(e => fail(e), identity)
+    branches.importModule("base", base)
+    val tipA = SemanticRepository.tipAfter(lang, base, parseSrc("{ copy x to xCopy ; }"), sourceModel).fold(e => fail(e), identity)
+    val tipB = SemanticRepository.tipAfter(lang, base, parseSrc("{ replace y = true ; }"), sourceModel).fold(e => fail(e), identity)
+    branches.commitTip("feat-a", accept(tipA, model = sourceModel))
+    branches.commitTip("feat-b", accept(tipB, model = sourceModel))
+    branches.mergeBranches(
+      lang, "main", "feat-a", "feat-b", migration = Some(mig -> v2),
+      policy = AcceptancePolicy.open, model = sourceModel, targetModel = targetModel,
+    ) match
+      case Right(Right(manifest)) =>
+        val head = branches.headModule("main").fold(e => fail(e), identity)
+        assertEquals(head.get("xCopy"), Some(Stlc.tru))
+        assertEquals(head.get("y"), Some(Stlc.tru))
+        val evDigest = manifest.acceptanceEvidence.getOrElse(fail("expected acceptanceEvidence on the manifest"))
+        assertEquals(evidenceOf(cas, casCtx, evDigest).changeModel, targetModel.digest,
+          "the migrated merge's evidence must carry the TARGET model, not the source model")
       case Right(Left(c)) => fail(c.render)
       case Left(e) => fail(e)
 
