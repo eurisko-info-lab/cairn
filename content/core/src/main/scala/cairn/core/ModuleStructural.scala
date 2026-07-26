@@ -10,6 +10,26 @@ import cairn.kernel.*
   */
 object ModuleStructural:
 
+  /** How [[Spec.OutlineNums]] reads a number off a resolved section term —
+    * pure data, no closures, so two `OutlineNums` specs with different
+    * number sources get genuinely different canon.
+    */
+  enum NumberSource:
+    /** The resolved term's own ctor tag == `ctorTag` ⇒ read field `idx` as
+      * the number (e.g. `euSection`'s own literal leaf).
+      */
+    case FromLeaf(ctorTag: String, idx: Int)
+    /** The resolved term's ctor tag is a key in `mapping` ⇒ look up the
+      * number (e.g. a typed section tag's declared position).
+      */
+    case ByTag(mapping: Map[String, Int])
+
+    def canon: Canon = this match
+      case FromLeaf(ctorTag, idx) =>
+        Canon.CTag("FromLeaf", Canon.cmap("ctorTag" -> Canon.CStr(ctorTag), "idx" -> Canon.CInt(idx)))
+      case ByTag(mapping) =>
+        Canon.CTag("ByTag", Canon.cmap(mapping.toList.sortBy(_._1).map((k, v) => k -> Canon.CInt(v))*))
+
   enum Spec:
     /** Sum of integer leaves at `leafPath` under each `ctor` binding ≤ `max`. */
     case SumLeavesAtMost(ctor: String, leafPath: List[Int], max: Long, label: String)
@@ -17,11 +37,15 @@ object ModuleStructural:
     case UniqueTuples(ctor: String, keyPaths: List[List[Int]], label: String)
     /** Non-empty string leaves at indices under `ctor`. */
     case NonEmptyLeaves(ctor: String, indices: List[Int], labels: List[String])
-    /** Refs in a list field must exist and satisfy `ok`; collected ints must be unique+ascending. */
+    /** Refs in a list field must resolve to a number via `numberSources`
+      * (tried in order) and satisfy judgment `judgmentName`; collected ints
+      * must be unique+ascending.
+      */
     case OutlineNums(
         ctor: String,
         refsField: Int,
-        resolveNum: (Module, String) => Either[String, Int],
+        numberSources: List[NumberSource],
+        judgmentName: String,
         label: String,
     )
     /** Leaf at `idx` must name a defined binding. */
@@ -33,9 +57,10 @@ object ModuleStructural:
     /** List field of nodes; leaf at `refPath` in each node must be defined. */
     case DefinedNodeListRefs(
         ctor: String, listIdx: Int, refPath: List[Int], label: String)
-    /** Leaf at `idx` must be non-empty and pass `ok`. */
-    case LeafOk(
-        ctor: String, idx: Int, ok: String => Boolean, detail: String => String)
+    /** Leaf at `idx` must be non-empty and satisfy judgment `judgmentName`
+      * (`Search.prove` against the judgments supplied to [[run]]/[[check]]).
+      */
+    case LeafOk(ctor: String, idx: Int, judgmentName: String)
     /** Leaf value equals some target ctor's field (value match, not binding name). */
     case LeafValueInCtorField(
         ctor: String,
@@ -80,14 +105,10 @@ object ModuleStructural:
     /** Canonical description of what this spec enforces — [[ModuleGate.fromSpecs]]
       * folds a digest of the whole spec list into [[cairn.core.AcceptancePolicy]]'s
       * own digest, so two gates built from the same specs (same ctor/index/label
-      * parameters) are provably the same check, not just same-named.
-      *
-      * [[OutlineNums.resolveNum]] and [[LeafOk.ok]]/[[LeafOk.detail]] are Scala
-      * closures with no canonical form — those two cases encode everything else
-      * (ctor/field/label) plus a fixed "closure omitted" marker; two `OutlineNums`
-      * or `LeafOk` specs with the same parameters but different closures are
-      * NOT distinguished by this digest. Every other case is fully data, so this
-      * digest is complete for them.
+      * parameters) are provably the same check, not just same-named. Every case
+      * is fully data (no closures anywhere in [[Spec]]), so this digest is
+      * complete: two specs are indistinguishable here iff they enforce the
+      * same check.
       */
     def canon: Canon =
       def ints(xs: List[Int]) = Canon.CList(xs.map(Canon.CInt(_)))
@@ -105,10 +126,11 @@ object ModuleStructural:
         case NonEmptyLeaves(ctor, indices, labels) =>
           Canon.CTag("NonEmptyLeaves", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "indices" -> ints(indices), "labels" -> strs(labels)))
-        case OutlineNums(ctor, refsField, _, label) =>
+        case OutlineNums(ctor, refsField, numberSources, judgmentName, label) =>
           Canon.CTag("OutlineNums", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "refsField" -> Canon.CInt(refsField),
-            "resolveNum" -> Canon.CStr("<closure omitted>"), "label" -> Canon.CStr(label)))
+            "numberSources" -> Canon.CList(numberSources.map(_.canon)),
+            "judgmentName" -> Canon.CStr(judgmentName), "label" -> Canon.CStr(label)))
         case DefinedRef(ctor, idx, label) =>
           Canon.CTag("DefinedRef", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx), "label" -> Canon.CStr(label)))
@@ -122,10 +144,10 @@ object ModuleStructural:
           Canon.CTag("DefinedNodeListRefs", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx),
             "refPath" -> ints(refPath), "label" -> Canon.CStr(label)))
-        case LeafOk(ctor, idx, _, _) =>
+        case LeafOk(ctor, idx, judgmentName) =>
           Canon.CTag("LeafOk", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx),
-            "ok" -> Canon.CStr("<closure omitted>"), "detail" -> Canon.CStr("<closure omitted>")))
+            "judgmentName" -> Canon.CStr(judgmentName)))
         case LeafValueInCtorField(ctor, leafIdx, targetCtors, targetFieldIdx, label) =>
           Canon.CTag("LeafValueInCtorField", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "leafIdx" -> Canon.CInt(leafIdx),
@@ -154,10 +176,10 @@ object ModuleStructural:
             "keyIdx" -> Canon.CInt(keyIdx), "langIdx" -> Canon.CInt(langIdx),
             "valueIdx" -> Canon.CInt(valueIdx), "label" -> Canon.CStr(label)))
 
-  def run(m: Module, specs: List[Spec]): List[String] =
-    specs.flatMap(check(m, _))
+  def run(m: Module, specs: List[Spec], judgments: List[JudgmentDef] = Nil): List[String] =
+    specs.flatMap(check(m, _, judgments))
 
-  def check(m: Module, spec: Spec): List[String] = spec match
+  def check(m: Module, spec: Spec, judgments: List[JudgmentDef] = Nil): List[String] = spec match
     case Spec.SumLeavesAtMost(ctor, leafPath, max, label) =>
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
@@ -196,7 +218,27 @@ object ModuleStructural:
           }
       }.flatten
 
-    case Spec.OutlineNums(ctor, refsField, resolveNum, label) =>
+    case Spec.OutlineNums(ctor, refsField, numberSources, judgmentName, label) =>
+      def numberOf(sec: Cst, tag: String): Option[Int] =
+        numberSources.iterator.flatMap {
+          case NumberSource.FromLeaf(ctorTag, idx) if tag == ctorTag =>
+            sec match
+              case Cst.Node(_, fields) => fields.lift(idx).collect { case Cst.Leaf(v) => v }.flatMap(_.toIntOption)
+              case _ => None
+          case NumberSource.ByTag(mapping) => mapping.get(tag)
+          case _ => None
+        }.nextOption()
+      def resolveNum(ref: String): Either[String, Int] =
+        m.get(ref) match
+          case None => Left(s"references unknown section '$ref'")
+          case Some(sec @ Cst.Node(tag, _)) =>
+            numberOf(sec, tag) match
+              case None => Left(s"references '$ref' which is not a section body")
+              case Some(num) =>
+                Search.prove(CheckerCfg(judgments), Cst.node(judgmentName, Cst.Leaf(num.toString))) match
+                  case Right(_) => Right(num)
+                  case Left(_)  => Left(s"section '$ref' number $num fails $judgmentName")
+          case Some(_) => Left(s"references '$ref' which is not a section body")
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
           val refs = fields.lift(refsField).map(refList).getOrElse(Left("missing refs"))
@@ -207,7 +249,7 @@ object ModuleStructural:
               val errs = List.newBuilder[String]
               if rs.isEmpty then errs += s"$label '$name' has no sections"
               for ref <- rs do
-                resolveNum(m, ref) match
+                resolveNum(ref) match
                   case Left(e) => errs += s"$label '$name': $e"
                   case Right(n) => nums += n
               val ns = nums.result()
@@ -265,14 +307,16 @@ object ModuleStructural:
               }
       }.flatten
 
-    case Spec.LeafOk(ctor, idx, ok, detail) =>
+    case Spec.LeafOk(ctor, idx, judgmentName) =>
+      def satisfies(v: String): Boolean =
+        Search.prove(CheckerCfg(judgments), Cst.node(judgmentName, Cst.Leaf(v))).isRight
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
           fields.lift(idx) match
             case Some(Cst.Leaf(v)) if v.isEmpty =>
               Some(s"$ctor '$name': empty field $idx")
-            case Some(Cst.Leaf(v)) if !ok(v) =>
-              Some(detail(s"$ctor '$name': $v"))
+            case Some(Cst.Leaf(v)) if !satisfies(v) =>
+              Some(s"$ctor '$name': '$v' does not satisfy judgment '$judgmentName'")
             case Some(Cst.Leaf(_)) => None
             case Some(other) => Some(s"$ctor '$name': bad field ${other.render}")
             case None => Some(s"$ctor '$name': missing field $idx")
