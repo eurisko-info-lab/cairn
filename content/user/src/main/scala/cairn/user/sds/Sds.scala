@@ -105,17 +105,17 @@ final class Sds(packs: PackAccess):
         "translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
       ModuleStructural.Spec.NonEmptyLeaves(
         "translationState", List(1, 2), List("lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk("translationState", 3, "translationStateTag"),
+      ModuleStructural.Spec.LeafOk("translationState", 3, JudgmentRef(language.digest, "translationStateTag")),
       ModuleStructural.Spec.UniqueTuples(
         "sectionFieldState", List(List(0), List(1), List(2)), "sectionFieldState"),
       ModuleStructural.Spec.RefTagIn(
         "sectionFieldState", 0, sectionBodyTags, "sectionFieldState"),
       ModuleStructural.Spec.NonEmptyLeaves(
         "sectionFieldState", List(1, 2, 3), List("field key", "lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk("sectionFieldState", 4, "translationStateTag"),
+      ModuleStructural.Spec.LeafOk("sectionFieldState", 4, JudgmentRef(language.digest, "translationStateTag")),
       ModuleStructural.Spec.DefinedRef("basis", 0, "basis"),
       ModuleStructural.Spec.NonEmptyLeaves("basis", List(1), List("Law section number")),
-      ModuleStructural.Spec.LeafOk("euSection", 0, "sectionNumberOk"),
+      ModuleStructural.Spec.LeafOk("euSection", 0, JudgmentRef(euClpLanguage.digest, "sectionNumberOk")),
       ModuleStructural.Spec.UniqueTuplesInList(
         "euSection", 1, List(List(0), List(1)), "euSection",
         Some(Set("sectionField", "sectionFieldRef"))),
@@ -126,7 +126,7 @@ final class Sds(packs: PackAccess):
         List(
           ModuleStructural.NumberSource.FromLeaf("euSection", 0),
           ModuleStructural.NumberSource.ByTag(typedSectionNumbers)),
-        "sectionNumberOk", "outline"),
+        JudgmentRef(euClpLanguage.digest, "sectionNumberOk"), "outline"),
     ) ++ typedSpecs
 
   def validate(m: Module): Either[String, Unit] =

@@ -10,6 +10,9 @@ import cairn.core.*
 class ModuleStructuralSuite extends munit.FunSuite:
   import ModuleStructural.Spec
 
+  private val langA = Digest.of(Canon.CStr("lang-a"))
+  private val langB = Digest.of(Canon.CStr("lang-b"))
+
   test("Spec.canon is deterministic for identical specs"):
     val a = Spec.DefinedRef("foo", 0, "foo")
     val b = Spec.DefinedRef("foo", 0, "foo")
@@ -33,19 +36,24 @@ class ModuleStructuralSuite extends munit.FunSuite:
     val b = Spec.RefTagIn("ctor", 0, Set("c", "b", "a"), "label")
     assertEquals(a.canon, b.canon)
 
-  test("Spec.canon: LeafOk is deterministic and distinguishes different judgment names"):
-    assertEquals(Spec.LeafOk("ctor", 0, "j1").canon, Spec.LeafOk("ctor", 0, "j1").canon)
-    assertNotEquals(Spec.LeafOk("ctor", 0, "j1").canon, Spec.LeafOk("ctor", 0, "j2").canon)
+  test("Spec.canon: LeafOk is deterministic and distinguishes different judgments (name or provider)"):
+    assertEquals(Spec.LeafOk("ctor", 0, JudgmentRef(langA, "j1")).canon, Spec.LeafOk("ctor", 0, JudgmentRef(langA, "j1")).canon)
+    assertNotEquals(Spec.LeafOk("ctor", 0, JudgmentRef(langA, "j1")).canon, Spec.LeafOk("ctor", 0, JudgmentRef(langA, "j2")).canon)
+    assertNotEquals(Spec.LeafOk("ctor", 0, JudgmentRef(langA, "j1")).canon, Spec.LeafOk("ctor", 0, JudgmentRef(langB, "j1")).canon,
+      "same judgment name under a different provider language must change the descriptor")
 
-  test("Spec.canon: OutlineNums is deterministic and distinguishes different judgment names / number sources"):
+  test("Spec.canon: OutlineNums is deterministic and distinguishes different judgments / number sources"):
     import ModuleStructural.NumberSource
-    val base = Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j1", "label")
-    assertEquals(base.canon, Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j1", "label").canon)
+    val base = Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), JudgmentRef(langA, "j1"), "label")
+    assertEquals(base.canon, Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), JudgmentRef(langA, "j1"), "label").canon)
     assertNotEquals(base.canon,
-      Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j2", "label").canon,
-      "different judgmentName must change the descriptor")
+      Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), JudgmentRef(langA, "j2"), "label").canon,
+      "different judgment name must change the descriptor")
     assertNotEquals(base.canon,
-      Spec.OutlineNums("ctor", 0, List(NumberSource.ByTag(Map("t" -> 1))), "j1", "label").canon,
+      Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), JudgmentRef(langB, "j1"), "label").canon,
+      "same judgment name under a different provider language must change the descriptor")
+    assertNotEquals(base.canon,
+      Spec.OutlineNums("ctor", 0, List(NumberSource.ByTag(Map("t" -> 1))), JudgmentRef(langA, "j1"), "label").canon,
       "different numberSources must change the descriptor")
 
   test("Spec.canon: a whole spec list's digest matches ModuleGate.fromSpecs's descriptor"):
@@ -66,12 +74,12 @@ class ModuleStructuralSuite extends munit.FunSuite:
       Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
       Spec.UniqueTuples("ctor", List(List(0), List(1)), "label"),
       Spec.NonEmptyLeaves("ctor", List(1, 2), List("a", "b")),
-      Spec.OutlineNums("outline", 2, List(NumberSource.FromLeaf("euSection", 0), NumberSource.ByTag(Map("s1" -> 1))), "sectionNumberOk", "outline"),
+      Spec.OutlineNums("outline", 2, List(NumberSource.FromLeaf("euSection", 0), NumberSource.ByTag(Map("s1" -> 1))), JudgmentRef(langA, "sectionNumberOk"), "outline"),
       Spec.DefinedRef("product", 1, "product"),
       Spec.DefinedRefs("shadow", List(0, 1), "shadow"),
       Spec.DefinedLeafList("product", 2, "product"),
       Spec.DefinedNodeListRefs("mixture", 0, List(0), "mixture"),
-      Spec.LeafOk("euSection", 0, "sectionNumberOk"),
+      Spec.LeafOk("euSection", 0, JudgmentRef(langA, "sectionNumberOk")),
       Spec.LeafValueInCtorField("translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
       Spec.RefTagIn("sectionFieldShadow", 0, Set("euSection", "identificationSection"), "sectionFieldShadow"),
       Spec.UniqueTuplesInList("euSection", 1, List(List(0), List(1)), "euSection", Some(Set("sectionField", "sectionFieldRef"))),

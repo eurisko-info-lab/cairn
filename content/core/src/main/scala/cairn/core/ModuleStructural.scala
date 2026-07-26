@@ -44,14 +44,14 @@ object ModuleStructural:
     /** Non-empty string leaves at indices under `ctor`. */
     case NonEmptyLeaves(ctor: String, indices: List[Int], labels: List[String])
     /** Refs in a list field must resolve to a number via `numberSources`
-      * (tried in order) and satisfy judgment `judgmentName`; collected ints
-      * must be unique+ascending.
+      * (tried in order) and satisfy `judgment`; collected ints must be
+      * unique+ascending.
       */
     case OutlineNums(
         ctor: String,
         refsField: Int,
         numberSources: List[NumberSource],
-        judgmentName: String,
+        judgment: JudgmentRef,
         label: String,
     )
     /** Leaf at `idx` must name a defined binding. */
@@ -63,10 +63,10 @@ object ModuleStructural:
     /** List field of nodes; leaf at `refPath` in each node must be defined. */
     case DefinedNodeListRefs(
         ctor: String, listIdx: Int, refPath: List[Int], label: String)
-    /** Leaf at `idx` must be non-empty and satisfy judgment `judgmentName`
+    /** Leaf at `idx` must be non-empty and satisfy `judgment`
       * (`Search.prove` against the judgments supplied to [[run]]/[[check]]).
       */
-    case LeafOk(ctor: String, idx: Int, judgmentName: String)
+    case LeafOk(ctor: String, idx: Int, judgment: JudgmentRef)
     /** Leaf value equals some target ctor's field (value match, not binding name). */
     case LeafValueInCtorField(
         ctor: String,
@@ -132,11 +132,11 @@ object ModuleStructural:
         case NonEmptyLeaves(ctor, indices, labels) =>
           Canon.CTag("NonEmptyLeaves", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "indices" -> ints(indices), "labels" -> strs(labels)))
-        case OutlineNums(ctor, refsField, numberSources, judgmentName, label) =>
+        case OutlineNums(ctor, refsField, numberSources, judgment, label) =>
           Canon.CTag("OutlineNums", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "refsField" -> Canon.CInt(refsField),
             "numberSources" -> Canon.CList(numberSources.map(_.canon)),
-            "judgmentName" -> Canon.CStr(judgmentName), "label" -> Canon.CStr(label)))
+            "judgment" -> judgment.canon, "label" -> Canon.CStr(label)))
         case DefinedRef(ctor, idx, label) =>
           Canon.CTag("DefinedRef", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx), "label" -> Canon.CStr(label)))
@@ -150,10 +150,10 @@ object ModuleStructural:
           Canon.CTag("DefinedNodeListRefs", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx),
             "refPath" -> ints(refPath), "label" -> Canon.CStr(label)))
-        case LeafOk(ctor, idx, judgmentName) =>
+        case LeafOk(ctor, idx, judgment) =>
           Canon.CTag("LeafOk", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx),
-            "judgmentName" -> Canon.CStr(judgmentName)))
+            "judgment" -> judgment.canon))
         case LeafValueInCtorField(ctor, leafIdx, targetCtors, targetFieldIdx, label) =>
           Canon.CTag("LeafValueInCtorField", Canon.cmap(
             "ctor" -> Canon.CStr(ctor), "leafIdx" -> Canon.CInt(leafIdx),
@@ -202,7 +202,7 @@ object ModuleStructural:
       case Canon.CTag("OutlineNums", m) =>
         OutlineNums(m.field("ctor").asStr, m.field("refsField").asInt.toInt,
           m.field("numberSources").asList.map(NumberSource.fromCanon),
-          m.field("judgmentName").asStr, m.field("label").asStr)
+          JudgmentRef.fromCanon(m.field("judgment")), m.field("label").asStr)
       case Canon.CTag("DefinedRef", m) =>
         DefinedRef(m.field("ctor").asStr, m.field("idx").asInt.toInt, m.field("label").asStr)
       case Canon.CTag("DefinedRefs", m) =>
@@ -213,7 +213,7 @@ object ModuleStructural:
         DefinedNodeListRefs(m.field("ctor").asStr, m.field("listIdx").asInt.toInt,
           decInts(m.field("refPath")), m.field("label").asStr)
       case Canon.CTag("LeafOk", m) =>
-        LeafOk(m.field("ctor").asStr, m.field("idx").asInt.toInt, m.field("judgmentName").asStr)
+        LeafOk(m.field("ctor").asStr, m.field("idx").asInt.toInt, JudgmentRef.fromCanon(m.field("judgment")))
       case Canon.CTag("LeafValueInCtorField", m) =>
         LeafValueInCtorField(m.field("ctor").asStr, m.field("leafIdx").asInt.toInt,
           decSortedStrs(m.field("targetCtors")), m.field("targetFieldIdx").asInt.toInt, m.field("label").asStr)
@@ -276,7 +276,7 @@ object ModuleStructural:
           }
       }.flatten
 
-    case Spec.OutlineNums(ctor, refsField, numberSources, judgmentName, label) =>
+    case Spec.OutlineNums(ctor, refsField, numberSources, judgment, label) =>
       def numberOf(sec: Cst, tag: String): Option[Int] =
         numberSources.iterator.flatMap {
           case NumberSource.FromLeaf(ctorTag, idx) if tag == ctorTag =>
@@ -293,9 +293,9 @@ object ModuleStructural:
             numberOf(sec, tag) match
               case None => Left(s"references '$ref' which is not a section body")
               case Some(num) =>
-                Search.prove(CheckerCfg(judgments), Cst.node(judgmentName, Cst.Leaf(num.toString))) match
+                Search.prove(CheckerCfg(judgments), Cst.node(judgment.judgment, Cst.Leaf(num.toString))) match
                   case Right(_) => Right(num)
-                  case Left(_)  => Left(s"section '$ref' number $num fails $judgmentName")
+                  case Left(_)  => Left(s"section '$ref' number $num fails ${judgment.judgment}")
           case Some(_) => Left(s"references '$ref' which is not a section body")
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
@@ -365,16 +365,16 @@ object ModuleStructural:
               }
       }.flatten
 
-    case Spec.LeafOk(ctor, idx, judgmentName) =>
+    case Spec.LeafOk(ctor, idx, judgment) =>
       def satisfies(v: String): Boolean =
-        Search.prove(CheckerCfg(judgments), Cst.node(judgmentName, Cst.Leaf(v))).isRight
+        Search.prove(CheckerCfg(judgments), Cst.node(judgment.judgment, Cst.Leaf(v))).isRight
       m.defs.collect {
         case (name, Cst.Node(c, fields)) if c == ctor =>
           fields.lift(idx) match
             case Some(Cst.Leaf(v)) if v.isEmpty =>
               Some(s"$ctor '$name': empty field $idx")
             case Some(Cst.Leaf(v)) if !satisfies(v) =>
-              Some(s"$ctor '$name': '$v' does not satisfy judgment '$judgmentName'")
+              Some(s"$ctor '$name': '$v' does not satisfy judgment '${judgment.judgment}'")
             case Some(Cst.Leaf(_)) => None
             case Some(other) => Some(s"$ctor '$name': bad field ${other.render}")
             case None => Some(s"$ctor '$name': missing field $idx")
