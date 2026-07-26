@@ -295,136 +295,171 @@ object Delta:
   /** Format-preserving ΔL apply (grammar-as-lens, part b): reprints only the
     * bytes an edit actually touches, splicing into the ORIGINAL source text
     * instead of [[apply]] + `Printer.print`'s whole-module canonical reprint.
-    * Built entirely on the existing, independently-tested `Concrete.put`/
-    * `putMany` (M7, `Grammar.scala`) — no kernel changes; the parser change
-    * this needed (leaf spans for `Elem.NameLeaf`) already landed there.
+    * Built on the existing, independently-tested `Concrete.splice`/`putMany`
+    * offset math (M7, `Grammar.scala`) — no kernel changes.
     *
-    * Handles `replace` / `edit` (1:1 subtree substitution — exactly what
-    * `Concrete.put` does), `add` (pure insertion, no existing span to touch),
-    * `rename` (the def's own name leaf plus every footprint reference,
-    * located via [[diffLeaves]] against `Binding.rename`'s already-trusted,
-    * shadowing-aware output, spliced together in one pass via `Concrete.putMany`),
-    * and `remove` (deletes the def's own span, extended BACKWARD through its
-    * own leading trivia — comment/blank-line — since a lexer's trivia belongs
-    * to the token that follows it, never to the one before; the trivia
-    * following the removed def, i.e. leading the NEXT def, is left untouched.
-    * That convention alone avoids both an orphaned "about the thing I just
-    * deleted" comment and a doubled blank line, with no separate collapse
-    * heuristic needed — see the case body for a worked-through example).
-    * `rename`/`remove` validate by delegating to the trusted [[apply]] first
-    * (footprint exactness, still-referenced checks, etc.), so format-preserving
-    * apply can never succeed where a plain apply would reject the edit;
-    * `replace`/`edit`/`add`'s validation (defined/not-defined) is simple
-    * enough to check directly, matching `applyOne`'s own checks.
+    * Runs the SAME generic interpreter [[applyTyped]] does
+    * ([[ChangeModelInterp.runTraced]]) against `model`'s operations — no
+    * per-operation-name switch here, and no separate validation pass either:
+    * every check (defined/not-defined, footprint exactness, still-referenced,
+    * ...) happens once, inside the op's own `program`, exactly as it does for
+    * ordinary (non-format-preserving) apply. The resulting resolved
+    * [[AppliedMutation]] trace is then spliced against the parsed source via
+    * [[mutationEdits]]/[[applyEdits]], which switch on the fixed, never-growing
+    * 5-case trace vocabulary — never on an operation name — so a data-defined
+    * operation (e.g. a `copy` op resolving to `InsertedDef`) is format-preserving
+    * automatically, with no change to this method.
     */
   def applyPreservingFormat(l: ComposedLanguage, moduleGrammar: GrammarSpec,
-                            source: String, change: Cst): Either[String, String] =
+                            source: String, change: Cst, model: ChangeModel = ChangeModel.default): Either[String, String] =
     changeItems(l, change).flatMap { chs =>
       chs.foldLeft[Either[String, String]](Right(source)) { (acc, ch) =>
-        acc.flatMap(applyOnePreserving(l, moduleGrammar, _, ch))
+        acc.flatMap(applyOnePreserving(l, moduleGrammar, model, _, ch))
       }
     }
 
-  private def applyOnePreserving(l: ComposedLanguage, mg: GrammarSpec, source: String, ch: Cst): Either[String, String] =
+  private def applyOnePreserving(l: ComposedLanguage, mg: GrammarSpec, model: ChangeModel, source: String, ch: Cst): Either[String, String] =
     Parser.parseFull(mg, source).flatMap { out =>
       moduleDefs(out.cst).flatMap { defs =>
-        ch match
-          case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "replace") =>
-            findDef(defs, name) match
-              case Some(Cst.Node(_, List(_, termInstance))) =>
-                Concrete.splice(mg, source, out, termInstance, term)
-              case _ => Left(s"ΔL replace (format-preserving): '$name' not defined")
-
-          case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
-            findDef(defs, name) match
-              case Some(Cst.Node(_, List(_, termInstance))) =>
-                SemanticPath.fromLegacyPath(l, termInstance, pathOf(pathCst))
-                  .left.map(e => s"ΔL edit (format-preserving): $e")
-                  .flatMap { sp =>
-                    // SemanticPath is index-based; subtreeAt still performs the
-                    // actual instance-preserving walk (Concrete.splice keys spans
-                    // by Cst node identity, so the exact parsed node is required).
-                    subtreeAt(termInstance, sp.indices).flatMap { target =>
-                      Concrete.splice(mg, source, out, target, term)
-                    }
-                  }
-              case _ => Left(s"ΔL edit (format-preserving): '$name' not defined")
-
-          case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>
-            if findDef(defs, name).isDefined then
-              Left(s"ΔL add (format-preserving): '$name' already defined (use replace)")
-            else
-              Printer.print(mg, Cst.node("moduleDef", Cst.Leaf(name), term)).map { printedDef =>
-                val real = out.tokens.filter(_.kind != TokKind.Eof)
-                val insertAt = real.lastOption.fold(0)(t => t.offset + t.rawLen)
-                val prefix = source.substring(0, insertAt)
-                val sep = if prefix.isEmpty || prefix.endsWith("\n") then "" else "\n"
-                prefix + sep + printedDef + "\n" + source.substring(insertAt)
+        ModuleSurface.toModule(out.cst).flatMap { module =>
+          ch match
+            case Cst.Node(t, children) if model.operations.exists(o => t == tag(l, o.name)) =>
+              val op = model.operations.find(o => t == tag(l, o.name)).get
+              ChangeModelInterp.runTraced(l, module, op, children).left.map(_.render).flatMap { applied =>
+                mutationEdits(l, mg, out, defs, module, source, applied.trace).flatMap(applyEdits(source, _))
               }
-
-          case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fpCst)) if t == tag(l, "rename") =>
-            // Validate via the trusted semantic path first (footprint exactness,
-            // 'to' not already defined, etc. — see apply's own rename case) —
-            // reused rather than re-derived, so format-preserving rename can
-            // never succeed where a plain apply would reject it.
-            ModuleSurface.toModule(out.cst).flatMap { module =>
-              apply(l, module, ch).left.map(e => s"ΔL rename (format-preserving): $e").flatMap { _ =>
-                findDef(defs, from) match
-                  case None => Left(s"ΔL rename (format-preserving): '$from' not defined")
-                  case Some(Cst.Node(_, List(ownNameLeaf, _))) =>
-                    val footprint = fpCst match
-                      case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }
-                      case _ => Nil
-                    val vc = l.varCtor.getOrElse("var")
-                    val refEdits = footprint.foldLeft[Either[String, List[(Cst, Cst)]]](Right(Nil)) { (acc, fname) =>
-                      acc.flatMap { pairs =>
-                        findDef(defs, fname) match
-                          case Some(Cst.Node(_, List(_, fTermInstance))) =>
-                            val renamedTerm = Binding.rename(l.binderSpec, vc)(fTermInstance, from, to)
-                            Right(pairs ++ diffLeaves(fTermInstance, renamedTerm))
-                          case _ => Left(s"ΔL rename (format-preserving): footprint '$fname' not defined")
-                      }
-                    }
-                    refEdits.flatMap { refs =>
-                      Concrete.putMany(mg, source, out, (ownNameLeaf, Cst.Leaf(to)) :: refs)
-                    }
-                  case Some(_) => Left(s"ΔL rename (format-preserving): malformed def '$from'")
-              }
-            }
-
-          case Cst.Node(t, List(Cst.Leaf(name))) if t == tag(l, "remove") =>
-            // Validated via the trusted semantic path first (still-referenced
-            // check, same as apply's own remove case) — same reuse pattern as
-            // rename above.
-            ModuleSurface.toModule(out.cst).flatMap { module =>
-              apply(l, module, ch).left.map(e => s"ΔL remove (format-preserving): $e").flatMap { _ =>
-                findDef(defs, name) match
-                  case None => Left(s"ΔL remove (format-preserving): '$name' not defined")
-                  case Some(defNode) =>
-                    out.spans.get(defNode) match
-                      case None => Left("ΔL remove (format-preserving): target def has no recorded span (not from this parse)")
-                      case Some((startTok, endTok)) =>
-                        // Extend the deletion BACKWARD through the def's own leading
-                        // trivia (its comment/blank-line, per the lexer's convention
-                        // that trivia belongs to the FOLLOWING token) — but never
-                        // forward into whatever follows: that trivia belongs to the
-                        // NEXT def, not this one, and must survive untouched. This
-                        // is what avoids leaving an orphaned "-- about the thing I
-                        // just deleted" comment, or a doubled blank line, without any
-                        // separate collapse heuristic.
-                        val startOff =
-                          if startTok == 0 then 0
-                          else { val prev = out.tokens(startTok - 1); prev.offset + prev.rawLen }
-                        val endOff =
-                          if endTok == 0 then startOff
-                          else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
-                        Right(source.substring(0, startOff) + source.substring(endOff))
-              }
-            }
-
-          case other => Left(s"not a ΔL change term: ${other.render}")
+            case other => Left(s"not a ΔL change term: ${other.render}")
+        }
       }
     }
+
+  /** `(startOffset, endOffset, replacementText)` — a `Concrete.splice`-shaped
+    * edit computed once from the ORIGINAL parse (`out.tokens`/`out.spans`),
+    * generalized to also cover pure insertion (a zero-width range) and
+    * trivia-aware deletion (an empty replacement), so every [[AppliedMutation]]
+    * case reduces to the same shape and [[applyEdits]] can combine them in one
+    * pass, exactly like `Concrete.putMany` does for ordinary replacements.
+    */
+  private def spanOffsets(out: ParseOut, startTok: Int, endTok: Int): (Int, Int) =
+    val startOff = out.tokens(startTok).offset
+    val endOff =
+      if endTok == 0 then startOff
+      else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+    (startOff, endOff)
+
+  private def mutationEdits(
+      l: ComposedLanguage, mg: GrammarSpec, out: ParseOut, defs: List[Cst], module: Module, source: String,
+      trace: List[AppliedMutation],
+  ): Either[String, List[(Int, Int, String)]] =
+    trace.foldLeft[Either[String, List[(Int, Int, String)]]](Right(Nil)) { (acc, mut) =>
+      acc.flatMap(xs => mutationEdit(l, mg, out, defs, module, source, mut).map(xs ++ _))
+    }
+
+  private def mutationEdit(
+      l: ComposedLanguage, mg: GrammarSpec, out: ParseOut, defs: List[Cst], module: Module, source: String,
+      mut: AppliedMutation,
+  ): Either[String, List[(Int, Int, String)]] = mut match
+
+    case AppliedMutation.InsertedDef(name, term) =>
+      Printer.print(mg, Cst.node("moduleDef", Cst.Leaf(name), term)).map { printedDef =>
+        val real = out.tokens.filter(_.kind != TokKind.Eof)
+        val insertAt = real.lastOption.fold(0)(t => t.offset + t.rawLen)
+        val prefix = source.substring(0, insertAt)
+        val sep = if prefix.isEmpty || prefix.endsWith("\n") then "" else "\n"
+        List((insertAt, insertAt, sep + printedDef + "\n"))
+      }
+
+    case AppliedMutation.ReplacedDef(name, oldTerm, newTerm) =>
+      out.spans.get(oldTerm) match
+        case None => Left(s"ΔL replace (format-preserving): '$name' has no recorded span (not from this parse)")
+        case Some((startTok, endTok)) =>
+          Printer.print(mg, newTerm).map { printed =>
+            val (startOff, endOff) = spanOffsets(out, startTok, endTok)
+            List((startOff, endOff, printed))
+          }
+
+    case AppliedMutation.ReplacedSubtree(name, _, oldSubtree, newSubtree) =>
+      out.spans.get(oldSubtree) match
+        case None => Left(s"ΔL edit (format-preserving): '$name' subtree has no recorded span (not from this parse)")
+        case Some((startTok, endTok)) =>
+          Printer.print(mg, newSubtree).map { printed =>
+            val (startOff, endOff) = spanOffsets(out, startTok, endTok)
+            List((startOff, endOff, printed))
+          }
+
+    case AppliedMutation.DeletedDef(name, _) =>
+      findDef(defs, name) match
+        case None => Left(s"ΔL remove (format-preserving): '$name' not defined")
+        case Some(defNode) =>
+          out.spans.get(defNode) match
+            case None => Left("ΔL remove (format-preserving): target def has no recorded span (not from this parse)")
+            case Some((startTok, endTok)) =>
+              // Extend the deletion BACKWARD through the def's own leading
+              // trivia (its comment/blank-line, per the lexer's convention
+              // that trivia belongs to the FOLLOWING token) — but never
+              // forward into whatever follows: that trivia belongs to the
+              // NEXT def, not this one, and must survive untouched. This is
+              // what avoids leaving an orphaned "-- about the thing I just
+              // deleted" comment, or a doubled blank line, without any
+              // separate collapse heuristic.
+              val startOff =
+                if startTok == 0 then 0
+                else { val prev = out.tokens(startTok - 1); prev.offset + prev.rawLen }
+              val endOff =
+                if endTok == 0 then startOff
+                else { val last = out.tokens(endTok - 1); last.offset + last.rawLen }
+              Right(List((startOff, endOff, "")))
+
+    case AppliedMutation.RenamedOccurrences(from, to, affectedDefs) =>
+      findDef(defs, from) match
+        case None => Left(s"ΔL rename (format-preserving): '$from' not defined")
+        case Some(Cst.Node(_, List(ownNameLeaf, _))) =>
+          val vc = l.varCtor.getOrElse("var")
+          val refPairs = affectedDefs.toList.sorted.foldLeft[Either[String, List[(Cst, Cst)]]](Right(Nil)) { (acc, fname) =>
+            acc.flatMap { pairs =>
+              module.get(fname) match
+                case Some(fTermInstance) =>
+                  val renamedTerm = Binding.rename(l.binderSpec, vc)(fTermInstance, from, to)
+                  Right(pairs ++ diffLeaves(fTermInstance, renamedTerm))
+                case None => Left(s"ΔL rename (format-preserving): footprint '$fname' not defined")
+            }
+          }
+          refPairs.flatMap { refs =>
+            ((ownNameLeaf, Cst.Leaf(to)) :: refs).foldLeft[Either[String, List[(Int, Int, String)]]](Right(Nil)) {
+              case (acc, (target, replacement)) =>
+                acc.flatMap { xs =>
+                  out.spans.get(target) match
+                    case None => Left("ΔL rename (format-preserving): target has no recorded span (not from this parse)")
+                    case Some((startTok, endTok)) =>
+                      Printer.print(mg, replacement).map { printed =>
+                        val (startOff, endOff) = spanOffsets(out, startTok, endTok)
+                        xs :+ (startOff, endOff, printed)
+                      }
+                }
+            }
+          }
+        case Some(_) => Left(s"ΔL rename (format-preserving): malformed def '$from'")
+
+  /** Combine every `(start,end,text)` edit against the SAME original parse in
+    * ONE pass — generalizing `Concrete.putMany`'s rightmost-first fold
+    * (`putMany` sorts by token index; here the sort key is the actual byte
+    * offset, since a pure insertion has no token index of its own). Adjacent
+    * edits (`e1 == s2`) compose correctly by the same invariant `putMany`
+    * relies on; only genuinely OVERLAPPING edits (`e1 > s2`), which none of
+    * the default operations or `copy` ever produce, are rejected rather than
+    * silently corrupting text.
+    */
+  private def applyEdits(source: String, edits: List[(Int, Int, String)]): Either[String, String] =
+    val sorted = edits.sortBy(_._1)
+    val overlap = sorted.zip(sorted.tail).collectFirst {
+      case ((s1, e1, _), (s2, e2, _)) if e1 > s2 => (s1, e1, s2, e2)
+    }
+    overlap match
+      case Some((s1, e1, s2, e2)) =>
+        Left(s"format-preserving apply: overlapping edits [$s1,$e1) and [$s2,$e2)")
+      case None =>
+        val ordered = sorted.sortBy(-_._1) // rightmost (highest start offset) first
+        Right(ordered.foldLeft(source) { case (acc, (s, e, text)) => acc.substring(0, s) + text + acc.substring(e) })
 
   /** Compose two changesets by sequencing `cs2` after `cs1` — list
     * concatenation, so `{}` is the identity and composition is associative
