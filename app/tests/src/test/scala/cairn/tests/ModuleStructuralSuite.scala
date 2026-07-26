@@ -33,15 +33,20 @@ class ModuleStructuralSuite extends munit.FunSuite:
     val b = Spec.RefTagIn("ctor", 0, Set("c", "b", "a"), "label")
     assertEquals(a.canon, b.canon)
 
-  test("Spec.canon: closure-bearing specs (OutlineNums, LeafOk) ignore the closure itself"):
-    val a = Spec.LeafOk("ctor", 0, _ => true, s => s)
-    val b = Spec.LeafOk("ctor", 0, _ => false, s => s"different: $s")
-    assertEquals(a.canon, b.canon,
-      "documented limitation: LeafOk's predicate/detail closures have no canonical form")
-    val c = Spec.OutlineNums("ctor", 0, (_, r) => Right(0), "label")
-    val d = Spec.OutlineNums("ctor", 0, (_, r) => Left("different"), "label")
-    assertEquals(c.canon, d.canon,
-      "documented limitation: OutlineNums's resolveNum closure has no canonical form")
+  test("Spec.canon: LeafOk is deterministic and distinguishes different judgment names"):
+    assertEquals(Spec.LeafOk("ctor", 0, "j1").canon, Spec.LeafOk("ctor", 0, "j1").canon)
+    assertNotEquals(Spec.LeafOk("ctor", 0, "j1").canon, Spec.LeafOk("ctor", 0, "j2").canon)
+
+  test("Spec.canon: OutlineNums is deterministic and distinguishes different judgment names / number sources"):
+    import ModuleStructural.NumberSource
+    val base = Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j1", "label")
+    assertEquals(base.canon, Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j1", "label").canon)
+    assertNotEquals(base.canon,
+      Spec.OutlineNums("ctor", 0, List(NumberSource.FromLeaf("t", 0)), "j2", "label").canon,
+      "different judgmentName must change the descriptor")
+    assertNotEquals(base.canon,
+      Spec.OutlineNums("ctor", 0, List(NumberSource.ByTag(Map("t" -> 1))), "j1", "label").canon,
+      "different numberSources must change the descriptor")
 
   test("Spec.canon: a whole spec list's digest matches ModuleGate.fromSpecs's descriptor"):
     val specs = List(

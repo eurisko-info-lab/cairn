@@ -246,7 +246,7 @@ class ExemplarPackSuite extends munit.FunSuite:
     val bad = Parser.parse(dl.grammar,
       """{ add badMark = translation state prodName lang de from "abc" as "bogus" ; }""")
       .fold(e => fail(e), identity)
-    assert(Sds.applySds(base, bad).swap.exists(_.contains("unknown state tag")))
+    assert(Sds.applySds(base, bad).swap.exists(_.contains("translationStateTag")))
 
   test("SDS section numbering: EU-CLP has exactly sections 1..16 in order"):
     import cairn.examples.sds.SectionNumbering
