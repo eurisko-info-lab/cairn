@@ -37,6 +37,7 @@ object Meta:
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
         "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by", "provider",
         "validate", "satisfies", "fromleaf", "bytag", "changeop", "semantics", "surface",
+        "migration", "from", "to", "model",
         "sumleavesatmost", "uniquetuples", "nonemptyleaves", "definedref", "definedrefs", "definedleaflist",
         "definednodelistrefs", "leafok", "leafvalueinctorfield", "reftagin", "uniquetupleslist",
         "listchilddefinedrefs", "keyedlocaleoverlay", "outlinenums"),
@@ -84,6 +85,9 @@ object Meta:
           ConstructorSpec("changeOpDecl", List(
             Elem.Tok("changeop"), Elem.Tok("semantics"), Elem.StrLeaf,
             Elem.Tok("surface"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("migrationDecl", List(
+            Elem.Tok("migration"), Elem.Tok("from"), Elem.AnyIdentLeaf,
+            Elem.Tok("to"), Elem.AnyIdentLeaf, Elem.Tok("model"), Elem.StrLeaf, Elem.Tok(";"))),
           // Each ModuleStructural.Spec kind gets its own disambiguating
           // keyword right after "validate" (never positional-only —
           // GrammarLint's prefix-conflict rule requires it, same reason
@@ -231,6 +235,10 @@ object Meta:
           PrintSeg.Lit("changeop"), PrintSeg.Space, PrintSeg.Lit("semantics"), PrintSeg.Space,
           PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit("surface"), PrintSeg.Space,
           PrintSeg.StrField(1), PrintSeg.Lit(";"))),
+        PrintRule("migrationDecl", List(
+          PrintSeg.Lit("migration from"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
+          PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
+          PrintSeg.Lit("model"), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Lit(";"))),
         PrintRule("validateSumLeavesAtMost", List(
           PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("sumleavesatmost"), PrintSeg.Space, PrintSeg.Field(0),
           PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
@@ -554,6 +562,7 @@ object Meta:
       val validations = List.newBuilder[Canon]
       val changeSemantics = List.newBuilder[Canon]
       val changeSurfaces = List.newBuilder[Canon]
+      val migrations = List.newBuilder[Canon]
       var varCtor: Option[String] = None
       val keywords = List.newBuilder[String]
       val puncts = List.newBuilder[String]
@@ -656,6 +665,14 @@ object Meta:
               catch case e: Exception => err ++= s"invalid changeop: ${e.getMessage}; "
             case (Left(e), _) => err ++= s"changeop semantics: $e; "
             case (_, Left(e)) => err ++= s"changeop surface: $e; "
+        case Cst.Node("migrationDecl", List(Cst.Leaf(from), Cst.Leaf(to), Cst.Leaf(modelHex))) =>
+          canonFromHex(modelHex) match
+            case Right(model) =>
+              try
+                LangMigration.fromCanon(model)
+                migrations += MigrationDeclaration(from, to, model).canon
+              catch case e: Exception => err ++= s"invalid migration: ${e.getMessage}; "
+            case Left(e) => err ++= s"migration model: $e; "
         // The 11 provider-free Spec kinds construct a real ModuleStructural.Spec
         // and store its OWN canon verbatim — byte-identical to the final
         // resolved shape ValidationModelLoader will decode, since nothing
@@ -731,7 +748,8 @@ object Meta:
         providers = providers.result().toMap,
         validations = validations.result(),
         changeSemantics = changeSemantics.result(),
-        changeSurfaces = changeSurfaces.result()))
+        changeSurfaces = changeSurfaces.result(),
+        migrations = migrations.result()))
     case other => Left(s"not a fragment declaration: ${other.render}")
 
   def parseFragment(src: String): Either[String, Fragment] =
@@ -893,6 +911,10 @@ object Meta:
     for v <- f.validations do items += validationCanonToCst(v)
     for (sem, surface) <- f.changeSemantics.zip(f.changeSurfaces) do
       items += n("changeOpDecl", leaf(canonHex(sem)), leaf(canonHex(surface)))
+    for migration <- f.migrations do
+      val declaration = MigrationDeclaration.fromCanon(migration)
+      items += n("migrationDecl", leaf(declaration.fromProvider), leaf(declaration.toProvider),
+        leaf(canonHex(declaration.model)))
     n("fragmentDecl", leaf(f.name),
       if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
       if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),

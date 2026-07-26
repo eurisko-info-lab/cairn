@@ -113,6 +113,8 @@ final case class Fragment(
       */
     changeSemantics: List[Canon] = Nil,
     changeSurfaces: List[Canon] = Nil,
+    /** Unresolved pack migration declarations; core resolves provider aliases. */
+    migrations: List[Canon] = Nil,
 ):
   /** Semantic identity only — grammar/surface is excluded (Phase 2). */
   def canon: Canon = FragmentCodec.toCanon(this)
@@ -148,6 +150,7 @@ final case class ComposedLanguage(
     validations: List[Canon] = Nil,
     changeSemantics: List[Canon] = Nil,
     changeSurfaces: List[Canon] = Nil,
+    migrations: List[Canon] = Nil,
 ):
   def binderSpec: BinderSpec = BinderSpec(
     constructors.values.filter(_.binders.nonEmpty).map(c => c.name -> c.binders).toMap)
@@ -184,6 +187,7 @@ object Compose:
     val validations = fragments.flatMap(_.validations)
     val changeSemantics = fragments.flatMap(_.changeSemantics)
     val changeSurfaces = fragments.flatMap(_.changeSurfaces)
+    val migrations = fragments.flatMap(_.migrations)
     // Grammar categories AMALGAMATE: fragments contribute alternatives to a
     // shared category. Alternative order is canonical: fragments in name
     // order, each fragment's declaration order preserved. Same tag with
@@ -269,7 +273,7 @@ object Compose:
         Right(ComposedLanguage(
           name, fragments, sorts, labeledCtors, grammar,
           rules.values.toList.sortBy(_.name), judgs, varCtors.headOption, keys,
-          providers, validations, changeSemantics, changeSurfaces))
+          providers, validations, changeSemantics, changeSurfaces, migrations))
 
 object FragmentCodec:
   import Canon.*
@@ -317,8 +321,10 @@ object FragmentCodec:
     "validations" -> CList(f.validations))
     // Preserve pre-PR12 identities for fragments that declare no change
     // semantics. Surface bodies never enter semantic fragment identity.
-    val fields = if f.changeSemantics.isEmpty then base
+    val withChanges = if f.changeSemantics.isEmpty then base
       else base :+ ("changeSemantics" -> CList(f.changeSemantics))
+    val fields = if f.migrations.isEmpty then withChanges
+      else withChanges :+ ("migrations" -> CList(f.migrations))
     Canon.cmap(fields*)
 
   def fromCanon(c: Canon): Fragment =
@@ -364,4 +370,5 @@ object FragmentCodec:
       providers = c.asMap.get("providers").map(_.asMap.map((k, v) => k -> v.asStr)).getOrElse(Map.empty),
       validations = c.asMap.get("validations").map(_.asList).getOrElse(Nil),
       changeSemantics = c.asMap.get("changeSemantics").map(_.asList).getOrElse(Nil),
-      changeSurfaces = Nil)
+      changeSurfaces = Nil,
+      migrations = c.asMap.get("migrations").map(_.asList).getOrElse(Nil))

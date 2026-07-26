@@ -270,6 +270,13 @@ final case class LangMigration(
       * rather than silently pick one).
       */
     fieldRemap: Map[String, List[Either[String, Cst]]] = Map.empty,
+    /** Shape changes for non-object wrappers (change operations, list-like
+      * envelopes, pending-edit records). These are intentionally separate
+      * from object constructors so wrapper evolution is explicit. */
+    wrapperRenames: Map[String, String] = Map.empty,
+    wrapperFieldRemap: Map[String, List[Either[Int, Cst]]] = Map.empty,
+    /** Provider-language revision transport used inside JudgmentRefs. */
+    providerMigrations: Map[Digest, Digest] = Map.empty,
 ):
   def canon: Canon = Canon.cmap(
     "from" -> Canon.CStr(fromLang.hex),
@@ -281,7 +288,14 @@ final case class LangMigration(
       k -> Canon.CList(slots.map {
         case Left(fieldId) => Canon.CTag("carry", Canon.CStr(fieldId))
         case Right(default) => Canon.CTag("default", Cst.toCanon(default))
-      }))*))
+      }))*),
+    "wrapperRenames" -> Canon.cmap(wrapperRenames.toList.map((k, v) => k -> Canon.CStr(v))*),
+    "wrapperFieldRemap" -> Canon.cmap(wrapperFieldRemap.toList.map((k, slots) =>
+      k -> Canon.CList(slots.map {
+        case Left(position) => Canon.CTag("carry-position", Canon.CInt(position))
+        case Right(default) => Canon.CTag("default", Cst.toCanon(default))
+      }))*),
+    "providerMigrations" -> Canon.cmap(providerMigrations.toList.map((k, v) => k.hex -> Canon.CStr(v.hex))*))
   def artifact: Artifact = Artifact(ArtifactKind.Migration, Canon.CTag("lang-migration", canon))
 
 object LangMigration:
@@ -298,7 +312,14 @@ object LangMigration:
         case Canon.CTag("carry", Canon.CStr(field)) => Left(field)
         case Canon.CTag("default", term)            => Right(Cst.fromCanon(term))
         case other => throw CodecError(s"not a migration field remap slot: $other")
-      })).getOrElse(Map.empty))
+      })).getOrElse(Map.empty),
+      body.asMap.get("wrapperRenames").map(_.asMap.map((k, v) => k -> v.asStr)).getOrElse(Map.empty),
+      body.asMap.get("wrapperFieldRemap").map(_.asMap.map((k, v) => k -> v.asList.map {
+        case Canon.CTag("carry-position", Canon.CInt(i)) => Left(i.toInt)
+        case Canon.CTag("default", term)                  => Right(Cst.fromCanon(term))
+        case other => throw CodecError(s"not a wrapper remap slot: $other")
+      })).getOrElse(Map.empty),
+      body.asMap.get("providerMigrations").map(_.asMap.map((k, v) => Digest(k) -> Digest(v.asStr))).getOrElse(Map.empty))
 
   def fromArtifact(artifact: Artifact): Either[String, LangMigration] =
     if artifact.kind != ArtifactKind.Migration then Left("expected migration artifact")
@@ -368,18 +389,33 @@ object Migrate:
     def retag(t: String): String =
       val suffix = s":${source.name}"
       if t.endsWith(suffix) then t.dropRight(suffix.length) + s":${target.name}" else t
+    def wrap(c: String, children: List[Cst]): Either[String, Cst] =
+      val renamed = mig.wrapperRenames.getOrElse(c, c)
+      mig.wrapperFieldRemap.get(renamed) match
+        case None => Right(Cst.Node(renamed, children))
+        case Some(slots) => slots.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, slot) =>
+          acc.flatMap { xs => slot match
+            case Right(default) => Right(xs :+ default)
+            case Left(position) if children.isDefinedAt(position) => Right(xs :+ children(position))
+            case Left(position) => Left(s"migration: wrapper '$c' has no child $position")
+          }
+        }.map(Cst.Node(renamed, _))
     def go(t: Cst): Either[String, Cst] = t match
       case Cst.Node(c, cs) if c.endsWith(s":${source.name}") =>
         cs.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, ch) =>
           for xs <- acc; x <- goChild(ch) yield xs :+ x
-        }.map(Cst.Node(retag(c), _))
+        }.flatMap(wrap(retag(c), _))
       case other => goChild(other)
     def goChild(t: Cst): Either[String, Cst] = t match
       case Cst.Node(c, cs) if c.endsWith(s":${source.name}") => go(t)
+      case Cst.Node(c, cs) if mig.wrapperRenames.contains(c) || mig.wrapperFieldRemap.contains(c) =>
+        cs.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, ch) =>
+          for xs <- acc; x <- goChild(ch) yield xs :+ x
+        }.flatMap(wrap(c, _))
       case Cst.Node(c, cs) if structuralTags.contains(c) =>
         cs.foldLeft[Either[String, List[Cst]]](Right(Nil)) { (acc, ch) =>
           for xs <- acc; x <- goChild(ch) yield xs :+ x
-        }.map(Cst.Node(c, _))
+        }.flatMap(wrap(c, _))
       case Cst.Leaf(_) => Right(t)
       case termNode    => term(mig, source, target, termNode) // an embedded object-language term
     go(change)
