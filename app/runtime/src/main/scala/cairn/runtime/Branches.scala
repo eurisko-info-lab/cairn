@@ -1015,7 +1015,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       live <- headModule(session.branch)
       _ <- Either.cond(live.digest == session.base.digest && proposal.base == live.digest, (),
         "Studio branch head changed; review or rebase the proposal")
-      facts <- acceptanceFacts(session.branch, None, None)
+      facts <- acceptanceFacts(session.branch,
+        session.migration.map(m => m.model -> m.target.language), None)
       _ <- Either.cond(
         session.constitution.authorityRules.required.isEmpty || facts.authorities.contains(session.authority), (),
         s"Studio authority '${session.authority}' is not eligible under the constitution")

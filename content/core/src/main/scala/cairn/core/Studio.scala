@@ -297,6 +297,27 @@ object Studio:
     yield StudioProposal(migration.target.language.digest, migratedBase.digest, migratedChange,
       vcs, result, trace, Nil)
 
+/** Conflict mode is a projection over ΔConflict, not a side-channel choice.
+  * The workspace retains both causal changes and exposes unresolved semantic
+  * locations through the resulting resolution artifact. */
+final case class StudioConflictWorkspace(
+    language: ComposedLanguage,
+    base: Module,
+    conflict: Merge.Conflict,
+    left: Cst,
+    right: Cst,
+    constitution: AcceptanceConstitution,
+    model: ChangeModel = ChangeModel.default,
+    gate: ModuleGate = ModuleGate.passthrough,
+    facts: AcceptanceFacts = AcceptanceFacts(),
+    conflictDigest: Option[Digest] = None,
+):
+  def locations: List[SemanticLocation] = conflict.overlap.toList.sortBy(_.render)
+
+  def resolve(program: Cst): Either[String, ConflictDelta.ValidatedResolution] =
+    ConflictDelta.resolve(language, base, conflict, left, right, program, model, gate,
+      constitution, facts, conflictDigest)
+
 final case class StudioBranchStatus(
     branch: String,
     history: List[Digest],
@@ -339,6 +360,16 @@ final case class StudioWorkspace(
           .map(p => copy(actions = remaining, proposal = Some(p)))
     yield next
 
+  /** Transport the pending ordinary change as one unit. Typed UI actions are
+    * deliberately not replayed or reinterpreted after a schema revision. */
+  def assistMigration(migration: ResolvedMigration): Either[String, StudioWorkspace] =
+    for
+      current <- proposal.toRight("Studio workspace has no pending proposal to migrate")
+      migratedBase <- migration.module(base)
+      migrated <- Studio.assistMigration(migration, base, current, migration.target.moduleGate())
+    yield StudioWorkspace(migration.target.language, migratedBase, Nil, Some(migrated),
+      migration.target.changeModel, migration.target.moduleGate())
+
 final case class StudioSession(
     capabilities: ResolvedLanguageCapabilities,
     branch: String,
@@ -349,5 +380,20 @@ final case class StudioSession(
     workspace: StudioWorkspace,
     profile: Option[StudioProfile],
     mode: StudioMode = StudioMode.Edit,
+    migration: Option[ResolvedMigration] = None,
 ):
   def withMode(next: StudioMode): StudioSession = copy(mode = next)
+
+  def assistMigration(resolved: ResolvedMigration): Either[String, StudioSession] =
+    for
+      _ <- Either.cond(resolved.source.language.digest == capabilities.language.digest, (),
+        "Studio migration source does not match the open language bundle")
+      migratedWorkspace <- workspace.assistMigration(resolved)
+      targetProfile <- resolved.target.studioProfile
+    yield copy(
+      capabilities = resolved.target,
+      base = migratedWorkspace.base,
+      workspace = migratedWorkspace,
+      profile = targetProfile,
+      mode = StudioMode.AssistMigration,
+      migration = Some(resolved))

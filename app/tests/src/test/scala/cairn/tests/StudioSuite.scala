@@ -122,3 +122,36 @@ class StudioSuite extends munit.FunSuite:
     val undone = workspace.undoLast.fold(e => fail(e), identity)
     assertEquals(undone.actions.length, 1)
     assertEquals(Delta.subtreeAt(undone.proposal.get.result.get("sheet").get, List(0, 1, 1)), Right(Cst.Leaf("60")))
+
+  test("Acetone cockpit stages multilingual and keyed edits, localizes rejection, and previews source/report"):
+    val packs = cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader())
+    val sds = cairn.examples.sds.Sds(packs)
+    val sdsLanguage = sds.language
+    val acetoneBase = cairn.examples.sds.SdsTutorial.acetoneBase
+    val gate = ModuleGate.fromValidationModel("sds.validate", sds.validationModel, sds.judgmentProviders.get)
+    val phrasePath = Studio.pathFromTraversal(sdsLanguage, acetoneBase.get("prodNameFr").get, List(2)).toOption.get
+    val concentrationPath = Studio.pathFromTraversal(sdsLanguage, acetoneBase.get("cleaner").get, List(0, 0, 1)).toOption.get
+    val phraseEdit = StudioAction.ReplaceAt("prodNameFr", phrasePath, Cst.Leaf("Nettoyant à l’acétone"))
+    val invalidConcentration = StudioAction.ReplaceAt("cleaner", concentrationPath, Cst.Leaf("95"))
+    val correctedConcentration = StudioAction.ReplaceAt("cleaner", concentrationPath, Cst.Leaf("75"))
+    val afterPhrase = StudioWorkspace(sdsLanguage, acetoneBase, gate = gate).stage(phraseEdit)
+      .fold(e => fail(e), identity)
+    assert(afterPhrase.stage(invalidConcentration).isLeft)
+    val diagnostics = Studio.diagnostics(sdsLanguage, afterPhrase.proposal.get.result,
+      invalidConcentration, gate = gate)
+    assert(diagnostics.exists(_.location.contains(SemanticLocation.Subtree("cleaner", concentrationPath))))
+    assert(diagnostics.exists(_.message.contains("100")))
+    val workspace = afterPhrase.stage(correctedConcentration).fold(e => fail(e), identity)
+    val proposal = workspace.proposal.get
+    assertEquals(workspace.actions.length, 2)
+    assert(proposal.accesses.accesses.exists(_.location == SemanticLocation.Subtree("prodNameFr", phrasePath)))
+    assert(proposal.accesses.accesses.exists(_.location == SemanticLocation.Subtree("cleaner", concentrationPath)))
+    val grammar = ModuleSurface.grammar(sdsLanguage)
+    val source = Printer.print(grammar, ModuleSurface.fromModule(acetoneBase)).fold(e => fail(e), identity)
+    val sourcePreview = Delta.applyPreservingFormat(sdsLanguage, grammar, source, proposal.change)
+      .fold(e => fail(e), identity)
+    assert(sourcePreview.contains("Nettoyant à l’acétone"))
+    val report = sds.render(proposal.result, "cleanerProduct", "fr").fold(e => fail(e), identity)
+    assertEquals(sds.phraseText(proposal.result, "prodName", "fr"), Some("Nettoyant à l’acétone"))
+    assert(report.contains("Acetone Cleaner"))
+    assertEquals(proposal.validatedChange.result, proposal.result.digest)

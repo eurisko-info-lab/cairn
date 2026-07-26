@@ -75,3 +75,17 @@ class MigrationModelSuite extends munit.FunSuite:
     val badTarget = target.copy(validation = Some(badValidation),
       descriptor = target.descriptor.copy(validation = Some(badValidation.digest)))
     assert(MigrationModelLoader.validate(migration.model, source, badTarget).isLeft)
+
+  test("Studio migration mode transports the pending proposal and records migration evidence"):
+    val base = Module(List("x" -> Stlc.tru))
+    val workspace = StudioWorkspace(source.language, base, model = source.changeModel)
+      .stage(StudioAction.Replace("x", Stlc.fls)).fold(e => fail(e), identity)
+    val session = StudioSession(source, "main", AcceptanceConstitution.open(source.changeModel.digest),
+      "editor", base, StudioBranchStatus("main", Nil, None, Set.empty, None, None, Nil),
+      workspace, None)
+    val migrated = session.assistMigration(migration).fold(e => fail(e), identity)
+    assertEquals(migrated.mode, StudioMode.AssistMigration)
+    assertEquals(migrated.capabilities.language.digest, target.language.digest)
+    assertEquals(migrated.workspace.proposal.get.language, target.language.digest)
+    assertEquals(migrated.migration.map(_.model.artifact.digest), Some(migration.model.artifact.digest))
+    assertEquals(migrated.workspace.proposal.get.result.get("x"), Some(Stlc.fls))

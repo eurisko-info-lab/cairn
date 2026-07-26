@@ -52,6 +52,18 @@ class ConflictResolutionSuite extends munit.FunSuite:
     assertEquals(resolved.causalChanges.toSet, Set(c.changeA, c.changeB))
     assertEquals(gateRuns, 1)
 
+  test("Studio conflict mode is a projection over the ordinary ΔConflict interpreter"):
+    val left = change("{ replace a = false ; }")
+    val right = change("{ edit a at [] = fun x : Bool . x ; }")
+    val c = conflict(left, right)
+    val workspace = StudioConflictWorkspace(language, base, c, left, right,
+      AcceptanceConstitution.open(ChangeModel.default.digest))
+    assertEquals(workspace.locations.toSet, c.overlap)
+    val resolution = workspace.resolve(program("{ accept-left; }")).fold(e => fail(e), identity)
+    assertEquals(resolution.result.get("a"), Some(Stlc.fls))
+    assertEquals(resolution.causalChanges.toSet, Set(c.changeA, c.changeB))
+    assertEquals(resolution.unresolved, Nil)
+
   test("defer and split remain explicit and a failing domain gate rejects resolution"):
     val left = change("{ replace a = false ; }")
     val right = change("{ edit a at [] = fun x : Bool . x ; }")

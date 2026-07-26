@@ -627,8 +627,10 @@ function renderStudio() {
         <button class="btn primary" id="studioSubmit" disabled>Commit under constitution</button></div>
     </div>`;
   let session = null;
-  const modes = ["Edit", "Review proposal", "Resolve conflict", "Assist migration", "Inspect evidence", "Compare history", "Preview surfaces"];
-  $("studioModes").innerHTML = modes.map(x => `<span class="pill">${esc(x)}</span>`).join(" ");
+  const modes = [["Edit", "Edit"], ["ReviewProposal", "Review proposal"], ["ResolveConflict", "Resolve conflict"],
+    ["AssistMigration", "Assist migration"], ["InspectEvidence", "Inspect evidence"],
+    ["CompareHistory", "Compare history"], ["PreviewSurfaces", "Preview surfaces"]];
+  $("studioModes").innerHTML = modes.map(([value, label]) => `<button class="pill studio-mode" data-mode="${value}">${esc(label)}</button>`).join(" ");
   const showReview = (r) => {
     $("studioDelta").textContent = r.change || "No staged actions.";
     $("studioEvidence").innerHTML = `<div><b>Actions</b><span>${r.actions || 0}</span></div>
@@ -646,6 +648,12 @@ function renderStudio() {
       const r = await api("studio/open", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lang: "sds", branch: $("studioBranch").value.trim(), authority: $("studioAuthority").value.trim() }) });
       session = r.session;
+      $("studioModes").querySelectorAll(".studio-mode").forEach(button => button.onclick = async () => {
+        try { const view = await api("studio/mode", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session, mode: button.dataset.mode }) });
+          status.innerHTML = `<span class="ok">${esc(button.textContent)} mode.</span> ${view.conflict ? "Conflict locations are available for ΔConflict resolution." : ""}`;
+        } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+      });
       $("studioNavigation").innerHTML = r.definitions.map(d => navigation(d.name, d.navigation)).join("");
       $("studioNavigation").querySelectorAll(".studio-field").forEach(button => button.onclick = async () => {
         const value = window.prompt(`New value for ${button.dataset.label}`); if (value === null) return;

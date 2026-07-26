@@ -228,6 +228,10 @@ final class BrowserServer(
           studioUndo(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
             case Left(e) => err(ex, 400, e)
             case Right(j) => json(ex, 200, j)
+        case ("POST", "studio/mode") =>
+          studioMode(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
+            case Left(e) => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
         case ("POST", "studio/submit") =>
           studioSubmit(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
             case Left(e) => err(ex, 400, e)
@@ -632,6 +636,24 @@ final class BrowserServer(
       "requiredCertificates" -> Json.arr(session.constitution.requiredCertificates.map(r => Json.str(r.kind.name))),
       "certificates" -> Json.arr(session.status.certificates.map(d => Json.str(d.hex))),
       "preferredProjections" -> Json.arr(session.profile.toList.flatMap(_.semantics.preferredProjections).map(d => Json.str(d.hex))))
+
+  private def studioMode(raw: String): Either[String, String] =
+    for
+      sessionId <- jsonField(raw, "session")
+      requested <- jsonField(raw, "mode")
+      mode <- StudioMode.values.find(_.toString == requested).toRight(s"unknown Studio mode '$requested'")
+      session <- studioSessions.get(sessionId).toRight("unknown or expired Studio session")
+      next = session.withMode(mode)
+      _ = studioSessions(sessionId) = next
+    yield Json.obj(
+      "session" -> Json.str(sessionId), "mode" -> Json.str(mode.toString),
+      "history" -> Json.arr(session.status.history.map(d => Json.str(d.hex))),
+      "conflict" -> session.status.conflict.fold(Json.nul)(d => Json.str(d.hex)),
+      "overlappingLocations" -> Json.arr(session.status.overlappingLocations.toList.sortBy(_.render).map(l => Json.str(l.render))),
+      "migration" -> session.migration.map(_.model.artifact.digest).orElse(session.status.migration)
+        .fold(Json.nul)(d => Json.str(d.hex)),
+      "acceptanceEvidence" -> session.status.acceptanceEvidence.fold(Json.nul)(d => Json.str(d.hex)),
+      "certificates" -> Json.arr(session.status.certificates.map(d => Json.str(d.hex))))
 
   private def studioSubmit(raw: String): Either[String, String] =
     for
