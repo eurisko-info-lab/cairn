@@ -708,7 +708,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       val key = refs.putArt(stored.artifact)
       refs.refsWrite(refs.conflictContextRefPath(into), key.valueHash.hex)
     }
-    if context.isEmpty then refs.refsDelete(refs.conflictContextRefPath(into))
+    if context.isEmpty then refs.clearConflictContext(into)
     conflict
 
   /** Semantic merge into `into`: integrate two change histories relative to

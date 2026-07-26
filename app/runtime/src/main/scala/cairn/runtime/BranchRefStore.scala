@@ -189,6 +189,9 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
     refsDelete(conflictRefPath(branch))
     refsDelete(conflictContextRefPath(branch))
 
+  private[runtime] def clearConflictContext(branch: String): Unit =
+    refsDelete(conflictContextRefPath(branch))
+
   private def applyRefs(j: AcceptJournal): BranchManifest =
     val modArt = getByDigest(j.moduleDigest).fold(e => throw RuntimeException(e), identity)
     val vcsArt = getByDigest(j.vcsDigest).fold(e => throw RuntimeException(e), identity)

@@ -17,7 +17,9 @@ import cairn.user.sds.Sds
   * goes through [[printSurface]] — PackLoader surface bind + RoundTrip — so
   * encodings load without recompiling Scala. [[renderPdf]] emits minimal PDF
   * 1.4 bytes via [[PdfMinimal]] (pure writer; the `pdf` surface is the
-  * RoundTrip-able text twin). RoundTrip is the trust gate for text surfaces.
+  * RoundTrip-able text twin). [[SdsForeignProviders]] binds the production
+  * JSON, XML, OOXML, report, PDF, and SVG carriers to the same canonical
+  * result and evidence pipeline. RoundTrip is the trust gate for text surfaces.
   */
 object SectionReport:
   private lazy val packs = PackLoader(EffectContexts.forPackLoader())

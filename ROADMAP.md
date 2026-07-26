@@ -31,8 +31,8 @@ thinner than the phase's full ambition · ⬜ not started.
 |---|---|---|
 | PR11–PR17 | Semantic access traces, pack-declared change/language capabilities, migrations, acceptance constitutions, ΔConflict, and foreign surfaces | ✅ |
 | PR18 | SDS Studio v1: generated semantic forms, governed branch workspaces, proposal review, source/report previews, conflict resolution, migration assistance, and evidence inspection | ✅ |
-| PR19 | Production SDS JSON/XML/XLSX/report/PDF/image providers | ⬜ next |
-| PR20 | Distributed Studio workspaces | ⬜ |
+| PR19 | Production SDS JSON/XML/XLSX/report/PDF/image providers, with provenance, canonical round-trip/projection evidence, migration, and foreign-source localization | ✅ |
+| PR20 | Distributed Studio workspaces | ⬜ next |
 | PR21 | Language Studio over ΔMeta and ΔGrammar | ⬜ |
 | PR22 | Proof and Projection Studio | ⬜ |
 | PR23 | Self-hosting, artifact-only startup, performance, and audit hardening | ⬜ |

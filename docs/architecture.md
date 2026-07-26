@@ -436,7 +436,7 @@ state, at the level that stays true across individual pack changes:
 | GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | Parity — Waves A–C, H1; `languages/meta.cairn` fixpoint |
 | GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | Parity — `languages/pki.cairn` + `PkiMax`/`DemoPki`/`PkiTutorial` |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | Parity — `system-handler.Encryption`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `languages/sds.cairn` + `eu-clp` + `sds-report` (incl. PDF) + `sds-workflow`/`sds-certificate` packs |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `languages/sds.cairn` + `eu-clp` + `sds-report` + `sds-workflow`/`sds-certificate` packs; production report/JSON/XML/OOXML/PDF/SVG providers share canonical semantic results, evidence, migration, and source localization |
 | GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `languages/law.cairn` requires `cert`; `LawTutorial` |
 | GRANITE | Computation / Bend profile | Parity — `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / governed authoring workspace | Native Cairn implementation — grammar/profile-generated widgets, branch sessions, ΔSDS proposals, ΔConflict, migration, previews, and constitutional acceptance; trust administration remains separate |
