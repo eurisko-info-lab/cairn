@@ -440,6 +440,7 @@ state, at the level that stays true across individual pack changes:
 | GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `languages/law.cairn` requires `cert`; `LawTutorial` |
 | GRANITE | Computation / Bend profile | Parity — `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / governed authoring workspace | Native Cairn implementation — grammar/profile-generated widgets, branch sessions, ΔSDS proposals, ΔConflict, migration, previews, and constitutional acceptance; trust administration remains separate |
+| GRANITE | Durable distributed workspaces | Native Cairn implementation — `WorkspaceDraft`, signed review/approval/handoff artifacts, immutable offline revision chains, restart-safe aliases, semantic rebase, and digest-verified CAS graph replication; process-local browser state is only a transport cache, never workspace identity |
 | ROSETTA | QuickSort Ord + effects + multi-host ports + sample entrypoints | Parity — `QuickSort2` + `QuickSortApp`; four host ports pass the whole-file byte fixpoint |
 | granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | Parity — L0–L6 engines; Unison pack; CLI/transcript |
 | marblego | Grammar VM + artifact/branch/store crates | Parity (absorbed) — same story in Scala |
