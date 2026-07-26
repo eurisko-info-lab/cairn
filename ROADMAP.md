@@ -34,8 +34,8 @@ thinner than the phase's full ambition · ⬜ not started.
 | PR19 | Production SDS JSON/XML/XLSX/report/PDF/image providers, with provenance, canonical round-trip/projection evidence, migration, and foreign-source localization | ✅ |
 | PR20 | Durable distributed workspaces: content-addressed drafts, signed review/approval/handoff, restart-safe offline revisions, rebase, and verified replication | ✅ |
 | PR21 | Language Studio: atomic language/capability projects edited through ΔMeta and ΔGrammar, with whole-graph revision validation | ✅ |
-| PR22 | Proof and Projection Studio | ⬜ next |
-| PR23 | Self-hosting, artifact-only startup, performance, and audit hardening | ⬜ |
+| PR22 | Proof and Projection Studio: goals, checked derivations/proof terms/certificates, Rosetta output evidence, and Lean/HVM agreement envelopes | ✅ |
+| PR23 | Self-hosting, artifact-only startup, performance, and audit hardening | ⬜ next |
 
 Studio is the generated interaction surface of a `LanguageCapabilities`
 bundle; SDS is its first complete domain inhabitant. It emits ordinary ΔL,
