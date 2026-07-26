@@ -54,3 +54,30 @@ class ModuleStructuralSuite extends munit.FunSuite:
       Spec.NonEmptyLeaves("bar", List(1, 2), List("a", "b")))
     val gate = ModuleGate.fromSpecs("j", specs)(_ => Right(()))
     assertEquals(gate.descriptor, Some(Digest.of(Canon.CList(specs.map(_.canon)))))
+
+  test("NumberSource: canon round-trip, both cases"):
+    import ModuleStructural.NumberSource
+    assertEquals(NumberSource.fromCanon(NumberSource.FromLeaf("t", 2).canon), NumberSource.FromLeaf("t", 2))
+    assertEquals(NumberSource.fromCanon(NumberSource.ByTag(Map("a" -> 1, "b" -> 2)).canon), NumberSource.ByTag(Map("a" -> 1, "b" -> 2)))
+
+  test("Spec: canon round-trip (fromCanon(x.canon) == x) for every case"):
+    import ModuleStructural.NumberSource
+    val specs = List(
+      Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
+      Spec.UniqueTuples("ctor", List(List(0), List(1)), "label"),
+      Spec.NonEmptyLeaves("ctor", List(1, 2), List("a", "b")),
+      Spec.OutlineNums("outline", 2, List(NumberSource.FromLeaf("euSection", 0), NumberSource.ByTag(Map("s1" -> 1))), "sectionNumberOk", "outline"),
+      Spec.DefinedRef("product", 1, "product"),
+      Spec.DefinedRefs("shadow", List(0, 1), "shadow"),
+      Spec.DefinedLeafList("product", 2, "product"),
+      Spec.DefinedNodeListRefs("mixture", 0, List(0), "mixture"),
+      Spec.LeafOk("euSection", 0, "sectionNumberOk"),
+      Spec.LeafValueInCtorField("translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
+      Spec.RefTagIn("sectionFieldShadow", 0, Set("euSection", "identificationSection"), "sectionFieldShadow"),
+      Spec.UniqueTuplesInList("euSection", 1, List(List(0), List(1)), "euSection", Some(Set("sectionField", "sectionFieldRef"))),
+      Spec.UniqueTuplesInList("euSection", 1, List(List(0)), "euSection", None),
+      Spec.ListChildDefinedRefs("euSection", 1, Map("sectionFieldRef" -> List(List(2))), "euSection"),
+      Spec.KeyedLocaleOverlay("identificationSection", 6, Set("synonyms", "recommendedUse"),
+        "fieldLocale", "fieldLocaleRef", 0, 1, 2, "identificationSection"),
+    )
+    for s <- specs do assertEquals(Spec.fromCanon(s.canon), s, s"round-trip failed for $s")

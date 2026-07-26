@@ -30,6 +30,12 @@ object ModuleStructural:
       case ByTag(mapping) =>
         Canon.CTag("ByTag", Canon.cmap(mapping.toList.sortBy(_._1).map((k, v) => k -> Canon.CInt(v))*))
 
+  object NumberSource:
+    def fromCanon(c: Canon): NumberSource = c match
+      case Canon.CTag("FromLeaf", m) => FromLeaf(m.field("ctorTag").asStr, m.field("idx").asInt.toInt)
+      case Canon.CTag("ByTag", m)    => ByTag(m.asMap.map((k, v) => k -> v.asInt.toInt))
+      case other => throw CodecError(s"unknown NumberSource: $other")
+
   enum Spec:
     /** Sum of integer leaves at `leafPath` under each `ctor` binding ≤ `max`. */
     case SumLeavesAtMost(ctor: String, leafPath: List[Int], max: Long, label: String)
@@ -175,6 +181,58 @@ object ModuleStructural:
             "plainTag" -> Canon.CStr(plainTag), "refTag" -> Canon.CStr(refTag),
             "keyIdx" -> Canon.CInt(keyIdx), "langIdx" -> Canon.CInt(langIdx),
             "valueIdx" -> Canon.CInt(valueIdx), "label" -> Canon.CStr(label)))
+
+  /** Total decode, mirroring `Module.fromCanon`/`Fragment.fromCanon`'s
+    * throwing convention — required now that [[ValidationModel]] needs to
+    * decode a real spec list from artifact bytes, not just compare digests.
+    */
+  object Spec:
+    private def decInts(c: Canon): List[Int] = c.asList.map(_.asInt.toInt)
+    private def decStrs(c: Canon): List[String] = c.asList.map(_.asStr)
+    private def decSortedStrs(c: Canon): Set[String] = decStrs(c).toSet
+    private def decPaths(c: Canon): List[List[Int]] = c.asList.map(decInts)
+
+    def fromCanon(c: Canon): Spec = c match
+      case Canon.CTag("SumLeavesAtMost", m) =>
+        SumLeavesAtMost(m.field("ctor").asStr, decInts(m.field("leafPath")), m.field("max").asInt, m.field("label").asStr)
+      case Canon.CTag("UniqueTuples", m) =>
+        UniqueTuples(m.field("ctor").asStr, decPaths(m.field("keyPaths")), m.field("label").asStr)
+      case Canon.CTag("NonEmptyLeaves", m) =>
+        NonEmptyLeaves(m.field("ctor").asStr, decInts(m.field("indices")), decStrs(m.field("labels")))
+      case Canon.CTag("OutlineNums", m) =>
+        OutlineNums(m.field("ctor").asStr, m.field("refsField").asInt.toInt,
+          m.field("numberSources").asList.map(NumberSource.fromCanon),
+          m.field("judgmentName").asStr, m.field("label").asStr)
+      case Canon.CTag("DefinedRef", m) =>
+        DefinedRef(m.field("ctor").asStr, m.field("idx").asInt.toInt, m.field("label").asStr)
+      case Canon.CTag("DefinedRefs", m) =>
+        DefinedRefs(m.field("ctor").asStr, decInts(m.field("idxs")), m.field("label").asStr)
+      case Canon.CTag("DefinedLeafList", m) =>
+        DefinedLeafList(m.field("ctor").asStr, m.field("listIdx").asInt.toInt, m.field("label").asStr)
+      case Canon.CTag("DefinedNodeListRefs", m) =>
+        DefinedNodeListRefs(m.field("ctor").asStr, m.field("listIdx").asInt.toInt,
+          decInts(m.field("refPath")), m.field("label").asStr)
+      case Canon.CTag("LeafOk", m) =>
+        LeafOk(m.field("ctor").asStr, m.field("idx").asInt.toInt, m.field("judgmentName").asStr)
+      case Canon.CTag("LeafValueInCtorField", m) =>
+        LeafValueInCtorField(m.field("ctor").asStr, m.field("leafIdx").asInt.toInt,
+          decSortedStrs(m.field("targetCtors")), m.field("targetFieldIdx").asInt.toInt, m.field("label").asStr)
+      case Canon.CTag("RefTagIn", m) =>
+        RefTagIn(m.field("ctor").asStr, m.field("refIdx").asInt.toInt, decSortedStrs(m.field("tags")), m.field("label").asStr)
+      case Canon.CTag("UniqueTuplesInList", m) =>
+        val childTags = m.field("childTags") match
+          case Canon.CTag("some", t) => Some(decSortedStrs(t))
+          case _ => None
+        UniqueTuplesInList(m.field("ctor").asStr, m.field("listIdx").asInt.toInt,
+          decPaths(m.field("keyPaths")), m.field("label").asStr, childTags)
+      case Canon.CTag("ListChildDefinedRefs", m) =>
+        val byTag = m.field("byTag").asMap.map((k, v) => k -> decPaths(v))
+        ListChildDefinedRefs(m.field("ctor").asStr, m.field("listIdx").asInt.toInt, byTag, m.field("label").asStr)
+      case Canon.CTag("KeyedLocaleOverlay", m) =>
+        KeyedLocaleOverlay(m.field("ctor").asStr, m.field("fieldIdx").asInt.toInt, decSortedStrs(m.field("allowedKeys")),
+          m.field("plainTag").asStr, m.field("refTag").asStr, m.field("keyIdx").asInt.toInt,
+          m.field("langIdx").asInt.toInt, m.field("valueIdx").asInt.toInt, m.field("label").asStr)
+      case other => throw CodecError(s"unknown Spec: $other")
 
   def run(m: Module, specs: List[Spec], judgments: List[JudgmentDef] = Nil): List[String] =
     specs.flatMap(check(m, _, judgments))
