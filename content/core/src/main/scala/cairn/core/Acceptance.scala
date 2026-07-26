@@ -15,18 +15,21 @@ import cairn.kernel.*
   * yet folded into one policy object — a further unification, not
   * attempted here.
   *
-  * Known limitation: [[digest]] identifies a policy by its judgment NAME
-  * only, not the semantics of `gate.check` itself — two different
-  * `ModuleGate`s sharing a judgment string are indistinguishable by digest.
-  * A verifying node re-runs whichever gate function it locally supplies for
-  * that name; [[AcceptanceEvidence]] proves "some policy named `judgment`
-  * held," not "the exact constraint semantics the accepting node used."
-  * Closing this needs policies to carry a canonical descriptor (e.g. a
-  * digest of a loaded judgment/constraint pack), not a host Scala closure —
-  * not attempted here.
+  * [[digest]] folds in [[ModuleGate.descriptor]] when the gate has one
+  * (built via [[ModuleGate.fromSpecs]] from a canonically-encodable
+  * [[ModuleStructural.Spec]] list) — two gates checking the same specs are
+  * then provably the same policy, not just same-named. Gates with no
+  * descriptor (an open-ended host closure, built via [[ModuleGate.host]] /
+  * [[ModuleGate.fromJudgment]]) keep the older, weaker identity: two such
+  * gates sharing a judgment string are indistinguishable by digest, and a
+  * verifying node re-runs whichever gate function it locally supplies for
+  * that name rather than confirming it matches the accepting node's.
   */
 final case class AcceptancePolicy(gate: ModuleGate):
-  def digest: Digest = Digest.of(Canon.cmap("judgment" -> Canon.CStr(gate.judgment)))
+  def digest: Digest = Digest.of(Canon.cmap(
+    "judgment" -> Canon.CStr(gate.judgment),
+    "descriptor" -> gate.descriptor.fold(Canon.CTag("none", Canon.CInt(0)))(d =>
+      Canon.CTag("some", Canon.CStr(d.hex)))))
 
 object AcceptancePolicy:
   val open: AcceptancePolicy = AcceptancePolicy(ModuleGate.passthrough)
@@ -36,9 +39,14 @@ object AcceptancePolicy:
   * checked against a specific [[AcceptancePolicy]] — what a second node
   * needs to independently replay a transition and re-run a policy against
   * it, rather than trusting a self-reported success. Referenced from
-  * `BranchManifest.gateEvidence`. Subject to [[AcceptancePolicy.digest]]'s
-  * own limitation: replay confirms the transition really produced `result`
-  * and that a gate named `judgment` accepted it, not that the verifying
+  * `BranchManifest.gateEvidence`. When the accepting node's gate has a
+  * [[ModuleGate.descriptor]] (see [[ModuleGate.fromSpecs]]), `policy`
+  * genuinely identifies the check's semantics, not just its judgment name —
+  * a verifying node supplying a gate with a different descriptor fails the
+  * policy-identity comparison in [[AcceptancePolicy.digest]] before it even
+  * re-runs the check. Without a descriptor (an open-ended host closure),
+  * replay confirms only that the transition really produced `result` and
+  * that a gate named `judgment` accepted it — not that the verifying
   * node's locally-supplied gate has the same semantics the accepting node
   * used.
   *

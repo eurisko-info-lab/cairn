@@ -13,6 +13,15 @@ import cairn.kernel.*
 final case class ModuleGate(
     judgment: String,
     check: Module => Either[Canon, Unit],
+    /** Canonical description of what `check` actually enforces, independent
+      * of the Scala closure itself — e.g. a digest of the
+      * [[ModuleStructural.Spec]] list a pack-declared gate is built from
+      * (see [[ModuleGate.fromSpecs]]). [[cairn.core.AcceptancePolicy.digest]]
+      * folds this in when present. `None` for an open-ended host closure
+      * with no data-described form — policy identity then falls back to
+      * judgment-name-only, same as every gate before this field existed.
+      */
+    descriptor: Option[Digest] = None,
 ):
   /** `None` when this gate is a no-op (empty judgment). */
   def apply(m: Module): Either[Merge.ConflictWitness, Unit] =
@@ -33,9 +42,29 @@ object ModuleGate:
   /** Same witness tagging as [[host]], named for pack-declared gates
     * (`sds.validate`, `law.validate`) whose body is Search.prove +
     * [[ModuleStructural]] — not an open-ended domain closure.
+    *
+    * `descriptor` is `None`: prefer [[fromSpecs]] when the check is actually
+    * built from a [[ModuleStructural.Spec]] list, so policy identity isn't
+    * judgment-name-only.
     */
   def fromJudgment(judgment: String)(f: Module => Either[String, Unit]): ModuleGate =
     host(judgment)(f)
+
+  /** Same as [[fromJudgment]], but `specs` — the [[ModuleStructural.Spec]]
+    * list `f` is actually built from — gives this gate a real canonical
+    * descriptor: [[cairn.core.AcceptancePolicy.digest]] then binds to what
+    * the gate checks, not just its judgment name. `f` is still supplied
+    * separately (not re-derived from `specs` here) since callers may wrap
+    * [[ModuleStructural.run]] with additional module-shape checks
+    * ([[Sds.validate]]'s `typedSpecs`, `Search.prove` goals, …) — `specs`
+    * only needs to name what's canonically describable, not be the gate's
+    * entire implementation.
+    */
+  def fromSpecs(judgment: String, specs: List[ModuleStructural.Spec])(
+      f: Module => Either[String, Unit]
+  ): ModuleGate =
+    ModuleGate(judgment, m => f(m).left.map(Canon.CStr.apply),
+      descriptor = Some(Digest.of(Canon.CList(specs.map(_.canon)))))
 
   /** Run `gate` after a successful ΔL apply (migration, branch accept,
     * structured edit). Failure is a judgment-tagged [[Canon]] detail.

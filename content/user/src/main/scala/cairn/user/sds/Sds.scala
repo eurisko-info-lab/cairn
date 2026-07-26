@@ -67,7 +67,13 @@ final class Sds(packs: PackAccess):
 
   // ---- domain validation (ΔSDS = ModuleStructural specs + Search.prove) ----
 
-  def validate(m: Module): Either[String, Unit] =
+  /** The complete set of structural checks [[validate]] runs — module-
+    * independent (built purely from language-level constants), so it also
+    * serves as [[ModuleGate.fromSpecs]]'s canonical descriptor for the
+    * `sds.validate` gate: two gates built from this same list are provably
+    * the same check, not just same-named.
+    */
+  lazy val validationSpecs: List[ModuleStructural.Spec] =
     val typedSpecs = typedSectionKeys.toList.flatMap { (tag, keys) =>
       List(
         ModuleStructural.Spec.NonEmptyLeaves(tag, keys.indices.toList, keys),
@@ -76,7 +82,7 @@ final class Sds(packs: PackAccess):
           "fieldLocale", "fieldLocaleRef", 0, 1, 2, tag),
       )
     }
-    val es = ModuleStructural.run(m, List(
+    List(
       ModuleStructural.Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
       ModuleStructural.Spec.DefinedNodeListRefs("mixture", 0, List(0), "mixture"),
       ModuleStructural.Spec.DefinedRef("product", 1, "product"),
@@ -125,7 +131,10 @@ final class Sds(packs: PackAccess):
               case Some(n) if checkSectionNumber(n.toString) => Right(n)
               case Some(n) => Left(s"section '$ref' number $n fails sectionNumberOk"),
         "outline"),
-    ) ++ typedSpecs)
+    ) ++ typedSpecs
+
+  def validate(m: Module): Either[String, Unit] =
+    val es = ModuleStructural.run(m, validationSpecs)
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
 
   /** ΔSDS application: the generic ΔL, then the domain gate. */
@@ -171,7 +180,7 @@ final class Sds(packs: PackAccess):
     else
       Merge.threeWay(
         language, base, baseChange, shadowChange,
-        ModuleGate.fromJudgment("sds.validate")(validate))
+        ModuleGate.fromSpecs("sds.validate", validationSpecs)(validate))
 
   // ---- the compiled document view (a bidirectional surface, M47) ----
 

@@ -96,6 +96,30 @@ class SemanticRepositorySuite extends munit.FunSuite:
       else Right(())
     }
 
+  test("AcceptancePolicy.digest: fromSpecs distinguishes two same-named gates checking different specs"):
+    // Before ModuleGate.descriptor existed, this was exactly the bug: two
+    // gates named "test.capacity" but enforcing different limits had the
+    // SAME AcceptancePolicy digest, so a second node couldn't tell them apart.
+    val specsA = List(ModuleStructural.Spec.DefinedRef("foo", 0, "foo"))
+    val specsB = List(ModuleStructural.Spec.DefinedRef("bar", 0, "bar"))
+    val gateA = ModuleGate.fromSpecs("test.capacity", specsA)(_ => Right(()))
+    val gateB = ModuleGate.fromSpecs("test.capacity", specsB)(_ => Right(()))
+    assertNotEquals(AcceptancePolicy.gated(gateA).digest, AcceptancePolicy.gated(gateB).digest)
+
+  test("AcceptancePolicy.digest: fromSpecs gives the same digest for the same specs regardless of closure identity"):
+    val specs = List(ModuleStructural.Spec.DefinedRef("foo", 0, "foo"))
+    val gate1 = ModuleGate.fromSpecs("test.capacity", specs)(_ => Right(()))
+    val gate2 = ModuleGate.fromSpecs("test.capacity", specs)(_ => Left("a different, unrelated closure"))
+    assertEquals(AcceptancePolicy.gated(gate1).digest, AcceptancePolicy.gated(gate2).digest)
+
+  test("AcceptancePolicy.digest: fromJudgment (no descriptor) keeps the old judgment-name-only identity"):
+    // Documents the known, still-present limitation for gates with no
+    // canonically-describable form (an open-ended host closure).
+    val gateA = ModuleGate.fromJudgment("test.capacity")(_ => Right(()))
+    val gateB = ModuleGate.fromJudgment("test.capacity")(_ => Left("unrelated"))
+    assertEquals(gateA.descriptor, None)
+    assertEquals(AcceptancePolicy.gated(gateA).digest, AcceptancePolicy.gated(gateB).digest)
+
   test("ModuleGate: two disjoint edits individually pass but jointly exceed a whole-module capacity"):
     val gate = capacityGate(3)
     val cA = parseChange("{ add fromA = true ; }")

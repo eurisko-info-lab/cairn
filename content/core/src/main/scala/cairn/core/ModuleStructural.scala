@@ -77,6 +77,83 @@ object ModuleStructural:
         label: String,
     )
 
+    /** Canonical description of what this spec enforces — [[ModuleGate.fromSpecs]]
+      * folds a digest of the whole spec list into [[cairn.core.AcceptancePolicy]]'s
+      * own digest, so two gates built from the same specs (same ctor/index/label
+      * parameters) are provably the same check, not just same-named.
+      *
+      * [[OutlineNums.resolveNum]] and [[LeafOk.ok]]/[[LeafOk.detail]] are Scala
+      * closures with no canonical form — those two cases encode everything else
+      * (ctor/field/label) plus a fixed "closure omitted" marker; two `OutlineNums`
+      * or `LeafOk` specs with the same parameters but different closures are
+      * NOT distinguished by this digest. Every other case is fully data, so this
+      * digest is complete for them.
+      */
+    def canon: Canon =
+      def ints(xs: List[Int]) = Canon.CList(xs.map(Canon.CInt(_)))
+      def strs(xs: List[String]) = Canon.CList(xs.map(Canon.CStr(_)))
+      def sortedStrs(xs: Set[String]) = strs(xs.toList.sorted)
+      def paths(xs: List[List[Int]]) = Canon.CList(xs.map(ints))
+      this match
+        case SumLeavesAtMost(ctor, leafPath, max, label) =>
+          Canon.CTag("SumLeavesAtMost", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "leafPath" -> ints(leafPath),
+            "max" -> Canon.CInt(max), "label" -> Canon.CStr(label)))
+        case UniqueTuples(ctor, keyPaths, label) =>
+          Canon.CTag("UniqueTuples", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "keyPaths" -> paths(keyPaths), "label" -> Canon.CStr(label)))
+        case NonEmptyLeaves(ctor, indices, labels) =>
+          Canon.CTag("NonEmptyLeaves", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "indices" -> ints(indices), "labels" -> strs(labels)))
+        case OutlineNums(ctor, refsField, _, label) =>
+          Canon.CTag("OutlineNums", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "refsField" -> Canon.CInt(refsField),
+            "resolveNum" -> Canon.CStr("<closure omitted>"), "label" -> Canon.CStr(label)))
+        case DefinedRef(ctor, idx, label) =>
+          Canon.CTag("DefinedRef", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx), "label" -> Canon.CStr(label)))
+        case DefinedRefs(ctor, idxs, label) =>
+          Canon.CTag("DefinedRefs", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "idxs" -> ints(idxs), "label" -> Canon.CStr(label)))
+        case DefinedLeafList(ctor, listIdx, label) =>
+          Canon.CTag("DefinedLeafList", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx), "label" -> Canon.CStr(label)))
+        case DefinedNodeListRefs(ctor, listIdx, refPath, label) =>
+          Canon.CTag("DefinedNodeListRefs", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx),
+            "refPath" -> ints(refPath), "label" -> Canon.CStr(label)))
+        case LeafOk(ctor, idx, _, _) =>
+          Canon.CTag("LeafOk", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx),
+            "ok" -> Canon.CStr("<closure omitted>"), "detail" -> Canon.CStr("<closure omitted>")))
+        case LeafValueInCtorField(ctor, leafIdx, targetCtors, targetFieldIdx, label) =>
+          Canon.CTag("LeafValueInCtorField", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "leafIdx" -> Canon.CInt(leafIdx),
+            "targetCtors" -> sortedStrs(targetCtors),
+            "targetFieldIdx" -> Canon.CInt(targetFieldIdx), "label" -> Canon.CStr(label)))
+        case RefTagIn(ctor, refIdx, tags, label) =>
+          Canon.CTag("RefTagIn", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "refIdx" -> Canon.CInt(refIdx),
+            "tags" -> sortedStrs(tags), "label" -> Canon.CStr(label)))
+        case UniqueTuplesInList(ctor, listIdx, keyPaths, label, childTags) =>
+          Canon.CTag("UniqueTuplesInList", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx),
+            "keyPaths" -> paths(keyPaths), "label" -> Canon.CStr(label),
+            "childTags" -> childTags.fold(Canon.CTag("none", Canon.CInt(0)))(t =>
+              Canon.CTag("some", sortedStrs(t)))))
+        case ListChildDefinedRefs(ctor, listIdx, byTag, label) =>
+          Canon.CTag("ListChildDefinedRefs", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "listIdx" -> Canon.CInt(listIdx),
+            "byTag" -> Canon.cmap(byTag.toList.map((k, v) => k -> paths(v))*),
+            "label" -> Canon.CStr(label)))
+        case KeyedLocaleOverlay(ctor, fieldIdx, allowedKeys, plainTag, refTag, keyIdx, langIdx, valueIdx, label) =>
+          Canon.CTag("KeyedLocaleOverlay", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "fieldIdx" -> Canon.CInt(fieldIdx),
+            "allowedKeys" -> sortedStrs(allowedKeys),
+            "plainTag" -> Canon.CStr(plainTag), "refTag" -> Canon.CStr(refTag),
+            "keyIdx" -> Canon.CInt(keyIdx), "langIdx" -> Canon.CInt(langIdx),
+            "valueIdx" -> Canon.CInt(valueIdx), "label" -> Canon.CStr(label)))
+
   def run(m: Module, specs: List[Spec]): List[String] =
     specs.flatMap(check(m, _))
 

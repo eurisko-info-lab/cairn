@@ -64,7 +64,7 @@ object EuClp:
       case _ =>
         errs += "annex-II profile missing version"
         "?"
-    ModuleGate.require(ModuleGate.fromJudgment("sds.validate")(sds.validate), m) match
+    ModuleGate.require(ModuleGate.fromSpecs("sds.validate", sds.validationSpecs)(sds.validate), m) match
       case Left(e) => errs += e
       case Right(_) => ()
     val titleByNum = annexIiSections.toMap

@@ -66,7 +66,8 @@ object SdsCausalWorkflow:
     // The real domain gate, wired into the acceptance path itself — every
     // commit/merge onto an SDS work branch in this workflow must now pass
     // sds.validate, not just the one-off validate() call above.
-    val sdsPolicy = AcceptancePolicy.gated(ModuleGate.fromJudgment("sds.validate")(Sds.validate))
+    val sdsPolicy = AcceptancePolicy.gated(
+      ModuleGate.fromSpecs("sds.validate", Sds.validationSpecs)(Sds.validate))
     EuClp.conform(Chemicals.Acetone.thinModule) match
       case r if !r.ok => throw RuntimeException(s"EU-CLP conform: ${r.errors.mkString("; ")}")
       case _ => ()
