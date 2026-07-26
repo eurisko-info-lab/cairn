@@ -44,8 +44,10 @@ object SemanticRepository:
       Repr(base, tip, change, vcs)
 
     /** Check a proposed [[Tip]]: replay apply and require digest equality. */
-    def check(language: ComposedLanguage, proposed: Tip): Either[String, ValidatedTip] =
-      Delta.apply(language, proposed.base, proposed.change).flatMap { (result, vcs) =>
+    def check(
+        language: ComposedLanguage, proposed: Tip, model: ChangeModel = ChangeModel.default,
+    ): Either[String, ValidatedTip] =
+      Delta.apply(language, proposed.base, proposed.change, model).flatMap { (result, vcs) =>
         if result.digest != proposed.tip.digest then
           Left(s"tip forgery: apply yielded ${result.digest.short}, claimed ${proposed.tip.digest.short}")
         else if vcs.base != proposed.base.digest then

@@ -1,7 +1,7 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{AcceptancePolicy, AcceptanceEvidence, AcceptedTip, ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
+import cairn.core.{AcceptancePolicy, AcceptanceEvidence, AcceptedTip, ChangeAlgebra, ChangeModel, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.PackAccess
 import cairn.systemhandler.{EffectContext, Ed25519, Keypair}
@@ -39,9 +39,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   export refs.{load, list, liveCasRoots, reclaimOrphanBlobs, recoverPendingAccepts, publishHead}
 
-  /** Load + replay-check a change-set artifact against `language`. */
+  /** Load + replay-check a change-set artifact against `language`/`model`. */
   private def loadVcs(
-      language: ComposedLanguage, digest: Digest
+      language: ComposedLanguage, digest: Digest, model: ChangeModel = ChangeModel.default,
   ): Either[String, Delta.ValidatedChangeSet] =
     refs.getByDigest(digest).flatMap { a =>
       if a.kind != ArtifactKind.ChangeSet then
@@ -51,7 +51,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         refs.getByDigest(claim.base).flatMap { baseArt =>
           if baseArt.kind != ArtifactKind.Ir then
             Left(s"base ${claim.base.short} is not a module")
-          else Delta.ValidatedChangeSet.check(language, Module.fromCanon(baseArt.body), claim)
+          else Delta.ValidatedChangeSet.check(language, model, Module.fromCanon(baseArt.body), claim)
         }
     }
 
@@ -559,14 +559,14 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * Prefers [[BranchManifest.acceptedChange]]; `.change` sidecar is a cache.
     */
   def loadChange(
-      branch: String, language: ComposedLanguage
+      branch: String, language: ComposedLanguage, model: ChangeModel = ChangeModel.default,
   ): Either[String, Delta.ValidatedChangeSet] =
     val fromManifest = refs.load(branch).acceptedChange
     val fromSidecar =
       val p = refs.changeRefPath(branch)
       if refs.refsExists(p) then Some(Digest(refs.refsRead(p).trim)) else None
     fromManifest.orElse(fromSidecar) match
-      case Some(d) => loadVcs(language, d)
+      case Some(d) => loadVcs(language, d, model)
       case None =>
         Left(s"branch '$branch' has no persisted change (commit via commitTip)")
 
@@ -574,7 +574,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * Prefers [[BranchManifest.changeHistory]]; `.changes` sidecar is a cache.
     */
   def loadChangeHistory(
-      branch: String, language: ComposedLanguage
+      branch: String, language: ComposedLanguage, model: ChangeModel = ChangeModel.default,
   ): Either[String, List[Delta.ValidatedChangeSet]] =
     val manifestHist = refs.load(branch).changeHistory
     val digests =
@@ -586,16 +586,16 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         else Nil
     if digests.nonEmpty then
       digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
-        acc.flatMap(xs => loadVcs(language, d).map(xs :+ _))
+        acc.flatMap(xs => loadVcs(language, d, model).map(xs :+ _))
       }
-    else loadChange(branch, language).map(List(_))
+    else loadChange(branch, language, model).map(List(_))
 
   /** Reconstruct a [[SemanticRepository.ValidatedTip]] (replay-checked). */
   def loadTip(
-      branch: String, language: ComposedLanguage
+      branch: String, language: ComposedLanguage, model: ChangeModel = ChangeModel.default,
   ): Either[String, SemanticRepository.ValidatedTip] =
     for
-      vcs <- loadChange(branch, language)
+      vcs <- loadChange(branch, language, model)
       tipMod <- headModule(branch)
       baseArt <- refs.getByDigest(vcs.base)
       base <-
@@ -604,7 +604,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       _ <- Either.cond(tipMod.digest == vcs.result, (),
         s"branch '$branch' head ${tipMod.digest.short} does not match change result ${vcs.result.short}")
       checked <- SemanticRepository.ValidatedTip.check(
-        language, SemanticRepository.Tip(base, tipMod, vcs.change))
+        language, SemanticRepository.Tip(base, tipMod, vcs.change), model)
     yield checked
 
   /** Persist a merge/gate conflict on `into` — conflict artifact stored,
@@ -687,10 +687,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       migration: Option[(LangMigration, ComposedLanguage)] = None,
       publish: Option[Publish] = None,
       policy: AcceptancePolicy,
+      model: ChangeModel = ChangeModel.default,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
     for
-      histA <- loadChangeHistory(ours, language)
-      histB <- loadChangeHistory(theirs, language)
+      histA <- loadChangeHistory(ours, language, model)
+      histB <- loadChangeHistory(theirs, language, model)
       (idxA, idxB) = patchAwareLca(histA, histB)
       // Prefer identical linear prefix when it reaches the same LCA tip.
       linear = commonAncestorPrefix(histA, histB)

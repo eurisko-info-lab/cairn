@@ -328,10 +328,10 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assert(SemanticRepository.ValidatedTip.check(lang, forged).isLeft)
     assert(SemanticRepository.ValidatedTip.check(lang, real.asTip).isRight)
     // ValidatedChangeSet.decodeClaim alone is not validated
-    val claim = Delta.ValidatedChangeSet.Claim(lang.digest, m0.digest, cA, m0.digest)
-    assert(Delta.ValidatedChangeSet.check(lang, m0, claim).isLeft)
+    val claim = Delta.ValidatedChangeSet.Claim(lang.digest, m0.digest, cA, m0.digest, ChangeModel.default.digest)
+    assert(Delta.ValidatedChangeSet.check(lang, ChangeModel.default, m0, claim).isLeft)
     val okClaim = real.vcs.claim
-    assert(Delta.ValidatedChangeSet.check(lang, m0, okClaim).isRight)
+    assert(Delta.ValidatedChangeSet.check(lang, ChangeModel.default, m0, okClaim).isRight)
 
   test("AcceptedTip: minted only after both ΔL replay and an explicit AcceptancePolicy succeed"):
     val cA = parseChange("{ add fromA = true ; }")

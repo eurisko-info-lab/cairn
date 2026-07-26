@@ -86,38 +86,52 @@ object Delta:
   opaque type ValidatedChangeSet = ValidatedChangeSet.Repr
   object ValidatedChangeSet:
     private[Delta] final case class Repr(
-        language: Digest, base: Digest, change: Cst, result: Digest)
+        language: Digest, base: Digest, change: Cst, result: Digest, changeModel: Digest)
 
     private[Delta] def mint(
-        language: Digest, base: Digest, change: Cst, result: Digest
+        language: Digest, base: Digest, change: Cst, result: Digest, changeModel: Digest
     ): ValidatedChangeSet =
-      Repr(language, base, change, result)
+      Repr(language, base, change, result, changeModel)
 
     /** Unchecked fields decoded from canon — not a validated change-set. */
-    final case class Claim(language: Digest, base: Digest, change: Cst, result: Digest):
+    final case class Claim(language: Digest, base: Digest, change: Cst, result: Digest, changeModel: Digest):
       def canon: Canon = Canon.cmap(
         "language" -> Canon.CStr(language.hex),
         "base" -> Canon.CStr(base.hex),
         "change" -> Cst.toCanon(change),
-        "result" -> Canon.CStr(result.hex))
+        "result" -> Canon.CStr(result.hex),
+        "changeModel" -> Canon.CStr(changeModel.hex))
 
+    /** `changeModel` defaults to [[ChangeModel.default]]'s digest when absent
+      * — canon minted before this field existed never recorded a model.
+      */
     def decodeClaim(c: Canon): Claim =
       Claim(
         Digest(c.field("language").asStr),
         Digest(c.field("base").asStr),
         Cst.fromCanon(c.field("change")),
-        Digest(c.field("result").asStr))
+        Digest(c.field("result").asStr),
+        c.asMap.get("changeModel").map(v => Digest(v.asStr)).getOrElse(ChangeModel.default.digest))
 
-    /** Replay [[apply]]; accept only when the result digest matches the claim. */
+    /** Replay [[apply]]; accept only when the model and result digest match
+      * the claim. The model check runs BEFORE replay — same reason the
+      * language check does: both are "does this claim even belong to this
+      * grammar/semantics" checks against caller-supplied static values,
+      * cheaper and more informative than letting a wrong model fail deep
+      * inside `apply` (or, worse, silently succeed under different semantics
+      * that happen to share tag names).
+      */
     def check(
-        l: ComposedLanguage, baseMod: Module, claim: Claim
+        l: ComposedLanguage, model: ChangeModel, baseMod: Module, claim: Claim
     ): Either[String, ValidatedChangeSet] =
       if l.digest != claim.language then
         Left(s"ValidatedChangeSet language mismatch: claim ${claim.language.short} ≠ ${l.digest.short}")
+      else if model.digest != claim.changeModel then
+        Left(s"ValidatedChangeSet model mismatch: claim ${claim.changeModel.short} ≠ ${model.digest.short}")
       else if baseMod.digest != claim.base then
         Left(s"ValidatedChangeSet base mismatch: claim ${claim.base.short} ≠ ${baseMod.digest.short}")
       else
-        apply(l, baseMod, claim.change).flatMap { (result, vcs) =>
+        apply(l, baseMod, claim.change, model).flatMap { (result, vcs) =>
           if result.digest != claim.result then
             Left(s"forged ValidatedChangeSet: claimed result ${claim.result.short}, apply yielded ${result.digest.short}")
           else Right(vcs)
@@ -128,9 +142,10 @@ object Delta:
       def base: Digest = v.base
       def change: Cst = v.change
       def result: Digest = v.result
-      def canon: Canon = Claim(v.language, v.base, v.change, v.result).canon
+      def changeModel: Digest = v.changeModel
+      def canon: Canon = Claim(v.language, v.base, v.change, v.result, v.changeModel).canon
       def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, v.canon)
-      def claim: Claim = Claim(v.language, v.base, v.change, v.result)
+      def claim: Claim = Claim(v.language, v.base, v.change, v.result, v.changeModel)
 
 
   /** Child-index path helpers for structural edits (M15). */
@@ -230,7 +245,7 @@ object Delta:
     changes.flatMap { chs =>
       chs.foldLeft[Either[Rejection, Module]](Right(module)) { (acc, ch) => acc.flatMap(applyOne(_, ch)) }
         .map { result =>
-          val vcs = ValidatedChangeSet.mint(l.digest, module.digest, change, result.digest)
+          val vcs = ValidatedChangeSet.mint(l.digest, module.digest, change, result.digest, model.digest)
           (result.sorted, vcs) }
     }
 
