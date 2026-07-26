@@ -3,21 +3,21 @@ package cairn.runtime
 import cairn.kernel.*
 import cairn.core.{AcceptancePolicy, AcceptanceEvidence, AcceptedTip, ChangeAlgebra, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
 import cairn.systeminterface.Cas
-import cairn.systeminterface.Filesystem as Fs
 import cairn.systeminterface.PackAccess
-import cairn.systemhandler.{CasEffects, CasAdmin, CasAdminEffects, Filesystem, EffectContext, Node, Ed25519, Keypair, Provenance}
-import java.nio.file.{Files, Path}
+import cairn.systemhandler.{EffectContext, Ed25519, Keypair}
+import java.nio.file.Path
 
-/** Named branch refs over a CAS; ref file stores the manifest digest.
-  *
-  * CAS put/get go through [[CasEffects]] with [[ctx]]; refs-directory
-  * read/write/mkdirs/list go through [[Filesystem]] with the same [[ctx]]
-  * (use [[EffectContexts.forBranches]] at the composition root).
+/** Semantic acceptance façade over a [[BranchRefStore]]: named branch refs,
+  * with every head advance either ΔL-replayed and policy-checked
+  * ([[commitTip]] / [[merge]] / [[mergeBranches]]) or an explicit,
+  * governance-guarded bootstrap ([[importModule]]) — never a raw ref write.
+  * `load`/`list` and the other ref-store primitives are plain delegations to
+  * [[refs]]; this class adds ΔL/policy/domain-governance semantics on top.
   *
   * Merge-aware (M17): [[merge]] / [[mergeBranches]] run
   * [[cairn.core.SemanticRepository.integrate]] then either advance the target
   * head or persist the conflict artifact. [[commitTip]] accepts only
-  * [[SemanticRepository.ValidatedTip]]; change-sets are replay-checked on load.
+  * [[AcceptedTip]]; change-sets are replay-checked on load.
   * Causal digests are also written into [[BranchManifest]] (CAS-backed);
   * refs sidecars remain for compatibility.
   *
@@ -27,7 +27,7 @@ import java.nio.file.{Files, Path}
   * Accepts use a journaled transactional path: CAS blobs → accept journal →
   * refs (history + tip + branch) → optional ledger publish → journal clear.
   * [[recoverPendingAccepts]] rolls forward interrupted accepts.
-  * [[reclaimOrphanBlobs]] recovers then mark/sweeps CAS with [[liveCasRoots]]
+  * [[reclaimOrphanBlobs]] recovers then mark/sweeps CAS with `liveCasRoots`
   * (branch refs, change history, pending journals) — the reclaim path for
   * unreferenced accept blobs left by a crash before the journal was written.
   *
@@ -35,387 +35,20 @@ import java.nio.file.{Files, Path}
   * `publish = Some(...)` on merge.
   */
 final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
-  private def casErr(e: Cas.Error): String = e match
-    case Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
-    case Cas.Error.Io(m)      => m
+  private val refs = BranchRefStore(cas, refsDir, ctx)
 
-  private def fsAbs(p: Path): Fs.Path = Fs.Path(p.toAbsolutePath.normalize.toString)
-
-  private def fsErr(e: Fs.Error): String = e match
-    case Fs.Error.NotFound(p) => s"not found: ${p.value}"
-    case Fs.Error.Io(m)       => m
-
-  private def fsRun(req: Fs.Request): Either[String, Fs.Response] =
-    Filesystem.run(req, ctx).left.map(fsErr)
-
-  private def refsMkdirs(): Unit =
-    fsRun(Fs.Request.Mkdirs(fsAbs(refsDir))).fold(e => throw RuntimeException(e), _ => ())
-
-  private def refsExists(p: Path): Boolean =
-    fsRun(Fs.Request.Exists(fsAbs(p))) match
-      case Right(Fs.Response.Bool(b)) => b
-      case Left(e)                    => throw RuntimeException(e)
-      case other                      => throw RuntimeException(s"unexpected fs response: $other")
-
-  private def refsRead(p: Path): String =
-    fsRun(Fs.Request.Read(fsAbs(p))) match
-      case Right(Fs.Response.Text(s)) => s
-      case Left(e)                    => throw RuntimeException(e)
-      case other                      => throw RuntimeException(s"unexpected fs response: $other")
-
-  private def refsWrite(p: Path, content: String): Unit =
-    fsRun(Fs.Request.Write(fsAbs(p), content)) match
-      case Right(Fs.Response.Ok) => ()
-      case Left(e)               => throw RuntimeException(e)
-      case other                 => throw RuntimeException(s"unexpected fs response: $other")
-
-  private def refsDelete(p: Path): Unit =
-    if refsExists(p) then
-      fsRun(Fs.Request.Delete(fsAbs(p))) match
-        case Right(Fs.Response.Ok) => ()
-        case Left(e)               => throw RuntimeException(e)
-        case other                 => throw RuntimeException(s"unexpected fs response: $other")
-
-  private def putArt(a: Artifact): TypedKey =
-    CasEffects.put(cas, a, ctx).fold(e => throw RuntimeException(casErr(e)), identity)
-
-  private def getByDigest(d: Digest): Either[String, Artifact] =
-    CasEffects.get(cas, d, ctx).left.map(casErr)
-
-  private def getKey(key: TypedKey): Either[String, Artifact] =
-    getByDigest(key.valueHash).flatMap { a =>
-      TypedKey.check(key, a.key).map(_ => a)
-    }
-
-  private def refPath(branch: String): Path =
-    require(branch.nonEmpty && branch.forall(c => c.isLetterOrDigit || c == '-' || c == '_'), s"bad branch name '$branch'")
-    refsDir.resolve(branch)
-
-  /** Sidecar ref: digest of the ValidatedChangeSet that produced the tip. */
-  private def changeRefPath(branch: String): Path =
-    refsDir.resolve(s"$branch.change")
-
-  /** Append-only log of every ValidatedChangeSet digest for `branch`. */
-  private def changeHistoryPath(branch: String): Path =
-    refsDir.resolve(s"$branch.changes")
-
-  private def acceptJournalPath(branch: String): Path =
-    refsDir.resolve(s"$branch.accepting")
-
-  /** Sidecar: conflict artifact digest when merge left the head unchanged. */
-  private def conflictRefPath(branch: String): Path =
-    refsDir.resolve(s"$branch.conflict")
-
-  private def isSidecar(name: String): Boolean =
-    name.endsWith(".change") || name.endsWith(".changes") ||
-      name.endsWith(".accepting") || name.endsWith(".conflict")
-
-  /** Journaled accept intent (CAS digests + intended ref / ledger steps). */
-  private final case class AcceptJournal(
-      branch: String,
-      moduleDigest: Digest,
-      vcsDigest: Digest,
-      parents: List[Digest],
-      causalHistoryRoot: Option[Digest],
-      historyAppend: Boolean,
-      phase: String, // "cas" | "refs" | "publish" | "done"
-      /** Provisional digests (provenance, tip base, …) protected as GC roots. */
-      extras: List[Digest] = Nil,
-      /** Domain-gate judgment that validated `moduleDigest`, if any (survives
-        * crash-recovery so [[applyRefs]] can restore [[BranchManifest.gateEvidence]]).
-        */
-      gateJudgment: Option[String] = None,
-      /** Digest of the [[cairn.core.AcceptanceEvidence]] artifact backing this
-        * accept, if any (survives crash-recovery so [[applyRefs]] can restore
-        * [[BranchManifest.acceptanceEvidence]]).
-        */
-      acceptanceEvidence: Option[Digest] = None,
-  ):
-    def rootDigests: List[Digest] =
-      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList
-
-    def encode: String =
-      val lines = List(
-        s"branch=$branch",
-        s"module=${moduleDigest.hex}",
-        s"vcs=${vcsDigest.hex}",
-        s"parents=${parents.map(_.hex).mkString(",")}",
-        s"causal=${causalHistoryRoot.map(_.hex).getOrElse("")}",
-        s"historyAppend=$historyAppend",
-        s"phase=$phase",
-        s"extras=${extras.map(_.hex).mkString(",")}",
-        s"gateJudgment=${gateJudgment.getOrElse("")}",
-        s"acceptanceEvidence=${acceptanceEvidence.map(_.hex).getOrElse("")}")
-      lines.mkString("\n")
-
-  private object AcceptJournal:
-    def parse(text: String): Either[String, AcceptJournal] =
-      val m = text.linesIterator.map(_.trim).filter(_.nonEmpty).flatMap { line =>
-        line.split("=", 2) match
-          case Array(k, v) => Some(k -> v)
-          case _           => None
-      }.toMap
-      for
-        branch <- m.get("branch").toRight("accept journal: missing branch")
-        mod <- m.get("module").toRight("accept journal: missing module")
-        vcs <- m.get("vcs").toRight("accept journal: missing vcs")
-        parents = m.getOrElse("parents", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
-        causal = m.get("causal").filter(_.nonEmpty).map(Digest(_))
-        histAppend = m.get("historyAppend").forall(_ != "false")
-        phase <- m.get("phase").toRight("accept journal: missing phase")
-        extras = m.getOrElse("extras", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
-        gateJudgment = m.get("gateJudgment").filter(_.nonEmpty)
-        acceptanceEvidence = m.get("acceptanceEvidence").filter(_.nonEmpty).map(Digest(_))
-      yield AcceptJournal(
-        branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras,
-        gateJudgment, acceptanceEvidence)
-
-  private def writeJournal(j: AcceptJournal): Unit =
-    refsMkdirs()
-    refsWrite(acceptJournalPath(j.branch), j.encode)
-
-  private def clearJournal(branch: String): Unit =
-    refsDelete(acceptJournalPath(branch))
-
-  private def clearConflict(branch: String): Unit =
-    refsDelete(conflictRefPath(branch))
-
-  /** Optional ledger publish after a local accept. */
-  final case class Publish(
-      node: Node,
-      authority: Keypair,
-      authorities: Map[String, Vector[Byte]],
-  )
-
-  private def applyRefs(j: AcceptJournal): BranchManifest =
-    val modArt = getByDigest(j.moduleDigest).fold(e => throw RuntimeException(e), identity)
-    val vcsArt = getByDigest(j.vcsDigest).fold(e => throw RuntimeException(e), identity)
-    if j.historyAppend then persistChange(j.branch, vcsArt.key)
-    else
-      refsMkdirs()
-      refsWrite(changeRefPath(j.branch), vcsArt.key.valueHash.hex)
-    advanceRaw(
-      j.branch,
-      modArt.key,
-      acceptedChange = Some(vcsArt.key.valueHash),
-      parents = j.parents,
-      causalHistoryRoot = j.causalHistoryRoot,
-      gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil),
-      acceptanceEvidence = j.acceptanceEvidence)
-
-  /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
-    * On ledger failure after refs, journal stays at phase=publish for recovery.
-    *
-    * If `branch` carries a pending [[Merge.Conflict]] ref (`conflictRefPath`),
-    * this accept is treated as resolving it: the conflict's digest is folded into
-    * this accept's provenance inputs, so the resolution is not just an ordinary
-    * commit that happens to supersede the conflict marker — [[Provenance.why]] on
-    * the resulting head surfaces the resolved conflict as a direct lineage input,
-    * permanently, even after [[clearConflict]] removes the branch's live ref.
-    */
-  private def transactionalAccept(
-      branch: String,
-      module: Module,
-      vcs: Delta.ValidatedChangeSet,
-      parents: List[Digest],
-      causalHistoryRoot: Option[Digest],
-      publish: Option[Publish],
-      provenanceParents: List[Digest],
-      provenanceTool: String,
-      historyAppend: Boolean = true,
-      extraPuts: List[Artifact] = Nil,
-      gateJudgment: Option[String] = None,
-      acceptanceEvidence: Option[Digest] = None,
-  ): Either[String, BranchManifest] =
-    if module.digest != vcs.result then
-      Left(s"accept rejected: module ${module.digest.short} ≠ validated change result ${vcs.result.short}")
-    else
-      val resolvedConflict =
-        if refsExists(conflictRefPath(branch)) then Some(Digest(refsRead(conflictRefPath(branch)).trim))
-        else None
-      val extraKeys = extraPuts.map(putArt)
-      val vcsKey = putArt(vcs.artifact)
-      val modKey = putArt(module.artifact)
-      val provDig =
-        Provenance.record(
-          cas, module.digest,
-          provenanceParents ++ resolvedConflict.toList :+ vcsKey.valueHash,
-          provenanceTool, ctx)
-          .fold(e => throw RuntimeException(casErr(e)), identity)
-      val extras = extraKeys.map(_.valueHash) :+ provDig
-      var journal = AcceptJournal(
-        branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras,
-        gateJudgment, acceptanceEvidence)
-      writeJournal(journal)
-      val manifest = applyRefs(journal)
-      journal = journal.copy(phase = "refs")
-      writeJournal(journal)
-      publish match
-        case None =>
-          clearJournal(branch)
-          clearConflict(branch)
-          Right(manifest)
-        case Some(p) =>
-          journal = journal.copy(phase = "publish")
-          writeJournal(journal)
-          publishHead(branch, p.node, p.authority, p.authorities) match
-            case Left(err) => Left(err)
-            case Right(_) =>
-              clearJournal(branch)
-              clearConflict(branch)
-              Right(manifest)
-
-  /** Roll forward interrupted accepts (refs and/or ledger publish).
-    * Phase=`cas` with missing journal blobs abandons the journal (orphans are
-    * then reclaimable via [[reclaimOrphanBlobs]]); other failures stay Left.
-    */
-  def recoverPendingAccepts(
-      publish: Option[Publish] = None
-  ): Either[String, List[String]] =
-    if !refsExists(refsDir) then Right(Nil)
-    else
-      fsRun(Fs.Request.List(fsAbs(refsDir))) match
-        case Left(e) => Left(e)
-        case Right(Fs.Response.Entries(names)) =>
-          val pending = names.filter(_.endsWith(".accepting")).sorted
-          pending.foldLeft[Either[String, List[String]]](Right(Nil)) { (acc, name) =>
-            acc.flatMap { done =>
-              val branch = name.stripSuffix(".accepting")
-              val text = refsRead(acceptJournalPath(branch))
-              AcceptJournal.parse(text).flatMap { j =>
-                j.phase match
-                  case "cas" =>
-                    tryApplyRefs(j) match
-                      case Right(_) =>
-                        clearJournal(branch)
-                        Right(done :+ branch)
-                      case Left(err) if err.contains("not in CAS") || err.contains("Missing") =>
-                        // Incomplete put before crash — drop journal; GC reclaims orphans.
-                        clearJournal(branch)
-                        Right(done :+ branch)
-                      case Left(err) => Left(err)
-                  case "refs" =>
-                    clearJournal(branch)
-                    Right(done :+ branch)
-                  case "publish" =>
-                    publish match
-                      case Some(p) =>
-                        publishHead(branch, p.node, p.authority, p.authorities).map { _ =>
-                          clearJournal(branch)
-                          done :+ branch
-                        }
-                      case None =>
-                        Left(s"pending publish for '$branch' needs Publish credentials")
-                  case other => Left(s"unknown accept journal phase '$other' for $branch")
-              }
-            }
-          }
-        case other => Left(s"unexpected fs response: $other")
-
-  private def tryApplyRefs(j: AcceptJournal): Either[String, BranchManifest] =
-    getByDigest(j.moduleDigest).flatMap { _ =>
-      getByDigest(j.vcsDigest).map { _ =>
-        applyRefs(j)
-      }
-    }
-
-  /** Digests that must survive CAS GC: branch heads, change sidecars /
-    * histories, conflict sidecars, pending accept-journal digests, causal
-    * digests reachable from stored [[BranchManifest]]s, and each manifest's
-    * [[cairn.core.AcceptanceEvidence]] artifact digest.
-    */
-  def liveCasRoots(): Either[String, Set[Digest]] =
-    if !refsExists(refsDir) then Right(Set.empty)
-    else
-      fsRun(Fs.Request.List(fsAbs(refsDir))) match
-        case Left(e) => Left(e)
-        case Right(Fs.Response.Entries(names)) =>
-          val roots = scala.collection.mutable.Set[Digest]()
-          def addHex(s: String): Unit =
-            val t = s.trim
-            if t.nonEmpty then
-              Digest.parse(t).foreach(roots += _)
-          for name <- names do
-            val p = refsDir.resolve(name)
-            if name.endsWith(".accepting") then
-              AcceptJournal.parse(refsRead(p)).foreach(j => j.rootDigests.foreach(roots += _))
-            else if name.endsWith(".changes") then
-              refsRead(p).linesIterator.foreach(addHex)
-            else if name.endsWith(".change") || name.endsWith(".conflict") then
-              addHex(refsRead(p))
-            else if !name.contains('.') then
-              val hex = refsRead(p).trim
-              addHex(hex)
-              Digest.parse(hex).foreach { d =>
-                getByDigest(d).foreach { a =>
-                  if a.kind == ArtifactKind.BranchManifest then
-                    val m = BranchManifest.fromCanon(a.body)
-                    m.head.foreach(k => roots += k.valueHash)
-                    m.acceptedChange.foreach(roots += _)
-                    m.changeHistory.foreach(roots += _)
-                    m.causalHistoryRoot.foreach(roots += _)
-                    m.conflictState.foreach(roots += _)
-                    m.parents.foreach(roots += _)
-                    m.certificates.foreach(roots += _)
-                    m.history.foreach(k => roots += k.valueHash)
-                    m.acceptanceEvidence.foreach(roots += _)
-                }
-              }
-          Right(roots.toSet)
-        case other => Left(s"unexpected fs response: $other")
-
-  final case class ReclaimReport(
-      recovered: List[String],
-      gc: CasAdmin.GcReport,
-      roots: Int,
-  )
-
-  /** Recover pending accepts, then mark/sweep the disk CAS using
-    * [[liveCasRoots]] plus provenance records that cite those roots.
-    * Call after a crash (or periodically) to drop unreferenced accept blobs.
-    * Requires a [[DiskCas]] root path.
-    */
-  def reclaimOrphanBlobs(
-      casRoot: Path,
-      publish: Option[Publish] = None,
-  ): Either[String, ReclaimReport] =
-    recoverPendingAccepts(publish).flatMap { recovered =>
-      liveCasRoots().flatMap { roots =>
-        val withProv = roots ++ provenanceRoots(casRoot, roots)
-        CasAdminEffects.gc(casRoot, withProv, ctx).left.map(casErr).map { report =>
-          ReclaimReport(recovered, report, withProv.size)
-        }
-      }
-    }
-
-  /** Keep provenance artifacts whose output/inputs intersect live roots. */
-  private def provenanceRoots(casRoot: Path, roots: Set[Digest]): Set[Digest] =
-    CasAdmin.objectFiles(casRoot).flatMap { p =>
-      val dig = Digest(p.getParent.getFileName.toString + p.getFileName.toString)
-      Artifact.decode(Files.readAllBytes(p)).toOption.flatMap(Provenance.fromArtifact).collect {
-        case r if roots.contains(r.output) || r.inputs.exists(roots.contains) => dig
-      }
-    }.toSet
-
-  private def persistChange(branch: String, vcsKey: TypedKey): Unit =
-    refsMkdirs()
-    refsWrite(changeRefPath(branch), vcsKey.valueHash.hex)
-    val hist = changeHistoryPath(branch)
-    val prev = if refsExists(hist) then refsRead(hist) else ""
-    val line = vcsKey.valueHash.hex + "\n"
-    val last = prev.linesIterator.map(_.trim).filter(_.nonEmpty).toList.lastOption
-    if last != Some(vcsKey.valueHash.hex) then refsWrite(hist, prev + line)
+  export refs.{load, list, liveCasRoots, reclaimOrphanBlobs, recoverPendingAccepts, publishHead}
 
   /** Load + replay-check a change-set artifact against `language`. */
   private def loadVcs(
       language: ComposedLanguage, digest: Digest
   ): Either[String, Delta.ValidatedChangeSet] =
-    getByDigest(digest).flatMap { a =>
+    refs.getByDigest(digest).flatMap { a =>
       if a.kind != ArtifactKind.ChangeSet then
         Left(s"digest ${digest.short} is ${a.kind.name}, not a change-set")
       else
         val claim = Delta.ValidatedChangeSet.decodeClaim(a.body)
-        getByDigest(claim.base).flatMap { baseArt =>
+        refs.getByDigest(claim.base).flatMap { baseArt =>
           if baseArt.kind != ArtifactKind.Ir then
             Left(s"base ${claim.base.short} is not a module")
           else Delta.ValidatedChangeSet.check(language, Module.fromCanon(baseArt.body), claim)
@@ -497,80 +130,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               val iB = b.indexWhere(_.artifact.digest == lcaId)
               if iA >= 0 && iB >= 0 then (iA, iB) else fallback
 
-  def load(branch: String): BranchManifest =
-    val p = refPath(branch)
-    if !refsExists(p) then BranchManifest(branch, None, Nil)
-    else
-      val d = Digest(refsRead(p).trim)
-      getByDigest(d).map(a => BranchManifest.fromCanon(a.body)).fold(e => throw RuntimeException(e), identity)
-
-  /** Append: new head goes to history head; manifest itself stored in CAS.
-    * Optional causal digests are recorded on the manifest. When
-    * `acceptedChange` is set, it is appended to [[BranchManifest.changeHistory]]
-    * (sidecars remain write-through caches of the same digests).
-    *
-    * Raw manifest/ref mechanics — no ΔL replay, no [[AcceptancePolicy]], no
-    * domain gate. `package`-private on purpose: this is not part of the
-    * sealed semantic-acceptance surface ([[commitTip]] / [[merge]] /
-    * [[mergeBranches]]); [[importModule]] is the only sanctioned caller for
-    * planting a module without ΔL, and only on a pristine branch.
-    */
-  private[runtime] def advanceRaw(
-      branch: String,
-      newHead: TypedKey,
-      acceptedChange: Option[Digest] = None,
-      parents: List[Digest] = Nil,
-      causalHistoryRoot: Option[Digest] = None,
-      conflictState: Option[Digest] = None,
-      /** Domain-gate judgment(s) that validated `newHead`'s module, if any.
-        * Overwrites (not accumulates) — reflects this accept only, since an
-        * un-gated advance genuinely does not carry forward a prior gate's claim.
-        */
-      gateEvidence: List[(String, Digest)] = Nil,
-      /** Digest of the [[cairn.core.AcceptanceEvidence]] artifact backing this
-        * accept, if any. Same overwrite-not-accumulate semantics as `gateEvidence`.
-        */
-      acceptanceEvidence: Option[Digest] = None,
-  ): BranchManifest =
-    val cur = load(branch)
-    val nextHistory = acceptedChange match
-      case Some(d) if cur.changeHistory.lastOption.contains(d) => cur.changeHistory
-      case Some(d) => cur.changeHistory :+ d
-      case None => cur.changeHistory
-    val next = BranchManifest(
-      branch,
-      Some(newHead),
-      cur.head.toList ++ cur.history,
-      causalHistoryRoot = causalHistoryRoot.orElse(cur.causalHistoryRoot),
-      parents = if parents.nonEmpty then parents else cur.head.toList.map(_.valueHash),
-      acceptedChange = acceptedChange.orElse(cur.acceptedChange),
-      conflictState = conflictState,
-      changeHistory = nextHistory,
-      certificates = cur.certificates,
-      gateEvidence = gateEvidence,
-      acceptanceEvidence = acceptanceEvidence,
-      primaryAncestor = cur.primaryAncestor,
-      references = cur.references,
-      domainAgreement = cur.domainAgreement)
-    val key = putArt(next.artifact)
-    refsMkdirs()
-    refsWrite(refPath(branch), key.valueHash.hex)
-    next
-
-  /** Persist domain ancestry on a branch ref (head / history unchanged). */
-  private def storeManifest(m: BranchManifest): BranchManifest =
-    val key = putArt(m.artifact)
-    refsMkdirs()
-    refsWrite(refPath(m.branch), key.valueHash.hex)
-    m
-
   /** Pull a domain branch off the ledger trunk (`primary = None`) or off an
     * existing primary ancestor. Soft [[references]] name additional ancestors
     * (e.g. SDS primary=LAW, references=CHEMISTRY). Optionally seeds a tip via
     * [[importModule]]; domain fields survive subsequent advances.
     */
   private def primaryOf(known: Set[String])(name: String): Option[String] =
-    if known.contains(name) then load(name).primaryAncestor else None
+    if known.contains(name) then refs.load(name).primaryAncestor else None
 
   /** Plant or amend a domain branch under a [[DomainAgreement]].
     *
@@ -634,17 +200,17 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   ): Either[String, Unit] =
     val idx = packs.loadClosed().values.map(_.digest).toSet
     if idx.isEmpty then Left("domain-audit: PackAccess.loadClosed returned no languages")
-    else if !list().contains(child) then Left(s"domain-audit: unknown branch '$child'")
+    else if !refs.list().contains(child) then Left(s"domain-audit: unknown branch '$child'")
     else
       def walk(name: String, seen: Set[String]): Either[String, Unit] =
         if seen.contains(name) then Left(s"domain-audit: cycle at '$name'")
         else
-          val m = load(name)
+          val m = refs.load(name)
           m.domainAgreement match
             case None => Left(s"domain-audit: '$name' is not governed")
             case Some(d) =>
               for
-                art <- getByDigest(d).left.map(e => s"domain-audit: $e")
+                art <- refs.getByDigest(d).left.map(e => s"domain-audit: $e")
                 sealedAg <- SealedDomainAgreement.fromCanon(art.body)
                 _ <- Either.cond(
                   m.primaryAncestor == sealedAg.agreement.primaryAncestor, (),
@@ -655,8 +221,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                   s"domain-audit: '$name' manifest refs ${m.references} " +
                     s"!= agreement ${sealedAg.agreement.references}")
                 gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
-                  load(p).domainAgreement.flatMap { pd =>
-                    getByDigest(pd).toOption
+                  refs.load(p).domainAgreement.flatMap { pd =>
+                    refs.getByDigest(pd).toOption
                       .flatMap(a => SealedDomainAgreement.fromCanon(a.body).toOption)
                       .map(_.agreement.owner)
                   }
@@ -669,11 +235,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     for
                       delDig <- sealedAg.agreement.ancestorDelegation.toRight(
                         s"domain-audit: '$name' missing ancestorDelegation")
-                      delArt <- getByDigest(delDig).left.map(e => s"domain-audit: $e")
+                      delArt <- refs.getByDigest(delDig).left.map(e => s"domain-audit: $e")
                       sealedDel <- SealedDomainAncestorDelegation.fromCanon(delArt.body)
-                      primaryDig <- load(p).domainAgreement.toRight(
+                      primaryDig <- refs.load(p).domainAgreement.toRight(
                         s"domain-audit: primary '$p' ungoverned")
-                      primaryArt <- getByDigest(primaryDig).left.map(e => s"domain-audit: $e")
+                      primaryArt <- refs.getByDigest(primaryDig).left.map(e => s"domain-audit: $e")
                       primarySealed <- SealedDomainAgreement.fromCanon(primaryArt.body)
                       gPk <- identities.require(primarySealed.agreement.owner)
                       _ <- SealedDomainAncestorDelegation.verify(sealedDel, gPk, verify)
@@ -696,15 +262,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean,
       knownLanguages: Set[Digest],
   ): Either[String, BranchManifest] =
-    val known = list().toSet
+    val known = refs.list().toSet
     val (ownerName, ownerSig) = ownerSeal
     val liveE: Either[String, Option[SealedDomainAgreement]] =
       if !known.contains(agreement.child) then Right(None)
       else
-        load(agreement.child).domainAgreement match
+        refs.load(agreement.child).domainAgreement match
           case None => Right(None)
           case Some(d) =>
-            getByDigest(d) match
+            refs.getByDigest(d) match
               case Left(e) =>
                 Left(s"domain-agreement: cannot load live ${d.short}: $e")
               case Right(art) =>
@@ -713,8 +279,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                     Left(s"domain-agreement: cannot decode live ${d.short}: $e")
                   case Right(sealedAg) =>
                     val gName = sealedAg.agreement.primaryAncestor.flatMap { p =>
-                      load(p).domainAgreement.flatMap { pd =>
-                        getByDigest(pd).toOption
+                      refs.load(p).domainAgreement.flatMap { pd =>
+                        refs.getByDigest(pd).toOption
                           .flatMap(a => SealedDomainAgreement.fromCanon(a.body).toOption)
                           .map(_.agreement.owner)
                       }
@@ -732,24 +298,24 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         agreement, live, liveSealedDigest = liveSealed.map(_.digest))
       sealedAg = agreement.seal(ownerSig, grantorSeal.map(_._2))
       art = sealedAg.artifact
-      _ = putArt(art)
+      _ = refs.putArt(art)
       certDigests = art.digest :: agreement.ancestorDelegation.toList
       base <-
         if known.contains(agreement.child) then
-          val cur = load(agreement.child)
+          val cur = refs.load(agreement.child)
           val next = cur.copy(
             primaryAncestor = agreement.primaryAncestor,
             references = agreement.references,
             domainAgreement = Some(art.digest),
             certificates = (cur.certificates ++ certDigests).distinct)
-          DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => storeManifest(next))
+          DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => refs.storeManifest(next))
         else
           forkFrom(
             agreement.child,
             agreement.primaryAncestor,
             module = None,
             agreement.references).map { planted =>
-            storeManifest(planted.copy(
+            refs.storeManifest(planted.copy(
               domainAgreement = Some(art.digest),
               certificates = (planted.certificates ++ certDigests).distinct))
           }
@@ -769,7 +335,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       identities: IdentityResolver,
       verify: (Vector[Byte], Array[Byte], Vector[Byte]) => Boolean = Ed25519.verify,
   ): Either[String, (DomainAgreement, (String, Vector[Byte]))] =
-    val known = list().toSet
+    val known = refs.list().toSet
     val (gName, gSig) = grantorSeal
     claim.primaryAncestor match
       case None =>
@@ -778,12 +344,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         Left(s"domain-delegation: unknown primary ancestor '$p'")
       case Some(p) =>
         for
-          grantorExpected <- load(p).domainAgreement match
+          grantorExpected <- refs.load(p).domainAgreement match
             case None =>
               // Primary not yet governed — seal is still stored; plantGoverned will refuse.
               Right(gName)
             case Some(d) =>
-              getByDigest(d).left.map(e =>
+              refs.getByDigest(d).left.map(e =>
                 s"domain-delegation: primary agreement unloadable: $e").flatMap { art =>
                 SealedDomainAgreement.fromCanon(art.body).map(_.agreement.owner)
               }
@@ -798,7 +364,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             claimDigest = claim.claimDigest)
           _ <- DomainAncestorDelegation.authenticateGrantor(del, gName, gPk, gSig, verify)
           sealedDel = del.seal(gSig)
-          _ = putArt(sealedDel.artifact)
+          _ = refs.putArt(sealedDel.artifact)
         yield (claim.copy(ancestorDelegation = Some(sealedDel.digest)), (gName, gSig))
 
   private def verifyLanguageEvidence(
@@ -838,20 +404,20 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         for
           delDig <- agreement.ancestorDelegation.toRight(
             "domain-agreement: plant under primary requires ancestorDelegation")
-          primarySealed <- load(p).domainAgreement match
+          primarySealed <- refs.load(p).domainAgreement match
             case None =>
               Left(
                 s"domain-agreement: primary '$p' must be governed before children " +
                   "can plantGoverned under it")
             case Some(d) =>
-              getByDigest(d) match
+              refs.getByDigest(d) match
                 case Left(e) =>
                   Left(s"domain-agreement: primary '$p' agreement ${d.short} unloadable: $e")
                 case Right(art) =>
                   SealedDomainAgreement.fromCanon(art.body).left.map(e =>
                     s"domain-agreement: primary '$p' agreement decode: $e")
           primaryAg = primarySealed.agreement
-          delArt <- getByDigest(delDig).left.map(e =>
+          delArt <- refs.getByDigest(delDig).left.map(e =>
             s"domain-delegation: cannot load ${delDig.short}: $e")
           sealedDel <- SealedDomainAncestorDelegation.fromCanon(delArt.body).left.map(e =>
             s"domain-delegation: cannot decode ${delDig.short}: $e")
@@ -873,7 +439,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       module: Option[Module] = None,
       references: List[String] = Nil,
   ): Either[String, BranchManifest] =
-    val known = list().toSet
+    val known = refs.list().toSet
     // Reject malformed proposals rather than silently normalizing them — same
     // posture as Canon decode / ΔL apply (repairing would hide caller bugs).
     if references.exists(_ == child) then
@@ -887,7 +453,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         child, None, Nil, primaryAncestor = primary, references = references)
       DomainBranch.wellFormed(draft, known, primaryOf(known)).flatMap { _ =>
         if known.contains(child) then
-          val cur = load(child)
+          val cur = refs.load(child)
           if cur.primaryAncestor == primary && cur.references == references then
             module match
               case None    => Right(cur)
@@ -897,9 +463,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               s"domain: branch '$child' already exists " +
                 s"(primary=${cur.primaryAncestor}, refs=${cur.references})")
         else
-          storeManifest(draft)
+          refs.storeManifest(draft)
           module match
-            case None    => Right(load(child))
+            case None    => Right(refs.load(child))
             case Some(m) => Right(importModule(child, m))
       }
 
@@ -909,11 +475,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * desync the branch manifest from its sealed [[DomainAgreement]].
     */
   def referTo(branch: String, other: String): Either[String, BranchManifest] =
-    val known = list().toSet
+    val known = refs.list().toSet
     if !known.contains(branch) then Left(s"domain: branch '$branch' does not exist")
     else if !known.contains(other) then Left(s"domain: reference '$other' is not a known branch")
     else
-      val cur = load(branch)
+      val cur = refs.load(branch)
       if cur.domainAgreement.isDefined then
         Left(
           s"domain: '$branch' is governed — amend references via plantGoverned " +
@@ -923,20 +489,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       else if cur.references.contains(other) then Right(cur)
       else
         val next = cur.copy(references = cur.references :+ other)
-        DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => storeManifest(next))
-
-  def list(): List[String] =
-    if !refsExists(refsDir) then Nil
-    else
-      fsRun(Fs.Request.List(fsAbs(refsDir))) match
-        case Right(Fs.Response.Entries(names)) => names.filterNot(isSidecar).sorted
-        case Left(e)                           => throw RuntimeException(e)
-        case other                             => throw RuntimeException(s"unexpected fs response: $other")
+        DomainBranch.wellFormed(next, known, primaryOf(known)).map(_ => refs.storeManifest(next))
 
   /** Load the module at a branch head (heads are [[ArtifactKind.Ir]] modules). */
   def headModule(branch: String): Either[String, Module] =
-    load(branch).head.toRight(s"branch '$branch' has no head").flatMap { key =>
-      getKey(key).flatMap { a =>
+    refs.load(branch).head.toRight(s"branch '$branch' has no head").flatMap { key =>
+      refs.getKey(key).flatMap { a =>
         if a.kind != ArtifactKind.Ir then Left(s"branch '$branch' head is ${a.kind.name}, not a module")
         else Right(Module.fromCanon(a.body))
       }
@@ -957,7 +515,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * branch is a distinct, not-yet-designed operation.
     */
   def importModule(branch: String, module: Module): BranchManifest =
-    val cur = load(branch)
+    val cur = refs.load(branch)
     val pristine =
       cur.head.isEmpty && cur.history.isEmpty && cur.acceptedChange.isEmpty &&
       cur.changeHistory.isEmpty && cur.causalHistoryRoot.isEmpty &&
@@ -968,7 +526,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       throw RuntimeException(
         s"importModule: branch '$branch' is already governed (bootstrap/import only applies " +
           "to a branch with no prior head, history, or acceptance evidence)")
-    advanceRaw(branch, putArt(module.artifact))
+    refs.advanceRaw(branch, refs.putArt(module.artifact))
 
   /** @deprecated Use [[importModule]] for bootstrap/import seeds; [[commitTip]] for ΔL. */
   def commitModule(branch: String, module: Module): BranchManifest =
@@ -980,10 +538,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * overload of this method that skips either check.
     */
   def commitTip(branch: String, accepted: AcceptedTip): BranchManifest =
-    val cur = load(branch)
+    val cur = refs.load(branch)
     val histRoot = cur.causalHistoryRoot.orElse(Some(accepted.vcs.base))
     val evidence = accepted.evidence
-    transactionalAccept(
+    refs.transactionalAccept(
       branch,
       accepted.module,
       accepted.vcs,
@@ -1003,10 +561,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   def loadChange(
       branch: String, language: ComposedLanguage
   ): Either[String, Delta.ValidatedChangeSet] =
-    val fromManifest = load(branch).acceptedChange
+    val fromManifest = refs.load(branch).acceptedChange
     val fromSidecar =
-      val p = changeRefPath(branch)
-      if refsExists(p) then Some(Digest(refsRead(p).trim)) else None
+      val p = refs.changeRefPath(branch)
+      if refs.refsExists(p) then Some(Digest(refs.refsRead(p).trim)) else None
     fromManifest.orElse(fromSidecar) match
       case Some(d) => loadVcs(language, d)
       case None =>
@@ -1018,13 +576,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   def loadChangeHistory(
       branch: String, language: ComposedLanguage
   ): Either[String, List[Delta.ValidatedChangeSet]] =
-    val manifestHist = load(branch).changeHistory
+    val manifestHist = refs.load(branch).changeHistory
     val digests =
       if manifestHist.nonEmpty then manifestHist
       else
-        val hist = changeHistoryPath(branch)
-        if refsExists(hist) then
-          refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
+        val hist = refs.changeHistoryPath(branch)
+        if refs.refsExists(hist) then
+          refs.refsRead(hist).linesIterator.map(_.trim).filter(_.nonEmpty).map(Digest(_)).toList
         else Nil
     if digests.nonEmpty then
       digests.foldLeft[Either[String, List[Delta.ValidatedChangeSet]]](Right(Nil)) { (acc, d) =>
@@ -1039,7 +597,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     for
       vcs <- loadChange(branch, language)
       tipMod <- headModule(branch)
-      baseArt <- getByDigest(vcs.base)
+      baseArt <- refs.getByDigest(vcs.base)
       base <-
         if baseArt.kind != ArtifactKind.Ir then Left(s"base ${vcs.base.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
@@ -1056,8 +614,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * which path produced it.
     */
   private def markConflict(into: String, conflict: Merge.Conflict): Merge.Conflict =
-    val conflictKey = putArt(conflict.artifact)
-    val cur = load(into)
+    val conflictKey = refs.putArt(conflict.artifact)
+    val cur = refs.load(into)
     val marked = BranchManifest(
       into, cur.head, cur.history, cur.causalHistoryRoot, cur.parents,
       cur.acceptedChange, conflictState = Some(conflictKey.valueHash),
@@ -1068,9 +626,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)
-    putArt(marked.artifact) // conflictState recorded; head unchanged
-    refsMkdirs()
-    refsWrite(conflictRefPath(into), conflictKey.valueHash.hex)
+    refs.putArt(marked.artifact) // conflictState recorded; head unchanged
+    refs.refsMkdirs()
+    refs.refsWrite(refs.conflictRefPath(into), conflictKey.valueHash.hex)
     conflict
 
   /** Semantic merge into `into`: integrate two change histories relative to
@@ -1103,10 +661,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         AcceptedTip.checkMerged(language, base, outcome, policy).flatMap { accepted =>
           val parentDigests =
             if parentBranches.nonEmpty then
-              parentBranches.flatMap(b => load(b).head.map(_.valueHash))
-            else load(into).head.toList.map(_.valueHash)
+              parentBranches.flatMap(b => refs.load(b).head.map(_.valueHash))
+            else refs.load(into).head.toList.map(_.valueHash)
           val evidence = accepted.evidence
-          transactionalAccept(
+          refs.transactionalAccept(
             into, module, vcs, parentDigests, Some(base.digest), publish,
             provenanceParents = List(base.digest),
             provenanceTool = "semantic-merge",
@@ -1153,15 +711,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       stackedB <-
         if suffixB.isEmpty then Right(None)
         else composeHistory(language, suffixB).map(Some(_))
-      baseArt <- getByDigest(baseDig)
+      baseArt <- refs.getByDigest(baseDig)
       base <-
         if baseArt.kind != ArtifactKind.Ir then Left(s"base ${baseDig.short} is not a module")
         else Right(Module.fromCanon(baseArt.body))
-      parentDigests = List(ours, theirs).flatMap(b => load(b).head.map(_.valueHash))
+      parentDigests = List(ours, theirs).flatMap(b => refs.load(b).head.map(_.valueHash))
       gate = policy.gate
       gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment)
       // `validatedChangeSet` is always the real `vcs.artifact.digest` — the
-      // SAME digest `advance`/`transactionalAccept` record as
+      // SAME digest `advanceRaw`/`transactionalAccept` record as
       // `BranchManifest.acceptedChange` — never a bespoke raw-change digest,
       // so `AcceptanceEvidence.verify` can replay it. `None` only for a true
       // fast-forward of a branch that itself has no ΔL change (pure import).
@@ -1178,12 +736,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               case Left(w) =>
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
               case Right(()) =>
-                val modKey = putArt(m.artifact)
-                val evidence = evidenceFor(load(ours).acceptedChange, m)
-                putArt(evidence.artifact)
-                Right(Right(advanceRaw(
+                val modKey = refs.putArt(m.artifact)
+                val evidence = evidenceFor(refs.load(ours).acceptedChange, m)
+                refs.putArt(evidence.artifact)
+                Right(Right(refs.advanceRaw(
                   into, modKey,
-                  acceptedChange = load(ours).acceptedChange,
+                  acceptedChange = refs.load(ours).acceptedChange,
                   parents = parentDigests,
                   causalHistoryRoot = Some(baseDig),
                   gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil),
@@ -1199,7 +757,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
               case Right(()) =>
                 val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
-                transactionalAccept(
+                refs.transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
                   provenanceTool = "semantic-merge",
@@ -1216,7 +774,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
               case Right(()) =>
                 val evidence = evidenceFor(Some(vcs.artifact.digest), mod)
-                transactionalAccept(
+                refs.transactionalAccept(
                   into, mod, vcs, parentDigests, Some(baseDig), publish,
                   provenanceParents = List(base.digest),
                   provenanceTool = "semantic-merge",
@@ -1227,21 +785,6 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
           }
     yield out
 
-  /** Opt-in ledger publication of an accepted branch head: `PublishArtifact`
-    * then `SetBranchHead`. Not called automatically on merge accept.
-    */
-  def publishHead(
-      branch: String,
-      node: Node,
-      authority: Keypair,
-      authorities: Map[String, Vector[Byte]],
-  ): Either[String, Block] =
-    load(branch).head.toRight(s"branch '$branch' has no head").flatMap { key =>
-      node.append(authority, authorities, List(
-        authority.signTx(Tx.PublishArtifact(key)),
-        authority.signTx(Tx.SetBranchHead(branch, key))))
-    }
-
   /** Put a certificate artifact and append its digest to the branch manifest
     * `certificates` list (linked CAS reference from branch state).
     *
@@ -1250,15 +793,15 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * or tip-mismatched certificates cannot become privileged branch state.
     */
   def attachCertificate(branch: String, cert: Artifact): Either[String, (BranchManifest, Digest)] =
-    val cur = load(branch)
+    val cur = refs.load(branch)
     val expectedTip = cur.head.map(_.valueHash)
     CertificateAttach.check(cert, expectedTip).flatMap { _ =>
-      val dig = putArt(cert).valueHash
+      val dig = refs.putArt(cert).valueHash
       if cur.certificates.contains(dig) then Right((cur, dig))
       else
         val next = cur.copy(certificates = cur.certificates :+ dig)
-        val key = putArt(next.artifact)
-        refsMkdirs()
-        refsWrite(refPath(branch), key.valueHash.hex)
+        val key = refs.putArt(next.artifact)
+        refs.refsMkdirs()
+        refs.refsWrite(refs.refPath(branch), key.valueHash.hex)
         Right((next, dig))
     }
