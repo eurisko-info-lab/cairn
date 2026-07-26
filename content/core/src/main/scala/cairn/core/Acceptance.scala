@@ -2,6 +2,150 @@ package cairn.core
 
 import cairn.kernel.*
 
+final case class CertificateRequirement(kind: ArtifactKind, issuer: Option[String], minimum: Int = 1):
+  def canon: Canon = Canon.cmap(
+    "kind" -> Canon.CStr(kind.name),
+    "issuer" -> issuer.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(x => Canon.CTag("some", Canon.CStr(x))),
+    "minimum" -> Canon.CInt(minimum))
+
+final case class AuthorityRules(required: Set[String] = Set.empty, threshold: Int = 0):
+  def canon: Canon = Canon.cmap(
+    "required" -> Canon.cstrs(required.toList.sorted), "threshold" -> Canon.CInt(threshold))
+
+final case class MigrationRules(allowed: Set[Digest] = Set.empty, required: Boolean = false):
+  def canon: Canon = Canon.cmap(
+    "allowed" -> Canon.cstrs(allowed.toList.map(_.hex).sorted),
+    "required" -> Canon.CInt(if required then 1 else 0))
+
+enum PublicationRules:
+  case Forbidden, Optional, Required
+  def canon: Canon = Canon.CStr(toString.toLowerCase)
+
+/** One canonical artifact specifies every condition under which a module may
+  * become externally visible as an accepted branch head. */
+final case class AcceptanceConstitution(
+    changeModel: Digest,
+    validationModel: Option[Digest],
+    requiredDomainAgreement: Option[Digest],
+    requiredCertificates: List[CertificateRequirement],
+    authorityRules: AuthorityRules,
+    migrationRules: MigrationRules,
+    publicationRules: PublicationRules,
+):
+  def canon: Canon = Canon.cmap(
+    "changeModel" -> Canon.CStr(changeModel.hex),
+    "validationModel" -> validationModel.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "requiredDomainAgreement" -> requiredDomainAgreement.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "requiredCertificates" -> Canon.CList(requiredCertificates.map(_.canon)),
+    "authorityRules" -> authorityRules.canon,
+    "migrationRules" -> migrationRules.canon,
+    "publicationRules" -> publicationRules.canon)
+  def artifact: Artifact = Artifact(ArtifactKind.AcceptanceConstitution, canon)
+  def digest: Digest = artifact.digest
+
+object AcceptanceConstitution:
+  def open(changeModel: Digest = ChangeModel.default.digest): AcceptanceConstitution =
+    AcceptanceConstitution(changeModel, None, None, Nil, AuthorityRules(), MigrationRules(), PublicationRules.Optional)
+
+  def fromPolicy(policy: AcceptancePolicy, changeModel: Digest): AcceptanceConstitution =
+    open(changeModel).copy(validationModel = policy.gate.descriptor)
+
+  def fromCanon(c: Canon): Either[String, AcceptanceConstitution] =
+    try
+      def optDigest(field: String): Option[Digest] = c.field(field) match
+        case Canon.CTag("some", Canon.CStr(s)) => Some(Digest(s))
+        case _                                  => None
+      val certs = c.field("requiredCertificates").asList.map { row =>
+        CertificateRequirement(
+          ArtifactKind.parse(row.field("kind").asStr).fold(e => throw CodecError(e), identity),
+          row.field("issuer") match
+            case Canon.CTag("some", Canon.CStr(s)) => Some(s)
+            case _                                  => None,
+          row.field("minimum").asInt.toInt)
+      }
+      val authority = c.field("authorityRules")
+      val migration = c.field("migrationRules")
+      val publication = c.field("publicationRules").asStr match
+        case "forbidden" => PublicationRules.Forbidden
+        case "required"  => PublicationRules.Required
+        case "optional"  => PublicationRules.Optional
+        case other        => throw CodecError(s"unknown publication rule '$other'")
+      Right(AcceptanceConstitution(
+        Digest(c.field("changeModel").asStr), optDigest("validationModel"),
+        optDigest("requiredDomainAgreement"), certs,
+        AuthorityRules(authority.field("required").asList.map(_.asStr).toSet,
+          authority.field("threshold").asInt.toInt),
+        MigrationRules(migration.field("allowed").asList.map(x => Digest(x.asStr)).toSet,
+          migration.field("required").asInt == 1L), publication))
+    catch case CodecError(m) => Left(m)
+
+  def fromArtifact(artifact: Artifact): Either[String, AcceptanceConstitution] =
+    if artifact.kind != ArtifactKind.AcceptanceConstitution then Left("expected acceptance-constitution artifact")
+    else fromCanon(artifact.body)
+
+final case class CertificateFact(digest: Digest, kind: ArtifactKind, issuer: Option[String])
+
+/** Canonical facts supplied to the pure constitution evaluator. Orchestration
+  * may discover these facts, but cannot invent acceptance policy around them. */
+final case class AcceptanceFacts(
+    domainAgreement: Option[Digest] = None,
+    certificates: List[CertificateFact] = Nil,
+    authorities: Set[String] = Set.empty,
+    migration: Option[Digest] = None,
+    publicationRequested: Boolean = false,
+):
+  def canon: Canon =
+    val certs = certificates.sortBy(_.digest.hex).map { f =>
+      Canon.cmap(
+        "digest" -> Canon.CStr(f.digest.hex),
+        "kind" -> Canon.CStr(f.kind.name),
+        "issuer" -> f.issuer.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(x =>
+          Canon.CTag("some", Canon.CStr(x))))
+    }
+    Canon.cmap(
+      "domainAgreement" -> domainAgreement.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+      "certificates" -> Canon.CList(certs),
+      "authorities" -> Canon.cstrs(authorities.toList.sorted),
+      "migration" -> migration.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+      "publicationRequested" -> Canon.CInt(if publicationRequested then 1 else 0))
+
+object AcceptanceConstitutionEvaluator:
+  def check(
+      constitution: AcceptanceConstitution,
+      gate: ModuleGate,
+      changeModel: Digest,
+      result: Module,
+      facts: AcceptanceFacts,
+  ): Either[String, Unit] =
+    def certificates: Either[String, Unit] =
+      constitution.requiredCertificates.foldLeft[Either[String, Unit]](Right(())) { (acc, req) =>
+        acc.flatMap { _ =>
+          val count = facts.certificates.count(f => f.kind == req.kind && req.issuer.forall(i => f.issuer.contains(i)))
+          Either.cond(count >= req.minimum, (),
+            s"acceptance constitution requires ${req.minimum} ${req.kind.name} certificate(s)${req.issuer.fold("")(i => s" from '$i'")}, found $count")
+        }
+      }
+    for
+      _ <- Either.cond(changeModel == constitution.changeModel, (), "acceptance constitution change model mismatch")
+      _ <- Either.cond(gate.descriptor == constitution.validationModel, (), "acceptance constitution validation model mismatch")
+      _ <- ModuleGate.require(gate, result)
+      _ <- Either.cond(constitution.requiredDomainAgreement.forall(facts.domainAgreement.contains), (),
+        "acceptance constitution domain agreement requirement not satisfied")
+      _ <- certificates
+      _ <- Either.cond(constitution.authorityRules.required.subsetOf(facts.authorities), (),
+        "acceptance constitution required authorities are missing")
+      _ <- Either.cond(facts.authorities.size >= constitution.authorityRules.threshold, (),
+        "acceptance constitution authority threshold not met")
+      _ <- Either.cond(!constitution.migrationRules.required || facts.migration.nonEmpty, (),
+        "acceptance constitution requires a migration")
+      _ <- Either.cond(facts.migration.forall(d => constitution.migrationRules.allowed.isEmpty || constitution.migrationRules.allowed.contains(d)), (),
+        "acceptance constitution forbids the selected migration")
+      _ <- constitution.publicationRules match
+        case PublicationRules.Forbidden => Either.cond(!facts.publicationRequested, (), "acceptance constitution forbids publication")
+        case PublicationRules.Required  => Either.cond(facts.publicationRequested, (), "acceptance constitution requires publication")
+        case PublicationRules.Optional  => Right(())
+    yield ()
+
 /** What must additionally hold, beyond ΔL replay, before a proposed module
   * may become a branch's new head. [[AcceptancePolicy.open]] is
   * passthrough — always available, but a NAMED, visible choice a caller
@@ -9,11 +153,9 @@ import cairn.kernel.*
   * [[cairn.runtime.Branches]]' acceptance API, so skipping domain
   * validation can no longer happen by omission.
   *
-  * Scope note: this governs the domain-invariant ([[ModuleGate]]) dimension
-  * of acceptance specifically. Domain ancestry ([[DomainAgreement]]) and
-  * certificate/approval requirements are separate, existing mechanisms not
-  * yet folded into one policy object — a further unification, not
-  * attempted here.
+  * Compatibility view for callers that only supply a [[ModuleGate]]. New
+  * acceptance is governed by [[AcceptanceConstitution]]; this type constructs
+  * an explicitly open constitution for the remaining dimensions.
   *
   * [[digest]] folds in [[ModuleGate.descriptor]] when the gate has one
   * (built via [[ModuleGate.fromSpecs]] from a canonically-encodable
@@ -84,6 +226,12 @@ final case class AcceptanceEvidence(
       * transitively names — `policy.gate.providers` at construction time.
       */
     providers: List[Digest] = Nil,
+    constitution: Option[Digest] = None,
+    domainAgreement: Option[Digest] = None,
+    certificates: List[Digest] = Nil,
+    authorities: List[String] = Nil,
+    migration: Option[Digest] = None,
+    publicationRequested: Boolean = false,
 ):
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex),
@@ -94,7 +242,13 @@ final case class AcceptanceEvidence(
     "judgment" -> Canon.CStr(judgment),
     "changeModel" -> Canon.CStr(changeModel.hex),
     "validationModel" -> validationModel.fold(Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
-    "providers" -> Canon.CList(providers.map(d => Canon.CStr(d.hex))))
+    "providers" -> Canon.CList(providers.map(d => Canon.CStr(d.hex))),
+    "constitution" -> constitution.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "domainAgreement" -> domainAgreement.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "certificates" -> Canon.cstrs(certificates.map(_.hex).sorted),
+    "authorities" -> Canon.cstrs(authorities.sorted),
+    "migration" -> migration.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
+    "publicationRequested" -> Canon.CInt(if publicationRequested then 1 else 0))
   def artifact: Artifact = Artifact(ArtifactKind.AcceptanceEvidence, canon)
   def digest: Digest = artifact.digest
 
@@ -114,11 +268,20 @@ object AcceptanceEvidence:
         case _                                 => None
       }
       val providers = c.asMap.get("providers").map(_.asList.map(v => Digest(v.asStr))).getOrElse(Nil)
+      def optDigest(field: String): Option[Digest] = c.asMap.get(field).flatMap {
+        case Canon.CTag("some", Canon.CStr(s)) => Some(Digest(s))
+        case _                                  => None
+      }
       Right(AcceptanceEvidence(
         Digest(c.field("language").asStr), Digest(c.field("base").asStr),
         vcsDigest, Digest(c.field("result").asStr),
         Digest(c.field("policy").asStr), c.field("judgment").asStr,
-        changeModel, validationModel, providers))
+        changeModel, validationModel, providers,
+        optDigest("constitution"), optDigest("domainAgreement"),
+        c.asMap.get("certificates").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
+        c.asMap.get("authorities").map(_.asList.map(_.asStr)).getOrElse(Nil),
+        optDigest("migration"),
+        c.asMap.get("publicationRequested").exists(_.asInt == 1L)))
     catch case CodecError(m) => Left(m)
 
   /** Independently re-derive whether `evidence` genuinely holds — never
@@ -175,6 +338,34 @@ object AcceptanceEvidence:
         case (evOpt, vOpt) =>
           Left(s"AcceptanceEvidence: validatedChangeSet presence mismatch (evidence has one: ${evOpt.isDefined}, supplied one: ${vOpt.isDefined})")
 
+  /** Complete verification path for post-PR15 evidence. */
+  def verifyComplete(
+      language: ComposedLanguage,
+      base: Module,
+      vcs: Option[Delta.ValidatedChangeSet],
+      policy: AcceptancePolicy,
+      constitution: AcceptanceConstitution,
+      facts: AcceptanceFacts,
+      result: Module,
+      evidence: AcceptanceEvidence,
+      model: ChangeModel = ChangeModel.default,
+  ): Either[String, Unit] =
+    for
+      _ <- verify(language, base, vcs, policy, result, evidence, model)
+      _ <- Either.cond(evidence.constitution.contains(constitution.digest), (),
+        "AcceptanceEvidence: constitution mismatch")
+      _ <- Either.cond(evidence.domainAgreement == facts.domainAgreement, (),
+        "AcceptanceEvidence: domain agreement facts mismatch")
+      _ <- Either.cond(evidence.certificates.sortBy(_.hex) == facts.certificates.map(_.digest).sortBy(_.hex), (),
+        "AcceptanceEvidence: certificate facts mismatch")
+      _ <- Either.cond(evidence.authorities.sorted == facts.authorities.toList.sorted, (),
+        "AcceptanceEvidence: authority facts mismatch")
+      _ <- Either.cond(evidence.migration == facts.migration, (), "AcceptanceEvidence: migration facts mismatch")
+      _ <- Either.cond(evidence.publicationRequested == facts.publicationRequested, (),
+        "AcceptanceEvidence: publication facts mismatch")
+      _ <- AcceptanceConstitutionEvaluator.check(constitution, policy.gate, model.digest, result, facts)
+    yield ()
+
 /** The only way to advance a branch head under a policy: a module that has
   * both replayed cleanly against ΔL (carries a genuine
   * [[Delta.ValidatedChangeSet]] — itself only mintable by a successful
@@ -191,6 +382,8 @@ private[core] final case class AcceptedTipRepr(
     vcs: Delta.ValidatedChangeSet,
     policy: AcceptancePolicy,
     languageDigest: Digest,
+    constitution: AcceptanceConstitution,
+    facts: AcceptanceFacts,
 )
 
 opaque type AcceptedTip = AcceptedTipRepr
@@ -199,7 +392,8 @@ object AcceptedTip:
   private def mint(
       base: Module, module: Module, change: Cst,
       vcs: Delta.ValidatedChangeSet, policy: AcceptancePolicy, languageDigest: Digest,
-  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest)
+      constitution: AcceptanceConstitution, facts: AcceptanceFacts,
+  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest, constitution, facts)
 
   /** Check a proposed [[SemanticRepository.Tip]]: ΔL replay, then `policy`. */
   def checkTip(
@@ -208,9 +402,20 @@ object AcceptedTip:
       policy: AcceptancePolicy,
       model: ChangeModel = ChangeModel.default,
   ): Either[String, AcceptedTip] =
+    checkTip(language, proposed, policy,
+      AcceptanceConstitution.fromPolicy(policy, model.digest), AcceptanceFacts(), model)
+
+  def checkTip(
+      language: ComposedLanguage,
+      proposed: SemanticRepository.Tip,
+      policy: AcceptancePolicy,
+      constitution: AcceptanceConstitution,
+      facts: AcceptanceFacts,
+      model: ChangeModel,
+  ): Either[String, AcceptedTip] =
     SemanticRepository.ValidatedTip.check(language, proposed, model).flatMap { vt =>
-      ModuleGate.require(policy.gate, vt.tip).map(_ =>
-        mint(vt.base, vt.tip, vt.change, vt.vcs, policy, language.digest))
+      AcceptanceConstitutionEvaluator.check(constitution, policy.gate, model.digest, vt.tip, facts).map(_ =>
+        mint(vt.base, vt.tip, vt.change, vt.vcs, policy, language.digest, constitution, facts))
     }
 
   /** Wrap an already ΔL-replayed merge/integrate [[SemanticRepository.Outcome.Accepted]]
@@ -223,8 +428,20 @@ object AcceptedTip:
       outcome: SemanticRepository.Outcome.Accepted,
       policy: AcceptancePolicy,
   ): Either[String, AcceptedTip] =
-    ModuleGate.require(policy.gate, outcome.module).map(_ =>
-      mint(base, outcome.module, outcome.mergedChange, outcome.vcs, policy, language.digest))
+    checkMerged(language, base, outcome, policy,
+      AcceptanceConstitution.fromPolicy(policy, outcome.vcs.changeModel), AcceptanceFacts())
+
+  def checkMerged(
+      language: ComposedLanguage,
+      base: Module,
+      outcome: SemanticRepository.Outcome.Accepted,
+      policy: AcceptancePolicy,
+      constitution: AcceptanceConstitution,
+      facts: AcceptanceFacts,
+  ): Either[String, AcceptedTip] =
+    AcceptanceConstitutionEvaluator.check(
+      constitution, policy.gate, outcome.vcs.changeModel, outcome.module, facts).map(_ =>
+      mint(base, outcome.module, outcome.mergedChange, outcome.vcs, policy, language.digest, constitution, facts))
 
   extension (a: AcceptedTip)
     def base: Module = a.base
@@ -233,6 +450,8 @@ object AcceptedTip:
     def vcs: Delta.ValidatedChangeSet = a.vcs
     def policy: AcceptancePolicy = a.policy
     def languageDigest: Digest = a.languageDigest
+    def constitution: AcceptanceConstitution = a.constitution
+    def facts: AcceptanceFacts = a.facts
     def evidence: AcceptanceEvidence = AcceptanceEvidence(
       language = a.languageDigest,
       base = a.base.digest,
@@ -242,4 +461,10 @@ object AcceptedTip:
       judgment = a.policy.gate.judgment,
       changeModel = a.vcs.changeModel,
       validationModel = a.policy.gate.descriptor,
-      providers = a.policy.gate.providers)
+      providers = a.policy.gate.providers,
+      constitution = Some(a.constitution.digest),
+      domainAgreement = a.facts.domainAgreement,
+      certificates = a.facts.certificates.map(_.digest),
+      authorities = a.facts.authorities.toList.sorted,
+      migration = a.facts.migration,
+      publicationRequested = a.facts.publicationRequested)

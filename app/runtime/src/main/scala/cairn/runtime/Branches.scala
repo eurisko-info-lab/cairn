@@ -1,7 +1,7 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{AcceptancePolicy, AcceptanceEvidence, AcceptedTip, ChangeAlgebra, ChangeModel, Delta, LangMigration, Merge, Module, PatchGraph, SemanticRepository}
+import cairn.core.*
 import cairn.systeminterface.Cas
 import cairn.systeminterface.PackAccess
 import cairn.systemhandler.{EffectContext, Ed25519, Keypair}
@@ -37,7 +37,56 @@ import java.nio.file.Path
 final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private val refs = BranchRefStore(cas, refsDir, ctx)
 
-  export refs.{load, list, liveCasRoots, reclaimOrphanBlobs, recoverPendingAccepts, publishHead}
+  export refs.{load, list, liveCasRoots, reclaimOrphanBlobs, recoverPendingAccepts}
+
+  /** Publication is governed by the same constitution that accepted the
+    * current head; the raw ref-store publisher is never exported. */
+  def publishHead(
+      branch: String,
+      node: cairn.systemhandler.Node,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+  ): Either[String, cairn.kernel.Block] =
+    for
+      evidenceDigest <- refs.load(branch).acceptanceEvidence.toRight(
+        s"branch '$branch' has no acceptance evidence")
+      evidenceArtifact <- refs.getByDigest(evidenceDigest)
+      evidence <- AcceptanceEvidence.fromCanon(evidenceArtifact.body)
+      constitutionDigest <- evidence.constitution.toRight(
+        s"branch '$branch' was accepted without an acceptance constitution")
+      constitutionArtifact <- refs.getByDigest(constitutionDigest)
+      constitution <- AcceptanceConstitution.fromArtifact(constitutionArtifact)
+      _ <- Either.cond(constitution.publicationRules != PublicationRules.Forbidden, (),
+        "acceptance constitution forbids publication")
+      _ <- Either.cond(
+        constitution.authorityRules.required.isEmpty || constitution.authorityRules.required.contains(authority.name), (),
+        s"authority '${authority.name}' is not allowed to publish by the acceptance constitution")
+      block <- refs.publishHead(branch, node, authority, authorities)
+    yield block
+
+  private def acceptanceFacts(
+      branch: String,
+      migration: Option[(LangMigration, ComposedLanguage)],
+      publish: Option[Publish],
+  ): Either[String, AcceptanceFacts] =
+    val manifest = refs.load(branch)
+    manifest.certificates.foldLeft[Either[String, List[CertificateFact]]](Right(Nil)) { (acc, digest) =>
+      for
+        xs <- acc
+        artifact <- refs.getByDigest(digest)
+        _ <- CertificateAttach.check(artifact, manifest.head.map(_.valueHash))
+        issuer = artifact.body match
+          case Canon.CMap(fields) => fields.toMap.get("issuer").map(_.asStr)
+          case _                  => None
+      yield xs :+ CertificateFact(digest, artifact.kind, issuer)
+    }.map { certificates =>
+      AcceptanceFacts(
+        domainAgreement = manifest.domainAgreement,
+        certificates = certificates,
+        authorities = publish.map(_.authority.name).toSet,
+        migration = migration.map(_._1.artifact.digest),
+        publicationRequested = publish.nonEmpty)
+    }
 
   /** Load + replay-check a change-set artifact against `language`/`model`. */
   private def loadVcs(
@@ -526,7 +575,21 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       throw RuntimeException(
         s"importModule: branch '$branch' is already governed (bootstrap/import only applies " +
           "to a branch with no prior head, history, or acceptance evidence)")
-    refs.advanceRaw(branch, refs.putArt(module.artifact))
+    val constitution = AcceptanceConstitution.open()
+    val facts = AcceptanceFacts()
+    AcceptanceConstitutionEvaluator.check(
+      constitution, ModuleGate.passthrough, ChangeModel.default.digest, module, facts)
+      .fold(e => throw RuntimeException(e), identity)
+    // Bootstrap has no object-language descriptor yet; bind evidence to a
+    // stable explicit bootstrap language marker instead of omitting policy.
+    val bootstrapLanguage = Digest.of(Canon.CStr("cairn/bootstrap-import"))
+    val evidence = AcceptanceEvidence(
+      bootstrapLanguage, module.digest, None, module.digest,
+      AcceptancePolicy.open.digest, "", ChangeModel.default.digest,
+      constitution = Some(constitution.digest))
+    refs.putArt(constitution.artifact)
+    refs.putArt(evidence.artifact)
+    refs.advanceRaw(branch, refs.putArt(module.artifact), acceptanceEvidence = Some(evidence.digest))
 
   /** @deprecated Use [[importModule]] for bootstrap/import seeds; [[commitTip]] for ΔL. */
   def commitModule(branch: String, module: Module): BranchManifest =
@@ -539,6 +602,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     */
   def commitTip(branch: String, accepted: AcceptedTip): BranchManifest =
     val cur = refs.load(branch)
+    val actualFacts = acceptanceFacts(branch, None, None).fold(e => throw RuntimeException(e), identity)
+    if accepted.facts != actualFacts then
+      throw RuntimeException(
+        "commitTip acceptance facts do not match branch ancestry/certificates/authority/migration/publication state")
     val histRoot = cur.causalHistoryRoot.orElse(Some(accepted.vcs.base))
     val evidence = accepted.evidence
     refs.transactionalAccept(
@@ -550,7 +617,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish = None,
       provenanceParents = List(accepted.base.digest),
       provenanceTool = "semantic-commit",
-      extraPuts = List(accepted.base.artifact, evidence.artifact),
+      extraPuts = List(accepted.base.artifact, accepted.constitution.artifact, evidence.artifact),
       gateJudgment = if accepted.policy.gate.judgment.isEmpty then None else Some(accepted.policy.gate.judgment),
       acceptanceEvidence = Some(evidence.digest),
     ).fold(e => throw RuntimeException(e), identity)
@@ -653,14 +720,18 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish: Option[Publish] = None,
       parentBranches: List[String] = Nil,
       policy: AcceptancePolicy,
+      constitution: Option[AcceptanceConstitution] = None,
       model: ChangeModel = ChangeModel.default,
       targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
+    val governingModel = if migration.nonEmpty then targetModel.digest else model.digest
+    val governing = constitution.getOrElse(AcceptanceConstitution.fromPolicy(policy, governingModel))
+    acceptanceFacts(into, migration, publish).flatMap { facts =>
     SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, policy.gate, model, targetModel).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
         Right(Left(markConflict(into, conflict)))
       case outcome @ SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
-        AcceptedTip.checkMerged(language, base, outcome, policy).flatMap { accepted =>
+        AcceptedTip.checkMerged(language, base, outcome, policy, governing, facts).flatMap { accepted =>
           val parentDigests =
             if parentBranches.nonEmpty then
               parentBranches.flatMap(b => refs.load(b).head.map(_.valueHash))
@@ -670,11 +741,12 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             into, module, vcs, parentDigests, Some(base.digest), publish,
             provenanceParents = List(base.digest),
             provenanceTool = "semantic-merge",
-            extraPuts = List(base.artifact, evidence.artifact),
+            extraPuts = List(base.artifact, governing.artifact, evidence.artifact),
             gateJudgment = if policy.gate.judgment.isEmpty then None else Some(policy.gate.judgment),
             acceptanceEvidence = Some(evidence.digest),
           ).map(Right(_))
         }
+    }
     }
 
   /** Everyday merge: causal LCA via [[PatchGraph]] when histories form a DAG,
@@ -689,6 +761,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       migration: Option[(LangMigration, ComposedLanguage)] = None,
       publish: Option[Publish] = None,
       policy: AcceptancePolicy,
+      constitution: Option[AcceptanceConstitution] = None,
       model: ChangeModel = ChangeModel.default,
       targetModel: ChangeModel = ChangeModel.default,
   ): Either[String, Either[Merge.Conflict, BranchManifest]] =
@@ -721,6 +794,9 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
         else Right(Module.fromCanon(baseArt.body))
       parentDigests = List(ours, theirs).flatMap(b => refs.load(b).head.map(_.valueHash))
       gate = policy.gate
+      governingModel = if migration.nonEmpty then targetModel.digest else model.digest
+      governing = constitution.getOrElse(AcceptanceConstitution.fromPolicy(policy, governingModel))
+      facts <- acceptanceFacts(into, migration, publish)
       gateJudgment = if gate.judgment.isEmpty then None else Some(gate.judgment)
       // `validatedChangeSet` is always the real `vcs.artifact.digest` — the
       // SAME digest `advanceRaw`/`transactionalAccept` record as
@@ -730,7 +806,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       evidenceFor = (vcsDigest: Option[Digest], result: Module, changeModel: Digest) => AcceptanceEvidence(
         language = language.digest, base = baseDig, validatedChangeSet = vcsDigest,
         result = result.digest, policy = policy.digest, judgment = gate.judgment,
-        changeModel = changeModel, validationModel = gate.descriptor, providers = gate.providers)
+        changeModel = changeModel, validationModel = gate.descriptor, providers = gate.providers,
+        constitution = Some(governing.digest), domainAgreement = facts.domainAgreement,
+        certificates = facts.certificates.map(_.digest), authorities = facts.authorities.toList.sorted,
+        migration = facts.migration, publicationRequested = facts.publicationRequested)
       out <- (stackedA, stackedB) match
         case (None, None) =>
           headModule(ours).flatMap { m =>
@@ -745,19 +824,26 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
               case Left(w) =>
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(w)))))
               case Right(()) =>
-                val modKey = refs.putArt(m.artifact)
-                val evidence = evidenceFor(refs.load(ours).acceptedChange, m, model.digest)
-                refs.putArt(evidence.artifact)
-                Right(Right(refs.advanceRaw(
-                  into, modKey,
-                  acceptedChange = refs.load(ours).acceptedChange,
-                  parents = parentDigests,
-                  causalHistoryRoot = Some(baseDig),
-                  gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil),
-                  acceptanceEvidence = Some(evidence.digest))))
+                AcceptanceConstitutionEvaluator.check(governing, gate, model.digest, m, facts) match
+                  case Left(e) =>
+                    val witness = Merge.ConflictWitness.DomainValidationFailed("acceptance-constitution", Canon.CStr(e))
+                    Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, m.digest, Some(witness)))))
+                  case Right(()) =>
+                    val modKey = refs.putArt(m.artifact)
+                    val evidence = evidenceFor(refs.load(ours).acceptedChange, m, model.digest)
+                    refs.putArt(governing.artifact)
+                    refs.putArt(evidence.artifact)
+                    Right(Right(refs.advanceRaw(
+                      into, modKey,
+                      acceptedChange = refs.load(ours).acceptedChange,
+                      parents = parentDigests,
+                      causalHistoryRoot = Some(baseDig),
+                      gateEvidence = gateJudgment.map(g => List(g -> m.digest)).getOrElse(Nil),
+                      acceptanceEvidence = Some(evidence.digest))))
           }
         case (Some((_, chA)), Some((_, chB))) =>
-          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs), policy, model, targetModel)
+          merge(language, into, base, chA, chB, migration, publish, List(ours, theirs), policy,
+            constitution, model, targetModel)
         case (Some((_, chA)), None) =>
           SemanticRepository.commit(language, base, chA, model).flatMap { (mod, vcs) =>
             gate(mod) match
@@ -765,15 +851,21 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(w)))))
               case Right(()) =>
-                val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
-                refs.transactionalAccept(
-                  into, mod, vcs, parentDigests, Some(baseDig), publish,
-                  provenanceParents = List(base.digest),
-                  provenanceTool = "semantic-merge",
-                  extraPuts = List(evidence.artifact),
-                  gateJudgment = gateJudgment,
-                  acceptanceEvidence = Some(evidence.digest),
-                ).map(Right(_))
+                AcceptanceConstitutionEvaluator.check(governing, gate, vcs.changeModel, mod, facts) match
+                  case Left(e) =>
+                    val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chA)).digest
+                    val witness = Merge.ConflictWitness.DomainValidationFailed("acceptance-constitution", Canon.CStr(e))
+                    Right(Left(markConflict(into, Merge.Conflict(Set.empty, chgDig, baseDig, Some(witness)))))
+                  case Right(()) =>
+                    val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
+                    refs.transactionalAccept(
+                      into, mod, vcs, parentDigests, Some(baseDig), publish,
+                      provenanceParents = List(base.digest),
+                      provenanceTool = "semantic-merge",
+                      extraPuts = List(governing.artifact, evidence.artifact),
+                      gateJudgment = gateJudgment,
+                      acceptanceEvidence = Some(evidence.digest),
+                    ).map(Right(_))
           }
         case (None, Some((_, chB))) =>
           SemanticRepository.commit(language, base, chB, model).flatMap { (mod, vcs) =>
@@ -782,15 +874,21 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
                 val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
                 Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(w)))))
               case Right(()) =>
-                val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
-                refs.transactionalAccept(
-                  into, mod, vcs, parentDigests, Some(baseDig), publish,
-                  provenanceParents = List(base.digest),
-                  provenanceTool = "semantic-merge",
-                  extraPuts = List(evidence.artifact),
-                  gateJudgment = gateJudgment,
-                  acceptanceEvidence = Some(evidence.digest),
-                ).map(Right(_))
+                AcceptanceConstitutionEvaluator.check(governing, gate, vcs.changeModel, mod, facts) match
+                  case Left(e) =>
+                    val chgDig = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(chB)).digest
+                    val witness = Merge.ConflictWitness.DomainValidationFailed("acceptance-constitution", Canon.CStr(e))
+                    Right(Left(markConflict(into, Merge.Conflict(Set.empty, baseDig, chgDig, Some(witness)))))
+                  case Right(()) =>
+                    val evidence = evidenceFor(Some(vcs.artifact.digest), mod, vcs.changeModel)
+                    refs.transactionalAccept(
+                      into, mod, vcs, parentDigests, Some(baseDig), publish,
+                      provenanceParents = List(base.digest),
+                      provenanceTool = "semantic-merge",
+                      extraPuts = List(governing.artifact, evidence.artifact),
+                      gateJudgment = gateJudgment,
+                      acceptanceEvidence = Some(evidence.digest),
+                    ).map(Right(_))
           }
     yield out
 
