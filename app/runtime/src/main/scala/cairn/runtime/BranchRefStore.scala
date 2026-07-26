@@ -111,9 +111,12 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
   private[runtime] def conflictRefPath(branch: String): Path =
     refsDir.resolve(s"$branch.conflict")
 
+  private[runtime] def conflictContextRefPath(branch: String): Path =
+    refsDir.resolve(s"$branch.conflict-context")
+
   private def isSidecar(name: String): Boolean =
     name.endsWith(".change") || name.endsWith(".changes") ||
-      name.endsWith(".accepting") || name.endsWith(".conflict")
+      name.endsWith(".accepting") || name.endsWith(".conflict") || name.endsWith(".conflict-context")
 
   /** Journaled accept intent (CAS digests + intended ref / ledger steps). */
   private final case class AcceptJournal(
@@ -184,6 +187,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   private[runtime] def clearConflict(branch: String): Unit =
     refsDelete(conflictRefPath(branch))
+    refsDelete(conflictContextRefPath(branch))
 
   private def applyRefs(j: AcceptJournal): BranchManifest =
     val modArt = getByDigest(j.moduleDigest).fold(e => throw RuntimeException(e), identity)
@@ -410,6 +414,10 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
 
   private[runtime] def pendingConflict(branch: String): Option[Digest] =
     if refsExists(conflictRefPath(branch)) then Some(Digest(refsRead(conflictRefPath(branch)).trim))
+    else None
+
+  private[runtime] def pendingConflictContext(branch: String): Option[Digest] =
+    if refsExists(conflictContextRefPath(branch)) then Some(Digest(refsRead(conflictContextRefPath(branch)).trim))
     else None
 
   /** Append: new head goes to history head; manifest itself stored in CAS.

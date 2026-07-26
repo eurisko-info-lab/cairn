@@ -618,11 +618,13 @@ function renderStudio() {
         <label>Branch<input id="studioBranch" type="text" placeholder="sds/main"></label>
         <label>Acting authority<input id="studioAuthority" type="text" placeholder="operator@example.org"></label>
         <button class="btn primary" id="studioOpen">Open semantic head</button>
-        <div id="studioModes" class="pills"></div><div id="studioNavigation"></div>
+        <div id="studioModes" class="pills"></div><div id="studioCollaboration"></div><div id="studioNavigation"></div>
         <p id="studioStatus" class="muted"></p>
       </div>
       <div class="card"><h2>Proposal</h2><pre class="view" id="studioDelta">Open a branch to begin.</pre>
         <div id="studioEvidence" class="evidence-grid"></div>
+        <details><summary>Preserved source preview</summary><pre class="view" id="studioSource">—</pre></details>
+        <details><summary>Rendered semantic preview</summary><pre class="view" id="studioReport">—</pre></details>
         <button class="btn" id="studioUndo" disabled>Undo last action</button>
         <button class="btn primary" id="studioSubmit" disabled>Commit under constitution</button></div>
     </div>`;
@@ -636,18 +638,37 @@ function renderStudio() {
     $("studioEvidence").innerHTML = `<div><b>Actions</b><span>${r.actions || 0}</span></div>
       <div><b>Result</b><span>${r.result ? short(r.result) : "—"}</span></div>
       <div><b>Accesses</b><span>${(r.accesses || []).map(a => esc(a.mode + " " + a.location)).join("<br>") || "—"}</span></div>
-      <div><b>Diagnostics</b><span>${(r.diagnostics || []).map(esc).join("<br>") || "valid"}</span></div>`;
+      <div><b>Validated change</b><span>${r.validatedChange ? short(r.validatedChange) : "—"}</span></div>
+      <div><b>Constitution</b><span>${r.constitution ? short(r.constitution) : "—"}</span></div>
+      <div><b>Certificates</b><span>${(r.requiredCertificates || []).map(esc).join(", ") || "none required"}</span></div>
+      <div><b>Diagnostics</b><span>${(r.diagnostics || []).map(d => esc(typeof d === "string" ? d : `${d.location || ""}: ${d.message}`)).join("<br>") || "valid"}</span></div>`;
+    $("studioSource").textContent = r.sourcePreview || "—";
+    $("studioReport").textContent = r.renderedPreview || "—";
     $("studioUndo").disabled = !(r.actions > 0); $("studioSubmit").disabled = !(r.actions > 0);
   };
   const navigation = (definition, n) => n.editable
-    ? `<button class="btn studio-field" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-label="${esc(n.label)}">${esc(n.label)}</button>`
-    : `<details open><summary>${esc(n.label)}</summary>${n.children.map(c => navigation(definition, c)).join("")}</details>`;
+    ? `<div class="studio-field"><label>${esc(n.label)}${n.widget === "decimal-percent" ? " (%)" : ""}
+        <input class="studio-value" type="${n.widget === "decimal-percent" ? "number" : "text"}" value="${esc(n.value || "")}" ${n.widget === "decimal-percent" ? 'min="0" max="100" step="0.01"' : ""}></label>
+        ${n.help ? `<small class="muted">${esc(n.help)}</small>` : ""}
+        <button class="btn studio-save" data-definition="${esc(definition)}" data-location="${esc(n.location)}">Stage</button></div>`
+    : `<details open><summary>${esc(n.label)}</summary>
+        ${n.collectionForm ? `<div class="studio-collection" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-constructor="${esc(n.collectionForm.constructor)}">
+          <b>Add ${esc(n.collectionForm.constructor)}</b>${n.collectionForm.fields.map(f => `<label>${esc(f.fieldId)}<input class="studio-new-value" data-field="${esc(f.fieldId)}" type="${f.sort === "Percentage" ? "number" : "text"}"></label>`).join("")}
+          <button class="btn studio-collection-add">Add keyed item</button></div>` : ""}
+        ${n.children.map(c => { const match = /\[([^\]]+)\]$/.exec(c.label); return `<div class="studio-collection-item">${navigation(definition, c)}${n.collectionForm && match ? `<div class="studio-item-actions"><button class="btn studio-collection-op" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-key="${esc(match[1])}" data-operation="up">↑</button><button class="btn studio-collection-op" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-key="${esc(match[1])}" data-operation="down">↓</button><button class="btn studio-collection-op" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-key="${esc(match[1])}" data-operation="remove">Remove</button></div>` : ""}</div>`; }).join("")}</details>`;
   $("studioOpen").onclick = async () => {
     const status = $("studioStatus");
     try {
       const r = await api("studio/open", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lang: "sds", branch: $("studioBranch").value.trim(), authority: $("studioAuthority").value.trim() }) });
       session = r.session;
+      $("studioCollaboration").innerHTML = `${r.conflictLocations.length ? `<div class="studio-conflict"><b>Semantic conflict</b><p>${r.conflictLocations.map(l => esc(l.location)).join("<br>")}</p><button class="btn studio-resolve" data-operation="accept-left">Accept left</button><button class="btn studio-resolve" data-operation="accept-right">Accept right</button>${r.conflictLocations.map(l => `<button class="btn studio-resolve" data-operation="defer" data-location="${esc(l.id)}">Defer ${esc(l.location)}</button><button class="btn studio-resolve" data-operation="split" data-location="${esc(l.id)}">Split ${esc(l.location)}</button>`).join("")}</div>` : ""}
+        ${r.migrations.length ? `<div class="studio-migration"><label>Language revision<select id="studioMigration">${r.migrations.map(m => `<option value="${esc(m.digest)}">${esc(m.label)}</option>`).join("")}</select></label><button class="btn" id="studioMigrate">Migrate pending proposal</button></div>` : ""}`;
+      $("studioCollaboration").querySelectorAll(".studio-resolve").forEach(button => button.onclick = async () => {
+        try { const result = await api("studio/resolve-conflict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, operation: button.dataset.operation, location: button.dataset.location || "" }) }); status.innerHTML = `<span class="ok">Conflict ${esc(result.status)} through ΔConflict.</span>`; }
+        catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+      });
+      if ($("studioMigrate")) $("studioMigrate").onclick = async () => { try { showReview(await api("studio/migrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, migration: $("studioMigration").value }) })); } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
       $("studioModes").querySelectorAll(".studio-mode").forEach(button => button.onclick = async () => {
         try { const view = await api("studio/mode", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session, mode: button.dataset.mode }) });
@@ -655,11 +676,21 @@ function renderStudio() {
         } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
       });
       $("studioNavigation").innerHTML = r.definitions.map(d => navigation(d.name, d.navigation)).join("");
-      $("studioNavigation").querySelectorAll(".studio-field").forEach(button => button.onclick = async () => {
-        const value = window.prompt(`New value for ${button.dataset.label}`); if (value === null) return;
+      $("studioNavigation").querySelectorAll(".studio-save").forEach(button => button.onclick = async () => {
+        const value = button.closest(".studio-field").querySelector(".studio-value").value;
         try { showReview(await api("studio/stage", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session, definition: button.dataset.definition, location: button.dataset.location, value }) }));
         } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+      });
+      $("studioNavigation").querySelectorAll(".studio-collection-add").forEach(button => button.onclick = async () => {
+        const box = button.closest(".studio-collection");
+        const values = [...box.querySelectorAll(".studio-new-value")].map(input => input.value).join("|||");
+        try { showReview(await api("studio/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, definition: box.dataset.definition, location: box.dataset.location, operation: "add", constructor: box.dataset.constructor, values }) })); }
+        catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+      });
+      $("studioNavigation").querySelectorAll(".studio-collection-op").forEach(button => button.onclick = async () => {
+        try { showReview(await api("studio/collection", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session, definition: button.dataset.definition, location: button.dataset.location, operation: button.dataset.operation, key: button.dataset.key }) })); }
+        catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
       });
       $("studioDelta").textContent = "No staged actions.";
       status.innerHTML = `<span class="ok">Branch opened.</span> Changes remain staged until governed submission.`;

@@ -604,9 +604,13 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * replay and an explicit [[AcceptancePolicy]] succeed — there is no
     * overload of this method that skips either check.
     */
-  def commitTip(branch: String, accepted: AcceptedTip): BranchManifest =
+  def commitTip(
+      branch: String,
+      accepted: AcceptedTip,
+      migration: Option[(LangMigration, ComposedLanguage)] = None,
+  ): BranchManifest =
     val cur = refs.load(branch)
-    val actualFacts = acceptanceFacts(branch, None, None).fold(e => throw RuntimeException(e), identity)
+    val actualFacts = acceptanceFacts(branch, migration, None).fold(e => throw RuntimeException(e), identity)
     if accepted.facts != actualFacts then
       throw RuntimeException(
         "commitTip acceptance facts do not match branch ancestry/certificates/authority/migration/publication state")
@@ -684,7 +688,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     * one-sided) so a domain-gate rejection is recorded identically no matter
     * which path produced it.
     */
-  private def markConflict(into: String, conflict: Merge.Conflict): Merge.Conflict =
+  private def markConflict(into: String, conflict: Merge.Conflict, context: Option[StoredConflict] = None): Merge.Conflict =
     val conflictKey = refs.putArt(conflict.artifact)
     val cur = refs.load(into)
     val marked = BranchManifest(
@@ -700,6 +704,11 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     refs.putArt(marked.artifact) // conflictState recorded; head unchanged
     refs.refsMkdirs()
     refs.refsWrite(refs.conflictRefPath(into), conflictKey.valueHash.hex)
+    context.foreach { stored =>
+      val key = refs.putArt(stored.artifact)
+      refs.refsWrite(refs.conflictContextRefPath(into), key.valueHash.hex)
+    }
+    if context.isEmpty then refs.refsDelete(refs.conflictContextRefPath(into))
     conflict
 
   /** Semantic merge into `into`: integrate two change histories relative to
@@ -733,7 +742,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
     acceptanceFacts(into, migration, publish).flatMap { facts =>
     SemanticRepository.integrate(language, base, changeOurs, changeTheirs, migration, policy.gate, model, targetModel).flatMap {
       case SemanticRepository.Outcome.Conflicted(conflict) =>
-        Right(Left(markConflict(into, conflict)))
+        Right(Left(markConflict(into, conflict,
+          Some(StoredConflict(language.digest, base, changeOurs, changeTheirs, conflict)))))
       case outcome @ SemanticRepository.Outcome.Accepted(module, vcs, _, _) =>
         AcceptedTip.checkMerged(language, base, outcome, policy, governing, facts).flatMap { accepted =>
           val parentDigests =
@@ -946,6 +956,17 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
             }
     yield outcome
 
+  /** Load the causal material persisted with a merge conflict so Studio can
+    * elaborate semantic buttons into ΔConflict without asking for digests or
+    * raw change terms. */
+  def studioConflictContext(branch: String): Either[String, StoredConflict] =
+    for
+      digest <- refs.pendingConflictContext(branch)
+        .toRight(s"branch '$branch' has no Studio-resolvable conflict context")
+      artifact <- refs.getByDigest(digest)
+      stored <- StoredConflict.fromArtifact(artifact)
+    yield stored
+
   /** Put a certificate artifact and append its digest to the branch manifest
     * `certificates` list (linked CAS reference from branch state).
     *
@@ -993,6 +1014,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       constitution: AcceptanceConstitution,
       authority: String,
       profile: Option[StudioProfile] = None,
+      resolveProvider: Digest => Option[ComposedLanguage] = _ => None,
   ): Either[String, StudioSession] =
     for
       _ <- Either.cond(authority.nonEmpty, (), "Studio authority is required")
@@ -1002,9 +1024,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       _ <- selectedProfile.fold[Either[String, Unit]](Right(()))(_.validate(capabilities.language))
       base <- headModule(branch)
       status <- studioStatus(branch)
-      workspace = StudioWorkspace(capabilities.language, base, model = capabilities.changeModel,
-        gate = capabilities.moduleGate())
-    yield StudioSession(capabilities, branch, constitution, authority, base, status, workspace, selectedProfile)
+      gate = capabilities.moduleGate(resolveProvider)
+      workspace = StudioWorkspace(capabilities.language, base, model = capabilities.changeModel, gate = gate)
+    yield StudioSession(capabilities, branch, constitution, authority, base, status, workspace,
+      selectedProfile, acceptanceGate = gate)
 
   /** The sole Studio submission path. It rechecks the complete staged change
     * under the live branch facts and constitution, mints AcceptedTip, then uses
@@ -1020,9 +1043,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       _ <- Either.cond(
         session.constitution.authorityRules.required.isEmpty || facts.authorities.contains(session.authority), (),
         s"Studio authority '${session.authority}' is not eligible under the constitution")
-      policy = AcceptancePolicy.gated(session.capabilities.moduleGate())
+      policy = AcceptancePolicy.gated(session.acceptanceGate)
       tip = SemanticRepository.Tip(session.base, proposal.result, proposal.change)
       accepted <- AcceptedTip.checkTip(session.capabilities.language, tip, policy,
         session.constitution, facts, session.capabilities.changeModel)
-      manifest <- scala.util.Try(commitTip(session.branch, accepted)).toEither.left.map(_.getMessage)
+      manifest <- scala.util.Try(commitTip(session.branch, accepted,
+        session.migration.map(m => m.model -> m.target.language))).toEither.left.map(_.getMessage)
     yield manifest

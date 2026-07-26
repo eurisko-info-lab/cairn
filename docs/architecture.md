@@ -439,7 +439,7 @@ state, at the level that stays true across individual pack changes:
 | GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `languages/sds.cairn` + `eu-clp` + `sds-report` (incl. PDF) + `sds-workflow`/`sds-certificate` packs |
 | GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `languages/law.cairn` requires `cert`; `LawTutorial` |
 | GRANITE | Computation / Bend profile | Parity — `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
-| GRANITE | SDS Studio UI / auth web app | N/A — explicit anti-goal (§8), not attempted |
+| GRANITE | SDS Studio UI / governed authoring workspace | Native Cairn implementation — grammar/profile-generated widgets, branch sessions, ΔSDS proposals, ΔConflict, migration, previews, and constitutional acceptance; trust administration remains separate |
 | ROSETTA | QuickSort Ord + effects + multi-host ports + sample entrypoints | Parity — `QuickSort2` + `QuickSortApp`; four host ports pass the whole-file byte fixpoint |
 | granit-rust | MetaLego grammar VM + CAS + PoA + Unison-as-fragments CLI demos | Parity — L0–L6 engines; Unison pack; CLI/transcript |
 | marblego | Grammar VM + artifact/branch/store crates | Parity (absorbed) — same story in Scala |

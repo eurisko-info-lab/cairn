@@ -130,7 +130,8 @@ enum StudioAction:
 final case class StudioDiagnostic(message: String, location: Option[SemanticLocation])
 
 final case class StudioNavigationNode(
-    label: String, sort: String, location: SemanticLocation, children: List[StudioNavigationNode],
+    label: String, sort: String, location: SemanticLocation, term: Cst,
+    children: List[StudioNavigationNode],
 )
 
 /** A Studio proposal is ordinary ΔL plus its replay witness. `result` is a
@@ -246,7 +247,7 @@ object Studio:
               for xs <- acc; node <- walk(child, indices :+ index, childLabel) yield xs :+ node
             }
           case Cst.Leaf(_) => Right(Nil)
-        children.map(StudioNavigationNode(label, path.focusSort, location, _))
+        children.map(StudioNavigationNode(label, path.focusSort, location, term, _))
       }
     walk(root, Nil, name)
 
@@ -381,6 +382,7 @@ final case class StudioSession(
     profile: Option[StudioProfile],
     mode: StudioMode = StudioMode.Edit,
     migration: Option[ResolvedMigration] = None,
+    acceptanceGate: ModuleGate = ModuleGate.passthrough,
 ):
   def withMode(next: StudioMode): StudioSession = copy(mode = next)
 
@@ -396,4 +398,5 @@ final case class StudioSession(
       workspace = migratedWorkspace,
       profile = targetProfile,
       mode = StudioMode.AssistMigration,
-      migration = Some(resolved))
+      migration = Some(resolved),
+      acceptanceGate = migratedWorkspace.gate)

@@ -64,6 +64,86 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assert(accepted.acceptanceEvidence.isDefined)
     assertEquals(branches.headModule("sds-main").toOption.get.get("a"), Some(Stlc.fls))
 
+  test("PR18 decisive Acetone vertical: governed edits, conflict resolution, migration, and evidence"):
+    val dir = Files.createTempDirectory("cairn-studio-acetone")
+    val branches = branchesAt(dir)
+    val packs = cairn.runtime.PackLoader(cairn.runtime.EffectContexts.forPackLoader())
+    val sds = cairn.examples.sds.Sds(packs)
+    val language = sds.language
+    val base = cairn.examples.sds.SdsTutorial.acetoneBase
+    val standard = LanguageCapabilities.standard(language)
+    val capabilities = standard.copy(validation = Some(sds.validationModel),
+      descriptor = standard.descriptor.copy(validation = Some(sds.validationModel.digest)))
+    val resolver: Digest => Option[ComposedLanguage] = sds.judgmentProviders.get
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+      .copy(validationModel = Some(sds.validationModel.digest))
+    branches.forkFrom("acetone-left", None, Some(base)).fold(e => fail(e), identity)
+    branches.forkFrom("acetone-right", None, Some(base)).fold(e => fail(e), identity)
+    branches.forkFrom("acetone-merge", None, Some(base)).fold(e => fail(e), identity)
+
+    val cleaner = base.get("cleaner").get
+    val concentration = Studio.pathFromTraversal(language, cleaner, List(0, 0, 1)).fold(e => fail(e), identity)
+    def commitConcentration(branch: String, value: String): BranchManifest =
+      val session = branches.openStudio(capabilities, branch, constitution, "sds-editor",
+        resolveProvider = resolver).fold(e => fail(e), identity)
+      val workspace = session.workspace.stage(
+        StudioAction.ReplaceAt("cleaner", concentration, Cst.Leaf(value))).fold(e => fail(e), identity)
+      branches.submitStudio(session.copy(workspace = workspace)).fold(e => fail(e), identity)
+
+    val left = commitConcentration("acetone-left", "70")
+    val right = commitConcentration("acetone-right", "75")
+    assert(left.acceptanceEvidence.isDefined && right.acceptanceEvidence.isDefined)
+    val merged = branches.mergeBranches(language, "acetone-merge", "acetone-left", "acetone-right",
+      policy = AcceptancePolicy.gated(capabilities.moduleGate(resolver)), constitution = Some(constitution))
+      .fold(e => fail(e), identity)
+    val conflict = merged match
+      case Left(value) => value
+      case Right(_) => fail("expected divergent concentration conflict")
+    assert(conflict.overlap.exists {
+      case SemanticLocation.Subtree("cleaner", path) => path == concentration
+      case _ => false
+    })
+    val stored = branches.studioConflictContext("acetone-merge").fold(e => fail(e), identity)
+    val resolutionLanguage = ConflictDelta.deltaOf(language).fold(es => fail(es.map(_.render).mkString("; ")), identity)
+    val program = Parser.parse(resolutionLanguage.grammar, "{ accept-left; }").fold(e => fail(e), identity)
+    val resolved = branches.resolveConflict(language, "acetone-merge", stored.base, stored.changeA, stored.changeB,
+      program, AcceptancePolicy.gated(capabilities.moduleGate(resolver)), Some(constitution))
+      .fold(e => fail(e), identity)
+    val resolvedManifest = resolved match
+      case ConflictResolutionOutcome.Accepted(manifest, artifact) =>
+        assertEquals(artifact.kind, ArtifactKind.ConflictResolution)
+        assertEquals(artifact.body.field("causalChanges").asList.length, 2)
+        manifest
+      case ConflictResolutionOutcome.Deferred(_, _) => fail("resolution unexpectedly deferred")
+
+    val revisedLanguage = Compose.compose("sds-v2", language.fragments :+
+      Fragment("sds-v2-revision", List("sds-v2"), Nil)).fold(es => fail(es.map(_.render).mkString("; ")), identity)
+    val target = LanguageCapabilities.standard(revisedLanguage)
+    val migrationModel = LangMigration(language.digest, revisedLanguage.digest, Map.empty, Map.empty)
+    val migration = ResolvedMigration(migrationModel, capabilities, target)
+    val opened = branches.openStudio(capabilities, "acetone-merge", constitution, "sds-editor",
+      resolveProvider = resolver).fold(e => fail(e), identity)
+    val phraseRoot = opened.base.get("prodNameFr").get
+    val phrasePath = Studio.pathFromTraversal(language, phraseRoot, List(2)).fold(e => fail(e), identity)
+    val pending = opened.copy(workspace = opened.workspace.stage(
+      StudioAction.ReplaceAt("prodNameFr", phrasePath, Cst.Leaf("Nettoyant acétone révisé")))
+      .fold(e => fail(e), identity))
+    val migrated = pending.assistMigration(migration).fold(e => fail(e), identity)
+    val targetConstitution = AcceptanceConstitution.open(target.changeModel.digest)
+      .copy(migrationRules = MigrationRules(Set(migrationModel.artifact.digest)))
+    val finalManifest = branches.submitStudio(migrated.copy(constitution = targetConstitution))
+      .fold(e => fail(e), identity)
+    val finalStatus = branches.studioStatus("acetone-merge").fold(e => fail(e), identity)
+    assert(finalManifest.acceptedChange.isDefined)
+    assert(finalManifest.acceptanceEvidence.isDefined)
+    assert(finalStatus.history.nonEmpty)
+    assertEquals(finalStatus.conflict, None)
+    assertEquals(finalStatus.certificates, Nil)
+    val finalProvenance = Provenance.why(dir.resolve("cas"), finalManifest.head.get.valueHash, casCtx)
+      .fold(e => fail(e.toString), identity)
+    assert(finalProvenance.exists(_.record.tool == "semantic-commit"))
+    assertEquals(resolvedManifest.conflictState, None)
+
   test("spine: overlapping edits → conflict artifact, no accept"):
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")

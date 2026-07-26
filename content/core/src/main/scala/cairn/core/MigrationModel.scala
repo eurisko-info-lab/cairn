@@ -121,6 +121,20 @@ final case class StoredConflict(
     "conflict" -> conflict.canon)
   def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("stored-conflict", canon))
 
+object StoredConflict:
+  def fromArtifact(artifact: Artifact): Either[String, StoredConflict] = artifact.body match
+    case Canon.CTag("stored-conflict", body) =>
+      val decoded = scala.util.Try((Digest(body.field("language").asStr), Module.fromCanon(body.field("base")),
+        Cst.fromCanon(body.field("changeA")), Cst.fromCanon(body.field("changeB")))).toEither
+        .left.map(e => s"invalid stored conflict: ${e.getMessage}")
+      for
+        values <- decoded
+        (language, base, a, b) = values
+        conflict <- Merge.Conflict.fromArtifact(Artifact(ArtifactKind.ChangeSet,
+          Canon.CTag("merge-conflict", body.field("conflict"))))
+      yield StoredConflict(language, base, a, b, conflict)
+    case _ => Left("expected stored-conflict artifact")
+
 object MigrationModelLoader:
   def resolve(
       owner: ComposedLanguage,

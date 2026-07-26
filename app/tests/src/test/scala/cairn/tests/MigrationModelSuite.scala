@@ -69,6 +69,7 @@ class MigrationModelSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     assertEquals(stored.language, target.language.digest)
     assert(stored.changeA.render.contains(target.language.name))
+    assertEquals(StoredConflict.fromArtifact(stored.artifact), Right(stored))
 
   test("migration validation rejects a target model bound to another revision"):
     val badValidation = ValidationModel(source.language.digest, Nil, Nil)

@@ -97,6 +97,8 @@ class BrowserSuite extends munit.FunSuite:
       val (jsCode, js) = get(port, "/ui/app.js")
       assertEquals(jsCode, 200)
       assert(js.contains("Cairn Explorer") || js.contains("loadOverview"), js)
+      assert(!js.contains("window.prompt"), "Studio must use generated controls rather than raw prompts")
+      assert(js.contains("studio/collection") && js.contains("studio/resolve-conflict") && js.contains("studio/migrate"))
     finally srv.stop()
 
   test("GET /api/schema/<lang>/<sort>: constructors + child sorts, derived from the composed language"):
