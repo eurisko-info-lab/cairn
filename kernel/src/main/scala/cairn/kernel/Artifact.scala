@@ -58,6 +58,8 @@ enum ArtifactKind(val name: String):
   case AcceptanceEvidence extends ArtifactKind("acceptance-evidence")
   case AcceptanceConstitution extends ArtifactKind("acceptance-constitution")
   case ConflictResolution extends ArtifactKind("conflict-resolution")
+  case ForeignSurface extends ArtifactKind("foreign-surface")
+  case SurfaceEvidence extends ArtifactKind("surface-evidence")
   case ChangeModel    extends ArtifactKind("change-model")
   case ChangeSurfaceModel extends ArtifactKind("change-surface-model")
   case ChangeCapability extends ArtifactKind("change-capability")
