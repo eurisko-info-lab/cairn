@@ -80,3 +80,56 @@ class ChangeModelCopySuite extends munit.FunSuite:
   test("copy: the DEFAULT model (no copy) still rejects `copy` syntax entirely — it's real data, not a hidden builtin"):
     val dlDefault = Delta.deltaOf(lang).fold(e => fail(e.map(_.render).mkString), identity)
     assert(Parser.parse(dlDefault.grammar, "{ copy a to b ; }").isLeft)
+
+  // -- PR6: ChangeModel identity is now bound into ValidatedChangeSet.Claim --
+
+  test("ChangeModel: canon round-trip for a custom model, at the canon level"):
+    assertEquals(ChangeModel.fromCanon(model2.canon).canon, model2.canon)
+
+  test("ChangeModel: byte-level artifact round-trip — a node with only the encoded bytes reconstructs the model"):
+    val bytes = Canon.encode(model2.canon)
+    val decoded = Canon.decode(bytes).fold(e => fail(e), identity)
+    val model2decoded = ChangeModel.fromCanon(decoded)
+    assertEquals(model2decoded.canon, model2.canon)
+    assertEquals(model2decoded.digest, model2.digest)
+
+  test("ChangeModel: create under model2, replay with a freshly byte-decoded model — 'resolve on another node'"):
+    val bytes = Canon.encode(model2.canon)
+    val model2decoded = ChangeModel.fromCanon(Canon.decode(bytes).fold(e => fail(e), identity))
+    val base = Module(List("a" -> Stlc.tru))
+    val ch = parseChange("{ copy a to b ; }")
+    val (_, vcs) = Delta.applyTyped(lang, base, ch, model2).fold(e => fail(e.render), identity)
+    val claim = vcs.claim
+    assertEquals(claim.changeModel, model2.digest)
+    val checked = Delta.ValidatedChangeSet.check(lang, model2decoded, base, claim)
+    assert(checked.isRight, s"replay under the freshly decoded model should succeed: $checked")
+
+  test("ChangeModel: supplying the WRONG model fails BEFORE apply, with a model-mismatch error"):
+    val base = Module(List("a" -> Stlc.tru))
+    val ch = parseChange("{ copy a to b ; }")
+    val (_, vcs) = Delta.applyTyped(lang, base, ch, model2).fold(e => fail(e.render), identity)
+    val claim = vcs.claim
+    val checked = Delta.ValidatedChangeSet.check(lang, ChangeModel.default, base, claim)
+    checked match
+      case Left(msg) => assert(msg.contains("model mismatch"), s"expected a model-mismatch error, got: $msg")
+      case Right(_)  => fail("expected the default model (no `copy` op) to reject this claim")
+
+  test("ChangeModel: identical transitions under semantically different models get different VCS identities, even with the same derived ΔL language digest"):
+    // Same name/params as `copyOp` (so the derived ΔL grammar/CtorDef — and
+    // therefore Delta.deltaOf's language digest — is byte-identical), but a
+    // different footprint: this is a pure semantics change, invisible to the
+    // grammar, that only ChangeModel.digest (not the derived language's
+    // digest) can distinguish.
+    val copyOpVariant = copyOp.copy(footprint = FootprintExpr.NameOf(1))
+    val model3 = ChangeModel(ChangeModel.default.operations :+ copyOpVariant)
+    val dl3 = Delta.deltaOf(lang, model3).fold(e => fail(e.map(_.render).mkString), identity)
+
+    assertEquals(dl3.digest, dl2.digest, "same name/params must derive the same ΔL language, regardless of program/footprint/inverse")
+    assert(model3.digest != model2.digest, "different footprint must change the ChangeModel's own digest")
+
+    val base = Module(List("a" -> Stlc.tru))
+    val ch = parseChange("{ copy a to b ; }")
+    val (_, vcs2) = Delta.applyTyped(lang, base, ch, model2).fold(e => fail(e.render), identity)
+    val (_, vcs3) = Delta.applyTyped(lang, base, ch, model3).fold(e => fail(e.render), identity)
+    assertEquals(vcs2.result, vcs3.result, "both models apply `copy` identically here — same resulting module")
+    assert(vcs2.claim.changeModel != vcs3.claim.changeModel, "but their claims must carry different ChangeModel identities")
