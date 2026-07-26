@@ -25,6 +25,9 @@ language meta {
     keyword satisfies;
     keyword fromleaf;
     keyword bytag;
+    keyword changeop;
+    keyword semantics;
+    keyword surface;
     keyword sumleavesatmost;
     keyword uniquetuples;
     keyword nonemptyleaves;
@@ -68,6 +71,7 @@ language meta {
     syntax item += topDecl : tok "top" anyident tok ";";
     syntax item += keyDecl : tok "key" anyident tok "by" anyident tok ";";
     syntax item += providerDecl : tok "provider" anyident tok "=" tok "language" anyident tok ";";
+    syntax item += changeOpDecl : tok "changeop" tok "semantics" str tok "surface" str tok ";";
     syntax item += validateSumLeavesAtMost : tok "validate" tok "sumleavesatmost" anyident cat numList num str tok ";";
     syntax item += validateUniqueTuples : tok "validate" tok "uniquetuples" anyident cat pathList str tok ";";
     syntax item += validateNonEmptyLeaves : tok "validate" tok "nonemptyleaves" anyident cat numList cat strList tok ";";
@@ -118,6 +122,7 @@ language meta {
     print topDecl : lit "top" sp field 0 lit ";";
     print keyDecl : lit "key" sp field 0 sp lit "by" sp field 1 lit ";";
     print providerDecl : lit "provider" sp field 0 sp lit "=" sp lit "language" sp field 1 lit ";";
+    print changeOpDecl : lit "changeop" sp lit "semantics" sp strfield 0 sp lit "surface" sp strfield 1 lit ";";
     print validateSumLeavesAtMost : lit "validate" sp lit "sumleavesatmost" sp field 0 sp field 1 sp field 2 sp strfield 3 lit ";";
     print validateUniqueTuples : lit "validate" sp lit "uniquetuples" sp field 0 sp field 1 sp strfield 2 lit ";";
     print validateNonEmptyLeaves : lit "validate" sp lit "nonemptyleaves" sp field 0 sp field 1 sp field 2 lit ";";

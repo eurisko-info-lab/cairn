@@ -36,7 +36,7 @@ object Meta:
     grammar = GrammarPart(
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
         "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by", "provider",
-        "validate", "satisfies", "fromleaf", "bytag",
+        "validate", "satisfies", "fromleaf", "bytag", "changeop", "semantics", "surface",
         "sumleavesatmost", "uniquetuples", "nonemptyleaves", "definedref", "definedrefs", "definedleaflist",
         "definednodelistrefs", "leafok", "leafvalueinctorfield", "reftagin", "uniquetupleslist",
         "listchilddefinedrefs", "keyedlocaleoverlay", "outlinenums"),
@@ -77,6 +77,13 @@ object Meta:
             Elem.Tok("key"), Elem.AnyIdentLeaf, Elem.Tok("by"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
           ConstructorSpec("providerDecl", List(
             Elem.Tok("provider"), Elem.AnyIdentLeaf, Elem.Tok("="), Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          /** Canon bodies are hex-encoded, not digest references: the pack is
+            * self-contained and an artifact-only node can decode both halves.
+            * The two quoted fields remain independently hashable models.
+            */
+          ConstructorSpec("changeOpDecl", List(
+            Elem.Tok("changeop"), Elem.Tok("semantics"), Elem.StrLeaf,
+            Elem.Tok("surface"), Elem.StrLeaf, Elem.Tok(";"))),
           // Each ModuleStructural.Spec kind gets its own disambiguating
           // keyword right after "validate" (never positional-only —
           // GrammarLint's prefix-conflict rule requires it, same reason
@@ -220,6 +227,10 @@ object Meta:
         PrintRule("providerDecl", List(
           PrintSeg.Lit("provider"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("="),
           PrintSeg.Space, PrintSeg.Lit("language"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
+        PrintRule("changeOpDecl", List(
+          PrintSeg.Lit("changeop"), PrintSeg.Space, PrintSeg.Lit("semantics"), PrintSeg.Space,
+          PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit("surface"), PrintSeg.Space,
+          PrintSeg.StrField(1), PrintSeg.Lit(";"))),
         PrintRule("validateSumLeavesAtMost", List(
           PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("sumleavesatmost"), PrintSeg.Space, PrintSeg.Field(0),
           PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
@@ -526,6 +537,11 @@ object Meta:
 
   private def tagOf(t: String): String = if t == "group" then "$group" else t
 
+  private def canonHex(c: Canon): String = java.util.HexFormat.of().formatHex(Canon.encode(c))
+  private def canonFromHex(hex: String): Either[String, Canon] =
+    try Canon.decode(java.util.HexFormat.of().parseHex(hex))
+    catch case e: IllegalArgumentException => Left(s"invalid canonical hex: ${e.getMessage}")
+
   def elaborateFragment(cst: Cst): Either[String, Fragment] = cst match
     case Cst.Node("fragmentDecl", List(Cst.Leaf(name), providesOpt, requiresOpt, Cst.Node("list", items))) =>
       def clause(o: Cst, tag: String): List[String] = o match
@@ -536,6 +552,8 @@ object Meta:
       val keys = List.newBuilder[KeyDef]
       val providers = List.newBuilder[(String, String)]
       val validations = List.newBuilder[Canon]
+      val changeSemantics = List.newBuilder[Canon]
+      val changeSurfaces = List.newBuilder[Canon]
       var varCtor: Option[String] = None
       val keywords = List.newBuilder[String]
       val puncts = List.newBuilder[String]
@@ -624,6 +642,20 @@ object Meta:
         case Cst.Node("topDecl", List(Cst.Leaf(t))) => top = Some(t)
         case Cst.Node("keyDecl", List(Cst.Leaf(sort), Cst.Leaf(field))) => keys += KeyDef(sort, field)
         case Cst.Node("providerDecl", List(Cst.Leaf(alias), Cst.Leaf(langName))) => providers += (alias -> langName)
+        case Cst.Node("changeOpDecl", List(Cst.Leaf(semHex), Cst.Leaf(surfaceHex))) =>
+          (canonFromHex(semHex), canonFromHex(surfaceHex)) match
+            case (Right(sem), Right(surface)) =>
+              try
+                val decodedSem = ChangeOpSemantics.fromCanon(sem)
+                val decodedSurface = ChangeOpSurface.fromCanon(surface)
+                if decodedSem.name != decodedSurface.name then
+                  err ++= s"changeop name mismatch: semantics '${decodedSem.name}', surface '${decodedSurface.name}'; "
+                else
+                  changeSemantics += decodedSem.canon
+                  changeSurfaces += decodedSurface.canon
+              catch case e: Exception => err ++= s"invalid changeop: ${e.getMessage}; "
+            case (Left(e), _) => err ++= s"changeop semantics: $e; "
+            case (_, Left(e)) => err ++= s"changeop surface: $e; "
         // The 11 provider-free Spec kinds construct a real ModuleStructural.Spec
         // and store its OWN canon verbatim — byte-identical to the final
         // resolved shape ValidationModelLoader will decode, since nothing
@@ -697,7 +729,9 @@ object Meta:
         varCtor = varCtor,
         keys = keys.result(),
         providers = providers.result().toMap,
-        validations = validations.result()))
+        validations = validations.result(),
+        changeSemantics = changeSemantics.result(),
+        changeSurfaces = changeSurfaces.result()))
     case other => Left(s"not a fragment declaration: ${other.render}")
 
   def parseFragment(src: String): Either[String, Fragment] =
@@ -857,6 +891,8 @@ object Meta:
     for k <- f.keys do items += n("keyDecl", leaf(k.sort), leaf(k.keyField))
     for (alias, langName) <- f.providers.toList.sortBy(_._1) do items += n("providerDecl", leaf(alias), leaf(langName))
     for v <- f.validations do items += validationCanonToCst(v)
+    for (sem, surface) <- f.changeSemantics.zip(f.changeSurfaces) do
+      items += n("changeOpDecl", leaf(canonHex(sem)), leaf(canonHex(surface)))
     n("fragmentDecl", leaf(f.name),
       if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
       if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),

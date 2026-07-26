@@ -78,6 +78,11 @@ object Delta:
     val demoted = l.fragments.map(f => f.copy(grammar = f.grammar.copy(top = None)))
     Compose.compose(s"Δ${l.name}", demoted :+ deltaFrag)
 
+  def deltaOf(l: ComposedLanguage, capability: ChangeCapability): Either[List[ComposeError], ComposedLanguage] =
+    capability.model match
+      case Left(e)      => Left(List(ComposeError("change-capability", "semantics", "surface", e)))
+      case Right(model) => deltaOf(l, model)
+
   /** Kernel-gated record of an applied change-set. Opaque: mint only via
     * [[apply]] / [[applyTyped]], or [[ValidatedChangeSet.check]] after replay.
     * Public [[ValidatedChangeSet.decodeClaim]] does not mint — forged canon

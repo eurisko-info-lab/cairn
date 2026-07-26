@@ -107,6 +107,12 @@ final case class Fragment(
       * `providers` aliases are known digests.
       */
     validations: List[Canon] = Nil,
+    /** Pack-declared change operation semantics and surfaces. Kept opaque in
+      * kernel for the same dependency-boundary reason as validations; core
+      * decodes them into ChangeOpSemantics / ChangeOpSurface.
+      */
+    changeSemantics: List[Canon] = Nil,
+    changeSurfaces: List[Canon] = Nil,
 ):
   /** Semantic identity only — grammar/surface is excluded (Phase 2). */
   def canon: Canon = FragmentCodec.toCanon(this)
@@ -140,6 +146,8 @@ final case class ComposedLanguage(
       * stable (name-sorted) fragment order — see [[Fragment.validations]].
       */
     validations: List[Canon] = Nil,
+    changeSemantics: List[Canon] = Nil,
+    changeSurfaces: List[Canon] = Nil,
 ):
   def binderSpec: BinderSpec = BinderSpec(
     constructors.values.filter(_.binders.nonEmpty).map(c => c.name -> c.binders).toMap)
@@ -174,6 +182,8 @@ object Compose:
     val keys = mergeNamed("keys", fragments.flatMap(f => f.keys.map(k => (k.sort, f.name, k))))
     val providers = mergeNamed("providers", fragments.flatMap(f => f.providers.map((alias, lang) => (alias, f.name, lang))))
     val validations = fragments.flatMap(_.validations)
+    val changeSemantics = fragments.flatMap(_.changeSemantics)
+    val changeSurfaces = fragments.flatMap(_.changeSurfaces)
     // Grammar categories AMALGAMATE: fragments contribute alternatives to a
     // shared category. Alternative order is canonical: fragments in name
     // order, each fragment's declaration order preserved. Same tag with
@@ -259,7 +269,7 @@ object Compose:
         Right(ComposedLanguage(
           name, fragments, sorts, labeledCtors, grammar,
           rules.values.toList.sortBy(_.name), judgs, varCtors.headOption, keys,
-          providers, validations))
+          providers, validations, changeSemantics, changeSurfaces))
 
 object FragmentCodec:
   import Canon.*
@@ -278,7 +288,8 @@ object FragmentCodec:
     "identContExtra" -> CStr(""),
     "spec" -> GrammarSpec.toCanon(GrammarSpec("", TokenSpec(Nil, Nil, None), Nil, Nil, Nil, "")))
 
-  def toCanon(f: Fragment): Canon = Canon.cmap(
+  def toCanon(f: Fragment): Canon =
+    val base = List(
     "name" -> CStr(f.name),
     "provides" -> Canon.cstrs(f.provides),
     "requires" -> Canon.cstrs(f.requires),
@@ -304,6 +315,11 @@ object FragmentCodec:
     "keys" -> CList(f.keys.map(k => Canon.cmap("sort" -> CStr(k.sort), "keyField" -> CStr(k.keyField)))),
     "providers" -> Canon.cmap(f.providers.toList.map((alias, lang) => alias -> CStr(lang))*),
     "validations" -> CList(f.validations))
+    // Preserve pre-PR12 identities for fragments that declare no change
+    // semantics. Surface bodies never enter semantic fragment identity.
+    val fields = if f.changeSemantics.isEmpty then base
+      else base :+ ("changeSemantics" -> CList(f.changeSemantics))
+    Canon.cmap(fields*)
 
   def fromCanon(c: Canon): Fragment =
     // Grammar in fragment canon is ignored (Phase 2); bind a SurfacePack for parse/print.
@@ -346,4 +362,6 @@ object FragmentCodec:
       // Absent on any Fragment canon persisted before providers/validations
       // existed — default to Map.empty/Nil, same tolerance as keys above.
       providers = c.asMap.get("providers").map(_.asMap.map((k, v) => k -> v.asStr)).getOrElse(Map.empty),
-      validations = c.asMap.get("validations").map(_.asList).getOrElse(Nil))
+      validations = c.asMap.get("validations").map(_.asList).getOrElse(Nil),
+      changeSemantics = c.asMap.get("changeSemantics").map(_.asList).getOrElse(Nil),
+      changeSurfaces = Nil)

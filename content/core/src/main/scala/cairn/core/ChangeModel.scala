@@ -355,98 +355,208 @@ object ChangeOpDef:
     inverse = InverseExpr.fromCanon(c.field("inverse")),
     printSegs = Nil)
 
+/** Meaning of an operation, deliberately excluding every spelling and
+  * printer choice. Existing validated changes bind to this identity.
+  */
+final case class ChangeOpSemantics(
+    name: String,
+    program: List[ChangeStep],
+    footprint: FootprintExpr,
+    inverse: InverseExpr,
+):
+  def canon: Canon = Canon.cmap(
+    "name" -> Canon.CStr(name),
+    "program" -> Canon.CList(program.map(_.canon)),
+    "footprint" -> footprint.canon,
+    "inverse" -> inverse.canon)
+
+object ChangeOpSemantics:
+  def fromCanon(c: Canon): ChangeOpSemantics = ChangeOpSemantics(
+    c.field("name").asStr,
+    c.field("program").asList.map(ChangeStep.fromCanon),
+    FootprintExpr.fromCanon(c.field("footprint")),
+    InverseExpr.fromCanon(c.field("inverse")))
+
+/** Surface spelling of an operation. It has its own identity so cosmetic
+  * changes cannot alter semantic replay identity.
+  */
+final case class ChangeOpSurface(
+    name: String,
+    params: List[ChangeParam],
+    printSegs: List[PrintSeg],
+):
+  def canon: Canon = Canon.cmap(
+    "name" -> Canon.CStr(name),
+    "params" -> Canon.CList(params.map(_.canon)),
+    "printSegs" -> Canon.CList(printSegs.map(ChangeSurfaceModel.printSegCanon)))
+
+object ChangeOpSurface:
+  def fromCanon(c: Canon): ChangeOpSurface = ChangeOpSurface(
+    c.field("name").asStr,
+    c.field("params").asList.map(ChangeParam.fromCanon),
+    c.field("printSegs").asList.map(ChangeSurfaceModel.printSegFromCanon))
+
+final case class ChangeSemanticsModel(operations: List[ChangeOpSemantics]):
+  def canon: Canon = Canon.cmap(
+    "operations" -> Canon.CList(operations.sortBy(_.name).map(_.canon)))
+  def artifact: Artifact = Artifact(ArtifactKind.ChangeModel, canon)
+  def digest: Digest = artifact.digest
+
+object ChangeSemanticsModel:
+  def fromCanon(c: Canon): ChangeSemanticsModel =
+    ChangeSemanticsModel(c.field("operations").asList.map(ChangeOpSemantics.fromCanon))
+
+final case class ChangeSurfaceModel(operations: List[ChangeOpSurface]):
+  def canon: Canon = Canon.cmap(
+    "operations" -> Canon.CList(operations.sortBy(_.name).map(_.canon)))
+  def artifact: Artifact = Artifact(ArtifactKind.ChangeSurfaceModel, canon)
+  def digest: Digest = artifact.digest
+
+object ChangeSurfaceModel:
+  private[core] def printSegCanon(s: PrintSeg): Canon = s match
+    case PrintSeg.Lit(t)          => Canon.CTag("lit", Canon.CStr(t))
+    case PrintSeg.Space           => Canon.CTag("space", Canon.CInt(0))
+    case PrintSeg.Newline         => Canon.CTag("newline", Canon.CInt(0))
+    case PrintSeg.IndentIn        => Canon.CTag("indent-in", Canon.CInt(0))
+    case PrintSeg.IndentOut       => Canon.CTag("indent-out", Canon.CInt(0))
+    case PrintSeg.Field(i)        => Canon.CTag("field", Canon.CInt(i))
+    case PrintSeg.StrField(i)     => Canon.CTag("str-field", Canon.CInt(i))
+    case PrintSeg.SepFields(i, s) => Canon.CTag("sep-fields", Canon.cmap(
+      "field" -> Canon.CInt(i), "separator" -> Canon.CStr(s)))
+
+  private[core] def printSegFromCanon(c: Canon): PrintSeg = c match
+    case Canon.CTag("lit", Canon.CStr(t)) => PrintSeg.Lit(t)
+    case Canon.CTag("space", _)           => PrintSeg.Space
+    case Canon.CTag("newline", _)         => PrintSeg.Newline
+    case Canon.CTag("indent-in", _)       => PrintSeg.IndentIn
+    case Canon.CTag("indent-out", _)      => PrintSeg.IndentOut
+    case Canon.CTag("field", Canon.CInt(i)) => PrintSeg.Field(i.toInt)
+    case Canon.CTag("str-field", Canon.CInt(i)) => PrintSeg.StrField(i.toInt)
+    case Canon.CTag("sep-fields", m) => PrintSeg.SepFields(
+      m.field("field").asInt.toInt, m.field("separator").asStr)
+    case other => throw CodecError(s"unknown change surface PrintSeg: $other")
+
+  def fromCanon(c: Canon): ChangeSurfaceModel =
+    ChangeSurfaceModel(c.field("operations").asList.map(ChangeOpSurface.fromCanon))
+
+/** Digest-bound pairing of independently addressable semantics and surface. */
+final case class ChangeCapability(semantics: ChangeSemanticsModel, surface: ChangeSurfaceModel):
+  def canon: Canon = Canon.cmap(
+    "semantics" -> Canon.CStr(semantics.digest.hex),
+    "surface" -> Canon.CStr(surface.digest.hex))
+  def artifact: Artifact = Artifact(ArtifactKind.ChangeCapability, canon)
+  def digest: Digest = artifact.digest
+
+  def model: Either[String, ChangeModel] =
+    val semanticsByName = semantics.operations.map(o => o.name -> o).toMap
+    val surfaceByName = surface.operations.map(o => o.name -> o).toMap
+    val missingSurface = semanticsByName.keySet -- surfaceByName.keySet
+    val missingSemantics = surfaceByName.keySet -- semanticsByName.keySet
+    if missingSurface.nonEmpty || missingSemantics.nonEmpty then
+      Left(s"change capability operation mismatch: missing surface={${missingSurface.toList.sorted.mkString(",")}}, " +
+        s"missing semantics={${missingSemantics.toList.sorted.mkString(",")}}")
+    else Right(ChangeModel(semantics.operations.sortBy(_.name).map { sem =>
+      val surf = surfaceByName(sem.name)
+      ChangeOpDef(sem.name, surf.params, sem.program, sem.footprint, sem.inverse, surf.printSegs)
+    }))
+
+object ChangeCapability:
+  final case class Claim(semantics: Digest, surface: Digest)
+
+  def decodeClaim(c: Canon): Claim = Claim(
+    Digest(c.field("semantics").asStr), Digest(c.field("surface").asStr))
+
+  def check(claim: Claim, semantics: ChangeSemanticsModel, surface: ChangeSurfaceModel): Either[String, ChangeCapability] =
+    if claim.semantics != semantics.digest then Left("change capability semantics digest mismatch")
+    else if claim.surface != surface.digest then Left("change capability surface digest mismatch")
+    else
+      val capability = ChangeCapability(semantics, surface)
+      capability.model.map(_ => capability)
+
+  def fromArtifacts(
+      semanticsArtifact: Artifact,
+      surfaceArtifact: Artifact,
+      capabilityArtifact: Artifact,
+  ): Either[String, ChangeCapability] =
+    if semanticsArtifact.kind != ArtifactKind.ChangeModel then Left("expected change-model artifact")
+    else if surfaceArtifact.kind != ArtifactKind.ChangeSurfaceModel then Left("expected change-surface-model artifact")
+    else if capabilityArtifact.kind != ArtifactKind.ChangeCapability then Left("expected change-capability artifact")
+    else
+      scala.util.Try((
+        ChangeSemanticsModel.fromCanon(semanticsArtifact.body),
+        ChangeSurfaceModel.fromCanon(surfaceArtifact.body),
+        decodeClaim(capabilityArtifact.body))).toEither
+        .left.map(e => s"invalid change capability artifacts: ${e.getMessage}")
+        .flatMap((semantics, surface, claim) => check(claim, semantics, surface))
+
+  /** Resolve the complete capability declared by a composed language's
+    * fragments. Duplicate operation names are rejected, never shadowed.
+    */
+  def fromLanguage(language: ComposedLanguage): Either[String, ChangeCapability] =
+    fromFragments(language.fragments)
+
+  def fromFragments(fragments: List[Fragment]): Either[String, ChangeCapability] =
+    def unique[A](kind: String, values: List[A], name: A => String): Either[String, List[A]] =
+      val duplicates = values.groupBy(name).collect { case (n, xs) if xs.sizeIs > 1 => n }.toList.sorted
+      Either.cond(duplicates.isEmpty, values, s"duplicate pack-declared change $kind: ${duplicates.mkString(", ")}")
+    for
+      semantics <- scala.util.Try(fragments.flatMap(_.changeSemantics).map(ChangeOpSemantics.fromCanon)).toEither
+        .left.map(e => s"invalid pack-declared change semantics: ${e.getMessage}")
+      surfaces <- scala.util.Try(fragments.flatMap(_.changeSurfaces).map(ChangeOpSurface.fromCanon)).toEither
+        .left.map(e => s"invalid pack-declared change surface: ${e.getMessage}")
+      sem <- unique("semantics", semantics, _.name)
+      surf <- unique("surface", surfaces, _.name)
+      capability = ChangeCapability(ChangeSemanticsModel(sem), ChangeSurfaceModel(surf))
+      _ <- capability.model
+    yield capability
+
+  /** Bootstrap standard capability, authored in the same `.cairn` data form
+    * every other pack uses. This is the sole compatibility default for APIs
+    * not yet supplied a language capability bundle (PR13).
+    */
+  lazy val standard: ChangeCapability =
+    val resource = Option(getClass.getResourceAsStream("/cairn/change-standard.cairn"))
+      .getOrElse(throw RuntimeException("missing /cairn/change-standard.cairn"))
+    val source = try new String(resource.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+      finally resource.close()
+    val fragments = Meta.parseLanguageAst(source).fold(
+      e => throw RuntimeException(s"invalid standard change capability: $e"), _._2)
+    fromFragments(fragments).fold(e => throw RuntimeException(e), identity)
+
 final case class ChangeModel(operations: List[ChangeOpDef]):
   def find(name: String): Option[ChangeOpDef] = operations.find(_.name == name)
 
   /** Sorted by name — construction order must never affect the digest,
     * mirroring `Module.canon`'s `sorted.defs`.
     */
-  def canon: Canon = Canon.cmap(
-    "operations" -> Canon.CList(operations.sortBy(_.name).map(_.canon)))
+  def canon: Canon = semantics.canon
   def artifact: Artifact = Artifact(ArtifactKind.ChangeModel, canon)
   def digest: Digest = artifact.digest
+  def semantics: ChangeSemanticsModel = ChangeSemanticsModel(operations.map(o =>
+    ChangeOpSemantics(o.name, o.program, o.footprint, o.inverse)))
+  def surface: ChangeSurfaceModel = ChangeSurfaceModel(operations.map(o =>
+    ChangeOpSurface(o.name, o.params, o.printSegs)))
+  def capability: ChangeCapability = ChangeCapability(semantics, surface)
 
 object ChangeModel:
   def fromCanon(c: Canon): ChangeModel =
-    ChangeModel(c.field("operations").asList.map(ChangeOpDef.fromCanon))
+    ChangeModel(c.field("operations").asList.map { op =>
+      // Legacy ChangeModel artifacts carried params beside semantics; new
+      // semantic-only artifacts deliberately do not. Either shape remains
+      // replayable, while only ChangeCapability reconstructs a full surface.
+      val params = op.asMap.get("params").map(_.asList.map(ChangeParam.fromCanon)).getOrElse(Nil)
+      ChangeOpDef(
+        op.field("name").asStr,
+        params,
+        op.field("program").asList.map(ChangeStep.fromCanon),
+        FootprintExpr.fromCanon(op.field("footprint")),
+        InverseExpr.fromCanon(op.field("inverse")),
+        Nil)
+    })
 
-  private def p(i: Int): ValueRef = ValueRef.Param(i)
-  private def b(name: String): ValueRef = ValueRef.Bound(name)
-
-  private val addOp = ChangeOpDef(
-    name = "add",
-    params = List(ChangeParam("name", ChangeParamKind.NameK), ChangeParam("term", ChangeParamKind.TermK, Some("="))),
-    program = List(
-      ChangeStep.Check(BoolExpr.Not(BoolExpr.IsDefined(p(0))), RejectionSpec.AlreadyDefinedR("add", p(0))),
-      ChangeStep.CheckTerm(p(1), SortRef.TopSort, p(0)),
-      ChangeStep.Mutate(Mutation.InsertDef(p(0), p(1)))),
-    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0))),
-    inverse = InverseExpr("remove", List(InverseArg.Copy(0))),
-    printSegs = List(
-      PrintSeg.Lit("add"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-      PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";")))
-
-  private val replaceOp = ChangeOpDef(
-    name = "replace",
-    params = List(ChangeParam("name", ChangeParamKind.NameK), ChangeParam("term", ChangeParamKind.TermK, Some("="))),
-    program = List(
-      ChangeStep.Check(BoolExpr.IsDefined(p(0)), RejectionSpec.NotDefinedR("replace", p(0))),
-      ChangeStep.CheckTerm(p(1), SortRef.TopSort, p(0)),
-      ChangeStep.Mutate(Mutation.ReplaceDef(p(0), p(1)))),
-    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0))),
-    inverse = InverseExpr("replace", List(InverseArg.Copy(0), InverseArg.LookupOld(0))),
-    printSegs = List(
-      PrintSeg.Lit("replace"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-      PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";")))
-
-  private val removeOp = ChangeOpDef(
-    name = "remove",
-    params = List(ChangeParam("name", ChangeParamKind.NameK)),
-    program = List(
-      ChangeStep.Check(BoolExpr.IsDefined(p(0)), RejectionSpec.NotDefinedR("remove", p(0))),
-      ChangeStep.Bind("refs", ChangeQuery.ReferencingNames(p(0))),
-      ChangeStep.Check(BoolExpr.NamesEmpty(b("refs")), RejectionSpec.StillReferencedR(p(0), b("refs"))),
-      ChangeStep.Mutate(Mutation.DeleteDef(p(0)))),
-    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0))),
-    inverse = InverseExpr("add", List(InverseArg.Copy(0), InverseArg.LookupOld(0))),
-    printSegs = List(PrintSeg.Lit("remove"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";")))
-
-  private val editOp = ChangeOpDef(
-    name = "edit",
-    params = List(
-      ChangeParam("name", ChangeParamKind.NameK),
-      ChangeParam("path", ChangeParamKind.PathK, Some("at")),
-      ChangeParam("term", ChangeParamKind.TermK, Some("="))),
-    program = List(
-      ChangeStep.Check(BoolExpr.IsDefined(p(0)), RejectionSpec.NotDefinedR("edit", p(0))),
-      ChangeStep.Bind("sp", ChangeQuery.ResolveSemanticPath(p(0), p(1))),
-      ChangeStep.CheckTerm(p(2), SortRef.FromBound("sp"), p(0)),
-      ChangeStep.Mutate(Mutation.ReplaceSubtreeAt(p(0), p(1), p(2)))),
-    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0))),
-    inverse = InverseExpr("edit", List(InverseArg.Copy(0), InverseArg.Copy(1), InverseArg.SubtreeAtOld(0, 1))),
-    printSegs = List(
-      PrintSeg.Lit("edit"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-      PrintSeg.Lit("at"), PrintSeg.Space, PrintSeg.Lit("["), PrintSeg.Field(1), PrintSeg.Lit("]"),
-      PrintSeg.Space, PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Lit(";")))
-
-  private val renameOp = ChangeOpDef(
-    name = "rename",
-    params = List(
-      ChangeParam("from", ChangeParamKind.NameK),
-      ChangeParam("to", ChangeParamKind.NameK, Some("to")),
-      ChangeParam("footprint", ChangeParamKind.FootprintK, Some("footprint"))),
-    program = List(
-      ChangeStep.Check(BoolExpr.IsDefined(p(0)), RejectionSpec.NotDefinedR("rename", p(0))),
-      ChangeStep.Check(BoolExpr.Not(BoolExpr.IsDefined(p(1))), RejectionSpec.AlreadyDefinedR("rename-target", p(1))),
-      ChangeStep.Bind("actual", ChangeQuery.ReferencingNames(p(0))),
-      ChangeStep.Check(BoolExpr.NamesEqual(p(2), b("actual")), RejectionSpec.FootprintMismatchR(p(0), p(2), b("actual"))),
-      ChangeStep.Mutate(Mutation.RenameOccurrences(p(0), p(1), b("actual")))),
-    footprint = FootprintExpr.Union(List(FootprintExpr.NameOf(0), FootprintExpr.NameOf(1), FootprintExpr.NamesOf(2))),
-    inverse = InverseExpr("rename", List(InverseArg.Copy(1), InverseArg.Copy(0), InverseArg.Copy(2))),
-    printSegs = List(
-      PrintSeg.Lit("rename"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-      PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
-      PrintSeg.Lit("footprint"), PrintSeg.Space, PrintSeg.Lit("["),
-      PrintSeg.Field(2), PrintSeg.Lit("]"), PrintSeg.Lit(";")))
-
-  val default: ChangeModel = ChangeModel(List(addOp, replaceOp, removeOp, editOp, renameOp))
+  /** Compatibility accessor. The authoritative standard operations are parsed
+    * from `cairn/change-standard.cairn`; no operation program is constructed
+    * in Scala here.
+    */
+  lazy val default: ChangeModel = ChangeCapability.standard.model.fold(
+    e => throw RuntimeException(e), identity)

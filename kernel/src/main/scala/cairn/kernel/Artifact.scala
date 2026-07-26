@@ -57,6 +57,8 @@ enum ArtifactKind(val name: String):
   case ReplaySnapshot extends ArtifactKind("replay-snapshot")
   case AcceptanceEvidence extends ArtifactKind("acceptance-evidence")
   case ChangeModel    extends ArtifactKind("change-model")
+  case ChangeSurfaceModel extends ArtifactKind("change-surface-model")
+  case ChangeCapability extends ArtifactKind("change-capability")
   case ValidationModel extends ArtifactKind("validation-model")
 
 object ArtifactKind:
