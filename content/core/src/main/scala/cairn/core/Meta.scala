@@ -35,8 +35,12 @@ object Meta:
     sorts = List(SortDef("FragmentD", SortMode.Tree)),
     grammar = GrammarPart(
       keywords = List("language", "surface", "for", "fragment", "provides", "requires", "sort", "tree", "graph",
-        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by", "provider"),
-      puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$", "="),
+        "ctor", "binds", "in", "varctor", "rule", "judgment", "top", "where", "key", "by", "provider",
+        "validate", "satisfies", "fromleaf", "bytag",
+        "sumleavesatmost", "uniquetuples", "nonemptyleaves", "definedref", "definedrefs", "definedleaflist",
+        "definednodelistrefs", "leafok", "leafvalueinctorfield", "reftagin", "uniquetupleslist",
+        "listchilddefinedrefs", "keyedlocaleoverlay", "outlinenums"),
+      puncts = List("{", "}", "(", ")", ":", ";", ",", "=>", "|-", "$", "=", "[", "]", "."),
       identContExtra = "-",
       categories = List(
         CategorySpec("file", List(
@@ -72,7 +76,78 @@ object Meta:
           ConstructorSpec("keyDecl", List(
             Elem.Tok("key"), Elem.AnyIdentLeaf, Elem.Tok("by"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
           ConstructorSpec("providerDecl", List(
-            Elem.Tok("provider"), Elem.AnyIdentLeaf, Elem.Tok("="), Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok(";"))))),
+            Elem.Tok("provider"), Elem.AnyIdentLeaf, Elem.Tok("="), Elem.Tok("language"), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          // Each ModuleStructural.Spec kind gets its own disambiguating
+          // keyword right after "validate" (never positional-only —
+          // GrammarLint's prefix-conflict rule requires it, same reason
+          // keyDecl's own comment flags). LeafOk/OutlineNums additionally
+          // reference a judgment via `<alias> . <judgment>` — the alias is
+          // resolved to a real language digest only later, by
+          // cairn.core.ValidationModelLoader (a Fragment is elaborated in
+          // isolation and cannot know another language's digest yet).
+          ConstructorSpec("validateSumLeavesAtMost", List(
+            Elem.Tok("validate"), Elem.Tok("sumleavesatmost"), Elem.AnyIdentLeaf,
+            Elem.Cat("numList"), Elem.NumLeaf, Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateUniqueTuples", List(
+            Elem.Tok("validate"), Elem.Tok("uniquetuples"), Elem.AnyIdentLeaf,
+            Elem.Cat("pathList"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateNonEmptyLeaves", List(
+            Elem.Tok("validate"), Elem.Tok("nonemptyleaves"), Elem.AnyIdentLeaf,
+            Elem.Cat("numList"), Elem.Cat("strList"), Elem.Tok(";"))),
+          ConstructorSpec("validateDefinedRef", List(
+            Elem.Tok("validate"), Elem.Tok("definedref"), Elem.AnyIdentLeaf,
+            Elem.NumLeaf, Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateDefinedRefs", List(
+            Elem.Tok("validate"), Elem.Tok("definedrefs"), Elem.AnyIdentLeaf,
+            Elem.Cat("numList"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateDefinedLeafList", List(
+            Elem.Tok("validate"), Elem.Tok("definedleaflist"), Elem.AnyIdentLeaf,
+            Elem.NumLeaf, Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateDefinedNodeListRefs", List(
+            Elem.Tok("validate"), Elem.Tok("definednodelistrefs"), Elem.AnyIdentLeaf,
+            Elem.NumLeaf, Elem.Cat("numList"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateLeafOk", List(
+            Elem.Tok("validate"), Elem.Tok("leafok"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Tok("satisfies"), Elem.AnyIdentLeaf, Elem.Tok("."), Elem.AnyIdentLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateLeafValueInCtorField", List(
+            Elem.Tok("validate"), Elem.Tok("leafvalueinctorfield"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("strList"), Elem.NumLeaf, Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateRefTagIn", List(
+            Elem.Tok("validate"), Elem.Tok("reftagin"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("strList"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateUniqueTuplesInList", List(
+            Elem.Tok("validate"), Elem.Tok("uniquetupleslist"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("pathList"), Elem.StrLeaf, Elem.Opt(Elem.Cat("strList")), Elem.Tok(";"))),
+          ConstructorSpec("validateListChildDefinedRefs", List(
+            Elem.Tok("validate"), Elem.Tok("listchilddefinedrefs"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("byTagList"), Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateKeyedLocaleOverlay", List(
+            Elem.Tok("validate"), Elem.Tok("keyedlocaleoverlay"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("strList"), Elem.AnyIdentLeaf, Elem.AnyIdentLeaf,
+            Elem.NumLeaf, Elem.NumLeaf, Elem.NumLeaf, Elem.StrLeaf, Elem.Tok(";"))),
+          ConstructorSpec("validateOutlineNums", List(
+            Elem.Tok("validate"), Elem.Tok("outlinenums"), Elem.AnyIdentLeaf, Elem.NumLeaf,
+            Elem.Cat("numberSourceList"), Elem.Tok("satisfies"), Elem.AnyIdentLeaf, Elem.Tok("."),
+            Elem.AnyIdentLeaf, Elem.StrLeaf, Elem.Tok(";"))))),
+        CategorySpec("numList", List(ConstructorSpec("numList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.NumLeaf, ","), Elem.Tok("]"))))),
+        CategorySpec("pathList", List(ConstructorSpec("pathList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.Cat("numList"), ","), Elem.Tok("]"))))),
+        CategorySpec("strList", List(ConstructorSpec("strList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.StrLeaf, ","), Elem.Tok("]"))))),
+        CategorySpec("byTagEntry", List(ConstructorSpec("byTagEntry", List(
+          Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Cat("pathList"))))),
+        CategorySpec("byTagList", List(ConstructorSpec("byTagList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.Cat("byTagEntry"), ","), Elem.Tok("]"))))),
+        CategorySpec("strNumEntry", List(ConstructorSpec("strNumEntry", List(
+          Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.NumLeaf)))),
+        CategorySpec("strNumList", List(ConstructorSpec("strNumList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.Cat("strNumEntry"), ","), Elem.Tok("]"))))),
+        CategorySpec("numberSource", List(
+          ConstructorSpec("nsFromLeaf", List(Elem.Tok("fromleaf"), Elem.StrLeaf, Elem.NumLeaf)),
+          ConstructorSpec("nsByTag", List(Elem.Tok("bytag"), Elem.Cat("strNumList"))))),
+        CategorySpec("numberSourceList", List(ConstructorSpec("numberSourceList", List(
+          Elem.Tok("["), Elem.SepBy1(Elem.Cat("numberSource"), ","), Elem.Tok("]"))))),
         CategorySpec("argList", List(
           ConstructorSpec("argList", List(Elem.Tok("("), Elem.SepBy1(Elem.Cat("argDecl"), ","), Elem.Tok(")"))))),
         // Named form declared before bare (GrammarLint: an earlier alternative
@@ -138,6 +213,65 @@ object Meta:
         PrintRule("providerDecl", List(
           PrintSeg.Lit("provider"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space, PrintSeg.Lit("="),
           PrintSeg.Space, PrintSeg.Lit("language"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
+        PrintRule("validateSumLeavesAtMost", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("sumleavesatmost"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
+        PrintRule("validateUniqueTuples", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("uniquetuples"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Lit(";"))),
+        PrintRule("validateNonEmptyLeaves", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("nonemptyleaves"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Lit(";"))),
+        PrintRule("validateDefinedRef", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("definedref"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Lit(";"))),
+        PrintRule("validateDefinedRefs", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("definedrefs"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Lit(";"))),
+        PrintRule("validateDefinedLeafList", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("definedleaflist"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.StrField(2), PrintSeg.Lit(";"))),
+        PrintRule("validateDefinedNodeListRefs", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("definednodelistrefs"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
+        PrintRule("validateLeafOk", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("leafok"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit("satisfies"), PrintSeg.Space,
+          PrintSeg.Field(2), PrintSeg.Lit("."), PrintSeg.Field(3), PrintSeg.Lit(";"))),
+        PrintRule("validateLeafValueInCtorField", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("leafvalueinctorfield"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.Field(3),
+          PrintSeg.Space, PrintSeg.StrField(4), PrintSeg.Lit(";"))),
+        PrintRule("validateRefTagIn", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("reftagin"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
+        PrintRule("validateUniqueTuplesInList", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("uniquetupleslist"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3),
+          PrintSeg.Space, PrintSeg.Field(4), PrintSeg.Lit(";"))),
+        PrintRule("validateListChildDefinedRefs", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("listchilddefinedrefs"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.StrField(3), PrintSeg.Lit(";"))),
+        PrintRule("validateKeyedLocaleOverlay", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("keyedlocaleoverlay"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.Field(3),
+          PrintSeg.Space, PrintSeg.Field(4), PrintSeg.Space, PrintSeg.Field(5), PrintSeg.Space, PrintSeg.Field(6),
+          PrintSeg.Space, PrintSeg.Field(7), PrintSeg.Space, PrintSeg.StrField(8), PrintSeg.Lit(";"))),
+        PrintRule("validateOutlineNums", List(
+          PrintSeg.Lit("validate"), PrintSeg.Space, PrintSeg.Lit("outlinenums"), PrintSeg.Space, PrintSeg.Field(0),
+          PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Space, PrintSeg.Lit("satisfies"),
+          PrintSeg.Space, PrintSeg.Field(3), PrintSeg.Lit("."), PrintSeg.Field(4), PrintSeg.Space, PrintSeg.StrField(5), PrintSeg.Lit(";"))),
+        PrintRule("numList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("pathList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("strList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("byTagEntry", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
+        PrintRule("byTagList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("strNumEntry", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
+        PrintRule("strNumList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("nsFromLeaf", List(
+          PrintSeg.Lit("fromleaf"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Field(1))),
+        PrintRule("nsByTag", List(PrintSeg.Lit("bytag"), PrintSeg.Space, PrintSeg.Field(0))),
+        PrintRule("numberSourceList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
         PrintRule("argList", List(PrintSeg.Lit("("), PrintSeg.SepFields(0, ", "), PrintSeg.Lit(")"))),
         PrintRule("argDeclNamed", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
         PrintRule("argDeclBare", List(PrintSeg.Field(0))),
@@ -292,6 +426,53 @@ object Meta:
     case Cst.Node("some", List(single)) => List(single)
     case _ => Nil
 
+  // -- shared sub-grammar Cst <-> Scala helpers for `validate ...;` decls
+  // (ModuleStructural.Spec fields: List[Int], List[List[Int]], List[String],
+  // Map[String, List[List[Int]]], Map[String, Int], List[NumberSource]) --
+
+  private def numListOf(c: Cst): List[Int] = c match
+    case Cst.Node("numList", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(s) => s.toInt }
+    case _ => Nil
+  private def numListToCst(xs: List[Int]): Cst = n("numList", lst(xs.map(i => leaf(i.toString))))
+
+  private def pathListOf(c: Cst): List[List[Int]] = c match
+    case Cst.Node("pathList", List(Cst.Node("list", items))) => items.map(numListOf)
+    case _ => Nil
+  private def pathListToCst(xs: List[List[Int]]): Cst = n("pathList", lst(xs.map(numListToCst)))
+
+  private def strListOf(c: Cst): List[String] = c match
+    case Cst.Node("strList", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(s) => s }
+    case _ => Nil
+  private def strListToCst(xs: List[String]): Cst = n("strList", lst(xs.map(leaf)))
+
+  private def byTagListOf(c: Cst): Map[String, List[List[Int]]] = c match
+    case Cst.Node("byTagList", List(Cst.Node("list", items))) =>
+      items.collect { case Cst.Node("byTagEntry", List(Cst.Leaf(tag), pl)) => tag -> pathListOf(pl) }.toMap
+    case _ => Map.empty
+  private def byTagListToCst(m: Map[String, List[List[Int]]]): Cst =
+    n("byTagList", lst(m.toList.sortBy(_._1).map((tag, pl) => n("byTagEntry", leaf(tag), pathListToCst(pl)))))
+
+  private def strNumListOf(c: Cst): Map[String, Int] = c match
+    case Cst.Node("strNumList", List(Cst.Node("list", items))) =>
+      items.collect { case Cst.Node("strNumEntry", List(Cst.Leaf(k), Cst.Leaf(v))) => k -> v.toInt }.toMap
+    case _ => Map.empty
+  private def strNumListToCst(m: Map[String, Int]): Cst =
+    n("strNumList", lst(m.toList.sortBy(_._1).map((k, v) => n("strNumEntry", leaf(k), leaf(v.toString)))))
+
+  private def numberSourceOf(c: Cst): ModuleStructural.NumberSource = c match
+    case Cst.Node("nsFromLeaf", List(Cst.Leaf(tag), Cst.Leaf(idx))) => ModuleStructural.NumberSource.FromLeaf(tag, idx.toInt)
+    case Cst.Node("nsByTag", List(m)) => ModuleStructural.NumberSource.ByTag(strNumListOf(m))
+    case other => throw RuntimeException(s"not a numberSource (grammar-guaranteed shape violated): ${other.render}")
+  private def numberSourceToCst(ns: ModuleStructural.NumberSource): Cst = ns match
+    case ModuleStructural.NumberSource.FromLeaf(tag, idx) => n("nsFromLeaf", leaf(tag), leaf(idx.toString))
+    case ModuleStructural.NumberSource.ByTag(m) => n("nsByTag", strNumListToCst(m))
+
+  private def numberSourceListOf(c: Cst): List[ModuleStructural.NumberSource] = c match
+    case Cst.Node("numberSourceList", List(Cst.Node("list", items))) => items.map(numberSourceOf)
+    case _ => Nil
+  private def numberSourceListToCst(xs: List[ModuleStructural.NumberSource]): Cst =
+    n("numberSourceList", lst(xs.map(numberSourceToCst)))
+
   def patToCst(p: Cst): Either[String, Cst] = p match
     case Cst.Node("patMeta", List(Cst.Leaf(x)))     => Right(leaf(s"$$$x"))
     case Cst.Node("patLeaf", List(Cst.Leaf(x)))     => Right(leaf(x))
@@ -434,6 +615,57 @@ object Meta:
         case Cst.Node("topDecl", List(Cst.Leaf(t))) => top = Some(t)
         case Cst.Node("keyDecl", List(Cst.Leaf(sort), Cst.Leaf(field))) => keys += KeyDef(sort, field)
         case Cst.Node("providerDecl", List(Cst.Leaf(alias), Cst.Leaf(langName))) => providers += (alias -> langName)
+        // The 11 provider-free Spec kinds construct a real ModuleStructural.Spec
+        // and store its OWN canon verbatim — byte-identical to the final
+        // resolved shape ValidationModelLoader will decode, since nothing
+        // about them needs an alias->digest resolution step.
+        case Cst.Node("validateSumLeavesAtMost", List(Cst.Leaf(ctor), leafPath, Cst.Leaf(max), Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.SumLeavesAtMost(ctor, numListOf(leafPath), max.toLong, label).canon
+        case Cst.Node("validateUniqueTuples", List(Cst.Leaf(ctor), keyPaths, Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.UniqueTuples(ctor, pathListOf(keyPaths), label).canon
+        case Cst.Node("validateNonEmptyLeaves", List(Cst.Leaf(ctor), indices, labels)) =>
+          validations += ModuleStructural.Spec.NonEmptyLeaves(ctor, numListOf(indices), strListOf(labels)).canon
+        case Cst.Node("validateDefinedRef", List(Cst.Leaf(ctor), Cst.Leaf(idx), Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.DefinedRef(ctor, idx.toInt, label).canon
+        case Cst.Node("validateDefinedRefs", List(Cst.Leaf(ctor), idxs, Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.DefinedRefs(ctor, numListOf(idxs), label).canon
+        case Cst.Node("validateDefinedLeafList", List(Cst.Leaf(ctor), Cst.Leaf(listIdx), Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.DefinedLeafList(ctor, listIdx.toInt, label).canon
+        case Cst.Node("validateDefinedNodeListRefs", List(Cst.Leaf(ctor), Cst.Leaf(listIdx), refPath, Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.DefinedNodeListRefs(ctor, listIdx.toInt, numListOf(refPath), label).canon
+        case Cst.Node("validateLeafValueInCtorField",
+            List(Cst.Leaf(ctor), Cst.Leaf(leafIdx), targetCtors, Cst.Leaf(targetFieldIdx), Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.LeafValueInCtorField(
+            ctor, leafIdx.toInt, strListOf(targetCtors).toSet, targetFieldIdx.toInt, label).canon
+        case Cst.Node("validateRefTagIn", List(Cst.Leaf(ctor), Cst.Leaf(refIdx), tags, Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.RefTagIn(ctor, refIdx.toInt, strListOf(tags).toSet, label).canon
+        case Cst.Node("validateUniqueTuplesInList",
+            List(Cst.Leaf(ctor), Cst.Leaf(listIdx), keyPaths, Cst.Leaf(label), childTagsOpt)) =>
+          val childTags = childTagsOpt match
+            case Cst.Node("some", List(ct)) => Some(strListOf(ct).toSet)
+            case _                          => None
+          validations += ModuleStructural.Spec.UniqueTuplesInList(
+            ctor, listIdx.toInt, pathListOf(keyPaths), label, childTags).canon
+        case Cst.Node("validateListChildDefinedRefs", List(Cst.Leaf(ctor), Cst.Leaf(listIdx), byTag, Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.ListChildDefinedRefs(ctor, listIdx.toInt, byTagListOf(byTag), label).canon
+        case Cst.Node("validateKeyedLocaleOverlay", List(Cst.Leaf(ctor), Cst.Leaf(fieldIdx), allowedKeys,
+            Cst.Leaf(plainTag), Cst.Leaf(refTag), Cst.Leaf(keyIdx), Cst.Leaf(langIdx), Cst.Leaf(valueIdx), Cst.Leaf(label))) =>
+          validations += ModuleStructural.Spec.KeyedLocaleOverlay(ctor, fieldIdx.toInt, strListOf(allowedKeys).toSet,
+            plainTag, refTag, keyIdx.toInt, langIdx.toInt, valueIdx.toInt, label).canon
+        // LeafOk/OutlineNums reference a judgment via an ALIAS, not yet a
+        // digest — stored as a distinct "Unresolved" canon tag carrying the
+        // alias; only cairn.core.ValidationModelLoader (which has every pack
+        // loaded) can resolve it into a real JudgmentRef.
+        case Cst.Node("validateLeafOk", List(Cst.Leaf(ctor), Cst.Leaf(idx), Cst.Leaf(alias), Cst.Leaf(judgmentName))) =>
+          validations += Canon.CTag("LeafOkUnresolved", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "idx" -> Canon.CInt(idx.toInt),
+            "alias" -> Canon.CStr(alias), "judgmentName" -> Canon.CStr(judgmentName)))
+        case Cst.Node("validateOutlineNums", List(Cst.Leaf(ctor), Cst.Leaf(refsField), numberSources,
+            Cst.Leaf(alias), Cst.Leaf(judgmentName), Cst.Leaf(label))) =>
+          validations += Canon.CTag("OutlineNumsUnresolved", Canon.cmap(
+            "ctor" -> Canon.CStr(ctor), "refsField" -> Canon.CInt(refsField.toInt),
+            "numberSources" -> Canon.CList(numberSourceListOf(numberSources).map(_.canon)),
+            "alias" -> Canon.CStr(alias), "judgmentName" -> Canon.CStr(judgmentName), "label" -> Canon.CStr(label)))
         case other => err ++= s"unknown item: ${other.render}; "
 
       if err.nonEmpty then Left(err.result())
@@ -500,6 +732,53 @@ object Meta:
       n("patMetaNode", leaf(tag.drop(1)), optList(cs.map(cstToPat)))
     case Cst.Node(tag, cs) =>
       n("patNode", leaf(tag), optList(cs.map(cstToPat)))
+
+  /** Inverse of the `validateX` elaboration cases above: turns one
+    * `Fragment.validations` entry back into meta-surface Cst. The two
+    * alias-bearing kinds are stored pre-resolution (`"...Unresolved"` tags,
+    * carrying the alias string) and decoded directly here; every other kind
+    * round-trips through the real `ModuleStructural.Spec.fromCanon`/case
+    * match, since its canon already IS the final, resolved shape.
+    */
+  private def validationCanonToCst(c: Canon): Cst = c match
+    case Canon.CTag("LeafOkUnresolved", m) =>
+      n("validateLeafOk", leaf(m.field("ctor").asStr), leaf(m.field("idx").asInt.toString),
+        leaf(m.field("alias").asStr), leaf(m.field("judgmentName").asStr))
+    case Canon.CTag("OutlineNumsUnresolved", m) =>
+      n("validateOutlineNums", leaf(m.field("ctor").asStr), leaf(m.field("refsField").asInt.toString),
+        numberSourceListToCst(m.field("numberSources").asList.map(ModuleStructural.NumberSource.fromCanon)),
+        leaf(m.field("alias").asStr), leaf(m.field("judgmentName").asStr), leaf(m.field("label").asStr))
+    case other =>
+      ModuleStructural.Spec.fromCanon(other) match
+        case ModuleStructural.Spec.SumLeavesAtMost(ctor, leafPath, max, label) =>
+          n("validateSumLeavesAtMost", leaf(ctor), numListToCst(leafPath), leaf(max.toString), leaf(label))
+        case ModuleStructural.Spec.UniqueTuples(ctor, keyPaths, label) =>
+          n("validateUniqueTuples", leaf(ctor), pathListToCst(keyPaths), leaf(label))
+        case ModuleStructural.Spec.NonEmptyLeaves(ctor, indices, labels) =>
+          n("validateNonEmptyLeaves", leaf(ctor), numListToCst(indices), strListToCst(labels))
+        case ModuleStructural.Spec.DefinedRef(ctor, idx, label) =>
+          n("validateDefinedRef", leaf(ctor), leaf(idx.toString), leaf(label))
+        case ModuleStructural.Spec.DefinedRefs(ctor, idxs, label) =>
+          n("validateDefinedRefs", leaf(ctor), numListToCst(idxs), leaf(label))
+        case ModuleStructural.Spec.DefinedLeafList(ctor, listIdx, label) =>
+          n("validateDefinedLeafList", leaf(ctor), leaf(listIdx.toString), leaf(label))
+        case ModuleStructural.Spec.DefinedNodeListRefs(ctor, listIdx, refPath, label) =>
+          n("validateDefinedNodeListRefs", leaf(ctor), leaf(listIdx.toString), numListToCst(refPath), leaf(label))
+        case ModuleStructural.Spec.LeafValueInCtorField(ctor, leafIdx, targetCtors, targetFieldIdx, label) =>
+          n("validateLeafValueInCtorField", leaf(ctor), leaf(leafIdx.toString),
+            strListToCst(targetCtors.toList.sorted), leaf(targetFieldIdx.toString), leaf(label))
+        case ModuleStructural.Spec.RefTagIn(ctor, refIdx, tags, label) =>
+          n("validateRefTagIn", leaf(ctor), leaf(refIdx.toString), strListToCst(tags.toList.sorted), leaf(label))
+        case ModuleStructural.Spec.UniqueTuplesInList(ctor, listIdx, keyPaths, label, childTags) =>
+          n("validateUniqueTuplesInList", leaf(ctor), leaf(listIdx.toString), pathListToCst(keyPaths), leaf(label),
+            childTags.fold(n("none"))(t => n("some", strListToCst(t.toList.sorted))))
+        case ModuleStructural.Spec.ListChildDefinedRefs(ctor, listIdx, byTag, label) =>
+          n("validateListChildDefinedRefs", leaf(ctor), leaf(listIdx.toString), byTagListToCst(byTag), leaf(label))
+        case ModuleStructural.Spec.KeyedLocaleOverlay(ctor, fieldIdx, allowedKeys, plainTag, refTag, keyIdx, langIdx, valueIdx, label) =>
+          n("validateKeyedLocaleOverlay", leaf(ctor), leaf(fieldIdx.toString), strListToCst(allowedKeys.toList.sorted),
+            leaf(plainTag), leaf(refTag), leaf(keyIdx.toString), leaf(langIdx.toString), leaf(valueIdx.toString), leaf(label))
+        case other =>
+          throw RuntimeException(s"validationCanonToCst: unexpected resolved-form spec in Fragment.validations: $other")
 
   def elemToCst(e: Elem): Cst = e match
     case Elem.Tok(s)       => n("elemTok", leaf(s))
@@ -568,6 +847,7 @@ object Meta:
     for t <- f.grammar.top do items += n("topDecl", leaf(t))
     for k <- f.keys do items += n("keyDecl", leaf(k.sort), leaf(k.keyField))
     for (alias, langName) <- f.providers.toList.sortBy(_._1) do items += n("providerDecl", leaf(alias), leaf(langName))
+    for v <- f.validations do items += validationCanonToCst(v)
     n("fragmentDecl", leaf(f.name),
       if f.provides.isEmpty then n("none") else n("some", n("provides", lst(f.provides.map(leaf)))),
       if f.requires.isEmpty then n("none") else n("some", n("requires", lst(f.requires.map(leaf)))),
