@@ -50,6 +50,20 @@ class SemanticRepositorySuite extends munit.FunSuite:
       case Right(SemanticRepository.Outcome.Conflicted(c)) => fail(c.render)
       case Left(e) => fail(e)
 
+  test("Studio branch session submits only through constitution and AcceptedTip"):
+    val dir = Files.createTempDirectory("cairn-studio-governed")
+    val branches = branchesAt(dir)
+    branches.importModule("sds-main", m0)
+    val capabilities = LanguageCapabilities.standard(lang)
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+    val opened = branches.openStudio(capabilities, "sds-main", constitution, "editor")
+      .fold(e => fail(e), identity)
+    val workspace = opened.workspace.stage(StudioAction.Replace("a", Stlc.fls)).fold(e => fail(e), identity)
+    val accepted = branches.submitStudio(opened.copy(workspace = workspace)).fold(e => fail(e), identity)
+    assert(accepted.acceptedChange.isDefined)
+    assert(accepted.acceptanceEvidence.isDefined)
+    assertEquals(branches.headModule("sds-main").toOption.get.get("a"), Some(Stlc.fls))
+
   test("spine: overlapping edits → conflict artifact, no accept"):
     val cA = parseChange("{ replace a = false ; }")
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")

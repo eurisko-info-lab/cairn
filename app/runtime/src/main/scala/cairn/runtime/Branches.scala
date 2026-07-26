@@ -984,3 +984,44 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       }
     yield StudioBranchStatus(branch, manifest.changeHistory, conflictDigest, overlap, migration,
       manifest.acceptanceEvidence, manifest.certificates)
+
+  /** Open the ordinary Studio entry point: a capability-selected language,
+    * live branch head, governing constitution, and acting authority. */
+  def openStudio(
+      capabilities: ResolvedLanguageCapabilities,
+      branch: String,
+      constitution: AcceptanceConstitution,
+      authority: String,
+      profile: Option[StudioProfile] = None,
+  ): Either[String, StudioSession] =
+    for
+      _ <- Either.cond(authority.nonEmpty, (), "Studio authority is required")
+      _ <- Either.cond(constitution.changeModel == capabilities.changeModel.digest, (),
+        "Studio constitution selects another change model")
+      selectedProfile <- profile.fold(capabilities.studioProfile)(p => Right(Some(p)))
+      _ <- selectedProfile.fold[Either[String, Unit]](Right(()))(_.validate(capabilities.language))
+      base <- headModule(branch)
+      status <- studioStatus(branch)
+      workspace = StudioWorkspace(capabilities.language, base, model = capabilities.changeModel,
+        gate = capabilities.moduleGate())
+    yield StudioSession(capabilities, branch, constitution, authority, base, status, workspace, selectedProfile)
+
+  /** The sole Studio submission path. It rechecks the complete staged change
+    * under the live branch facts and constitution, mints AcceptedTip, then uses
+    * the existing transactional branch accept. */
+  def submitStudio(session: StudioSession): Either[String, BranchManifest] =
+    for
+      proposal <- session.workspace.proposal.toRight("Studio workspace has no validated proposal")
+      live <- headModule(session.branch)
+      _ <- Either.cond(live.digest == session.base.digest && proposal.base == live.digest, (),
+        "Studio branch head changed; review or rebase the proposal")
+      facts <- acceptanceFacts(session.branch, None, None)
+      _ <- Either.cond(
+        session.constitution.authorityRules.required.isEmpty || facts.authorities.contains(session.authority), (),
+        s"Studio authority '${session.authority}' is not eligible under the constitution")
+      policy = AcceptancePolicy.gated(session.capabilities.moduleGate())
+      tip = SemanticRepository.Tip(session.base, proposal.result, proposal.change)
+      accepted <- AcceptedTip.checkTip(session.capabilities.language, tip, policy,
+        session.constitution, facts, session.capabilities.changeModel)
+      manifest <- scala.util.Try(commitTip(session.branch, accepted)).toEither.left.map(_.getMessage)
+    yield manifest

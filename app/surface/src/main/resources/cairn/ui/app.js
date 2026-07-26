@@ -611,34 +611,54 @@ function renderStudio() {
   const detail = $("detail");
   detail.innerHTML = `
     <div class="card studio-hero"><h2>SDS Studio <span class="pill">ΔSDS only</span></h2>
-      <p class="muted">Fields come from grammar metadata and persistent FieldIds. List identity comes from declared keys; positions are traversal hints only.</p>
+      <p class="muted">Open a governed branch, navigate semantic fields, and stage one validated ΔSDS proposal. Digests and traversal positions stay behind the cockpit.</p>
     </div>
     <div class="studio-grid">
-      <div class="card"><h2>Semantic edit</h2>
-        <label>Module digest<input id="studioDigest" type="text" placeholder="IR artifact digest"></label>
-        <label>Definition<input id="studioDefinition" type="text" placeholder="sheet"></label>
-        <label>Traversal path<input id="studioPath" type="text" placeholder="0,1,2"></label>
-        <label>Replacement term<textarea id="studioTerm" class="studio-term" placeholder="SDS term"></textarea></label>
-        <button class="btn primary" id="studioPropose">Build ΔSDS proposal</button>
+      <div class="card"><h2>Workspace</h2>
+        <label>Branch<input id="studioBranch" type="text" placeholder="sds/main"></label>
+        <label>Acting authority<input id="studioAuthority" type="text" placeholder="operator@example.org"></label>
+        <button class="btn primary" id="studioOpen">Open semantic head</button>
+        <div id="studioModes" class="pills"></div><div id="studioNavigation"></div>
         <p id="studioStatus" class="muted"></p>
       </div>
-      <div class="card"><h2>Proposal</h2><pre class="view" id="studioDelta">No proposal yet.</pre>
-        <div id="studioEvidence" class="evidence-grid"></div></div>
+      <div class="card"><h2>Proposal</h2><pre class="view" id="studioDelta">Open a branch to begin.</pre>
+        <div id="studioEvidence" class="evidence-grid"></div>
+        <button class="btn" id="studioUndo" disabled>Undo last action</button>
+        <button class="btn primary" id="studioSubmit" disabled>Commit under constitution</button></div>
     </div>`;
-  $("studioPropose").onclick = async () => {
+  let session = null;
+  const modes = ["Edit", "Review proposal", "Resolve conflict", "Assist migration", "Inspect evidence", "Compare history", "Preview surfaces"];
+  $("studioModes").innerHTML = modes.map(x => `<span class="pill">${esc(x)}</span>`).join(" ");
+  const showReview = (r) => {
+    $("studioDelta").textContent = r.change || "No staged actions.";
+    $("studioEvidence").innerHTML = `<div><b>Actions</b><span>${r.actions || 0}</span></div>
+      <div><b>Result</b><span>${r.result ? short(r.result) : "—"}</span></div>
+      <div><b>Accesses</b><span>${(r.accesses || []).map(a => esc(a.mode + " " + a.location)).join("<br>") || "—"}</span></div>
+      <div><b>Diagnostics</b><span>${(r.diagnostics || []).map(esc).join("<br>") || "valid"}</span></div>`;
+    $("studioUndo").disabled = !(r.actions > 0); $("studioSubmit").disabled = !(r.actions > 0);
+  };
+  const navigation = (definition, n) => n.editable
+    ? `<button class="btn studio-field" data-definition="${esc(definition)}" data-location="${esc(n.location)}" data-label="${esc(n.label)}">${esc(n.label)}</button>`
+    : `<details open><summary>${esc(n.label)}</summary>${n.children.map(c => navigation(definition, c)).join("")}</details>`;
+  $("studioOpen").onclick = async () => {
     const status = $("studioStatus");
     try {
-      const r = await api("studio/propose", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lang: "sds", digest: $("studioDigest").value.trim(),
-          definition: $("studioDefinition").value.trim(), path: $("studioPath").value.trim(), term: $("studioTerm").value }) });
-      $("studioDelta").textContent = r.change;
-      $("studioEvidence").innerHTML = `<div><b>Location</b><span>${esc(r.location)}</span></div>
-        <div><b>Validated change</b><span>${short(r.validatedChange)}</span></div>
-        <div><b>Preview result</b><span>${short(r.result)}</span></div>
-        <div><b>Mutation path</b><span>${esc(r.mutation)}</span></div>`;
-      status.innerHTML = `<span class="ok">Valid ΔSDS proposal.</span> The module has not been mutated.`;
+      const r = await api("studio/open", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lang: "sds", branch: $("studioBranch").value.trim(), authority: $("studioAuthority").value.trim() }) });
+      session = r.session;
+      $("studioNavigation").innerHTML = r.definitions.map(d => navigation(d.name, d.navigation)).join("");
+      $("studioNavigation").querySelectorAll(".studio-field").forEach(button => button.onclick = async () => {
+        const value = window.prompt(`New value for ${button.dataset.label}`); if (value === null) return;
+        try { showReview(await api("studio/stage", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session, definition: button.dataset.definition, location: button.dataset.location, value }) }));
+        } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+      });
+      $("studioDelta").textContent = "No staged actions.";
+      status.innerHTML = `<span class="ok">Branch opened.</span> Changes remain staged until governed submission.`;
     } catch (e) { status.innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
   };
+  $("studioUndo").onclick = async () => { try { showReview(await api("studio/undo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session }) })); } catch (e) { $("studioStatus").textContent = e.message; } };
+  $("studioSubmit").onclick = async () => { try { const r = await api("studio/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session }) }); session = null; $("studioStatus").innerHTML = `<span class="ok">Accepted on ${esc(r.branch)}.</span>`; $("studioSubmit").disabled = true; $("studioUndo").disabled = true; } catch (e) { $("studioStatus").innerHTML = `<span class="bad">${esc(e.message)}</span>`; } };
 }
 
 loadOverview().then(render).catch((e) => {

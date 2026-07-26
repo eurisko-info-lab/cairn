@@ -39,6 +39,7 @@ final class BrowserServer(
 ):
   private var server: HttpServer | Null = null
   private val uiRoot = "cairn/ui"
+  private val studioSessions = scala.collection.mutable.Map.empty[String, StudioSession]
 
   def start(): Int =
     val s = HttpServer.create(InetSocketAddress(port), 0)
@@ -214,6 +215,26 @@ final class BrowserServer(
           val body = new String(ex.getRequestBody.readAllBytes(), UTF_8)
           studioProposal(body) match
             case Left(e)  => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("POST", "studio/open") =>
+          studioOpen(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
+            case Left(e) => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("POST", "studio/stage") =>
+          studioStage(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
+            case Left(e) => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("POST", "studio/undo") =>
+          studioUndo(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
+            case Left(e) => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("POST", "studio/submit") =>
+          studioSubmit(new String(ex.getRequestBody.readAllBytes(), UTF_8)) match
+            case Left(e) => err(ex, 400, e)
+            case Right(j) => json(ex, 200, j)
+        case ("GET", p) if p.startsWith("studio/review/") =>
+          studioReview(p.stripPrefix("studio/review/")) match
+            case Left(e) => err(ex, 404, e)
             case Right(j) => json(ex, 200, j)
         case ("GET", p) if p.startsWith("studio/status/") =>
           val branch = p.stripPrefix("studio/status/")
@@ -507,6 +528,120 @@ final class BrowserServer(
       "location" -> Json.str(SemanticLocation.Subtree(definition, path).render),
       "accesses" -> Json.arr(proposal.accesses.accesses.map(a => Json.obj(
         "mode" -> Json.str(a.mode.toString.toLowerCase), "location" -> Json.str(a.location.render)))))
+
+  private def studioBranches: Branches =
+    Branches(node.cas, node.root.resolve("refs"), EffectContexts.forBranches())
+
+  private def studioConstitution(branch: String, model: Digest): Either[String, AcceptanceConstitution] =
+    val manifest = studioBranches.load(branch)
+    manifest.acceptanceEvidence match
+      case None => Right(AcceptanceConstitution.open(model))
+      case Some(evidenceDigest) =>
+        for
+          evidenceArtifact <- loadArtifact(evidenceDigest.hex)
+          evidence <- AcceptanceEvidence.fromCanon(evidenceArtifact.body)
+          constitutionDigest <- evidence.constitution.toRight("branch acceptance evidence has no constitution")
+          constitutionArtifact <- loadArtifact(constitutionDigest.hex)
+          constitution <- AcceptanceConstitution.fromArtifact(constitutionArtifact)
+        yield constitution
+
+  private def navigationJson(node: StudioNavigationNode): String = Json.obj(
+    "label" -> Json.str(node.label), "sort" -> Json.str(node.sort),
+    "location" -> Json.str(Digest.of(node.location.canon).hex),
+    "semanticLocation" -> Json.str(node.location.render),
+    "editable" -> Json.bool(node.children.isEmpty),
+    "children" -> Json.arr(node.children.map(navigationJson)))
+
+  private def allNavigation(node: StudioNavigationNode): List[StudioNavigationNode] =
+    node :: node.children.flatMap(allNavigation)
+
+  private def studioOpen(raw: String): Either[String, String] =
+    for
+      languageName <- jsonField(raw, "lang")
+      branch <- jsonField(raw, "branch")
+      authority <- jsonField(raw, "authority")
+      language <- languages.get(languageName).toRight(s"unknown language '$languageName'")
+      capabilities = LanguageCapabilities.standard(language)
+      constitution <- studioConstitution(branch, capabilities.changeModel.digest)
+      session <- studioBranches.openStudio(capabilities, branch, constitution, authority)
+      navigation <- session.base.defs.foldLeft[Either[String, List[(String, StudioNavigationNode)]]](Right(Nil)) {
+        case (acc, (name, term)) => for xs <- acc; nav <- Studio.navigateDefinition(language, name, term)
+          yield xs :+ (name -> nav)
+      }
+      sessionId = Digest.of(Canon.cmap(
+        "branch" -> Canon.CStr(branch), "head" -> Canon.CStr(session.base.digest.hex),
+        "authority" -> Canon.CStr(authority))).hex
+      _ = studioSessions(sessionId) = session
+    yield Json.obj(
+      "session" -> Json.str(sessionId), "branch" -> Json.str(branch),
+      "head" -> Json.str(session.base.digest.hex), "authority" -> Json.str(authority),
+      "mode" -> Json.str(session.mode.toString),
+      "definitions" -> Json.arr(navigation.map((name, nav) => Json.obj(
+        "name" -> Json.str(name), "navigation" -> navigationJson(nav)))),
+      "constitution" -> Json.str(constitution.digest.hex),
+      "requiredCertificates" -> Json.arr(constitution.requiredCertificates.map(r => Json.str(r.kind.name))))
+
+  private def studioStage(raw: String): Either[String, String] =
+    for
+      sessionId <- jsonField(raw, "session")
+      definition <- jsonField(raw, "definition")
+      locationId <- jsonField(raw, "location")
+      value <- jsonField(raw, "value")
+      session <- studioSessions.get(sessionId).toRight("unknown or expired Studio session")
+      root <- session.base.get(definition).toRight(s"no definition '$definition'")
+      navigation <- Studio.navigateDefinition(session.capabilities.language, definition, root)
+      selected <- allNavigation(navigation).find(n => Digest.of(n.location.canon).hex == locationId)
+        .toRight("semantic location is not in the selected definition")
+      path <- selected.location match
+        case SemanticLocation.Subtree(_, value) => Right(value)
+        case other => Left(s"location ${other.render} is not editable as a subtree")
+      _ <- Either.cond(selected.children.isEmpty, (), "select an editable field, not a structural group")
+      term = Cst.Leaf(value)
+      workspace <- session.workspace.stage(StudioAction.ReplaceAt(definition, path, term))
+      next = session.copy(workspace = workspace, mode = StudioMode.ReviewProposal)
+      _ = studioSessions(sessionId) = next
+      review <- studioReview(sessionId)
+    yield review
+
+  private def studioUndo(raw: String): Either[String, String] =
+    for
+      sessionId <- jsonField(raw, "session")
+      session <- studioSessions.get(sessionId).toRight("unknown or expired Studio session")
+      workspace <- session.workspace.undoLast
+      _ = studioSessions(sessionId) = session.copy(workspace = workspace)
+      review <- workspace.proposal.fold[Either[String, String]](Right(Json.obj(
+        "session" -> Json.str(sessionId), "mode" -> Json.str(StudioMode.Edit.toString),
+        "actions" -> Json.num(0), "change" -> Json.str(""),
+        "diagnostics" -> Json.arr(Nil), "accesses" -> Json.arr(Nil))))(_ => studioReview(sessionId))
+    yield review
+
+  private def studioReview(sessionId: String): Either[String, String] =
+    for
+      session <- studioSessions.get(sessionId).toRight("unknown or expired Studio session")
+      proposal <- session.workspace.proposal.toRight("Studio workspace has no staged proposal")
+      delta <- Delta.deltaOf(session.capabilities.language).left.map(_.mkString("; "))
+      change <- Printer.print(delta.grammar, proposal.change)
+    yield Json.obj(
+      "session" -> Json.str(sessionId), "mode" -> Json.str(StudioMode.ReviewProposal.toString),
+      "actions" -> Json.num(session.workspace.actions.length.toLong), "change" -> Json.str(change),
+      "result" -> Json.str(proposal.result.digest.hex),
+      "accesses" -> Json.arr(proposal.accesses.accesses.map(a => Json.obj(
+        "mode" -> Json.str(a.mode.toString), "location" -> Json.str(a.location.render)))),
+      "diagnostics" -> Json.arr(proposal.diagnostics.map(d => Json.str(d.message))),
+      "constitution" -> Json.str(session.constitution.digest.hex),
+      "requiredCertificates" -> Json.arr(session.constitution.requiredCertificates.map(r => Json.str(r.kind.name))),
+      "certificates" -> Json.arr(session.status.certificates.map(d => Json.str(d.hex))),
+      "preferredProjections" -> Json.arr(session.profile.toList.flatMap(_.semantics.preferredProjections).map(d => Json.str(d.hex))))
+
+  private def studioSubmit(raw: String): Either[String, String] =
+    for
+      sessionId <- jsonField(raw, "session")
+      session <- studioSessions.get(sessionId).toRight("unknown or expired Studio session")
+      manifest <- studioBranches.submitStudio(session)
+      _ = studioSessions.remove(sessionId)
+    yield Json.obj("ok" -> Json.bool(true), "branch" -> Json.str(manifest.branch),
+      "head" -> manifest.head.fold(Json.nul)(k => Json.str(k.valueHash.hex)),
+      "acceptedChange" -> manifest.acceptedChange.fold(Json.nul)(d => Json.str(d.hex)))
 
   private def jsonField(raw: String, name: String): Either[String, String] =
     val key = s"\"$name\""

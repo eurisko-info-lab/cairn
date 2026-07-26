@@ -80,3 +80,45 @@ class StudioSuite extends munit.FunSuite:
     assert(preview.startsWith("\nsheet   =   mixture"))
     assert(preview.contains("component ref acetone percentage p40 phrase \"Acétone\""))
     assert(preview.contains("component ref ethanol percentage p60 phrase \"Ethanol shadow\""))
+
+  test("semantic navigation exposes FieldIds and keyed identities without positional controls"):
+    val navigation = Studio.navigateDefinition(language, "sheet", root).fold(e => fail(e), identity)
+    def flatten(node: StudioNavigationNode): List[StudioNavigationNode] = node :: node.children.flatMap(flatten)
+    val nodes = flatten(navigation)
+    assert(nodes.exists(_.label == "percentage"))
+    assert(nodes.exists(_.location match
+      case SemanticLocation.Subtree(_, path) => path.steps.exists {
+        case SemanticPath.Step.KeyedElement("Component", "ref", "acetone") => true
+        case _ => false
+      }
+      case _ => false))
+    assert(!nodes.exists(_.label.matches("[0-9]+")))
+
+  test("capability-selected Studio profiles round-trip as pack projection artifacts"):
+    val semantics = StudioProfileSemantics(language.digest, List("Mixture"),
+      List(StudioView("Product", "Mixture", List("components"))),
+      List(StudioCommand("edit percentage", StudioTemplate.ReplaceAt, Some("Percentage"))),
+      List(List("Product", "components")), Nil)
+    val surface = StudioProfileSurface(semantics.digest, Map("components" -> "Mixture"),
+      Map("percentage" -> "Percentage"), List(StudioWidgetHint("Percentage", "decimal-percent")),
+      Map("percentage" -> "Enter a value from 0 to 100"), List("Product", "components"))
+    val standard = LanguageCapabilities.standard(language)
+    val descriptor = standard.descriptor.copy(projections = List(semantics.digest, surface.digest))
+    val capabilities = standard.copy(descriptor = descriptor, projections = List(semantics.artifact, surface.artifact))
+    val selected = capabilities.studioProfile.fold(e => fail(e), identity).get
+    assertEquals(selected.semantics, semantics)
+    assertEquals(selected.surface.widgetHints.head.widget, "decimal-percent")
+    assertEquals(LanguageCapabilities.standard(language).studioProfile, Right(None))
+
+  test("proposal workspace stages one changeset and undo is proven by ChangeAlgebra inversion"):
+    val phrase = Studio.pathFromTraversal(language, root, List(0, 0, 2)).toOption.get
+    val percentage = Studio.pathFromTraversal(language, root, List(0, 1, 1)).toOption.get
+    val workspace = StudioWorkspace(language, base)
+      .stage(StudioAction.ReplaceAt("sheet", phrase, Cst.Leaf("Acetone"))).toOption.get
+      .stage(StudioAction.ReplaceAt("sheet", percentage, Cst.Leaf("55"))).toOption.get
+    assertEquals(workspace.actions.length, 2)
+    assertEquals(workspace.proposal.get.validatedChange.base, base.digest)
+    assertEquals(workspace.proposal.get.accesses.accesses.count(_.mode == AccessMode.Write), 2)
+    val undone = workspace.undoLast.fold(e => fail(e), identity)
+    assertEquals(undone.actions.length, 1)
+    assertEquals(Delta.subtreeAt(undone.proposal.get.result.get("sheet").get, List(0, 1, 1)), Right(Cst.Leaf("60")))

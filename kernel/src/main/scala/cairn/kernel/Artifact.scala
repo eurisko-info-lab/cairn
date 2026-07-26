@@ -60,6 +60,8 @@ enum ArtifactKind(val name: String):
   case ConflictResolution extends ArtifactKind("conflict-resolution")
   case ForeignSurface extends ArtifactKind("foreign-surface")
   case SurfaceEvidence extends ArtifactKind("surface-evidence")
+  case StudioProfileSemantics extends ArtifactKind("studio-profile-semantics")
+  case StudioProfileSurface extends ArtifactKind("studio-profile-surface")
   case ChangeModel    extends ArtifactKind("change-model")
   case ChangeSurfaceModel extends ArtifactKind("change-surface-model")
   case ChangeCapability extends ArtifactKind("change-capability")

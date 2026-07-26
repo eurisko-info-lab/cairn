@@ -101,6 +101,16 @@ final case class ResolvedLanguageCapabilities(
     migrations.find(_.digest == digest).toRight(s"migration ${digest.short} is not in the language bundle")
       .flatMap(LangMigration.fromArtifact)
 
+  /** Profiles are ordinary capability-bound projection artifacts. A bundle
+    * without them deliberately falls back to grammar-derived Studio forms. */
+  def studioProfile: Either[String, Option[StudioProfile]] =
+    val semantics = projections.filter(_.kind == ArtifactKind.StudioProfileSemantics)
+    val surfaces = projections.filter(_.kind == ArtifactKind.StudioProfileSurface)
+    (semantics, surfaces) match
+      case (Nil, Nil) => Right(None)
+      case (one :: Nil, surface :: Nil) => StudioProfile.fromArtifacts(one, surface, language).map(Some(_))
+      case _ => Left("a language bundle must select at most one complete Studio profile")
+
   /** A generic closure step. Repetition derives every finite Δ level. */
   def delta: Either[List[ComposeError], ResolvedLanguageCapabilities] =
     Delta.deltaOf(language, change).map { derived =>
