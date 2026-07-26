@@ -88,6 +88,25 @@ final case class Fragment(
     varCtor: Option[String] = None,
     /** `key <sort> by <field>;` declarations — see [[KeyDef]]. */
     keys: List[KeyDef] = Nil,
+    /** `provider <alias> = language <name>;` declarations — alias to
+      * language PACK NAME (not yet a digest: a `Fragment` is elaborated in
+      * isolation, before any other pack is loaded, so it cannot know
+      * another language's actual digest — only `cairn.core.
+      * ValidationModelLoader`, with access to every loaded pack, resolves
+      * aliases into real digests).
+      */
+    providers: Map[String, String] = Map.empty,
+    /** `validate ...;` declarations, canon-encoded — kept as opaque
+      * [[Canon]] (not a typed `cairn.core.ModuleStructural.Spec`) because
+      * `kernel` cannot depend on `content.core`; `cairn.core.Meta`
+      * constructs each entry via `Spec.canon` for the 11 provider-free
+      * kinds (identical to the final, resolved shape) or a special
+      * "unresolved" tag carrying a `provider` ALIAS for the two
+      * judgment-referencing kinds (`LeafOk`/`OutlineNums`) — resolved into
+      * a real `JudgmentRef` only by `ValidationModelLoader`, once
+      * `providers` aliases are known digests.
+      */
+    validations: List[Canon] = Nil,
 ):
   /** Semantic identity only — grammar/surface is excluded (Phase 2). */
   def canon: Canon = FragmentCodec.toCanon(this)
@@ -113,6 +132,14 @@ final case class ComposedLanguage(
     varCtor: Option[String],
     /** `key <sort> by <field>;` declarations, by sort name — see [[KeyDef]]. */
     keys: Map[String, KeyDef] = Map.empty,
+    /** `provider <alias> = language <name>;` declarations, merged across
+      * every fragment — see [[Fragment.providers]].
+      */
+    providers: Map[String, String] = Map.empty,
+    /** `validate ...;` declarations, concatenated across every fragment in
+      * stable (name-sorted) fragment order — see [[Fragment.validations]].
+      */
+    validations: List[Canon] = Nil,
 ):
   def binderSpec: BinderSpec = BinderSpec(
     constructors.values.filter(_.binders.nonEmpty).map(c => c.name -> c.binders).toMap)
@@ -145,6 +172,8 @@ object Compose:
     val sorts = mergeNamed("sorts", fragments.flatMap(f => f.sorts.map(s => (s.name, f.name, s))))
     val ctors = mergeNamed("constructors", fragments.flatMap(f => f.constructors.map(c => (c.name, f.name, c))))
     val keys = mergeNamed("keys", fragments.flatMap(f => f.keys.map(k => (k.sort, f.name, k))))
+    val providers = mergeNamed("providers", fragments.flatMap(f => f.providers.map((alias, lang) => (alias, f.name, lang))))
+    val validations = fragments.flatMap(_.validations)
     // Grammar categories AMALGAMATE: fragments contribute alternatives to a
     // shared category. Alternative order is canonical: fragments in name
     // order, each fragment's declaration order preserved. Same tag with
@@ -229,7 +258,8 @@ object Compose:
         }
         Right(ComposedLanguage(
           name, fragments, sorts, labeledCtors, grammar,
-          rules.values.toList.sortBy(_.name), judgs, varCtors.headOption, keys))
+          rules.values.toList.sortBy(_.name), judgs, varCtors.headOption, keys,
+          providers, validations))
 
 object FragmentCodec:
   import Canon.*
@@ -271,7 +301,9 @@ object FragmentCodec:
         "conclusion" -> Cst.toCanon(r.conclusion),
         "conditions" -> CList(r.conditions.map(Cst.toCanon)))))))),
     "varCtor" -> f.varCtor.fold(CTag("none", CInt(0)))(s => CTag("some", CStr(s))),
-    "keys" -> CList(f.keys.map(k => Canon.cmap("sort" -> CStr(k.sort), "keyField" -> CStr(k.keyField)))))
+    "keys" -> CList(f.keys.map(k => Canon.cmap("sort" -> CStr(k.sort), "keyField" -> CStr(k.keyField)))),
+    "providers" -> Canon.cmap(f.providers.toList.map((alias, lang) => alias -> CStr(lang))*),
+    "validations" -> CList(f.validations))
 
   def fromCanon(c: Canon): Fragment =
     // Grammar in fragment canon is ignored (Phase 2); bind a SurfacePack for parse/print.
@@ -310,4 +342,8 @@ object FragmentCodec:
       // Absent on any Fragment canon persisted before keys existed — default
       // to Nil, same tolerance as fieldIds above.
       keys = c.asMap.get("keys").map(_.asList.map(k =>
-        KeyDef(k.field("sort").asStr, k.field("keyField").asStr))).getOrElse(Nil))
+        KeyDef(k.field("sort").asStr, k.field("keyField").asStr))).getOrElse(Nil),
+      // Absent on any Fragment canon persisted before providers/validations
+      // existed — default to Map.empty/Nil, same tolerance as keys above.
+      providers = c.asMap.get("providers").map(_.asMap.map((k, v) => k -> v.asStr)).getOrElse(Map.empty),
+      validations = c.asMap.get("validations").map(_.asList).getOrElse(Nil))
