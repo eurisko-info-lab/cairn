@@ -31,7 +31,13 @@ object Delta:
   /** Constructor tags are language-qualified so nested Δ levels never collide. */
   def tag(l: ComposedLanguage, op: String): String = s"$op:${l.name}"
 
-  def deltaOf(l: ComposedLanguage): Either[List[ComposeError], ComposedLanguage] =
+  /** `model.operations` drives the change-term category's `CtorDef`s,
+    * `ConstructorSpec`s, and `PrintRule`s generically ([[ChangeModelInterp]])
+    * — adding an operation is adding [[ChangeOpDef]] data to a `model`, not
+    * editing this method. The `changeset` wrapper (list-of-changes syntax)
+    * stays hand-written: it's structural, not one of the operations.
+    */
+  def deltaOf(l: ComposedLanguage, model: ChangeModel = ChangeModel.default): Either[List[ComposeError], ComposedLanguage] =
     val p = l.name
     // termCat: the grammar CATEGORY name (e.g. "term", or Search's
     // "searchObj") — used both for Elem.Cat(termCat) in the ΔL grammar below
@@ -45,62 +51,28 @@ object Delta:
     val termCat = l.grammar.top
     val chg = s"Δ$p.change"
     val chgs = s"Δ$p.changeset"
+    val changeSort = s"Δ$p.Change"
+    val opCtors = model.operations.map(op => ChangeModelInterp.ctorDefFor(l, op, changeSort, termCat))
+    val opSpecs = model.operations.map(op => ChangeModelInterp.constructorSpecFor(l, op, termCat))
+    val opPrintRules = model.operations.map(op => ChangeModelInterp.printRuleFor(l, op))
     val deltaFrag = Fragment(
       name = s"Δ:$p",
       provides = List(s"Δ$p"),
       requires = Nil,
-      sorts = List(SortDef(s"Δ$p.Change", SortMode.Tree), SortDef(s"Δ$p.ChangeSet", SortMode.Tree)),
-      constructors = List(
-        CtorDef(tag(l, "changeset"), s"Δ$p.ChangeSet", List(s"Δ$p.Change")),
-        CtorDef(tag(l, "add"), s"Δ$p.Change", List("Name", termCat)),
-        CtorDef(tag(l, "replace"), s"Δ$p.Change", List("Name", termCat)),
-        CtorDef(tag(l, "remove"), s"Δ$p.Change", List("Name")),
-        CtorDef(tag(l, "rename"), s"Δ$p.Change", List("Name", "Name", "Footprint")),
-        CtorDef(tag(l, "edit"), s"Δ$p.Change", List("Name", "Path", termCat))),
+      sorts = List(SortDef(changeSort, SortMode.Tree), SortDef(s"Δ$p.ChangeSet", SortMode.Tree)),
+      constructors = CtorDef(tag(l, "changeset"), s"Δ$p.ChangeSet", List(changeSort)) :: opCtors,
       grammar = GrammarPart(
-        keywords = List("add", "replace", "remove", "rename", "to", "footprint", "edit", "at"),
-        puncts = List("{", "}", ";", "=", ",", "[", "]"),
+        keywords = ChangeModelInterp.keywordsFor(model),
+        puncts = ChangeModelInterp.punctsFor(model),
         categories = List(
           CategorySpec(chgs, List(
             ConstructorSpec(tag(l, "changeset"), List(
               Elem.Tok("{"), Elem.Star(Elem.Cat(chg)), Elem.Tok("}"))))),
-          CategorySpec(chg, List(
-            ConstructorSpec(tag(l, "add"), List(
-              Elem.Tok("add"), Elem.NameLeaf, Elem.Tok("="), Elem.Cat(termCat), Elem.Tok(";"))),
-            ConstructorSpec(tag(l, "replace"), List(
-              Elem.Tok("replace"), Elem.NameLeaf, Elem.Tok("="), Elem.Cat(termCat), Elem.Tok(";"))),
-            ConstructorSpec(tag(l, "remove"), List(
-              Elem.Tok("remove"), Elem.NameLeaf, Elem.Tok(";"))),
-            ConstructorSpec(tag(l, "edit"), List(
-              Elem.Tok("edit"), Elem.NameLeaf, Elem.Tok("at"), Elem.Tok("["),
-              Elem.Opt(Elem.SepBy1(Elem.NumLeaf, ",")), Elem.Tok("]"),
-              Elem.Tok("="), Elem.Cat(termCat), Elem.Tok(";"))),
-            ConstructorSpec(tag(l, "rename"), List(
-              Elem.Tok("rename"), Elem.NameLeaf, Elem.Tok("to"), Elem.NameLeaf,
-              Elem.Tok("footprint"), Elem.Tok("["),
-              Elem.Opt(Elem.SepBy1(Elem.NameLeaf, ",")), Elem.Tok("]"), Elem.Tok(";")))))),
-        printRules = List(
-          PrintRule(tag(l, "changeset"), List(
-            PrintSeg.Lit("{"), PrintSeg.Newline, PrintSeg.IndentIn,
-            PrintSeg.SepFields(0, "\n"), PrintSeg.Newline,
-            PrintSeg.IndentOut, PrintSeg.Lit("}"))),
-          PrintRule(tag(l, "add"), List(
-            PrintSeg.Lit("add"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-            PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
-          PrintRule(tag(l, "replace"), List(
-            PrintSeg.Lit("replace"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-            PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Lit(";"))),
-          PrintRule(tag(l, "remove"), List(
-            PrintSeg.Lit("remove"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Lit(";"))),
-          PrintRule(tag(l, "edit"), List(
-            PrintSeg.Lit("edit"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-            PrintSeg.Lit("at"), PrintSeg.Space, PrintSeg.Lit("["), PrintSeg.Field(1), PrintSeg.Lit("]"),
-            PrintSeg.Space, PrintSeg.Lit("="), PrintSeg.Space, PrintSeg.Field(2), PrintSeg.Lit(";"))),
-          PrintRule(tag(l, "rename"), List(
-            PrintSeg.Lit("rename"), PrintSeg.Space, PrintSeg.Field(0), PrintSeg.Space,
-            PrintSeg.Lit("to"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space,
-            PrintSeg.Lit("footprint"), PrintSeg.Space, PrintSeg.Lit("["),
-            PrintSeg.Field(2), PrintSeg.Lit("]"), PrintSeg.Lit(";")))),
+          CategorySpec(chg, opSpecs)),
+        printRules = PrintRule(tag(l, "changeset"), List(
+          PrintSeg.Lit("{"), PrintSeg.Newline, PrintSeg.IndentIn,
+          PrintSeg.SepFields(0, "\n"), PrintSeg.Newline,
+          PrintSeg.IndentOut, PrintSeg.Lit("}"))) :: opPrintRules,
         top = Some(chgs)))
     // Base language fragments contribute their grammar but yield the top slot to ΔL.
     val demoted = l.fragments.map(f => f.copy(grammar = f.grammar.copy(top = None)))
@@ -235,76 +207,24 @@ object Delta:
       case InvalidTerm(name, errors) =>
         s"ΔL '$name': invalid term (${errors.map(_.render).mkString("; ")})"
 
-  /** [[apply]], but with [[Rejection]] left unstringified — the typed view. */
-  def applyTyped(l: ComposedLanguage, module: Module, change: Cst): Either[Rejection, (Module, ValidatedChangeSet)] =
-    def referencing(m: Module, name: String): Set[String] =
-      val spec = l.binderSpec
-      val vc = l.varCtor.getOrElse("var")
-      m.defs.collect { case (n, t) if n != name && Binding.freeVars(spec, vc)(t).contains(name) => n }.toSet
-
-    // Structural gate (M-validation): a parsed-from-text term is well-formed
-    // by construction, but a structurally-submitted one (cairn.editDefAtStructured)
-    // has no such guarantee — this is the check that closes that gap, for
-    // add/replace/edit alike. Only computed once per applyTyped call.
-    def checkAgainst(name: String, expectedSort: String, term: Cst): Either[Rejection, Unit] =
-      LanguageChecker.checkTerm(l, expectedSort, term) match
-        case Right(_)     => Right(())
-        case Left(errors) => Left(Rejection.InvalidTerm(name, errors))
-
+  /** [[apply]], but with [[Rejection]] left unstringified — the typed view.
+    * `applyOne` looks an item's [[ChangeOpDef]] up by tag once, then runs its
+    * `program` via [[ChangeModelInterp.run]] — no operation-name switch here
+    * any more; adding an operation to `model` needs no change to this method.
+    */
+  def applyTyped(
+      l: ComposedLanguage, module: Module, change: Cst, model: ChangeModel = ChangeModel.default,
+  ): Either[Rejection, (Module, ValidatedChangeSet)] =
     def applyOne(m: Module, ch: Cst): Either[Rejection, Module] = ch match
-      case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "add") =>
-        if m.get(name).isDefined then Left(Rejection.AlreadyDefined("add", name))
-        else checkAgainst(name, l.grammar.top, term).map(_ => Module(m.defs :+ (name, term)))
-      case Cst.Node(t, List(Cst.Leaf(name), term)) if t == tag(l, "replace") =>
-        if m.get(name).isEmpty then Left(Rejection.NotDefined("replace", name))
-        else
-          checkAgainst(name, l.grammar.top, term)
-            .map(_ => Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))))
-      case Cst.Node(t, List(Cst.Leaf(name))) if t == tag(l, "remove") =>
-        if m.get(name).isEmpty then Left(Rejection.NotDefined("remove", name))
-        else
-          val refs = referencing(m, name)
-          if refs.nonEmpty then Left(Rejection.StillReferenced(name, refs))
-          else Right(Module(m.defs.filterNot(_._1 == name)))
-      case Cst.Node(t, List(Cst.Leaf(name), pathCst, term)) if t == tag(l, "edit") =>
-        // M15: structural path edit — replace the subtree addressed by a
-        // Kernel-checked SemanticPath (fromLegacyPath recovers ctor/label/
-        // sort at each hop from the raw child-index Cst encoding).
-        val path = pathOf(pathCst)
-        m.get(name) match
-          case None => Left(Rejection.NotDefined("edit", name))
-          case Some(old) =>
-            for
-              sp      <- SemanticPath.fromLegacyPath(l, old, path).left.map(Rejection.PathError(name, _))
-              _       <- checkAgainst(name, sp.focusSort, term)
-              updated <- replaceAt(old, path, term).left.map(Rejection.PathError(name, _))
-            yield Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0)))
-      case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
-        val declared: Set[String] = fp match
-          case Cst.Node("some", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(n) => n }.toSet
-          case Cst.Node("none", _) => Set.empty
-          case Cst.Node("list", items) => items.collect { case Cst.Leaf(n) => n }.toSet
-          case other => Set.empty
-        if m.get(from).isEmpty then Left(Rejection.NotDefined("rename", from))
-        else if m.get(to).isDefined then Left(Rejection.AlreadyDefined("rename-target", to))
-        else
-          val actual = referencing(m, from)
-          if declared != actual then
-            Left(Rejection.FootprintMismatch(from, declared, actual))
-          else
-            val spec = l.binderSpec
-            val vc = l.varCtor.getOrElse("var")
-            Right(Module(m.defs.map { (n, t0) =>
-              val n2 = if n == from then to else n
-              val t2 = if actual.contains(n) then Binding.rename(spec, vc)(t0, from, to) else t0
-              (n2, t2) }))
+      case Cst.Node(t, children) if model.operations.exists(o => t == tag(l, o.name)) =>
+        val op = model.operations.find(o => t == tag(l, o.name)).get
+        ChangeModelInterp.run(l, m, op, children)
       case other => Left(Rejection.Malformed(s"not a ΔL change term: ${other.render}"))
 
     val changes = change match
       case Cst.Node(t, List(Cst.Node("list", items))) if t == tag(l, "changeset") => Right(items)
       case Cst.Node(t, items) if t == tag(l, "changeset") => Right(items)
-      case single @ Cst.Node(t, _) if t.startsWith("add:") || t.startsWith("replace:") ||
-          t.startsWith("remove:") || t.startsWith("rename:") || t.startsWith("edit:") => Right(List(single))
+      case single @ Cst.Node(t, _) if model.operations.exists(o => t == tag(l, o.name)) => Right(List(single))
       case other => Left(Rejection.Malformed(s"not a ΔL changeset: ${other.render}"))
 
     changes.flatMap { chs =>
@@ -318,8 +238,10 @@ object Delta:
     * no silent overwrites; renames must carry an exact footprint. See
     * [[applyTyped]] for the same check with [[Rejection]] left unstringified.
     */
-  def apply(l: ComposedLanguage, module: Module, change: Cst): Either[String, (Module, ValidatedChangeSet)] =
-    applyTyped(l, module, change).left.map(_.render)
+  def apply(
+      l: ComposedLanguage, module: Module, change: Cst, model: ChangeModel = ChangeModel.default,
+  ): Either[String, (Module, ValidatedChangeSet)] =
+    applyTyped(l, module, change, model).left.map(_.render)
 
   /** Accept either a `changeset` node or a single bare change term (same
     * tolerance as [[apply]]) and return its flat list of change items.

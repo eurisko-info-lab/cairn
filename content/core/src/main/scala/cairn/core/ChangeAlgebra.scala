@@ -21,16 +21,18 @@ object ChangeAlgebra:
   def compose(l: ComposedLanguage, a: Cst, b: Cst): Cst =
     changeset(l, changeItems(l, a) ++ changeItems(l, b))
 
-  /** Definition names an atomic change touches (writes) and reads. */
-  def footprint(l: ComposedLanguage, change: Cst): Set[String] =
+  /** Definition names an atomic change touches (writes) and reads. Each
+    * item's [[ChangeOpDef]] is looked up by tag once, then evaluated via
+    * [[ChangeModelInterp.footprintOf]] — no operation-name switch here any
+    * more; adding an operation to `model` needs no change to this method.
+    */
+  def footprint(l: ComposedLanguage, change: Cst, model: ChangeModel = ChangeModel.default): Set[String] =
     changeItems(l, change).flatMap {
-      case Cst.Node(t, Cst.Leaf(n) :: _) if t == tag(l, "add") || t == tag(l, "replace") ||
-          t == tag(l, "remove") || t == tag(l, "edit") => List(n)
-      case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
-        from :: to :: (fp match
-          case Cst.Node("some", List(Cst.Node("list", xs))) => xs.collect { case Cst.Leaf(x) => x }
-          case _ => Nil)
-      case _ => Nil
+      case Cst.Node(t, children) =>
+        model.operations.find(o => t == tag(l, o.name)) match
+          case Some(op) => ChangeModelInterp.footprintOf(op, children)
+          case None     => Set.empty
+      case _ => Set.empty
     }.toSet
 
   /** Syntactic APPROXIMATION of commutation — disjoint footprints (no shared
@@ -49,40 +51,27 @@ object ChangeAlgebra:
 
   /** Inverse of a change-set RELATIVE to the module it was applied to:
     * apply(invert(c)) ∘ apply(c) == id. Requires the base module because
-    * remove/replace/edit inverses need the overwritten content.
+    * remove/replace/edit inverses need the overwritten content. Each item's
+    * inverse is built via [[ChangeModelInterp.inverseOf]] against the
+    * PRE-state module (before that item is applied) — no operation-name
+    * switch here any more; adding an operation to `model` needs no change
+    * to this method, only an [[InverseExpr]] on its [[ChangeOpDef]].
     */
-  def invert(l: ComposedLanguage, base: Module, change: Cst): Either[String, Cst] =
+  def invert(l: ComposedLanguage, base: Module, change: Cst, model: ChangeModel = ChangeModel.default): Either[String, Cst] =
     val items = changeItems(l, change)
     // walk forward, collecting each op's inverse against the current module
     val zero: Either[String, (Module, List[Cst])] = Right((base, Nil))
     items.foldLeft(zero) { (acc, item) =>
       acc.flatMap { (m, invs) =>
         val inverse: Either[String, Cst] = item match
-          case Cst.Node(t, List(Cst.Leaf(n), _)) if t == tag(l, "add") =>
-            Right(Cst.node(tag(l, "remove"), Cst.Leaf(n)))
-          case Cst.Node(t, List(Cst.Leaf(n), _)) if t == tag(l, "replace") =>
-            m.get(n).toRight(s"invert replace: '$n' not in module")
-              .map(old => Cst.node(tag(l, "replace"), Cst.Leaf(n), old))
-          case Cst.Node(t, List(Cst.Leaf(n))) if t == tag(l, "remove") =>
-            m.get(n).toRight(s"invert remove: '$n' not in module")
-              .map(old => Cst.node(tag(l, "add"), Cst.Leaf(n), old))
-          case Cst.Node(t, List(Cst.Leaf(from), Cst.Leaf(to), fp)) if t == tag(l, "rename") =>
-            // inverse rename; the footprint transports to the new names
-            val transported = fp match
-              case Cst.Node("some", List(Cst.Node("list", xs))) =>
-                Cst.node("some", Cst.Node("list", xs))
-              case other => other
-            Right(Cst.Node(tag(l, "rename"), List(Cst.Leaf(to), Cst.Leaf(from), transported)))
-          case Cst.Node(t, List(Cst.Leaf(n), pathCst, _)) if t == tag(l, "edit") =>
-            for
-              old <- m.get(n).toRight(s"invert edit: '$n' not in module")
-              sp  <- SemanticPath.fromLegacyPath(l, old, Delta.pathOf(pathCst))
-              sub <- Delta.subtreeAt(old, sp.indices)
-            yield Cst.Node(tag(l, "edit"), List(Cst.Leaf(n), pathCst, sub))
+          case Cst.Node(t, children) =>
+            model.operations.find(o => t == tag(l, o.name)) match
+              case Some(op) => ChangeModelInterp.inverseOf(l, model, op, children, m)
+              case None     => Left(s"cannot invert: ${item.render}")
           case other => Left(s"cannot invert: ${other.render}")
         for
           inv <- inverse
-          applied <- Delta.apply(l, m, changeset(l, List(item))).map(_._1)
+          applied <- Delta.apply(l, m, changeset(l, List(item)), model).map(_._1)
         yield (applied, inv :: invs) // inverses accumulate in REVERSE order
       }
     }.map((_, invs) => changeset(l, invs))
