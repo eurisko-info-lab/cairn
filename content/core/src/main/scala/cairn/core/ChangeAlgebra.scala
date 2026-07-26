@@ -35,6 +35,23 @@ object ChangeAlgebra:
       case _ => Set.empty
     }.toSet
 
+  /** Rejects a change containing any item whose operation tag is not part of
+    * `model` — called BEFORE [[footprint]]/[[Delta.applyTyped]] wherever a
+    * caller supplies an explicit model, so a change built against the wrong
+    * model fails here rather than silently footprinting to `Set.empty`
+    * (which [[footprint]] does for an unrecognized tag, since it must stay
+    * total for its many default-model callers) and appearing to commute
+    * with everything.
+    */
+  def checkRecognized(l: ComposedLanguage, change: Cst, model: ChangeModel): Either[String, Unit] =
+    changeItems(l, change).foldLeft[Either[String, Unit]](Right(())) { (acc, item) =>
+      acc.flatMap { _ =>
+        item match
+          case Cst.Node(t, _) if model.operations.exists(o => t == tag(l, o.name)) => Right(())
+          case other => Left(s"unrecognized operation under this model: ${other.render}")
+      }
+    }
+
   /** Syntactic APPROXIMATION of commutation — disjoint footprints (no shared
     * definition name) — used where no base [[Module]] is available to
     * actually try both orders (graph construction in [[PatchGraph]], the
@@ -46,8 +63,8 @@ object ChangeAlgebra:
     * by literally applying both orders and requiring them to agree, rather
     * than trusting this predicate alone.
     */
-  def commutes(l: ComposedLanguage, a: Cst, b: Cst): Boolean =
-    footprint(l, a).intersect(footprint(l, b)).isEmpty
+  def commutes(l: ComposedLanguage, a: Cst, b: Cst, model: ChangeModel = ChangeModel.default): Boolean =
+    footprint(l, a, model).intersect(footprint(l, b, model)).isEmpty
 
   /** Inverse of a change-set RELATIVE to the module it was applied to:
     * apply(invert(c)) ∘ apply(c) == id. Requires the base module because
@@ -172,32 +189,37 @@ object Merge:
       changeA: Cst,
       changeB: Cst,
       gate: ModuleGate = ModuleGate.passthrough,
+      model: ChangeModel = ChangeModel.default,
   ): Either[Conflict, (Module, Delta.ValidatedChangeSet)] =
-    val fa = ChangeAlgebra.footprint(l, changeA)
-    val fb = ChangeAlgebra.footprint(l, changeB)
-    val overlap = fa.intersect(fb)
     val digA = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeA)).digest
     val digB = Artifact(ArtifactKind.ChangeSet, Cst.toCanon(changeB)).digest
-    if overlap.nonEmpty then Left(Conflict(overlap, digA, digB))
-    else
-      // canonical order: apply the change-set with the smaller digest first
-      val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
-      val canonical = ChangeAlgebra.compose(l, first, second)
-      val reversed = ChangeAlgebra.compose(l, second, first)
-      def conflict(w: ConflictWitness) = Conflict(overlap, digA, digB, Some(w))
-      (Delta.applyTyped(l, base, canonical), Delta.applyTyped(l, base, reversed)) match
-        case (Left(rej), _) =>
-          Left(conflict(ConflictWitness.ApplyFailed(Order.Canonical, rej)))
-        case (_, Left(rej)) =>
-          Left(conflict(ConflictWitness.ApplyFailed(Order.Reversed, rej)))
-        case (Right(canonResult), Right(reversedResult)) =>
-          if canonResult._1.digest != reversedResult._1.digest then
-            Left(conflict(ConflictWitness.ResultsDiffer(
-              canonResult._1.digest, reversedResult._1.digest)))
-          else
-            gate(canonResult._1) match
-              case Left(w) => Left(conflict(w))
-              case Right(()) => Right(canonResult)
+    (ChangeAlgebra.checkRecognized(l, changeA, model), ChangeAlgebra.checkRecognized(l, changeB, model)) match
+      case (Left(e), _) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Canonical, Delta.Rejection.Malformed(e)))))
+      case (_, Left(e)) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Reversed, Delta.Rejection.Malformed(e)))))
+      case (Right(()), Right(())) =>
+        val fa = ChangeAlgebra.footprint(l, changeA, model)
+        val fb = ChangeAlgebra.footprint(l, changeB, model)
+        val overlap = fa.intersect(fb)
+        if overlap.nonEmpty then Left(Conflict(overlap, digA, digB))
+        else
+          // canonical order: apply the change-set with the smaller digest first
+          val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
+          val canonical = ChangeAlgebra.compose(l, first, second)
+          val reversed = ChangeAlgebra.compose(l, second, first)
+          def conflict(w: ConflictWitness) = Conflict(overlap, digA, digB, Some(w))
+          (Delta.applyTyped(l, base, canonical, model), Delta.applyTyped(l, base, reversed, model)) match
+            case (Left(rej), _) =>
+              Left(conflict(ConflictWitness.ApplyFailed(Order.Canonical, rej)))
+            case (_, Left(rej)) =>
+              Left(conflict(ConflictWitness.ApplyFailed(Order.Reversed, rej)))
+            case (Right(canonResult), Right(reversedResult)) =>
+              if canonResult._1.digest != reversedResult._1.digest then
+                Left(conflict(ConflictWitness.ResultsDiffer(
+                  canonResult._1.digest, reversedResult._1.digest)))
+              else
+                gate(canonResult._1) match
+                  case Left(w) => Left(conflict(w))
+                  case Right(()) => Right(canonResult)
 
 /** M18: language migrations — revision morphisms between language versions
   * that transport modules and change-sets, kernel-validated against the

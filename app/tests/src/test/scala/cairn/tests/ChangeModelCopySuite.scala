@@ -134,6 +134,41 @@ class ChangeModelCopySuite extends munit.FunSuite:
     assertEquals(vcs2.result, vcs3.result, "both models apply `copy` identically here — same resulting module")
     assert(vcs2.claim.changeModel != vcs3.claim.changeModel, "but their claims must carry different ChangeModel identities")
 
+  // -- PR10: explicit-model threading through the CREATE-side algebra --
+
+  test("checkRecognized: rejects a `copy` change under the default model, before footprint runs"):
+    val ch = parseChange("{ copy a to b ; }")
+    ChangeAlgebra.checkRecognized(lang, ch, ChangeModel.default) match
+      case Left(msg) => assert(msg.contains("unrecognized operation"), msg)
+      case Right(()) => fail("default model has no `copy` op, this must be rejected")
+
+  test("checkRecognized: accepts a `copy` change under model2"):
+    val ch = parseChange("{ copy a to b ; }")
+    assertEquals(ChangeAlgebra.checkRecognized(lang, ch, model2), Right(()))
+
+  test("Merge.threeWay: two disjoint `copy` changes merge successfully under model2, with no default-model fallback"):
+    val base = Module(List("a" -> Stlc.tru, "c" -> Stlc.tru))
+    val changeA = parseChange("{ copy a to b ; }")
+    val changeB = parseChange("{ copy c to d ; }")
+    Merge.threeWay(lang, base, changeA, changeB, model = model2) match
+      case Right((merged, vcs)) =>
+        assertEquals(merged.get("b"), Some(Stlc.tru))
+        assertEquals(merged.get("d"), Some(Stlc.tru))
+        assertEquals(vcs.claim.changeModel, model2.digest)
+      case Left(c) => fail(s"expected the disjoint copy changes to merge under model2: ${c.render}")
+
+  test("Merge.threeWay: the same `copy` changes fail under the default model with an unrecognized-operation witness, not a false footprint pass"):
+    val base = Module(List("a" -> Stlc.tru, "c" -> Stlc.tru))
+    val changeA = parseChange("{ copy a to b ; }")
+    val changeB = parseChange("{ copy c to d ; }")
+    Merge.threeWay(lang, base, changeA, changeB) match
+      case Left(conflict) =>
+        assert(conflict.overlap.isEmpty, "must fail via the recognition guard, not a footprint overlap")
+        conflict.witness match
+          case Some(Merge.ConflictWitness.ApplyFailed(_, rej)) => assert(rej.render.contains("unrecognized operation"), rej.render)
+          case other => fail(s"expected an ApplyFailed(unrecognized operation) witness, got: $other")
+      case Right(_) => fail("the default model has no `copy` op — this must not silently succeed")
+
   test("copy: works under applyPreservingFormat with ZERO format-preserving code changes"):
     val mg = ModuleSurface.grammar(lang)
     val src = "-- a's own comment\na = true ;\n-- unrelated comment, untouched\nother = false ;\n"
