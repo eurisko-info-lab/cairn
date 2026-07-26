@@ -74,6 +74,20 @@ class ValidationDeclSuite extends munit.FunSuite:
     val f = singleFragment(allKindsSrc)
     assertEquals(f.validations.length, 15) // 14 Spec kinds, uniquetupleslist appears twice (with/without childTags)
 
+  test("all 14 validateX kinds round-trip through actual TEXT (print + re-parse), not just Cst-level encode/elaborate"):
+    // Cst-level round-trips (encode/elaborate, above) never exercise
+    // Printer.print, so a print-rule bug (e.g. a raw Cst.Leaf printing
+    // unquoted where a quoted string was required) can hide behind them —
+    // this is the exact gap that let one such bug through earlier.
+    val f = singleFragment(allKindsSrc)
+    val text = Meta.printLanguage("t", List(f)).fold(e => fail(e), identity)
+    val (name, fs) = Meta.parseLanguageAst(text).fold(e => fail(e), identity)
+    assertEquals(name, "t")
+    val reparsed = fs match
+      case List(f2) => f2
+      case other    => fail(s"expected exactly one fragment, got ${other.length}")
+    assertEquals(reparsed, f)
+
   test("resolved (non-alias) validateX kinds decode to the exact expected Spec"):
     val f = singleFragment(allKindsSrc)
     val specs = f.validations.flatMap(c => scala.util.Try(ModuleStructural.Spec.fromCanon(c)).toOption)

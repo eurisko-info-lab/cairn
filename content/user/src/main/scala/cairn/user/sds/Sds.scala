@@ -74,13 +74,16 @@ final class Sds(packs: PackAccess):
 
   // ---- domain validation (ΔSDS = ModuleStructural specs + Search.prove) ----
 
-  /** The complete set of structural checks [[validate]] runs — module-
-    * independent (built purely from language-level constants), so it also
-    * serves as [[ModuleGate.fromSpecs]]'s canonical descriptor for the
-    * `sds.validate` gate: two gates built from this same list are provably
-    * the same check, not just same-named.
+  /** Specs that are genuinely GRAMMAR-DERIVED, not hand-authored pack data:
+    * which typed sections exist, their field labels, and their 1-indexed
+    * EU-CLP position all come from `sds.cairn`'s own ctor declarations via
+    * [[SurfaceSlots]] — duplicating them as static `validate` text would
+    * either drift against the grammar or require re-deriving the exact same
+    * per-section enumeration this generic computation already avoids. Kept
+    * in Scala for that reason; everything else lives in `sds.cairn` as
+    * `provider`/`validate` pack data (see [[ValidationModelLoader]]).
     */
-  lazy val validationSpecs: List[ModuleStructural.Spec] =
+  private lazy val dynamicSpecs: List[ModuleStructural.Spec] =
     val typedSpecs = typedSectionKeys.toList.flatMap { (tag, keys) =>
       List(
         ModuleStructural.Spec.NonEmptyLeaves(tag, keys.indices.toList, keys),
@@ -90,37 +93,8 @@ final class Sds(packs: PackAccess):
       )
     }
     List(
-      ModuleStructural.Spec.SumLeavesAtMost("mixture", List(1), 100, "mixture"),
-      ModuleStructural.Spec.DefinedNodeListRefs("mixture", 0, List(0), "mixture"),
-      ModuleStructural.Spec.DefinedRef("product", 1, "product"),
-      ModuleStructural.Spec.DefinedLeafList("product", 2, "product"),
-      ModuleStructural.Spec.DefinedRefs("shadow", List(0, 1), "shadow"),
-      ModuleStructural.Spec.RefTagIn(
-        "sectionFieldShadow", 0, sectionBodyTags, "sectionFieldShadow"),
-      ModuleStructural.Spec.NonEmptyLeaves(
-        "sectionFieldShadow", List(1), List("field key")),
-      ModuleStructural.Spec.UniqueTuples(
-        "translationState", List(List(0), List(1)), "translationState"),
-      ModuleStructural.Spec.LeafValueInCtorField(
-        "translationState", 0, Set("phrase", "corpusPhrase"), 0, "translationState"),
-      ModuleStructural.Spec.NonEmptyLeaves(
-        "translationState", List(1, 2), List("lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk("translationState", 3, JudgmentRef(language.digest, "translationStateTag")),
-      ModuleStructural.Spec.UniqueTuples(
-        "sectionFieldState", List(List(0), List(1), List(2)), "sectionFieldState"),
-      ModuleStructural.Spec.RefTagIn(
-        "sectionFieldState", 0, sectionBodyTags, "sectionFieldState"),
-      ModuleStructural.Spec.NonEmptyLeaves(
-        "sectionFieldState", List(1, 2, 3), List("field key", "lang", "from-hash")),
-      ModuleStructural.Spec.LeafOk("sectionFieldState", 4, JudgmentRef(language.digest, "translationStateTag")),
-      ModuleStructural.Spec.DefinedRef("basis", 0, "basis"),
-      ModuleStructural.Spec.NonEmptyLeaves("basis", List(1), List("Law section number")),
-      ModuleStructural.Spec.LeafOk("euSection", 0, JudgmentRef(euClpLanguage.digest, "sectionNumberOk")),
-      ModuleStructural.Spec.UniqueTuplesInList(
-        "euSection", 1, List(List(0), List(1)), "euSection",
-        Some(Set("sectionField", "sectionFieldRef"))),
-      ModuleStructural.Spec.ListChildDefinedRefs(
-        "euSection", 1, Map("sectionFieldRef" -> List(List(2))), "euSection"),
+      ModuleStructural.Spec.RefTagIn("sectionFieldShadow", 0, sectionBodyTags, "sectionFieldShadow"),
+      ModuleStructural.Spec.RefTagIn("sectionFieldState", 0, sectionBodyTags, "sectionFieldState"),
       ModuleStructural.Spec.OutlineNums(
         "outline", 2,
         List(
@@ -129,26 +103,31 @@ final class Sds(packs: PackAccess):
         JudgmentRef(euClpLanguage.digest, "sectionNumberOk"), "outline"),
     ) ++ typedSpecs
 
-  /** The judgment-providing languages `validationSpecs`'s [[JudgmentRef]]s
-    * name, keyed by their own digest — SDS's own `language` (translationStateTag)
-    * and `euClpLanguage` (sectionNumberOk). Public: external callers building
-    * a `ModuleGate.fromValidationModel`/`ModuleStructural.run` resolver
-    * (e.g. `EuClp.conform`, `SdsCausalWorkflow`) need the same mapping.
+  /** The judgment-providing languages any spec's [[JudgmentRef]] names,
+    * keyed by their own digest — SDS's own `language` (translationStateTag,
+    * via the pack's `provider self = language sds;`) and `euClpLanguage`
+    * (sectionNumberOk, via `provider clp = language eu-clp;`). Public:
+    * external callers building a `ModuleGate.fromValidationModel`/
+    * `ModuleStructural.run` resolver (e.g. `EuClp.conform`,
+    * `SdsCausalWorkflow`) need the same mapping.
     */
   lazy val judgmentProviders: Map[Digest, ComposedLanguage] =
     Map(language.digest -> language, euClpLanguage.digest -> euClpLanguage)
 
   /** Canonical, content-addressed identity for the complete `sds.validate`
-    * gate — `ModuleGate.fromValidationModel`'s descriptor binds to this
-    * digest directly, so two gates built from the same model are provably
-    * the same check (including which judgment-provider languages it uses),
-    * not just same-named.
+    * gate: the pack-declared specs (loaded from `sds.cairn`'s `provider`/
+    * `validate` declarations via [[ValidationModelLoader]]) plus
+    * [[dynamicSpecs]]. `ModuleGate.fromValidationModel`'s descriptor binds
+    * to this digest directly, so two gates built from the same model are
+    * provably the same check (including which judgment-provider languages
+    * it uses), not just same-named.
     */
   lazy val validationModel: ValidationModel =
-    ValidationModel(language.digest, validationSpecs, judgmentProviders.keys.toList.sortBy(_.hex))
+    val loaded = ValidationModelLoader.resolve(language, packs.requireClosed(_))
+    loaded.copy(specs = loaded.specs ++ dynamicSpecs)
 
   def validate(m: Module): Either[String, Unit] =
-    val es = ModuleStructural.run(m, validationSpecs, judgmentProviders.get)
+    val es = ModuleStructural.run(m, validationModel.specs, judgmentProviders.get)
     if es.isEmpty then Right(()) else Left(es.mkString("; "))
 
   /** ΔSDS application: the generic ΔL, then the domain gate. */

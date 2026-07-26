@@ -133,8 +133,15 @@ object Meta:
           Elem.Tok("["), Elem.SepBy1(Elem.NumLeaf, ","), Elem.Tok("]"))))),
         CategorySpec("pathList", List(ConstructorSpec("pathList", List(
           Elem.Tok("["), Elem.SepBy1(Elem.Cat("numList"), ","), Elem.Tok("]"))))),
+        // A bare Cst.Leaf prints unquoted (Grammar.scala's generic `go`
+        // treats every leaf identically) — SepFields recurses into each
+        // item via that same generic printer, so a raw StrLeaf item would
+        // print without its quotes. strItem wraps each string in its own
+        // node with a StrField print rule (exactly `patStr`'s precedent) so
+        // recursing into it prints correctly quoted.
+        CategorySpec("strItem", List(ConstructorSpec("strItem", List(Elem.StrLeaf)))),
         CategorySpec("strList", List(ConstructorSpec("strList", List(
-          Elem.Tok("["), Elem.SepBy1(Elem.StrLeaf, ","), Elem.Tok("]"))))),
+          Elem.Tok("["), Elem.SepBy1(Elem.Cat("strItem"), ","), Elem.Tok("]"))))),
         CategorySpec("byTagEntry", List(ConstructorSpec("byTagEntry", List(
           Elem.AnyIdentLeaf, Elem.Tok(":"), Elem.Cat("pathList"))))),
         CategorySpec("byTagList", List(ConstructorSpec("byTagList", List(
@@ -263,6 +270,7 @@ object Meta:
           PrintSeg.Space, PrintSeg.Field(3), PrintSeg.Lit("."), PrintSeg.Field(4), PrintSeg.Space, PrintSeg.StrField(5), PrintSeg.Lit(";"))),
         PrintRule("numList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
         PrintRule("pathList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
+        PrintRule("strItem", List(PrintSeg.StrField(0))),
         PrintRule("strList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
         PrintRule("byTagEntry", List(PrintSeg.Field(0), PrintSeg.Lit(":"), PrintSeg.Space, PrintSeg.Field(1))),
         PrintRule("byTagList", List(PrintSeg.Lit("["), PrintSeg.SepFields(0, ", "), PrintSeg.Lit("]"))),
@@ -441,9 +449,10 @@ object Meta:
   private def pathListToCst(xs: List[List[Int]]): Cst = n("pathList", lst(xs.map(numListToCst)))
 
   private def strListOf(c: Cst): List[String] = c match
-    case Cst.Node("strList", List(Cst.Node("list", items))) => items.collect { case Cst.Leaf(s) => s }
+    case Cst.Node("strList", List(Cst.Node("list", items))) =>
+      items.collect { case Cst.Node("strItem", List(Cst.Leaf(s))) => s }
     case _ => Nil
-  private def strListToCst(xs: List[String]): Cst = n("strList", lst(xs.map(leaf)))
+  private def strListToCst(xs: List[String]): Cst = n("strList", lst(xs.map(s => n("strItem", leaf(s)))))
 
   private def byTagListOf(c: Cst): Map[String, List[List[Int]]] = c match
     case Cst.Node("byTagList", List(Cst.Node("list", items))) =>

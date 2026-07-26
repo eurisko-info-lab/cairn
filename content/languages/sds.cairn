@@ -17,52 +17,50 @@ language sds {
     ctor fieldLocale : FieldLocale(Name, Lang, Text);
     ctor fieldLocaleRef : FieldLocale(Name, Lang, PhraseRef);
     ctor euSection : SdsObj(Number, Fields);
-    ctor identificationSection : SdsObj(
-      ProductName, Synonyms, RecommendedUse, UsesAdvisedAgainst,
-      SupplierName, EmergencyPhone, LocaleOverlays);
-    ctor hazardsSection : SdsObj(
-      ClassificationSummary, HazardsNotOtherwiseClassified,
-      HazardPhrases, SignalWord, Pictograms, LocaleOverlays);
-    ctor compositionSection : SdsObj(
-      ComponentName, Cas, Ec, Concentration, LocaleOverlays);
-    ctor firstAidSection : SdsObj(
-      GeneralAdvice, Inhalation, SkinContact, EyeContact, Ingestion, LocaleOverlays);
-    ctor firefightingSection : SdsObj(
-      ExtinguishingMedia, UnsuitableExtinguishingMedia, SpecialHazards,
-      FirefighterProtection, LocaleOverlays);
-    ctor accidentalReleaseSection : SdsObj(
-      PersonalPrecautions, EnvironmentalPrecautions, CleanupMethods, LocaleOverlays);
-    ctor handlingStorageSection : SdsObj(
-      Handling, Storage, StorageIncompatibilities, LocaleOverlays);
-    ctor exposureControlsSection : SdsObj(
-      OccupationalExposureLimit, EngineeringControls, EyeProtection,
-      SkinProtection, RespiratoryProtection, LocaleOverlays);
-    ctor physicalChemicalSection : SdsObj(
-      Appearance, Odor, MolecularWeight, MeltingPoint, BoilingPoint,
-      FlashPoint, Density, Solubility, ExplosiveLimits, LocaleOverlays);
-    ctor stabilityReactivitySection : SdsObj(
-      Stability, ConditionsToAvoid, IncompatibleMaterials,
-      HazardousDecomposition, LocaleOverlays);
-    ctor toxicologicalSection : SdsObj(
-      Ld50Oral, Irritation, InhalationEffects, Carcinogenicity, LocaleOverlays);
-    ctor ecologicalSection : SdsObj(
-      Ecotoxicity, Persistence, Bioaccumulation, Mobility, LocaleOverlays);
-    ctor disposalSection : SdsObj(
-      DisposalMethods, WasteClassification, LocaleOverlays);
-    ctor transportSection : SdsObj(
-      UnNumber, ProperShippingName, TransportHazardClass, PackingGroup, LocaleOverlays);
-    ctor regulatorySection : SdsObj(
-      RegulatoryInfo, ReachStatus, UsInventory, LocaleOverlays);
-    ctor otherInformationSection : SdsObj(
-      RevisionDate, OtherInformation, LocaleOverlays);
+    ctor identificationSection : SdsObj(ProductName, Synonyms, RecommendedUse, UsesAdvisedAgainst, SupplierName, EmergencyPhone, LocaleOverlays);
+    ctor hazardsSection : SdsObj(ClassificationSummary, HazardsNotOtherwiseClassified, HazardPhrases, SignalWord, Pictograms, LocaleOverlays);
+    ctor compositionSection : SdsObj(ComponentName, Cas, Ec, Concentration, LocaleOverlays);
+    ctor firstAidSection : SdsObj(GeneralAdvice, Inhalation, SkinContact, EyeContact, Ingestion, LocaleOverlays);
+    ctor firefightingSection : SdsObj(ExtinguishingMedia, UnsuitableExtinguishingMedia, SpecialHazards, FirefighterProtection, LocaleOverlays);
+    ctor accidentalReleaseSection : SdsObj(PersonalPrecautions, EnvironmentalPrecautions, CleanupMethods, LocaleOverlays);
+    ctor handlingStorageSection : SdsObj(Handling, Storage, StorageIncompatibilities, LocaleOverlays);
+    ctor exposureControlsSection : SdsObj(OccupationalExposureLimit, EngineeringControls, EyeProtection, SkinProtection, RespiratoryProtection, LocaleOverlays);
+    ctor physicalChemicalSection : SdsObj(Appearance, Odor, MolecularWeight, MeltingPoint, BoilingPoint, FlashPoint, Density, Solubility, ExplosiveLimits, LocaleOverlays);
+    ctor stabilityReactivitySection : SdsObj(Stability, ConditionsToAvoid, IncompatibleMaterials, HazardousDecomposition, LocaleOverlays);
+    ctor toxicologicalSection : SdsObj(Ld50Oral, Irritation, InhalationEffects, Carcinogenicity, LocaleOverlays);
+    ctor ecologicalSection : SdsObj(Ecotoxicity, Persistence, Bioaccumulation, Mobility, LocaleOverlays);
+    ctor disposalSection : SdsObj(DisposalMethods, WasteClassification, LocaleOverlays);
+    ctor transportSection : SdsObj(UnNumber, ProperShippingName, TransportHazardClass, PackingGroup, LocaleOverlays);
+    ctor regulatorySection : SdsObj(RegulatoryInfo, ReachStatus, UsInventory, LocaleOverlays);
+    ctor otherInformationSection : SdsObj(RevisionDate, OtherInformation, LocaleOverlays);
     ctor outline : SdsObj(Label, Cas, SectionRefs);
     varctor sdsRef;
     judgment translationStateTag {
-      rule ts-official :  |- translationStateTag("officialCorpus");
-      rule ts-reviewed :  |- translationStateTag("humanReviewed");
-      rule ts-aidraft :   |- translationStateTag("aiDraft");
-      rule ts-stale :     |- translationStateTag("staleBecauseSourceChanged");
-      rule ts-rejected :  |- translationStateTag("rejected");
+      rule ts-official :  |- translationStateTag(officialCorpus);
+      rule ts-reviewed :  |- translationStateTag(humanReviewed);
+      rule ts-aidraft :  |- translationStateTag(aiDraft);
+      rule ts-stale :  |- translationStateTag(staleBecauseSourceChanged);
+      rule ts-rejected :  |- translationStateTag(rejected);
     }
+    provider clp = language eu-clp;
+    provider self = language sds;
+    validate sumleavesatmost mixture [1] 100 "mixture";
+    validate definednodelistrefs mixture 0 [0] "mixture";
+    validate definedref product 1 "product";
+    validate definedleaflist product 2 "product";
+    validate definedrefs shadow [0, 1] "shadow";
+    validate nonemptyleaves sectionFieldShadow [1] ["field key"];
+    validate uniquetuples translationState [[0], [1]] "translationState";
+    validate leafvalueinctorfield translationState 0 ["corpusPhrase", "phrase"] 0 "translationState";
+    validate nonemptyleaves translationState [1, 2] ["lang", "from-hash"];
+    validate leafok translationState 3 satisfies self.translationStateTag;
+    validate uniquetuples sectionFieldState [[0], [1], [2]] "sectionFieldState";
+    validate nonemptyleaves sectionFieldState [1, 2, 3] ["field key", "lang", "from-hash"];
+    validate leafok sectionFieldState 4 satisfies self.translationStateTag;
+    validate definedref basis 0 "basis";
+    validate nonemptyleaves basis [1] ["Law section number"];
+    validate leafok euSection 0 satisfies clp.sectionNumberOk;
+    validate uniquetupleslist euSection 1 [[0], [1]] "euSection" ["sectionField", "sectionFieldRef"];
+    validate listchilddefinedrefs euSection 1 [sectionFieldRef: [[2]]] "euSection";
   }
 }

@@ -84,7 +84,8 @@ language meta {
     syntax item += validateOutlineNums : tok "validate" tok "outlinenums" anyident num cat numberSourceList tok "satisfies" anyident tok "." anyident str tok ";";
     syntax numList += numList : tok "[" sepby1 num "," tok "]";
     syntax pathList += pathList : tok "[" sepby1 cat numList "," tok "]";
-    syntax strList += strList : tok "[" sepby1 str "," tok "]";
+    syntax strItem += strItem : str;
+    syntax strList += strList : tok "[" sepby1 cat strItem "," tok "]";
     syntax byTagEntry += byTagEntry : anyident tok ":" cat pathList;
     syntax byTagList += byTagList : tok "[" sepby1 cat byTagEntry "," tok "]";
     syntax strNumEntry += strNumEntry : anyident tok ":" num;
@@ -133,6 +134,7 @@ language meta {
     print validateOutlineNums : lit "validate" sp lit "outlinenums" sp field 0 sp field 1 sp field 2 sp lit "satisfies" sp field 3 lit "." field 4 sp strfield 5 lit ";";
     print numList : lit "[" sep 0 ", " lit "]";
     print pathList : lit "[" sep 0 ", " lit "]";
+    print strItem : strfield 0;
     print strList : lit "[" sep 0 ", " lit "]";
     print byTagEntry : field 0 lit ":" sp field 1;
     print byTagList : lit "[" sep 0 ", " lit "]";
