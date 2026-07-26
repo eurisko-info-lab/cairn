@@ -4,7 +4,8 @@ import cairn.kernel.*
 
 enum LanguageAssetKind:
   case Language, Grammar, ChangeSemantics, ChangeSurface, LanguageCapabilities,
-    ValidationModel, Migration, ForeignSurface, StudioProfileSemantics, StudioProfileSurface
+    ValidationModel, Migration, Query, Policy, Projection, ForeignSurface,
+    StudioProfileSemantics, StudioProfileSurface
 
   def artifactKind: ArtifactKind = this match
     case Language => ArtifactKind.Language
@@ -14,6 +15,9 @@ enum LanguageAssetKind:
     case LanguageCapabilities => ArtifactKind.LanguageCapabilities
     case ValidationModel => ArtifactKind.ValidationModel
     case Migration => ArtifactKind.Migration
+    case Query => ArtifactKind.QueryResult
+    case Policy => ArtifactKind.Policy
+    case Projection => ArtifactKind.ProjectionEvidence
     case ForeignSurface => ArtifactKind.ForeignSurface
     case StudioProfileSemantics => ArtifactKind.StudioProfileSemantics
     case StudioProfileSurface => ArtifactKind.StudioProfileSurface
@@ -44,7 +48,8 @@ final case class LanguageStudioProject(targetLanguage: Digest, assets: Map[Langu
       _ <- assets.collectFirst { case (LanguageAssetId(LanguageAssetKind.LanguageCapabilities, _), a) =>
         LanguageCapabilities.fromCanon(a.body) }.fold[Either[String, Unit]](Right(()))(c => for
           _ <- Either.cond(c.language == targetLanguage, (), "language capability bundle targets another language revision")
-          selected = List(c.changeSemantics, c.changeSurface) ++ c.validation.toList ++ c.migrations ++ c.projections
+          selected = List(c.changeSemantics, c.changeSurface) ++ c.validation.toList ++
+            c.migrations ++ c.queries ++ c.policies ++ c.projections
           _ <- Either.cond(selected.forall(digests.contains), (), "language capability bundle selects an artifact outside the project")
         yield ())
       _ <- scala.util.Try(assets.collect { case (LanguageAssetId(LanguageAssetKind.ChangeSemantics, _), a) =>

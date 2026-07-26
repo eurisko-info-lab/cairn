@@ -7,6 +7,16 @@ There is no source or module mutation path in this API. An edit crossing both
 partitions succeeds only when both reconstructed modules equal the proposed
 project and the complete capability graph validates.
 
+`SelfHostingCeremony.run` closes the release loop from a signed ecosystem
+bundle digest. It recursively installs that bundle into an empty CAS,
+reconstructs the Language Studio project and its Meta/Grammar interpreters
+from the application manifest, applies ordinary asset edits, builds and signs
+a successor manifest, publishes it to the ledger, and recursively installs it
+into a second empty CAS. The second node independently resolves the same graph,
+reopens Language Studio, emits a continuation change, and produces a byte-equal
+audit. Callers supply no language map, capability list, migration list, Studio
+profile, or application entry-point map.
+
 Application hardening begins from the same single root digest used at startup.
 `ApplicationHardeningAuditor` resolves the complete application, including its
 languages and capability bundles, walks every discovered dependency, and emits
@@ -24,3 +34,15 @@ identity, language checking, change replay, validation checking, and ledger
 transition are trusted mechanisms. Studio orchestration, application assembly,
 caches, surface renderers, and audit orchestration remain outside the TCB; their
 outputs must pass through the trusted mechanisms before acquiring authority.
+
+The embedded `TrustedClosure` is the machine-readable accounting view. It
+separates semantic artifact digests, digest-bound host interpreter identities,
+native providers, external cryptographic/durability assumptions, and checked
+evidence. Evidence is individually classified as independently checked,
+replayed, digest-bound, signed, host code, or external-native agreement; these
+categories do not imply one another.
+
+Optimization paths carry `OptimizationEquivalence` traces keyed by semantic
+model digest, interpreter-version digest, and input digest. The dependency
+cache is accepted only when its canonical and optimized result digests agree.
+Deleting the cache leaves artifact installation and audit semantics unchanged.

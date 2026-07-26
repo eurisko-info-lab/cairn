@@ -18,6 +18,66 @@ object TrustedBoundary:
     List("language-studio", "application-resolver", "dependency-cache",
       "surface-renderers", "audit-orchestration").sorted)
 
+enum TrustBasis:
+  case IndependentlyChecked, Replayed, DigestBound, Signed, HostCode, ExternalNativeTool
+
+final case class InterpreterIdentity(name: String, interfaceDigest: Digest, implementationDigest: Digest):
+  def canon: Canon = Canon.cmap("name" -> Canon.CStr(name),
+    "interface" -> Canon.CStr(interfaceDigest.hex), "implementation" -> Canon.CStr(implementationDigest.hex))
+
+final case class ProviderIdentity(name: String, identity: Digest, basis: TrustBasis):
+  def canon: Canon = Canon.cmap("name" -> Canon.CStr(name), "identity" -> Canon.CStr(identity.hex),
+    "basis" -> Canon.CStr(basis.toString))
+
+final case class ExternalAssumption(name: String, statement: String):
+  def canon: Canon = Canon.cmap("name" -> Canon.CStr(name), "statement" -> Canon.CStr(statement))
+
+final case class TrustedEvidence(artifact: Digest, basis: TrustBasis):
+  def canon: Canon = Canon.cmap("artifact" -> Canon.CStr(artifact.hex), "basis" -> Canon.CStr(basis.toString))
+
+/** Complete, machine-readable accounting of why each part of a resolved
+  * application is trusted. No evidence category implies another. */
+final case class TrustedClosure(
+    root: Digest, semanticArtifacts: List[Digest], hostInterpreters: List[InterpreterIdentity],
+    nativeProviders: List[ProviderIdentity], externalAssumptions: List[ExternalAssumption],
+    checkedEvidence: List[TrustedEvidence],
+):
+  def normalized: TrustedClosure = copy(
+    semanticArtifacts = semanticArtifacts.distinct.sortBy(_.hex),
+    hostInterpreters = hostInterpreters.sortBy(_.name),
+    nativeProviders = nativeProviders.sortBy(_.name),
+    externalAssumptions = externalAssumptions.sortBy(_.name),
+    checkedEvidence = checkedEvidence.sortBy(e => (e.artifact.hex, e.basis.toString)))
+  def canon: Canon = Canon.cmap(
+    "root" -> Canon.CStr(root.hex),
+    "semanticArtifacts" -> Canon.cstrs(semanticArtifacts.distinct.sortBy(_.hex).map(_.hex)),
+    "hostInterpreters" -> Canon.CList(hostInterpreters.sortBy(_.name).map(_.canon)),
+    "nativeProviders" -> Canon.CList(nativeProviders.sortBy(_.name).map(_.canon)),
+    "externalAssumptions" -> Canon.CList(externalAssumptions.sortBy(_.name).map(_.canon)),
+    "checkedEvidence" -> Canon.CList(checkedEvidence.sortBy(e => (e.artifact.hex, e.basis.toString)).map(_.canon)))
+
+object TrustedClosure:
+  private def digest(label: String): Digest = Digest.of(Canon.CStr(s"cairn-interpreter-v1:$label"))
+  val hostInterpreters: List[InterpreterIdentity] = List(
+    "canonical-codec", "language-checker", "generic-parser-printer", "change-replay",
+    "proof-checker", "validation-checker", "signature-verifier", "ledger-transition"
+  ).map(name => InterpreterIdentity(name, digest(s"$name-interface"), digest(s"$name-implementation")))
+  val assumptions: List[ExternalAssumption] = List(
+    ExternalAssumption("sha-256", "SHA-256 collision and second-preimage resistance"),
+    ExternalAssumption("ed25519", "Ed25519 verification authenticates possession of the signing key"),
+    ExternalAssumption("durable-io", "successful CAS and ledger writes survive process restart"))
+
+final case class OptimizationEquivalence(
+    semanticModel: Digest, interpreterVersion: Digest, input: Digest,
+    canonicalResult: Digest, optimizedResult: Digest,
+):
+  def valid: Boolean = canonicalResult == optimizedResult
+  def artifact: Artifact = Artifact(ArtifactKind.Trace, Canon.CTag("optimization-equivalence", Canon.cmap(
+    "semanticModel" -> Canon.CStr(semanticModel.hex),
+    "interpreterVersion" -> Canon.CStr(interpreterVersion.hex),
+    "input" -> Canon.CStr(input.hex), "canonicalResult" -> Canon.CStr(canonicalResult.hex),
+    "optimizedResult" -> Canon.CStr(optimizedResult.hex))))
+
 final case class SelfHostingWitness(
     baseProject: Digest,
     resultProject: Digest,
@@ -64,6 +124,7 @@ final case class HardeningAuditReport(
     kinds: Map[String, Int],
     languages: Map[String, Digest],
     trustedBoundary: TrustedBoundary,
+    trustedClosure: TrustedClosure,
 ):
   def canon: Canon = Canon.cmap(
     "root" -> Canon.CStr(root.hex),
@@ -71,7 +132,8 @@ final case class HardeningAuditReport(
     "closure" -> Canon.cstrs(closure.distinct.sortBy(_.hex).map(_.hex)),
     "kinds" -> Canon.cmap(kinds.toList.map((k, v) => k -> Canon.CInt(v))*),
     "languages" -> Canon.cmap(languages.toList.map((k, v) => k -> Canon.CStr(v.hex))*),
-    "trustedBoundary" -> trustedBoundary.canon)
+    "trustedBoundary" -> trustedBoundary.canon,
+    "trustedClosure" -> trustedClosure.canon)
   def artifact: Artifact = Artifact(ArtifactKind.AuditReport, canon)
 
 object HardeningAuditReport:
@@ -85,5 +147,17 @@ object HardeningAuditReport:
       artifact.body.field("languages").asMap.map((k, v) => k -> Digest(v.asStr)).toMap,
       TrustedBoundary(
         artifact.body.field("trustedBoundary").field("mechanisms").asList.map(_.asStr),
-        artifact.body.field("trustedBoundary").field("excluded").asList.map(_.asStr))))
+        artifact.body.field("trustedBoundary").field("excluded").asList.map(_.asStr)),
+      trustedClosure(artifact.body.field("trustedClosure"))))
     catch case e: Exception => Left(s"invalid hardening audit report: ${e.getMessage}")
+
+  private def trustedClosure(c: Canon): TrustedClosure =
+    def basis(x: Canon) = TrustBasis.values.find(_.toString == x.asStr).getOrElse(throw CodecError("unknown trust basis"))
+    TrustedClosure(Digest(c.field("root").asStr),
+      c.field("semanticArtifacts").asList.map(x => Digest(x.asStr)),
+      c.field("hostInterpreters").asList.map(x => InterpreterIdentity(x.field("name").asStr,
+        Digest(x.field("interface").asStr), Digest(x.field("implementation").asStr))),
+      c.field("nativeProviders").asList.map(x => ProviderIdentity(x.field("name").asStr,
+        Digest(x.field("identity").asStr), basis(x.field("basis")))),
+      c.field("externalAssumptions").asList.map(x => ExternalAssumption(x.field("name").asStr, x.field("statement").asStr)),
+      c.field("checkedEvidence").asList.map(x => TrustedEvidence(Digest(x.field("artifact").asStr), basis(x.field("basis"))))).normalized

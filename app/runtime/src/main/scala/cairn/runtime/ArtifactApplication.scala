@@ -22,6 +22,16 @@ final class ArtifactDependencyCache:
         result
   }
   def stats: DependencyCacheStats = synchronized(DependencyCacheStats(hitCount, missCount, entries.size))
+  def verify(artifact: Artifact): Either[String, OptimizationEquivalence] = for
+    canonical <- ArtifactDependencies.direct(artifact)
+    optimized <- direct(artifact)
+    model = Digest.of(Canon.CStr("artifact-dependency-model-v1"))
+    interpreter = Digest.of(Canon.CStr("artifact-dependency-interpreter-v1"))
+    canonicalDigest = Digest.of(Canon.cstrs(canonical.map(_.hex)))
+    optimizedDigest = Digest.of(Canon.cstrs(optimized.map(_.hex)))
+    witness = OptimizationEquivalence(model, interpreter, artifact.digest, canonicalDigest, optimizedDigest)
+    _ <- Either.cond(witness.valid, (), "optimized dependency discovery disagrees with canonical semantics")
+  yield witness
 
 final case class ResolvedApplication(
     root: Digest,
@@ -118,9 +128,28 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
   * report cannot be produced for a partial graph or failed capability check. */
 final class ApplicationHardeningAuditor(local: Cas, resolver: ArtifactApplicationResolver):
   def audit(root: Digest): Either[String, HardeningAuditReport] = for
-    application <- resolver.resolve(root)
-    artifacts <- application.installed.toList.foldLeft[Either[String, List[Artifact]]](Right(Nil)) {
+    rootArtifact <- local.getByDigest(root)
+    applicationRoot <- rootArtifact.kind match
+      case ArtifactKind.EcosystemBundle => SignedEcosystemBundle.fromArtifact(rootArtifact).map(_.release.root)
+      case ArtifactKind.Application => Right(root)
+      case _ => Left("hardening audit root is neither an application nor an ecosystem bundle")
+    application <- resolver.resolve(applicationRoot)
+    installed <- resolver.audit(root)
+    artifacts <- installed.toList.foldLeft[Either[String, List[Artifact]]](Right(Nil)) {
       (acc, digest) => for xs <- acc; artifact <- local.getByDigest(digest) yield artifact :: xs }
     kinds = artifacts.groupMapReduce(_.kind.name)(_ => 1)(_ + _)
-  yield HardeningAuditReport(root, application.manifest.name, application.installed.toList.sortBy(_.hex),
-    kinds, application.languages.view.mapValues(_.language.digest).toMap, TrustedBoundary.minimal)
+    evidence = artifacts.flatMap { artifact => artifact.kind match
+      case ArtifactKind.ProofTerm | ArtifactKind.Theorem | ArtifactKind.Certificate => Some(TrustedEvidence(artifact.digest, TrustBasis.IndependentlyChecked))
+      case ArtifactKind.ChangeSet | ArtifactKind.ConflictResolution => Some(TrustedEvidence(artifact.digest, TrustBasis.Replayed))
+      case ArtifactKind.EcosystemBundle => Some(TrustedEvidence(artifact.digest, TrustBasis.Signed))
+      case ArtifactKind.AgreementCertificate => Some(TrustedEvidence(artifact.digest, TrustBasis.ExternalNativeTool))
+      case ArtifactKind.ProjectionEvidence | ArtifactKind.SurfaceEvidence => Some(TrustedEvidence(artifact.digest, TrustBasis.DigestBound))
+      case _ => None }
+    providers = artifacts.collect {
+      case a if Set(ArtifactKind.ForeignSurface, ArtifactKind.StudioProfileSemantics,
+        ArtifactKind.StudioProfileSurface).contains(a.kind) =>
+        ProviderIdentity(a.kind.name, a.digest, TrustBasis.DigestBound) }
+    closure = TrustedClosure(root, installed.toList, TrustedClosure.hostInterpreters,
+      providers, TrustedClosure.assumptions, evidence).normalized
+  yield HardeningAuditReport(root, application.manifest.name, installed.toList.sortBy(_.hex),
+    kinds, application.languages.view.mapValues(_.language.digest).toMap, TrustedBoundary.minimal, closure)
