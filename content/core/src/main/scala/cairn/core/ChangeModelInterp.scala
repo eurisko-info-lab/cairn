@@ -142,57 +142,85 @@ object ChangeModelInterp:
             case Right(sp) => Right(BoundValue.VFocusSort(sp.focusSort))
             case Left(e)   => Left(Delta.Rejection.PathError(name, e))
 
-  private def evalMutation(l: ComposedLanguage, m: Module, ctx: EvalCtx, mut: Mutation): Either[Delta.Rejection, Module] = mut match
+  private def evalMutation(l: ComposedLanguage, m: Module, ctx: EvalCtx, mut: Mutation): Either[Delta.Rejection, (Module, AppliedMutation)] = mut match
     case Mutation.InsertDef(nameRef, termRef) =>
-      Right(Module(m.defs :+ (resolveName(ctx, nameRef), resolveTerm(ctx, termRef))))
+      val name = resolveName(ctx, nameRef); val term = resolveTerm(ctx, termRef)
+      Right((Module(m.defs :+ (name, term)), AppliedMutation.InsertedDef(name, term)))
     case Mutation.ReplaceDef(nameRef, termRef) =>
       val name = resolveName(ctx, nameRef); val term = resolveTerm(ctx, termRef)
-      Right(Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))))
+      m.get(name) match
+        case None => internalError(s"ReplaceDef on undefined '$name' (missing prior IsDefined check)")
+        case Some(oldTerm) =>
+          Right((Module(m.defs.map((n, old) => if n == name then (n, term) else (n, old))),
+            AppliedMutation.ReplacedDef(name, oldTerm, term)))
     case Mutation.DeleteDef(nameRef) =>
-      Right(Module(m.defs.filterNot(_._1 == resolveName(ctx, nameRef))))
+      val name = resolveName(ctx, nameRef)
+      m.get(name) match
+        case None => internalError(s"DeleteDef on undefined '$name' (missing prior IsDefined check)")
+        case Some(oldTerm) =>
+          Right((Module(m.defs.filterNot(_._1 == name)), AppliedMutation.DeletedDef(name, oldTerm)))
     case Mutation.ReplaceSubtreeAt(nameRef, pathRef, termRef) =>
       val name = resolveName(ctx, nameRef); val path = resolvePath(ctx, pathRef); val term = resolveTerm(ctx, termRef)
       m.get(name) match
         case None => internalError(s"ReplaceSubtreeAt on undefined '$name' (missing prior IsDefined check)")
         case Some(old) =>
           Delta.replaceAt(old, path, term) match
-            case Right(updated) => Right(Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0))))
-            case Left(e)        => Left(Delta.Rejection.PathError(name, e))
+            case Right(updated) =>
+              SemanticPath.fromLegacyPath(l, old, path) match
+                case Right(sp) =>
+                  Delta.subtreeAt(old, path) match
+                    case Right(oldSubtree) =>
+                      Right((Module(m.defs.map((n, t0) => if n == name then (n, updated) else (n, t0))),
+                        AppliedMutation.ReplacedSubtree(name, sp, oldSubtree, term)))
+                    case Left(e) => Left(Delta.Rejection.PathError(name, e))
+                case Left(e) => Left(Delta.Rejection.PathError(name, e))
+            case Left(e) => Left(Delta.Rejection.PathError(name, e))
     case Mutation.RenameOccurrences(fromRef, toRef, footprintRef) =>
       val from = resolveName(ctx, fromRef); val to = resolveName(ctx, toRef); val actual = resolveNames(ctx, footprintRef)
       val spec = l.binderSpec; val vc = l.varCtor.getOrElse("var")
-      Right(Module(m.defs.map { (n, t0) =>
+      Right((Module(m.defs.map { (n, t0) =>
         val n2 = if n == from then to else n
         val t2 = if actual.contains(n) then Binding.rename(spec, vc)(t0, from, to) else t0
         (n2, t2)
-      }))
+      }), AppliedMutation.RenamedOccurrences(from, to, actual)))
+
+  /** Runs `op`'s program against `module`, given the parsed change term's raw
+    * children — the semantic result only, discarding the trace. See
+    * [[runTraced]] for the same execution plus a resolved [[AppliedMutation]]
+    * trace, which [[Delta.applyPreservingFormat]] consumes.
+    */
+  def run(l: ComposedLanguage, module: Module, op: ChangeOpDef, children: List[Cst]): Either[Delta.Rejection, Module] =
+    runTraced(l, module, op, children).map(_.result)
 
   /** Runs `op`'s program against `module`, given the parsed change term's raw
     * children. The one place that walks a [[ChangeOpDef.program]] generically
     * — no operation name is ever inspected here, only `ChangeStep` shapes.
+    * Also accumulates the [[AppliedMutation]] trace of every `Mutate` step
+    * that actually fired — derived evidence, not a semantic input; it plays
+    * no part in [[ChangeModel.digest]] or [[Delta.ValidatedChangeSet]] identity.
     */
-  def run(l: ComposedLanguage, module: Module, op: ChangeOpDef, children: List[Cst]): Either[Delta.Rejection, Module] =
-    def go(steps: List[ChangeStep], m: Module, ctx: EvalCtx): Either[Delta.Rejection, Module] =
+  def runTraced(l: ComposedLanguage, module: Module, op: ChangeOpDef, children: List[Cst]): Either[Delta.Rejection, AppliedChange] =
+    def go(steps: List[ChangeStep], m: Module, ctx: EvalCtx, trace: List[AppliedMutation]): Either[Delta.Rejection, AppliedChange] =
       steps match
-        case Nil => Right(m)
+        case Nil => Right(AppliedChange(m, trace))
         case ChangeStep.Check(require, onFail) :: rest =>
-          if evalBool(ctx, m, require) then go(rest, m, ctx)
+          if evalBool(ctx, m, require) then go(rest, m, ctx, trace)
           else Left(materializeRejection(ctx, onFail))
         case ChangeStep.CheckTerm(termRef, sortRef, nameRef) :: rest =>
           val term = resolveTerm(ctx, termRef)
           val sort = resolveFocusSort(ctx, sortRef, l)
           LanguageChecker.checkTerm(l, sort, term) match
-            case Right(_)      => go(rest, m, ctx)
+            case Right(_)      => go(rest, m, ctx, trace)
             case Left(errors) => Left(Delta.Rejection.InvalidTerm(resolveName(ctx, nameRef), errors))
         case ChangeStep.Bind(as, query) :: rest =>
           evalQuery(l, m, ctx, query) match
-            case Right(bv)  => go(rest, m, ctx.copy(bound = ctx.bound + (as -> bv)))
+            case Right(bv)  => go(rest, m, ctx.copy(bound = ctx.bound + (as -> bv)), trace)
             case Left(rej)  => Left(rej)
         case ChangeStep.Mutate(mutation) :: rest =>
           evalMutation(l, m, ctx, mutation) match
-            case Right(m2) => go(rest, m2, ctx)
+            case Right((m2, applied)) => go(rest, m2, ctx, trace :+ applied)
             case Left(rej) => Left(rej)
-    go(op.program, module, EvalCtx(children, Map.empty))
+    go(op.program, module, EvalCtx(children, Map.empty), Nil)
 
   /** Purely syntactic over the parsed change term's raw children — no module
     * needed, matching [[ChangeAlgebra.footprint]]'s current nature.
