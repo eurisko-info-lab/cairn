@@ -133,3 +133,21 @@ class ChangeModelCopySuite extends munit.FunSuite:
     val (_, vcs3) = Delta.applyTyped(lang, base, ch, model3).fold(e => fail(e.render), identity)
     assertEquals(vcs2.result, vcs3.result, "both models apply `copy` identically here — same resulting module")
     assert(vcs2.claim.changeModel != vcs3.claim.changeModel, "but their claims must carry different ChangeModel identities")
+
+  test("copy: works under applyPreservingFormat with ZERO format-preserving code changes"):
+    val mg = ModuleSurface.grammar(lang)
+    val src = "-- a's own comment\na = true ;\n-- unrelated comment, untouched\nother = false ;\n"
+    val ch = parseChange("{ copy a to b ; }")
+    val result = Delta.applyPreservingFormat(lang, mg, src, ch, model2).fold(e => fail(e), identity)
+    // The custom op's own comment, and every other def's comment, survive —
+    // the format-preserving layer never had to learn what "copy" means; it
+    // only understood the InsertedDef mutation copy's program resolves to.
+    assert(result.contains("-- a's own comment\na = true ;"), result)
+    assert(result.contains("-- unrelated comment, untouched\nother = false ;"), result)
+    assert(result.contains("b = true ;"), result)
+    assert(Parser.parse(mg, result).isRight, result)
+    // Parsing the result back yields the SAME module digest applyTyped produced directly.
+    val base = ModuleSurface.toModule(Parser.parse(mg, src).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+    val (viaApply, _) = Delta.applyTyped(lang, base, ch, model2).fold(e => fail(e.render), identity)
+    val viaPreserved = ModuleSurface.toModule(Parser.parse(mg, result).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+    assertEquals(viaPreserved.sorted.digest, viaApply.sorted.digest)

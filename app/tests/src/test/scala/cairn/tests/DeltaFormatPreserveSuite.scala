@@ -22,9 +22,11 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
   /** The property that actually matters: format-preservation must never change
     * what the module MEANS, only its bytes. Compare against plain Delta.apply.
     */
-  private def assertSameMeaning(originalSource: String, change: Cst, preservedResult: String): Unit =
+  private def assertSameMeaning(
+      originalSource: String, change: Cst, preservedResult: String, model: ChangeModel = ChangeModel.default,
+  ): Unit =
     val origModule = ModuleSurface.toModule(Parser.parse(mg, originalSource).toOption.get).toOption.get
-    val viaApply = Delta.apply(Stlc.language, origModule, change).toOption.get._1
+    val viaApply = Delta.apply(Stlc.language, origModule, change, model).toOption.get._1
     val viaPreserved = ModuleSurface.toModule(Parser.parse(mg, preservedResult).toOption.get).toOption.get
     assertEquals(viaPreserved.sorted.digest, viaApply.sorted.digest)
 
@@ -165,6 +167,16 @@ class DeltaFormatPreserveSuite extends munit.FunSuite:
     val change = parseChange("{ rename a to b footprint [ ] ; }")
     val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change)
     assert(result.isLeft, result.toString)
+
+  test("multi-operation changeset preserves format correctly while applying mutations sequentially"):
+    val src = "-- a's comment\na = true ;\n-- b's comment\nb = false ;\n-- c's comment\nc = true ;\n"
+    val change = parseChange("{ replace a = false ; remove b ; rename c to renamed footprint [ ] ; }")
+    val result = Delta.applyPreservingFormat(Stlc.language, mg, src, change).fold(e => fail(e), identity)
+    assert(result.contains("-- a's comment\na = false ;"), result)
+    assert(!result.contains("b's comment") && !result.contains("b = false"), result)
+    assert(result.contains("-- c's comment\nrenamed = true ;"), result)
+    assert(Parser.parse(mg, result).isRight, result)
+    assertSameMeaning(src, change, result)
 
   test("dirty-subtree re-association: two sibling edits preserve outer trivia"):
     val g = Stlc.language.grammar
