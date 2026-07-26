@@ -65,6 +65,24 @@ class ChangeModelCopySuite extends munit.FunSuite:
     val ch = parseChange("{ copy a to b ; }")
     assertEquals(ChangeAlgebra.footprint(lang, ch, model2), Set("a", "b"))
 
+  test("PR11: copy's generic query trace reads its source, so source replacement conflicts"):
+    val base = Module(List("a" -> Stlc.tru))
+    val copy = parseChange("{ copy a to b ; }")
+    val replace = parseChange("{ replace a = false ; }")
+    val conflict = Merge.threeWay(lang, base, copy, replace, model = model2)
+      .swap.getOrElse(fail("copy/source replacement conflict not detected"))
+    assert(conflict.overlap.contains(SemanticLocation.WholeDefinition("a")))
+
+  test("PR11: two copies may share a read without conflicting"):
+    val base = Module(List("a" -> Stlc.tru))
+    val copyB = parseChange("{ copy a to b ; }")
+    val copyC = parseChange("{ copy a to c ; }")
+    Merge.threeWay(lang, base, copyB, copyC, model = model2) match
+      case Right((merged, _)) =>
+        assertEquals(merged.get("b"), Some(Stlc.tru))
+        assertEquals(merged.get("c"), Some(Stlc.tru))
+      case Left(conflict) => fail(conflict.render)
+
   test("copy: inverse is remove(to), and forward-then-inverse round-trips the module digest"):
     val base = Module(List("a" -> Stlc.tru))
     val ch = parseChange("{ copy a to b ; }")

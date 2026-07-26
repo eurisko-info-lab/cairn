@@ -156,10 +156,39 @@ class WaveCSuite extends munit.FunSuite:
     val branchB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
     Merge.threeWay(lang, m0, branchA, branchB) match
       case Left(conflict) =>
-        assertEquals(conflict.overlap, Set("a"))
+        assertEquals(conflict.overlap.map(_.definitionName), Set("a"))
         assert(conflict.changeA != conflict.changeB)
         assertEquals(conflict.artifact.kind, ArtifactKind.ChangeSet)
       case Right(_) => fail("conflict not detected")
+
+  test("PR11: edits to sibling semantic fields of one definition merge"):
+    val base = Module(List("sheet" -> Stlc.app1(Stlc.tru, Stlc.fls)))
+    val left = parseChange("{ edit sheet at [0] = false ; }")
+    val right = parseChange("{ edit sheet at [1] = true ; }")
+    Merge.threeWay(lang, base, left, right) match
+      case Right((merged, _)) => assertEquals(merged.get("sheet"), Some(Stlc.app1(Stlc.fls, Stlc.tru)))
+      case Left(conflict) => fail(conflict.render)
+
+  test("PR11: parent and child subtree accesses conflict and report semantic locations"):
+    val base = Module(List("sheet" -> Stlc.app1(Stlc.idBool, Stlc.tru)))
+    val parent = parseChange("{ edit sheet at [0] = false ; }")
+    val child = parseChange("{ edit sheet at [0, 2] = false ; }")
+    Merge.threeWay(lang, base, parent, child) match
+      case Left(conflict) =>
+        assert(conflict.overlap.nonEmpty)
+        assert(conflict.overlap.forall {
+          case SemanticLocation.Subtree("sheet", _) => true
+          case _ => false
+        })
+      case Right(_) => fail("parent/child conflict not detected")
+
+  test("PR11: whole-definition replacement conflicts with subtree access"):
+    val base = Module(List("sheet" -> Stlc.app1(Stlc.tru, Stlc.fls)))
+    val whole = parseChange("{ replace sheet = true ; }")
+    val subtree = parseChange("{ edit sheet at [1] = true ; }")
+    val conflict = Merge.threeWay(lang, base, whole, subtree).swap.getOrElse(fail("conflict not detected"))
+    assert(conflict.overlap.exists(_.isInstanceOf[SemanticLocation.WholeDefinition]))
+    assert(conflict.overlap.exists(_.isInstanceOf[SemanticLocation.Subtree]))
 
   test("M17: merge order is canonical (digest-deterministic)"):
     val branchA = parseChange("{ add x1 = true ; }")

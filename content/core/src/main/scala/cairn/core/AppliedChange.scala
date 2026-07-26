@@ -15,7 +15,7 @@ import cairn.kernel.*
   * VCS consensus identity. Kept in its own file (not folded into
   * `ChangeModel.scala`) so that boundary stays visually obvious.
   */
-final case class AppliedChange(result: Module, trace: List[AppliedMutation])
+final case class AppliedChange(result: Module, trace: List[AppliedMutation], accessTrace: AccessTrace = AccessTrace.empty)
 
 enum AppliedMutation:
   case InsertedDef(name: String, term: Cst)

@@ -56,7 +56,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     assert(!SemanticRepository.commutes(lang, cA, cB))
     SemanticRepository.integrate(lang, m0, cA, cB) match
       case Right(SemanticRepository.Outcome.Conflicted(conflict)) =>
-        assertEquals(conflict.overlap, Set("a"))
+        assertEquals(conflict.overlap.map(_.definitionName), Set("a"))
         assertEquals(conflict.artifact.kind, ArtifactKind.ChangeSet)
       case Right(SemanticRepository.Outcome.Accepted(_, _, _, _)) =>
         fail("expected conflict")
@@ -401,7 +401,7 @@ class SemanticRepositorySuite extends munit.FunSuite:
     val cB = parseChange("{ edit a at [] = fun x : Bool . x ; }")
     branches.merge(lang, "main", m0, cA, cB, policy = AcceptancePolicy.open) match
       case Right(Left(conflict)) =>
-        assertEquals(conflict.overlap, Set("a"))
+        assertEquals(conflict.overlap.map(_.definitionName), Set("a"))
         assert(CasEffects.contains(cas, conflict.artifact.digest, casCtx).contains(true))
         assertEquals(branches.load("main").head, None)
       case Right(Right(_)) => fail("expected conflict")

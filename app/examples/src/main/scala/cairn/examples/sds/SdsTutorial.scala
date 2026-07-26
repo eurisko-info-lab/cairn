@@ -75,7 +75,7 @@ object SdsTutorial:
       """{ replace h225 = corpus phrase h225 lang en text "Base reworded flammable phrase" ; }""")
       .fold(e => throw RuntimeException(e), identity)
     val conflict = Sds.rebaseShadow(base, basePhrase, addShadow)
-    val conflictPaths = conflict.fold(c => c.overlap, _ => Set.empty)
+    val conflictPaths = conflict.fold(c => c.overlap.map(_.definitionName), _ => Set.empty[String])
 
     // Composition sealing via DemoPki encryption cert
     val h = DemoPki.hierarchy()

@@ -724,7 +724,7 @@ class ExemplarPackSuite extends munit.FunSuite:
   test("conflict artifact digests differ by typed witness (not free-form strings)"):
     val digA = Digest.of(Canon.CStr("change-a"))
     val digB = Digest.of(Canon.CStr("change-b"))
-    val overlap = Set.empty[String]
+    val overlap = Set.empty[SemanticLocation]
     val applyFail = Merge.Conflict(overlap, digA, digB, Some(
       Merge.ConflictWitness.ApplyFailed(
         Merge.Order.Canonical,

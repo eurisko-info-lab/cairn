@@ -68,6 +68,19 @@ class KeyedElementSuite extends munit.FunSuite:
     val sp = SemanticPath.verify(lang, mixture, claim).fold(e => fail(e), identity)
     assertEquals(sp.indices, List(0, 1)) // found at position 1 this time, same claim
 
+  test("PR11: legacy paths recover keyed identity and different keyed elements do not overlap"):
+    val lang = Meta.parseFile(mixtureSrc).fold(e => fail(e), identity)
+    val mixture = Cst.Node("mixture", List(Cst.Node("list", List(
+      component("acetone", "50"), component("water", "50")))))
+    val acetone = SemanticPath.fromLegacyPath(lang, mixture, List(0, 0, 1)).fold(e => fail(e), identity)
+    val water = SemanticPath.fromLegacyPath(lang, mixture, List(0, 1, 1)).fold(e => fail(e), identity)
+    assert(acetone.steps.exists {
+      case Step.KeyedElement("Component", "ref", "acetone") => true
+      case _ => false
+    })
+    assert(!SemanticLocation.overlaps(
+      SemanticLocation.Subtree("sheet", acetone), SemanticLocation.Subtree("sheet", water)))
+
   test("Step.KeyedElement: no matching key is a structured error, not a crash"):
     val lang = Meta.parseFile(mixtureSrc).fold(e => fail(e), identity)
     val list = Cst.Node("list", List(component("acetone", "50")))

@@ -118,19 +118,24 @@ object ChangeModelInterp:
     case RejectionSpec.FootprintMismatchR(name, declared, actual) =>
       Delta.Rejection.FootprintMismatch(resolveName(ctx, name), resolveNames(ctx, declared), resolveNames(ctx, actual))
 
-  private def evalBool(ctx: EvalCtx, m: Module, e: BoolExpr): Boolean = e match
-    case BoolExpr.IsDefined(v)      => m.get(resolveName(ctx, v)).isDefined
-    case BoolExpr.Not(inner)        => !evalBool(ctx, m, inner)
-    case BoolExpr.NamesEmpty(v)     => resolveNames(ctx, v).isEmpty
-    case BoolExpr.NamesEqual(a, b)  => resolveNames(ctx, a) == resolveNames(ctx, b)
+  private def evalBool(ctx: EvalCtx, m: Module, e: BoolExpr): (Boolean, List[SemanticAccess]) = e match
+    case BoolExpr.IsDefined(v) =>
+      val name = resolveName(ctx, v)
+      (m.get(name).isDefined, List(SemanticAccess(AccessMode.Read, SemanticLocation.Binding(name))))
+    case BoolExpr.Not(inner) =>
+      val (result, accesses) = evalBool(ctx, m, inner)
+      (!result, accesses)
+    case BoolExpr.NamesEmpty(v)    => (resolveNames(ctx, v).isEmpty, Nil)
+    case BoolExpr.NamesEqual(a, b) => (resolveNames(ctx, a) == resolveNames(ctx, b), Nil)
 
-  private def evalQuery(l: ComposedLanguage, m: Module, ctx: EvalCtx, q: ChangeQuery): Either[Delta.Rejection, BoundValue] = q match
+  private def evalQuery(l: ComposedLanguage, m: Module, ctx: EvalCtx, q: ChangeQuery): Either[Delta.Rejection, (BoundValue, List[SemanticAccess])] = q match
     case ChangeQuery.ReferencingNames(nameRef) =>
-      Right(BoundValue.VNames(referencing(l, m, resolveName(ctx, nameRef))))
+      Right((BoundValue.VNames(referencing(l, m, resolveName(ctx, nameRef))),
+        m.defs.map((name, _) => SemanticAccess(AccessMode.Read, SemanticLocation.WholeDefinition(name)))))
     case ChangeQuery.ReadTerm(nameRef) =>
       val name = resolveName(ctx, nameRef)
       m.get(name) match
-        case Some(t) => Right(BoundValue.VTerm(t))
+        case Some(t) => Right((BoundValue.VTerm(t), List(SemanticAccess(AccessMode.Read, SemanticLocation.WholeDefinition(name)))))
         case None    => internalError(s"ReadTerm on undefined '$name' (missing prior IsDefined check)")
     case ChangeQuery.ResolveSemanticPath(nameRef, pathRef) =>
       val name = resolveName(ctx, nameRef)
@@ -139,7 +144,8 @@ object ChangeModelInterp:
         case None => internalError(s"ResolveSemanticPath on undefined '$name' (missing prior IsDefined check)")
         case Some(old) =>
           SemanticPath.fromLegacyPath(l, old, path) match
-            case Right(sp) => Right(BoundValue.VFocusSort(sp.focusSort))
+            case Right(sp) => Right((BoundValue.VFocusSort(sp.focusSort),
+              List(SemanticAccess(AccessMode.Read, SemanticLocation.Subtree(name, sp)))))
             case Left(e)   => Left(Delta.Rejection.PathError(name, e))
 
   private def evalMutation(l: ComposedLanguage, m: Module, ctx: EvalCtx, mut: Mutation): Either[Delta.Rejection, (Module, AppliedMutation)] = mut match
@@ -184,6 +190,30 @@ object ChangeModelInterp:
         (n2, t2)
       }), AppliedMutation.RenamedOccurrences(from, to, actual)))
 
+  private def mutationAccesses(l: ComposedLanguage, m: Module, ctx: EvalCtx, mut: Mutation): Either[Delta.Rejection, List[SemanticAccess]] = mut match
+    case Mutation.InsertDef(name, _) => Right(List(SemanticAccess(AccessMode.Write, SemanticLocation.Binding(resolveName(ctx, name)))))
+    case Mutation.ReplaceDef(name, _) => Right(List(SemanticAccess(AccessMode.Write, SemanticLocation.WholeDefinition(resolveName(ctx, name)))))
+    case Mutation.DeleteDef(name) =>
+      val resolved = resolveName(ctx, name)
+      Right(List(
+        SemanticAccess(AccessMode.Write, SemanticLocation.Binding(resolved)),
+        SemanticAccess(AccessMode.Write, SemanticLocation.WholeDefinition(resolved))))
+    case Mutation.ReplaceSubtreeAt(nameRef, pathRef, _) =>
+      val name = resolveName(ctx, nameRef)
+      m.get(name) match
+        case None => internalError(s"ReplaceSubtreeAt on undefined '$name' (missing prior IsDefined check)")
+        case Some(old) => SemanticPath.fromLegacyPath(l, old, resolvePath(ctx, pathRef))
+          .left.map(e => Delta.Rejection.PathError(name, e))
+          .map(sp => List(SemanticAccess(AccessMode.Write, SemanticLocation.Subtree(name, sp))))
+    case Mutation.RenameOccurrences(fromRef, toRef, footprintRef) =>
+      val from = resolveName(ctx, fromRef)
+      val to = resolveName(ctx, toRef)
+      val affected = resolveNames(ctx, footprintRef).toList.sorted.map(n =>
+        SemanticAccess(AccessMode.Write, SemanticLocation.WholeDefinition(n)))
+      Right(SemanticAccess(AccessMode.Write, SemanticLocation.Binding(from)) ::
+        SemanticAccess(AccessMode.Write, SemanticLocation.Binding(to)) ::
+        SemanticAccess(AccessMode.Write, SemanticLocation.WholeDefinition(from)) :: affected)
+
   /** Runs `op`'s program against `module`, given the parsed change term's raw
     * children — the semantic result only, discarding the trace. See
     * [[runTraced]] for the same execution plus a resolved [[AppliedMutation]]
@@ -200,27 +230,30 @@ object ChangeModelInterp:
     * no part in [[ChangeModel.digest]] or [[Delta.ValidatedChangeSet]] identity.
     */
   def runTraced(l: ComposedLanguage, module: Module, op: ChangeOpDef, children: List[Cst]): Either[Delta.Rejection, AppliedChange] =
-    def go(steps: List[ChangeStep], m: Module, ctx: EvalCtx, trace: List[AppliedMutation]): Either[Delta.Rejection, AppliedChange] =
+    def go(steps: List[ChangeStep], m: Module, ctx: EvalCtx, trace: List[AppliedMutation], accesses: List[SemanticAccess]): Either[Delta.Rejection, AppliedChange] =
       steps match
-        case Nil => Right(AppliedChange(m, trace))
+        case Nil => Right(AppliedChange(m, trace, AccessTrace(accesses)))
         case ChangeStep.Check(require, onFail) :: rest =>
-          if evalBool(ctx, m, require) then go(rest, m, ctx, trace)
+          val (accepted, reads) = evalBool(ctx, m, require)
+          if accepted then go(rest, m, ctx, trace, accesses ++ reads)
           else Left(materializeRejection(ctx, onFail))
         case ChangeStep.CheckTerm(termRef, sortRef, nameRef) :: rest =>
           val term = resolveTerm(ctx, termRef)
           val sort = resolveFocusSort(ctx, sortRef, l)
           LanguageChecker.checkTerm(l, sort, term) match
-            case Right(_)      => go(rest, m, ctx, trace)
+            case Right(_)      => go(rest, m, ctx, trace, accesses)
             case Left(errors) => Left(Delta.Rejection.InvalidTerm(resolveName(ctx, nameRef), errors))
         case ChangeStep.Bind(as, query) :: rest =>
           evalQuery(l, m, ctx, query) match
-            case Right(bv)  => go(rest, m, ctx.copy(bound = ctx.bound + (as -> bv)), trace)
+            case Right((bv, reads)) => go(rest, m, ctx.copy(bound = ctx.bound + (as -> bv)), trace, accesses ++ reads)
             case Left(rej)  => Left(rej)
         case ChangeStep.Mutate(mutation) :: rest =>
-          evalMutation(l, m, ctx, mutation) match
-            case Right((m2, applied)) => go(rest, m2, ctx, trace :+ applied)
-            case Left(rej) => Left(rej)
-    go(op.program, module, EvalCtx(children, Map.empty), Nil)
+          for
+            writes <- mutationAccesses(l, m, ctx, mutation)
+            evaluated <- evalMutation(l, m, ctx, mutation)
+            result <- go(rest, evaluated._1, ctx, trace :+ evaluated._2, accesses ++ writes)
+          yield result
+    go(op.program, module, EvalCtx(children, Map.empty), Nil, Nil)
 
   /** Purely syntactic over the parsed change term's raw children — no module
     * needed, matching [[ChangeAlgebra.footprint]]'s current nature.

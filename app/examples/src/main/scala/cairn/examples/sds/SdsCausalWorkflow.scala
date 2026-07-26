@@ -131,7 +131,7 @@ object SdsCausalWorkflow:
         val phraseCs = parse(
           """{ replace h225 = corpus phrase h225 lang en text "Base reworded flammable phrase" ; }""")
         conflictOverlap = Sds.rebaseShadow(base, phraseCs, shadowCs) match
-          case Left(c) => c.overlap
+          case Left(c) => c.overlap.map(_.definitionName)
           case Right(_) => Set.empty
         Right(conflictOverlap.mkString(","))
       },

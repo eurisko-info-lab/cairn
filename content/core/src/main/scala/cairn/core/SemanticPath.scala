@@ -297,7 +297,23 @@ object SemanticPath:
         case Nil => Right((sort, steps))
         case i :: rest =>
           t match
-            case Cst.Node("list" | "some" | "none", children) if i >= 0 && i < children.length =>
+            case Cst.Node("list", children) if i >= 0 && i < children.length =>
+              val child = children(i)
+              val keyed = child match
+                case Cst.Node(ctor, kids) => language.constructors.get(ctor).flatMap { cd =>
+                  language.keys.get(cd.sort).flatMap { key =>
+                    cd.fieldIds.indexOf(Some(key.keyField)) match
+                      case pos if pos >= 0 => kids.lift(pos).collect {
+                        case Cst.Leaf(value) => (cd.sort, Step.KeyedElement(cd.sort, key.keyField, value))
+                      }
+                      case _ => None
+                  }
+                }
+                case _ => None
+              keyed match
+                case Some((elementSort, step)) => go(child, elementSort, rest, steps :+ step)
+                case None => go(child, sort, rest, steps :+ Step.Index(i))
+            case Cst.Node("some" | "none", children) if i >= 0 && i < children.length =>
               go(children(i), sort, rest, steps :+ Step.Index(i))
             case Cst.Node("list" | "some" | "none", children) =>
               Left(s"SemanticPath: path index $i out of range (${children.length} children)")

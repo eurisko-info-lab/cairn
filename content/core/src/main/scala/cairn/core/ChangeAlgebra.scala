@@ -35,6 +35,29 @@ object ChangeAlgebra:
       case _ => Set.empty
     }.toSet
 
+  /** Resolved semantic reads and writes produced by the same generic program
+    * interpreter that applies operations. The walk advances item by item so
+    * later paths and queries resolve against the actual intermediate state.
+    */
+  def accessTrace(
+      l: ComposedLanguage,
+      base: Module,
+      change: Cst,
+      model: ChangeModel = ChangeModel.default,
+  ): Either[Delta.Rejection, AccessTrace] =
+    changeItems(l, change).foldLeft[Either[Delta.Rejection, (Module, AccessTrace)]](
+      Right((base, AccessTrace.empty))) { (acc, item) =>
+      acc.flatMap { (module, trace) =>
+        item match
+          case Cst.Node(t, children) =>
+            model.operations.find(o => t == tag(l, o.name)) match
+              case Some(op) => ChangeModelInterp.runTraced(l, module, op, children)
+                .map(applied => (applied.result, trace ++ applied.accessTrace))
+              case None => Left(Delta.Rejection.Malformed(s"unrecognized operation under this model: ${item.render}"))
+          case other => Left(Delta.Rejection.Malformed(s"unrecognized operation under this model: ${other.render}"))
+      }
+    }.map(_._2)
+
   /** Rejects a change containing any item whose operation tag is not part of
     * `model` — called BEFORE [[footprint]]/[[Delta.applyTyped]] wherever a
     * caller supplies an explicit model, so a change built against the wrong
@@ -93,7 +116,7 @@ object ChangeAlgebra:
       }
     }.map((_, invs) => changeset(l, invs))
 
-/** M17: three-way semantic merge over change histories. Disjoint-footprint
+/** M17: three-way semantic merge over change histories. Access-compatible
   * branches merge automatically; overlaps surface as a structured conflict
   * artifact naming both change-sets — never silent, never textual.
   */
@@ -108,7 +131,7 @@ object Merge:
       case Canonical => "canonical order"
       case Reversed  => "reversed order"
 
-  /** Typed evidence for a merge conflict that name-overlap alone did not
+  /** Typed evidence for a merge conflict that access analysis alone did not
     * predict. Part of [[Conflict.canon]] so distinct causes cannot share an
     * artifact digest.
     */
@@ -142,22 +165,22 @@ object Merge:
           case other         => other.toString
         s"module gate '$judgment' rejected: $d"
 
-  /** `witness`, when present, explains a conflict that footprint disjointness
+  /** `witness`, when present, explains a conflict that access compatibility
     * alone didn't predict — apply failure, order-dependent results, or a
-    * [[ModuleGate]] rejection — as opposed to an outright name overlap
+    * [[ModuleGate]] rejection — as opposed to a semantic-location overlap
     * (`overlap.nonEmpty`, `witness = None`). Optional and last so every
     * existing 3-arg `Conflict(overlap, changeA, changeB)` call site is
     * unaffected.
     */
   final case class Conflict(
-      overlap: Set[String],
+      overlap: Set[SemanticLocation],
       changeA: Digest,
       changeB: Digest,
       witness: Option[ConflictWitness] = None,
   ):
     def canon: Canon =
       val base = List(
-        "overlap" -> Canon.cstrs(overlap.toList.sorted),
+        "overlap" -> Canon.CList(overlap.toList.sortBy(_.render).map(_.canon)),
         "changeA" -> Canon.CStr(changeA.hex),
         "changeB" -> Canon.CStr(changeB.hex))
       val withWitness = witness match
@@ -166,21 +189,20 @@ object Merge:
       Canon.cmap(withWitness*)
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("merge-conflict", canon))
     def render: String =
-      if overlap.nonEmpty then s"merge conflict on {${overlap.toList.sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
+      if overlap.nonEmpty then s"merge conflict on {${overlap.toList.map(_.render).sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
       else s"merge conflict between ${changeA.short} and ${changeB.short}: ${witness.map(_.render).getOrElse("order-dependent result")}"
 
-  /** Disjoint-footprint branches merge automatically — but footprint
-    * disjointness (no shared definition NAME) is a syntactic approximation
-    * of commutation, not a proof of it: a whole-module domain gate (SDS's
+  /** Access-compatible branches merge automatically — but access analysis
+    * is not a proof of commutation: a whole-module domain gate (SDS's
     * percentage-sum check, LanguageChecker's structural gate, a judgment
     * side condition) can still reject the combination, or — in principle —
     * accept it but produce a different result depending on order, even
-    * though the two change-sets never touch the same name. This WITNESSES
+    * though the change-sets have independent accesses. This WITNESSES
     * commutation instead of assuming it: both orders are actually applied
     * against `base`, and the merge only succeeds if both apply cleanly AND
     * agree on the result. An optional [[ModuleGate]] then re-checks the
     * merged module under domain judgments. Either failure surfaces as a
-    * `Conflict` (never an exception — a disjoint-footprint pair failing this
+    * `Conflict` (never an exception — an access-compatible pair failing this
     * check is a real, anticipatable outcome, not a broken invariant).
     */
   def threeWay(
@@ -197,29 +219,31 @@ object Merge:
       case (Left(e), _) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Canonical, Delta.Rejection.Malformed(e)))))
       case (_, Left(e)) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Reversed, Delta.Rejection.Malformed(e)))))
       case (Right(()), Right(())) =>
-        val fa = ChangeAlgebra.footprint(l, changeA, model)
-        val fb = ChangeAlgebra.footprint(l, changeB, model)
-        val overlap = fa.intersect(fb)
-        if overlap.nonEmpty then Left(Conflict(overlap, digA, digB))
-        else
+        (ChangeAlgebra.accessTrace(l, base, changeA, model), ChangeAlgebra.accessTrace(l, base, changeB, model)) match
+          case (Left(rej), _) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Canonical, rej))))
+          case (_, Left(rej)) => Left(Conflict(Set.empty, digA, digB, Some(ConflictWitness.ApplyFailed(Order.Reversed, rej))))
+          case (Right(traceA), Right(traceB)) =>
+            val overlap = AccessTrace.conflicts(traceA, traceB)
+            if overlap.nonEmpty then Left(Conflict(overlap, digA, digB))
+            else
           // canonical order: apply the change-set with the smaller digest first
-          val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
-          val canonical = ChangeAlgebra.compose(l, first, second)
-          val reversed = ChangeAlgebra.compose(l, second, first)
-          def conflict(w: ConflictWitness) = Conflict(overlap, digA, digB, Some(w))
-          (Delta.applyTyped(l, base, canonical, model), Delta.applyTyped(l, base, reversed, model)) match
-            case (Left(rej), _) =>
-              Left(conflict(ConflictWitness.ApplyFailed(Order.Canonical, rej)))
-            case (_, Left(rej)) =>
-              Left(conflict(ConflictWitness.ApplyFailed(Order.Reversed, rej)))
-            case (Right(canonResult), Right(reversedResult)) =>
-              if canonResult._1.digest != reversedResult._1.digest then
-                Left(conflict(ConflictWitness.ResultsDiffer(
-                  canonResult._1.digest, reversedResult._1.digest)))
-              else
-                gate(canonResult._1) match
-                  case Left(w) => Left(conflict(w))
-                  case Right(()) => Right(canonResult)
+              val (first, second) = if digA.hex <= digB.hex then (changeA, changeB) else (changeB, changeA)
+              val canonical = ChangeAlgebra.compose(l, first, second)
+              val reversed = ChangeAlgebra.compose(l, second, first)
+              def conflict(w: ConflictWitness) = Conflict(overlap, digA, digB, Some(w))
+              (Delta.applyTyped(l, base, canonical, model), Delta.applyTyped(l, base, reversed, model)) match
+                case (Left(rej), _) =>
+                  Left(conflict(ConflictWitness.ApplyFailed(Order.Canonical, rej)))
+                case (_, Left(rej)) =>
+                  Left(conflict(ConflictWitness.ApplyFailed(Order.Reversed, rej)))
+                case (Right(canonResult), Right(reversedResult)) =>
+                  if canonResult._1.digest != reversedResult._1.digest then
+                    Left(conflict(ConflictWitness.ResultsDiffer(
+                      canonResult._1.digest, reversedResult._1.digest)))
+                  else
+                    gate(canonResult._1) match
+                      case Left(w) => Left(conflict(w))
+                      case Right(()) => Right(canonResult)
 
 /** M18: language migrations — revision morphisms between language versions
   * that transport modules and change-sets, kernel-validated against the

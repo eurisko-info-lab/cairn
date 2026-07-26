@@ -167,7 +167,7 @@ final class Sds(packs: PackAccess):
     val overlap = touched.intersect(overrides)
     if overlap.nonEmpty then
       Left(Merge.Conflict(
-        overlap,
+        overlap.map(SemanticLocation.WholeDefinition(_)),
         Artifact(ArtifactKind.ChangeSet, Cst.toCanon(baseChange)).digest,
         Artifact(ArtifactKind.ChangeSet, Cst.toCanon(shadowChange)).digest))
     else
