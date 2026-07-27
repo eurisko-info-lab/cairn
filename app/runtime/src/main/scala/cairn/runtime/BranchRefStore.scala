@@ -1,8 +1,7 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{ArtifactDependencies, CausalChange, ContextDependency, Delta, Module, NativeRepository,
-  PartialApplication, SemanticLocation}
+import cairn.core.*
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
 import cairn.systemhandler.{CasEffects, CasAdmin, CasAdminEffects, Filesystem, EffectContext, Node, Keypair, Provenance}
@@ -116,11 +115,12 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
     refsDir.resolve(s"$branch.conflict-context")
 
   private def repositoryGraphRefPath: Path = refsDir.resolve("repository.graph")
+  private def repositoryCertificationsRefPath: Path = refsDir.resolve("repository.certifications")
 
   private def isSidecar(name: String): Boolean =
     name.endsWith(".change") || name.endsWith(".changes") ||
       name.endsWith(".accepting") || name.endsWith(".conflict") || name.endsWith(".conflict-context") ||
-      name == "repository.graph"
+      name == "repository.graph" || name == "repository.certifications"
 
   def nativeRepository: Either[String, NativeRepository] =
     if !refsExists(repositoryGraphRefPath) then Right(NativeRepository.empty)
@@ -157,16 +157,154 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
             dependencies <- ArtifactDependencies.direct(artifact)
             result <- walk(dependencies ++ rest, seen + digest, artifact :: out)
           yield result
-      val roots = changes.flatMap(c => List(c.change, c.base, c.result, c.runtime))
-      walk(roots, Set.empty, changes.map(_.artifact)).map(_.distinctBy(_.digest).sortBy(_.digest.hex))
+      val roots = changes.flatMap(c => List(c.change, c.base, c.result, c.runtime) ++ c.acceptanceEvidence)
+      for
+        repository <- nativeRepository
+        closure <- walk(roots, Set.empty, repository.artifact :: changes.map(_.artifact))
+      yield closure.distinctBy(_.digest).sortBy(_.digest.hex)
     }
 
+  /** Untrusted replication boundary. Artifact bytes are staged in memory;
+    * causal nodes enter the graph only after runtime-bound replay, acceptance,
+    * access/context recomputation, and certified-machine selection. */
+  def pushChangeArtifacts(
+      artifacts: List[Artifact], application: ResolvedApplication,
+  ): Either[String, PartialApplication] =
+    val staged = artifacts.map(a => a.digest -> a).toMap
+    val causalArtifacts = artifacts.filter(_.body match
+      case Canon.CTag("causal-change", _) => true
+      case _ => false)
+    val decodedCausal = causalArtifacts.map(artifact => artifact -> CausalChange.fromArtifact(artifact))
+    val causal = decodedCausal.collect { case (_, Right(change)) => change }
+    val malformed = decodedCausal.collect { case (artifact, Left(message)) => artifact.digest -> message }.toMap
+    for
+      _ <- Either.cond(causal.nonEmpty || malformed.nonEmpty, (), "change transfer contains no causal changes")
+      current <- nativeRepository
+      transferredGraphs <- artifacts.filter(_.kind == ArtifactKind.RepositoryGraph)
+        .foldLeft[Either[String, List[NativeRepository]]](Right(Nil)) { (acc, artifact) =>
+          for xs <- acc; graph <- NativeRepository.fromArtifact(artifact) yield xs :+ graph }
+      _ <- Either.cond(transferredGraphs.size <= 1, (), "change transfer contains multiple repository roots")
+      certificationTopology = transferredGraphs.headOption.getOrElse(current)
+      classified = causal.map { change => change -> certifyIncoming(change, application, staged, certificationTopology) }
+      valid = classified.collect { case (change, Right(_)) => change }
+      incomplete = classified.collect { case (change, Left(CertificationFailure.Incomplete(_))) => change }
+      rejected = malformed ++ classified.collect {
+        case (change, Left(CertificationFailure.Invalid(message))) => change.id -> message }.toMap
+      // Uncertified pending nodes are never fed back through structural
+      // `offer`; only envelopes certified in this invocation may be promoted.
+      offered <- current.copy(pending = Map.empty).offer(valid)
+      (afterValid, applied) = offered
+      withResolutions = valid.foldLeft(afterValid) { (repo, change) => change.resolves match
+        case None => repo
+        case Some(conflict) => repo.copy(conflicts = repo.conflicts.updatedWith(conflict)(_.map(
+          _.copy(resolution = Some(change.id), unresolved = Set.empty)))) }
+      retained = (current.pending -- valid.map(_.id)) ++ incomplete.map(c => c.id -> c)
+      afterPending = withResolutions.copy(pending = retained)
+      withViews = transferredGraphs.headOption match
+        case Some(target) if target.changes.keySet.subsetOf(afterPending.changes.keySet) && target.pending.isEmpty =>
+          afterPending.copy(conflicts = target.conflicts, heads = target.heads)
+        case _ => afterPending
+      missing = classified.collect { case (_, Left(CertificationFailure.Incomplete(ds))) => ds }.flatten.toSet ++ applied.missing
+      evidenceArtifacts = classified.collect { case (_, Right((replay, context, certification))) =>
+        List(replay.artifact, context.artifact, certification.artifact) }.flatten
+      _ = (artifacts ++ evidenceArtifacts).distinctBy(_.digest).foreach(putArt)
+      certificationDigests = evidenceArtifacts.filter(_.kind == ArtifactKind.CertifiedCausalChange).map(_.digest)
+      _ = if certificationDigests.nonEmpty then
+        refsMkdirs()
+        val existing = if refsExists(repositoryCertificationsRefPath) then refsRead(repositoryCertificationsRefPath) else ""
+        val merged = (existing.linesIterator.flatMap(Digest.parse(_).toOption).toList ++ certificationDigests)
+          .distinct.sortBy(_.hex).map(_.hex).mkString("\n") + "\n"
+        refsWrite(repositoryCertificationsRefPath, merged)
+      _ = storeNativeRepository(withViews)
+    yield PartialApplication(applied.applied, withViews.pending.keySet, missing, rejected)
+
+  /** Legacy callers must explicitly supply the application-selected machine;
+    * a process-local default is not a certification boundary. */
   def pushChangeArtifacts(artifacts: List[Artifact]): Either[String, PartialApplication] =
-    val causal = artifacts.filter(a => a.kind == ArtifactKind.ChangeSet).flatMap(a => CausalChange.fromArtifact(a).toOption)
-    if causal.isEmpty then Left("change transfer contains no causal changes")
-    else
-      artifacts.foreach(putArt)
-      pushChanges(causal)
+    Left("certified causal replication requires a resolved application")
+
+  private enum CertificationFailure:
+    case Incomplete(missing: Set[Digest])
+    case Invalid(message: String)
+
+  private def certifyIncoming(
+      causal: CausalChange, application: ResolvedApplication, staged: Map[Digest, Artifact],
+      repository: NativeRepository,
+  ): Either[CertificationFailure, (CausalReplayEvidence, CausalContextEvidence, CertifiedCausalChange)] =
+    def artifact(digest: Digest): Either[CertificationFailure, Artifact] =
+      staged.get(digest).orElse(getByDigest(digest).toOption)
+        .toRight(CertificationFailure.Incomplete(Set(digest)))
+    def invalid[A](message: String): Either[CertificationFailure, A] = Left(CertificationFailure.Invalid(message))
+    val runtimeE = application.runtimes.values.find(_.digest == causal.runtime)
+      .toRight(CertificationFailure.Invalid(s"causal change ${causal.id.short} selects an unresolved runtime"))
+    for
+      runtime <- runtimeE
+      implementation <- application.implementations.find(_.component == MachineComponent.ChangeProgramInterpreter)
+        .toRight(CertificationFailure.Invalid("application has no certified change-program interpreter"))
+      baseArtifact <- artifact(causal.base)
+      _ <- Either.cond(baseArtifact.kind == ArtifactKind.Ir, (), CertificationFailure.Invalid("causal base is not a module artifact"))
+      resultArtifact <- artifact(causal.result)
+      _ <- Either.cond(resultArtifact.kind == ArtifactKind.Ir, (), CertificationFailure.Invalid("causal result is not a module artifact"))
+      base <- scala.util.Try(Module.fromCanon(baseArtifact.body)).toEither.left
+        .map(e => CertificationFailure.Invalid(s"invalid causal base module: ${e.getMessage}"))
+      result <- scala.util.Try(Module.fromCanon(resultArtifact.body)).toEither.left
+        .map(e => CertificationFailure.Invalid(s"invalid causal result module: ${e.getMessage}"))
+      _ <- Either.cond(base.digest == causal.base && result.digest == causal.result, (),
+        CertificationFailure.Invalid("causal base/result digest claim mismatch"))
+      vcsArtifact <- artifact(causal.change)
+      _ <- Either.cond(vcsArtifact.kind == ArtifactKind.ChangeSet, (), CertificationFailure.Invalid("causal change is not a ValidatedChangeSet artifact"))
+      claim <- scala.util.Try(Delta.ValidatedChangeSet.decodeClaim(vcsArtifact.body)).toEither.left
+        .map(e => CertificationFailure.Invalid(s"invalid ValidatedChangeSet: ${e.getMessage}"))
+      vcs <- Delta.ValidatedChangeSet.check(runtime.language, runtime.changeModel, base, claim)
+        .left.map(CertificationFailure.Invalid(_))
+      _ <- Either.cond(vcs.result == causal.result && vcs.base == causal.base, (),
+        CertificationFailure.Invalid("replayed change does not match causal base/result"))
+      trace <- ChangeAlgebra.accessTrace(runtime.language, base, vcs.change, runtime.changeModel)
+        .left.map(r => CertificationFailure.Invalid(r.render))
+      accesses = trace.accesses.map(_.location).toSet
+      declared = causal.context.map(_.location).toSet
+      _ <- Either.cond(accesses == declared, (), CertificationFailure.Invalid("causal semantic context differs from replayed access trace"))
+      _ <- Either.cond(causal.context.forall(_.providers.subsetOf(causal.dependencies)), (),
+        CertificationFailure.Invalid("causal context providers are outside explicit dependencies"))
+      _ <- causal.resolves.fold[Either[CertificationFailure, Unit]](Right(())) { conflict =>
+        repository.conflicts.get(conflict) match
+          case None => invalid(s"causal resolution names unknown conflict ${conflict.short}")
+          case Some(value) => Either.cond(value.causes.subsetOf(causal.dependencies), (),
+            CertificationFailure.Invalid("causal resolution is not dependent on every conflict cause")) }
+      acceptanceDigest <- causal.acceptanceEvidence.toRight(
+        CertificationFailure.Invalid("causal change does not name acceptance evidence"))
+      acceptanceArtifact <- artifact(acceptanceDigest)
+      _ <- Either.cond(acceptanceArtifact.kind == ArtifactKind.AcceptanceEvidence, (),
+        CertificationFailure.Invalid("causal acceptance evidence has wrong artifact kind"))
+      acceptance <- AcceptanceEvidence.fromCanon(acceptanceArtifact.body).left.map(CertificationFailure.Invalid(_))
+      certificateArtifacts <- acceptance.certificates.foldLeft[Either[CertificationFailure, List[Artifact]]](Right(Nil)) {
+        (acc, digest) => for xs <- acc; a <- artifact(digest) yield xs :+ a }
+      facts = AcceptanceFacts(acceptance.domainAgreement,
+        certificateArtifacts.map(a => CertificateFact(a.digest, a.kind, None)), acceptance.authorities.toSet,
+        acceptance.migration, acceptance.publicationRequested)
+      policy = AcceptancePolicy.gated(runtime.moduleGate(d => application.languages.values.find(_.language.digest == d).map(_.language)))
+      _ <- AcceptanceEvidence.verifyComplete(runtime, base, Some(vcs), policy, facts, result, acceptance)
+        .left.map(CertificationFailure.Invalid(_))
+      traceCanon = Canon.CList(trace.accesses.map(a => Canon.cmap("mode" -> Canon.CStr(a.mode.toString),
+        "location" -> a.location.canon)))
+      replay = CausalReplayEvidence(application.machine.digest, implementation.artifact.digest,
+        runtime.digest, causal.change, causal.base, causal.result, Digest.of(traceCanon))
+      context = CausalContextEvidence(causal.id, accesses, causal.context)
+      certified = CertifiedCausalChange(causal.id, runtime.digest, replay.artifact.digest,
+        acceptanceDigest, context.artifact.digest)
+    yield (replay, context, certified)
+
+  /** Re-certify every resident graph node from CAS roots. Pending nodes are
+    * intentionally excluded until their artifact/causal requirements arrive. */
+  def verifyNativeRepository(application: ResolvedApplication): Either[String, Digest] = for
+    repository <- nativeRepository
+    digest <- repository.verifyFromRoots { causal =>
+        certifyIncoming(causal, application, Map.empty, repository).left.map {
+          case CertificationFailure.Incomplete(missing) =>
+            s"repository change ${causal.id.short} is incomplete: ${missing.map(_.short).toList.sorted.mkString(",")}"
+          case CertificationFailure.Invalid(message) => message
+        }.map(_ => ()) }
+  yield digest
 
   private[runtime] def recordNativeConflict(
       target: String, branches: List[String], conflict: cairn.core.Merge.Conflict,
@@ -332,7 +470,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         case Some(runtime) => nativeRepository.flatMap { repo =>
           val dependencies = repo.heads.getOrElse(branch, Set.empty)
           val context = contextLocations.toList.sortBy(_.render).map(ContextDependency(_, dependencies))
-          val change = CausalChange(vcsKey.valueHash, dependencies, context, vcs.base, vcs.result, runtime, resolves)
+          val change = CausalChange(vcsKey.valueHash, dependencies, context, vcs.base, vcs.result, runtime,
+            resolves, acceptanceEvidence)
           val added = resolves match
             case Some(_) => repo.addResolution(change)
             case None    => repo.add(change)
@@ -455,6 +594,14 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
               Digest.parse(hex).foreach(d => getByDigest(d).flatMap(NativeRepository.fromArtifact).foreach { repo =>
                 repo.gcRoots.foreach(roots += _)
               })
+            else if name == "repository.certifications" then
+              refsRead(p).linesIterator.foreach { line =>
+                val text = line.trim
+                Digest.parse(text).foreach { digest =>
+                  roots += digest
+                  getByDigest(digest).flatMap(ArtifactDependencies.direct).foreach(_.foreach(roots += _))
+                }
+              }
             else if !name.contains('.') then
               val hex = refsRead(p).trim
               addHex(hex)

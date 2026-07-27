@@ -26,6 +26,7 @@ final case class CausalChange(
     result: Digest,
     runtime: Digest,
     resolves: Option[Digest] = None,
+    acceptanceEvidence: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "change" -> Canon.CStr(change.hex),
@@ -35,25 +36,31 @@ final case class CausalChange(
     "result" -> Canon.CStr(result.hex),
     "runtime" -> Canon.CStr(runtime.hex),
     "resolves" -> resolves.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d =>
+      Canon.CTag("some", Canon.CStr(d.hex))),
+    "acceptanceEvidence" -> acceptanceEvidence.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d =>
       Canon.CTag("some", Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("causal-change", canon))
   def id: Digest = artifact.digest
 
 object CausalChange:
-  def fromArtifact(a: Artifact): Either[String, CausalChange] = a.body match
-    case Canon.CTag("causal-change", c) =>
-      try
-        val context = c.field("context").asList.foldLeft[Either[String, List[ContextDependency]]](Right(Nil)) {
-          (acc, raw) => for xs <- acc; x <- ContextDependency.fromCanon(raw) yield xs :+ x }
-        context.map(ctx => CausalChange(
-          Digest(c.field("change").asStr),
-          c.field("dependencies").asList.map(x => Digest(x.asStr)).toSet,
-          ctx, Digest(c.field("base").asStr), Digest(c.field("result").asStr),
-          Digest(c.field("runtime").asStr), c.field("resolves") match
-            case Canon.CTag("some", Canon.CStr(d)) => Some(Digest(d))
-            case _ => None))
-      catch case e: Exception => Left(s"invalid causal change: ${e.getMessage}")
-    case _ => Left("expected causal-change artifact")
+  def fromArtifact(a: Artifact): Either[String, CausalChange] =
+    if a.kind != ArtifactKind.ChangeSet then Left("causal-change artifact has wrong kind")
+    else a.body match
+      case Canon.CTag("causal-change", c) =>
+        try
+          val context = c.field("context").asList.foldLeft[Either[String, List[ContextDependency]]](Right(Nil)) {
+            (acc, raw) => for xs <- acc; x <- ContextDependency.fromCanon(raw) yield xs :+ x }
+          context.map(ctx => CausalChange(
+            Digest(c.field("change").asStr),
+            c.field("dependencies").asList.map(x => Digest(x.asStr)).toSet,
+            ctx, Digest(c.field("base").asStr), Digest(c.field("result").asStr),
+            Digest(c.field("runtime").asStr), c.field("resolves") match
+              case Canon.CTag("some", Canon.CStr(d)) => Some(Digest(d))
+              case _ => None,
+            c.asMap.get("acceptanceEvidence").flatMap {
+              case Canon.CTag("some", Canon.CStr(d)) => Some(Digest(d)); case _ => None }))
+        catch case e: Exception => Left(s"invalid causal change: ${e.getMessage}")
+      case _ => Left("expected causal-change artifact")
 
 final case class RepositoryConflict(
     conflict: Digest,
@@ -84,6 +91,7 @@ final case class PartialApplication(
     applied: List[Digest],
     pending: Set[Digest],
     missing: Set[Digest],
+    rejected: Map[Digest, String] = Map.empty,
 )
 
 /** The one native change graph. Branches are named views over head sets;
@@ -127,6 +135,13 @@ final case class NativeRepository(
       val knownOrOffered = readyGraph.changes.keySet ++ blocked.keySet
       val missing = blocked.values.flatMap(requirements).toSet -- knownOrOffered
       Right(readyGraph.copy(pending = blocked) -> PartialApplication(applied, blocked.keySet, missing))
+
+  /** Retain semantically plausible envelopes whose artifact closure is not
+    * complete yet. They cannot become resident through this path. */
+  def retainPending(incoming: List[CausalChange]): Either[String, NativeRepository] =
+    val duplicates = incoming.map(_.id).filter(id => changes.contains(id) || pending.contains(id))
+    if duplicates.nonEmpty then Left(s"pending transfer duplicates ${duplicates.map(_.short).mkString(",")}")
+    else Right(copy(pending = pending ++ incoming.map(c => c.id -> c)))
 
   def recordConflict(value: RepositoryConflict): Either[String, NativeRepository] =
     if value.causes.size < 2 then Left("repository conflict must retain at least two causal changes")
@@ -172,10 +187,29 @@ final case class NativeRepository(
           else order(todo -- ready, emitted ++ ready, out ++ ready.map(changes))
       Right(order(wanted, Set.empty, Nil))
 
+  /** Full graph verification hook. Core checks causal/conflict topology from
+    * roots; the runtime callback independently certifies each semantic node
+    * against its installed artifact closure. */
+  def verifyFromRoots(certify: CausalChange => Either[String, Unit]): Either[String, Digest] = for
+    _ <- changes.values.toList.sortBy(_.id.hex).foldLeft[Either[String, Unit]](Right(())) {
+      (acc, change) => acc.flatMap(_ => validateReady(change, changes.keySet)).flatMap(_ => certify(change)) }
+    _ <- conflicts.values.foldLeft[Either[String, Unit]](Right(())) { (acc, conflict) => acc.flatMap { _ =>
+      for
+        _ <- Either.cond(conflict.causes.size >= 2 && conflict.causes.subsetOf(changes.keySet), (),
+          s"conflict ${conflict.conflict.short} has unavailable causes")
+        _ <- conflict.resolution.fold[Either[String, Unit]](Right(())) { resolution =>
+          changes.get(resolution).toRight(s"conflict ${conflict.conflict.short} has unavailable resolution")
+            .flatMap(c => Either.cond(c.resolves.contains(conflict.conflict) && conflict.causes.subsetOf(c.dependencies), (),
+              s"conflict ${conflict.conflict.short} has invalid resolution linkage")) }
+      yield () } }
+    _ <- heads.foldLeft[Either[String, Unit]](Right(())) { case (acc, (branch, selected)) =>
+      acc.flatMap(_ => Either.cond(selected.subsetOf(changes.keySet), (), s"branch '$branch' has unavailable heads")) }
+  yield digest
+
   /** CAS roots required by the causal graph, independent of branch-history lists. */
   def gcRoots: Set[Digest] =
-    changes.values.flatMap(c => List(c.change, c.base, c.result, c.runtime) ++ c.resolves.toList).toSet ++
-      pending.values.flatMap(c => List(c.change, c.base, c.result, c.runtime)).toSet ++
+    changes.values.flatMap(c => List(c.change, c.base, c.result, c.runtime) ++ c.resolves.toList ++ c.acceptanceEvidence).toSet ++
+      pending.values.flatMap(c => List(c.change, c.base, c.result, c.runtime) ++ c.acceptanceEvidence).toSet ++
       conflicts.values.flatMap(c => c.causes ++ Set(c.conflict) ++ c.resolution).toSet
 
   def canon: Canon = Canon.CTag("native-repository", Canon.cmap(
@@ -211,5 +245,8 @@ object NativeRepository:
             acc.flatMap(_ => repo.validateReady(x, repo.changes.keySet)))
           _ <- repo.heads.foldLeft[Either[String, Unit]](Right(()))((acc, row) =>
             acc.flatMap(_ => Either.cond(row._2.subsetOf(repo.changes.keySet), (), s"branch '${row._1}' has unknown heads")))
+          _ <- repo.conflicts.values.foldLeft[Either[String, Unit]](Right(()))((acc, conflict) =>
+            acc.flatMap(_ => Either.cond(conflict.causes.subsetOf(repo.changes.keySet), (),
+              s"conflict ${conflict.conflict.short} has unknown causes")))
         yield repo
       case _ => Left("expected native-repository body")

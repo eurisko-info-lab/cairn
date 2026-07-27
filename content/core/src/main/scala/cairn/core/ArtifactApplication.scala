@@ -68,6 +68,7 @@ object ArtifactDependencies:
     case ArtifactKind.GenericMachine => GenericMachine.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.InterpreterImplementation => InterpreterImplementation.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.InterpreterConformance => InterpreterConformance.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.CertifiedCausalChange => CertifiedCausalChange.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.Application => ApplicationManifest.fromArtifact(artifact).map(_.roots)
     case ArtifactKind.Language => scala.util.Try(
       artifact.body.field("fragments").asList.map(x => Digest(x.asStr))).toEither

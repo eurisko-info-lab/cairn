@@ -42,7 +42,8 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
   private val refs = BranchRefStore(cas, refsDir, ctx)
 
   export refs.{load, list, liveCasRoots, reclaimOrphanBlobs, recoverPendingAccepts,
-    nativeRepository, pullChanges, pushChanges, pullChangeArtifacts, pushChangeArtifacts}
+    nativeRepository, pullChanges, pushChanges, pullChangeArtifacts, pushChangeArtifacts,
+    verifyNativeRepository}
 
   /** Publication is governed by the same constitution that accepted the
     * current head; the raw ref-store publisher is never exported. */

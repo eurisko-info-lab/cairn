@@ -84,7 +84,7 @@ remaining gaps.
 | PR27 | Complete native Pijul-like repository | ✅ |
 | PR28 | Contract the remaining host TCB | ✅ |
 | PR29 | Certified generic machine and semantic equivalence | ✅ |
-| PR30 | Certified causal replication | ⬜ |
+| PR30 | Certified causal replication | ✅ |
 | PR31 | Atomic federation | ⬜ |
 | PR32 | Production Studio | ⬜ |
 | PR33 | Fidelity and backend depth | ⬜ |
@@ -188,6 +188,18 @@ Certify each incoming causal change before graph admission: resolve its
 `DomainRuntime`, replay the `ValidatedChangeSet`, verify base/result and
 semantic context, re-evaluate the acceptance constitution, and retain valid but
 incomplete changes as pending. The graph decoder must verify from roots.
+
+Implemented at `BranchRefStore.pushChangeArtifacts`: transfers are staged
+before CAS/graph mutation and require a resolved application-selected certified
+machine. Each envelope now names its acceptance evidence. The receiver reloads
+its runtime, base, result and VCS; replays ΔL through the canonical interpreter
+while binding the selected certified change-program implementation; recomputes semantic access/context; checks conflict-resolution
+causality; reconstructs acceptance facts; and reruns the complete constitution.
+It emits digest-bound replay, context, and `CertifiedCausalChange` artifacts.
+Valid nodes are admitted, incomplete nodes remain unpromotable pending state,
+and forged nodes are reported without graph admission. Transferred repository
+roots restore branch-head views only after their changes certify, and
+`verifyFromRoots`/`verifyNativeRepository` re-certify the entire resident graph.
 
 #### PR31 — Atomic federation
 

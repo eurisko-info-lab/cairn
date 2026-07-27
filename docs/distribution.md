@@ -80,6 +80,13 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
   `CAIRN_KEYSTORE_PLAINTEXT=1` (lab only).
 - **Divergence surfacing** (`Sync.compare`): `Same / Ahead / Behind /
   Diverged(atHeight, headA, headB)`.
+- **Certified causal replication**: change-centric network admission stages an
+  unordered payload, resolves the application-selected machine and
+  `DomainRuntime`, replays each `ValidatedChangeSet`, recomputes semantic
+  context, and re-evaluates acceptance before graph admission. Genuine missing
+  closures remain pending; forged claims are reported and excluded. A complete
+  transferred repository root restores the sender's graph digest only after
+  every resident change certifies.
 - **Light clients** (M35): Merkle inclusion proofs verify "published" and
   "head" membership against a state root without the full state.
 

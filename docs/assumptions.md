@@ -139,3 +139,9 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     Startup checks the full closure. `SemanticEquivalence` binds differential
     outcomes across optimized and native alternatives; Lean/HVM remain narrow
     envelopes rather than claims of whole-runtime compatibility.
+18. **Network graph admission is semantic.** Causal transfers require a
+    resolved application machine and explicit acceptance-evidence digest.
+    Validated changes are replayed, access/context and resolution links are
+    recomputed, and the full runtime constitution is re-evaluated. Incomplete
+    envelopes remain pending and cannot be promoted by structural dependency
+    arrival alone; rejected envelopes never enter resident graph state.

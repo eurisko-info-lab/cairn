@@ -78,6 +78,7 @@ enum ArtifactKind(val name: String):
   case InterpreterImplementation extends ArtifactKind("interpreter-implementation")
   case InterpreterConformance extends ArtifactKind("interpreter-conformance")
   case SemanticEquivalence extends ArtifactKind("semantic-equivalence")
+  case CertifiedCausalChange extends ArtifactKind("certified-causal-change")
   case ValidationModel extends ArtifactKind("validation-model")
   case Application extends ArtifactKind("application")
   case EcosystemBundle extends ArtifactKind("ecosystem-bundle")

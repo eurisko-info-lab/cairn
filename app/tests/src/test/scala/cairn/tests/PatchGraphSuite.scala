@@ -4,7 +4,7 @@ import cairn.runtime.EffectContexts
 import cairn.core.*
 import cairn.examples.stlc.Stlc
 import cairn.kernel.{Canon, Cst, Digest}
-import cairn.runtime.{Branches, ConflictResolutionOutcome, WorkflowRunner}
+import cairn.runtime.{Branches, ConflictResolutionOutcome, WorkflowRunner, ResolvedApplication}
 import cairn.systemhandler.MemCas
 
 /** Patch DAG + bootstrap import + workflow runner (architecture priorities 4–6). */
@@ -147,7 +147,7 @@ class PatchGraphSuite extends munit.FunSuite:
     assert(graph.gcRoots.contains(child.change))
     assert(ArtifactDependencies.direct(graph.artifact).toOption.get.contains(root.change))
 
-  test("PR27 Branches persists governed commits as native graph heads"):
+  test("PR30 certified replication admits valid changes and quarantines incomplete or forged claims"):
     val capabilities = LanguageCapabilities.standard(lang)
     val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
     val runtime = ResolvedDomainRuntime.create(capabilities, constitution).fold(e => fail(e), identity)
@@ -174,9 +174,51 @@ class PatchGraphSuite extends munit.FunSuite:
     val payload = branches.pullChangeArtifacts("main", Set.empty).fold(e => fail(e), identity)
     val receiver = Branches(MemCas(), java.nio.file.Files.createTempDirectory("cairn-native-receiver"),
       EffectContexts.forBranches())
-    val imported = receiver.pushChangeArtifacts(payload).fold(e => fail(e), identity)
+    val declaredMachine = GenericMachine.declare(List(runtime.digest))
+    val implementations = declaredMachine.supportArtifacts.filter(_.kind == cairn.kernel.ArtifactKind.InterpreterImplementation)
+      .map(a => InterpreterImplementation.fromArtifact(a).toOption.get)
+    val grammar = cairn.kernel.Artifact(cairn.kernel.ArtifactKind.Grammar, cairn.kernel.GrammarSpec.toCanon(lang.grammar))
+    val appLanguage = ApplicationLanguage("stlc", lang.digest, grammar.digest,
+      capabilities.descriptor.digest, Some(runtime.digest))
+    val appManifest = ApplicationManifest("causal-receiver", declaredMachine.machine.digest, List(appLanguage), Nil)
+    val application = ResolvedApplication(appManifest.digest, appManifest, declaredMachine.machine,
+      implementations, Map("stlc" -> capabilities), Map.empty, Set.empty, Map("stlc" -> runtime))
+    val imported = receiver.pushChangeArtifacts(payload, application).fold(e => fail(e), identity)
     assertEquals(imported.applied, List(head))
     assertEquals(receiver.nativeRepository.toOption.get.changes.keySet, Set(head))
+    assertEquals(receiver.nativeRepository.toOption.get.digest, graph.digest)
+    assertEquals(receiver.verifyNativeRepository(application), Right(receiver.nativeRepository.toOption.get.digest))
+
+    // One unordered adversarial batch: a valid envelope is admitted, a
+    // semantically forged result is rejected, and a genuine but incomplete
+    // envelope remains pending until its named evidence arrives.
+    val original = graph.changes(head)
+    val forged = original.copy(result = original.base)
+    val wrongRuntime = original.copy(runtime = dig("forged-runtime"))
+    val wrongContext = original.copy(context = Nil)
+    val malformed = cairn.kernel.Artifact(cairn.kernel.ArtifactKind.ChangeSet,
+      Canon.CTag("causal-change", Canon.cmap("malformed" -> Canon.CInt(1))))
+    val acceptance = payload.find(_.digest == original.acceptanceEvidence.get).get
+    val alternateAcceptance = cairn.kernel.Artifact(cairn.kernel.ArtifactKind.AcceptanceEvidence,
+      Canon.cmap((acceptance.body.asMap.toList :+ ("transportVariant" -> Canon.CStr("pending")))*))
+    val incomplete = original.copy(acceptanceEvidence = Some(alternateAcceptance.digest))
+    val adversarialReceiver = Branches(MemCas(), java.nio.file.Files.createTempDirectory("cairn-native-adversarial"),
+      EffectContexts.forBranches())
+    val mixed = scala.util.Random(29).shuffle(payload ++ List(
+      forged.artifact, wrongRuntime.artifact, wrongContext.artifact, malformed, incomplete.artifact))
+      .filterNot(_.digest == alternateAcceptance.digest).toList
+    val first = adversarialReceiver.pushChangeArtifacts(mixed, application).fold(e => fail(e), identity)
+    assert(first.applied.contains(original.id))
+    assert(first.rejected.contains(forged.id))
+    assert(first.rejected.contains(wrongRuntime.id))
+    assert(first.rejected.contains(wrongContext.id))
+    assert(first.rejected.contains(malformed.digest))
+    assert(first.pending.contains(incomplete.id))
+    assert(first.missing.contains(alternateAcceptance.digest))
+    val completed = adversarialReceiver.pushChangeArtifacts(
+      List(incomplete.artifact, alternateAcceptance), application).fold(e => fail(e), identity)
+    assert(completed.applied.contains(incomplete.id))
+    assert(!completed.pending.contains(incomplete.id))
 
   test("PR27 Branches preserves conflicts in graph state and resolves them as dependent changes"):
     val capabilities = LanguageCapabilities.standard(lang)
