@@ -69,6 +69,14 @@ object ArtifactDependencies:
     case ArtifactKind.InterpreterImplementation => InterpreterImplementation.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.InterpreterConformance => InterpreterConformance.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.CertifiedCausalChange => CertifiedCausalChange.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.FederationCommit => FederationCommit.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.ReplicatedGcEpoch => ReplicatedGcEpoch.fromArtifact(artifact).map(e =>
+      e.roots.toList.sortBy(_.hex) ++ e.previous)
+    case ArtifactKind.FederationState => FederationState.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.FederationTransition => FederationTransition.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.RepositoryIndex => RepositoryIndex.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.ApplicationIndex => ApplicationIndex.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.NamespaceIndex => NamespaceIndex.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.Application => ApplicationManifest.fromArtifact(artifact).map(_.roots)
     case ArtifactKind.Language => scala.util.Try(
       artifact.body.field("fragments").asList.map(x => Digest(x.asStr))).toEither

@@ -79,10 +79,18 @@ enum ArtifactKind(val name: String):
   case InterpreterConformance extends ArtifactKind("interpreter-conformance")
   case SemanticEquivalence extends ArtifactKind("semantic-equivalence")
   case CertifiedCausalChange extends ArtifactKind("certified-causal-change")
+  case FederationCommit extends ArtifactKind("federation-commit")
+  case ReplicatedGcEpoch extends ArtifactKind("replicated-gc-epoch")
   case ValidationModel extends ArtifactKind("validation-model")
   case Application extends ArtifactKind("application")
   case EcosystemBundle extends ArtifactKind("ecosystem-bundle")
   case AuditReport extends ArtifactKind("audit-report")
+  case FederationState extends ArtifactKind("federation-state")
+  case FederationTransition extends ArtifactKind("federation-transition")
+  case RepositoryIndex extends ArtifactKind("repository-index")
+  case ApplicationIndex extends ArtifactKind("application-index")
+  case NamespaceIndex extends ArtifactKind("namespace-index")
+  case EquivocationEvidence extends ArtifactKind("equivocation-evidence")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =
