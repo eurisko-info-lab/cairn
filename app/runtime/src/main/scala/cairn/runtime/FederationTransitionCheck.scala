@@ -27,6 +27,39 @@ final case class VerifiedFederationTransition private (
 
 object VerifiedFederationTransition:
 
+  private def decodeIndices(state: FederationState, cas: Cas): Either[String, (RepositoryIndex, ApplicationIndex, NamespaceIndex)] =
+    for
+      repoArtifact <- cas.getByDigest(state.repository)
+      repo <- RepositoryIndex.fromArtifact(repoArtifact)
+      appArtifact <- cas.getByDigest(state.applications)
+      app <- ApplicationIndex.fromArtifact(appArtifact)
+      nsArtifact <- cas.getByDigest(state.namespaces)
+      ns <- NamespaceIndex.fromArtifact(nsArtifact)
+    yield (repo, app, ns)
+
+  /** A changed entry must trace to exactly one commit for that namespace
+    * (whose own field matches the new entry); an untouched namespace's entry
+    * must be byte-identical before/after — no other mechanism may move a
+    * [[RepositoryIndex]]/[[ApplicationIndex]] entry. (`NamespaceIndex`
+    * entries may ALSO move via pure namespace-trust rotation with no backing
+    * commit at all — that path is checked separately, not here.)
+    */
+  private def diffCommitBackedIndex(
+      label: String, before: Map[String, Digest], after: Map[String, Digest],
+      commitsByNamespace: Map[String, FederationCommit], project: FederationCommit => Digest,
+  ): Either[String, Unit] =
+    (before.keySet ++ after.keySet).toList.foldLeft[Either[String, Unit]](Right(())) { (acc, ns) =>
+      acc.flatMap { _ =>
+        if before.get(ns) == after.get(ns) then Right(())
+        else commitsByNamespace.get(ns) match
+          case None =>
+            Left(s"federation transition: $label entry for namespace '$ns' changed without an authorizing commit")
+          case Some(c) =>
+            Either.cond(after.get(ns).contains(project(c)), (),
+              s"federation transition: $label entry for namespace '$ns' does not match its authorizing commit")
+      }
+    }
+
   /** `federationId` is the fixed chain identity (external context, not
     * itself part of [[FederationState]]); `activeManifest` is decoded from
     * `after.trustRoots`, not `before` — confirmed against
@@ -64,4 +97,19 @@ object VerifiedFederationTransition:
       activeManifest <- ReplicaSetManifest.fromCanon(trustArtifact.body)
       _ <- FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(
         finality, activeManifest, federationId, before.digest, after.digest)
+      _ <- Either.cond(commits.map(_.namespace).distinct.length == commits.length, (),
+        "federation transition: two commits in the same transition target the same namespace")
+      commitsByNamespace = commits.map(c => c.namespace -> c).toMap
+      beforeIndices <- decodeIndices(before, cas)
+      afterIndices <- decodeIndices(after, cas)
+      (repoBefore, appBefore, _) = beforeIndices
+      (repoAfter, appAfter, nsAfter) = afterIndices
+      _ <- diffCommitBackedIndex("repository", repoBefore.namespaces, repoAfter.namespaces, commitsByNamespace, _.repositoryGraph)
+      _ <- diffCommitBackedIndex("application", appBefore.releases, appAfter.releases, commitsByNamespace, _.application)
+      _ <- commits.foldLeft[Either[String, Unit]](Right(())) { (acc, c) =>
+        acc.flatMap { _ =>
+          Either.cond(nsAfter.manifests.get(c.namespace).contains(c.namespaceTrust), (),
+            s"federation transition: commit for namespace '${c.namespace}' does not cite its own governing trust manifest")
+        }
+      }
     yield VerifiedFederationTransition(transition, before, after, commits, finality)
