@@ -37,9 +37,9 @@ class FederationProposalSuite extends munit.FunSuite:
     val malformed = Artifact(ArtifactKind.FederationProposal, Canon.CStr("not-a-proposal"))
     assert(FederationFinality.FederationProposal.fromArtifact(malformed).isLeft)
 
-  test("valueOfProposal commits to the proposal's own digest, not just 'after'"):
-    val v1 = FederationFinality.valueOfProposal(proposal)
-    val v2 = FederationFinality.valueOfProposal(proposal)
-    assertEquals(v1.digest, v2.digest)
-    val sameAfterDifferentEpoch = proposal.copy(epoch = 99L)
-    assert(FederationFinality.valueOfProposal(sameAfterDifferentEpoch).digest != v1.digest)
+  test("fromCanon round-trips the bare canon body (no artifact envelope)"):
+    val back = FederationFinality.FederationProposal.fromCanon(proposal.canon).fold(e => fail(e), identity)
+    assertEquals(back, proposal)
+
+  test("fromCanon rejects a canon value that isn't a federation-proposal-v1 body"):
+    assert(FederationFinality.FederationProposal.fromCanon(Canon.CStr("not-a-proposal")).isLeft)
