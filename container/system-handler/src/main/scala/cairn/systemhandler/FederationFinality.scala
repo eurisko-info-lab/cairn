@@ -261,6 +261,63 @@ object FederationFinality:
           "federation finality: certificate subject is not the claimed state")
       yield ()
 
+  /** PR33.1 slice 4: proof that a certificate's quorum seals genuinely bind
+    * THIS proposal AND that every convenience projection on the certificate
+    * (`transition`/`stateDigest`/`previousState`/`epoch`/`replicaSet`/
+    * `federationId` — none of which the Commit seals are themselves over,
+    * see [[FederationFinalityCertificate]]'s doc comment) matches the
+    * signed proposal's real fields. Constructible only via
+    * [[verifyCertificateForProposal]] — any consumer holding one may use
+    * the certificate's projections as verified facts about the proposal.
+    */
+  final case class VerifiedProposalCertificate private[FederationFinality] (
+      certificate: FederationFinalityCertificate,
+      proposal: FederationProposal,
+  )
+
+  /** The one shared cert↔proposal verifier every consuming path must go
+    * through before using a certificate's projected fields (advancing a
+    * cursor, reclaiming GC space, replaying history): checks the quorum
+    * seals are over exactly `proposal.digest`, then cross-checks every
+    * unsigned projection against the proposal's actual contents. Without
+    * the projection checks, a certificate carrying valid seals for the
+    * right proposal but doctored `stateDigest`/`transition`/`previousState`
+    * fields could advance a consumer to a state the quorum never approved.
+    */
+  def verifyCertificateForProposal(
+      certificate: FederationFinalityCertificate,
+      proposal: FederationProposal,
+      authorities: Map[String, Vector[Byte]],
+      expectedReplicaSet: Digest,
+  ): Either[String, VerifiedProposalCertificate] =
+    for
+      _ <- Either.cond(certificate.proposal == proposal.digest, (),
+        s"federation finality: certificate names proposal ${certificate.proposal.short}, not ${proposal.digest.short}")
+      _ <- FederationFinalityCertificate.verify(certificate, authorities, expectedReplicaSet)
+      _ <- Either.cond(certificate.transition == proposal.transition, (),
+        "federation finality: certificate transition projection does not match the signed proposal")
+      _ <- Either.cond(certificate.stateDigest == proposal.after, (),
+        "federation finality: certificate state projection does not match the signed proposal's after-state")
+      _ <- Either.cond(certificate.previousState == proposal.before, (),
+        "federation finality: certificate previousState projection does not match the signed proposal's before-state")
+      _ <- Either.cond(certificate.epoch == proposal.epoch, (),
+        "federation finality: certificate epoch projection does not match the signed proposal")
+      _ <- Either.cond(certificate.replicaSet == proposal.replicaSet, (),
+        "federation finality: certificate replicaSet projection does not match the signed proposal")
+      _ <- Either.cond(certificate.federationId == proposal.federationId, (),
+        "federation finality: certificate federationId projection does not match the signed proposal")
+    yield VerifiedProposalCertificate(certificate, proposal)
+
+  /** [[verifyCertificateForProposal]] against a sealed [[ReplicaSetManifest]]. */
+  def verifyCertificateForProposal(
+      certificate: FederationFinalityCertificate,
+      proposal: FederationProposal,
+      manifest: ReplicaSetManifest,
+  ): Either[String, VerifiedProposalCertificate] =
+    ReplicaSetManifest.verifySeals(manifest, Ed25519.verify).flatMap { _ =>
+      verifyCertificateForProposal(certificate, proposal, manifest.authorities, manifest.replicaSetDigest)
+    }
+
   /** PR33 slice 8: TEST-ONLY local orchestration — every replica's state
     * machine runs synchronously in this one process/call, given every
     * replica's PRIVATE key directly in `replicas`. Real BFT safety requires
@@ -573,14 +630,18 @@ object FederationFinality:
   def fetchViewStatus(baseUrl: String): Either[String, FederationViewStatus] =
     BftFinality.httpGet(s"$baseUrl/federation/status").flatMap(body => Canon.decode(body).flatMap(FederationViewStatus.fromCanon))
 
-  /** Slice 6: asks a peer for the [[FederationProposal]] whose `after`
-    * field equals `stateDigest` — the only handle a replica missing this
-    * closure has, since the PrePrepare's `Value` never carries the
-    * proposal's own artifact digest. Backed by `FederationReplica.knownProposal`
-    * via the `/federation/proposal/<hex>` endpoint.
+  /** Slice 6: asks a peer for the [[FederationProposal]] with this exact
+    * artifact digest (PR33.1 — the same digest a `PrePrepare`'s `Value`
+    * embeds and a certificate's `proposal` field names). Backed by
+    * `FederationReplica.knownProposal` via the `/federation/proposal/<hex>`
+    * endpoint. Never trusts the peer: confirms the served proposal really
+    * hashes to the requested digest before returning it.
     */
-  def fetchProposal(baseUrl: String, stateDigest: Digest): Either[String, FederationProposal] =
-    BftFinality.httpGet(s"$baseUrl/federation/proposal/${stateDigest.hex}").flatMap(body => Canon.decode(body).flatMap(FederationProposal.fromCanon))
+  def fetchProposal(baseUrl: String, proposalDigest: Digest): Either[String, FederationProposal] =
+    BftFinality.httpGet(s"$baseUrl/federation/proposal/${proposalDigest.hex}")
+      .flatMap(body => Canon.decode(body).flatMap(FederationProposal.fromCanon))
+      .flatMap(p => Either.cond(p.digest == proposalDigest, p,
+        s"federation: peer served proposal ${p.digest.short} for requested ${proposalDigest.short}"))
 
   /** Unlike [[BftFinality.fanoutQuorum]] (which returns — and CANCELS every
     * still-pending request — the instant `q` requests succeed), this waits
@@ -672,10 +733,11 @@ object FederationFinality:
         verified.filter(_.view >= targetView).map(_.replica.id).distinct.length >= q
       finally exec.shutdownNow()
 
-  /** Polls replica URLs for a certificate matching this exact proposal
-    * (state digest AND epoch, since a state digest alone could coincide
-    * across generations), verifying each candidate before it can win the
-    * race — mirrors [[BftFinality]]'s private `pollCert`.
+  /** Polls replica URLs for a certificate binding this exact proposal —
+    * matched by `cert.proposal` (the digest every Commit seal is actually
+    * over), never by state-digest/epoch projections — and fully verified
+    * via [[verifyCertificateForProposal]] before it can win the race —
+    * mirrors [[BftFinality]]'s private `pollCert`.
     */
   private def pollCert(
       replicaUrls: Map[String, String], proposal: FederationProposal, polls: Int, pollSleepMs: Long,
@@ -694,9 +756,9 @@ object FederationFinality:
             exec.execute(() =>
               try
                 fetchCerts(url).toOption.toList.flatten
-                  .find(c => c.stateDigest == proposal.after && c.epoch == proposal.epoch)
+                  .find(c => c.proposal == proposal.digest)
                   .foreach { c =>
-                    if FederationFinalityCertificate.verify(c, authorities, expectedReplicaSet).isRight then
+                    if verifyCertificateForProposal(c, proposal, authorities, expectedReplicaSet).isRight then
                       found.compareAndSet(null, c)
                       done.countDown()
                   }

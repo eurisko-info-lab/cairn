@@ -104,8 +104,21 @@ object FederationGc:
           after <- FederationState.fromArtifact(afterArtifact)
           beforeNsDigests <- namespaceTrustDigests(before, cas)
           afterNsDigests <- namespaceTrustDigests(after, cas)
+          // PR33.1: history replay (`VerifiedFederationTransition.verify`)
+          // independently fetches the certified PROPOSAL by digest to check
+          // the certificate's projections against it — the proposal is
+          // referenced only from inside the certificate's own body (never
+          // from `transition.dependencies`), so it must be retained
+          // explicitly or replay-after-GC would lose its verification input.
+          proposalDigests <- transition.finality match
+            case None => Right(Set.empty[Digest])
+            case Some(fd) =>
+              for
+                certArtifact <- cas.getByDigest(fd)
+                cert <- FederationFinality.FederationFinalityCertificate.fromCanon(certArtifact.body)
+              yield Set(cert.proposal)
         yield xs + transition.digest ++ transition.dependencies ++ before.dependencies ++ after.dependencies ++
-          beforeNsDigests ++ afterNsDigests
+          beforeNsDigests ++ afterNsDigests ++ proposalDigests
       }
     yield roots
 
@@ -141,10 +154,17 @@ object FederationGc:
       node: Node,
   ): Either[String, CasAdmin.GcReport] =
     for
-      _ <- FederationFinality.FederationFinalityCertificate.verify(certificate, activeManifest)
       _ <- Either.cond(certificate.federationId == federationId, (), "federation gc: certificate federation id mismatch")
       _ <- Either.cond(certificate.stateDigest == latestFinalized.digest, (),
         "federation gc: certificate does not finalize the candidate epoch's state")
+      // Shared cert↔proposal verifier (PR33.1 slice 4): `certificate.stateDigest`
+      // above decides what content SURVIVES reclamation, so it must be a
+      // verified projection of the signed proposal — not a raw certificate
+      // field checked only for quorum seals. The proposal artifact is always
+      // CAS-resident for a published generation (publishWithCert persists it).
+      proposalArtifact <- cas.getByDigest(certificate.proposal)
+      proposal <- FederationFinality.FederationProposal.fromArtifact(proposalArtifact)
+      _ <- FederationFinality.verifyCertificateForProposal(certificate, proposal, activeManifest)
       epochArtifact <- cas.getByDigest(latestFinalized.gcEpoch)
       epoch <- ReplicatedGcEpoch.fromArtifact(epochArtifact)
       currentClosure <- ArtifactApplicationResolver(cas).audit(latestFinalized.digest)

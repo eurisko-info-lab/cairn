@@ -550,7 +550,11 @@ final class FederationReplica private (
           if commits.map(_._1.id).distinct.length >= quorumSize(n) then
             val cert = FederationFinality.FederationFinalityCertificate(proposal.digest, proposal.transition,
               proposal.after, view, seq, commits, setDigest, proposal.epoch, proposal.before, proposal.federationId)
-            if FederationFinality.FederationFinalityCertificate.verify(cert, manifest).isRight then
+            // Same shared cert↔proposal verifier the adoption/network paths
+            // use — trivially satisfied here (the projections were just built
+            // from this very proposal) but keeps every certificate this
+            // replica ever exposes provably projection-consistent.
+            if FederationFinality.verifyCertificateForProposal(cert, proposal, manifest).isRight then
               certificates = certificates :+ cert
               cursor.advancedBy(cert).foreach(next => cursor = next)
 
@@ -597,9 +601,13 @@ final class FederationReplica private (
       already.getOrElse {
         val result =
           for
-            _ <- Either.cond(certificate.proposal == proposal.digest, (),
-              "federation: certificate does not name this proposal")
-            _ <- FederationFinality.FederationFinalityCertificate.verify(certificate, manifest)
+            // Shared cert↔proposal verifier (PR33.1 slice 4): quorum seals
+            // bind exactly `proposal.digest`, AND every unsigned convenience
+            // projection (`stateDigest`/`transition`/`previousState`/`epoch`/
+            // `replicaSet`/`federationId`) matches the signed proposal's real
+            // fields — required BEFORE `cursor.advancedBy(certificate)` below
+            // may consume those projections to advance the cursor.
+            _ <- FederationFinality.verifyCertificateForProposal(certificate, proposal, manifest)
             _ <- Either.cond(proposal.federationId == federationId, (), "federation: proposal federationId mismatch")
             _ <- Either.cond(proposal.replicaSet == setDigest, (), "federation: proposal replicaSet mismatch")
             _ <- Either.cond(cursor.extendedBy(proposal), (),

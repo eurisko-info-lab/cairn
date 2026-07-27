@@ -294,6 +294,11 @@ final class FederationTransactionCoordinator(
       _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
       cert <- mintCert(proposal)
+      // Both CASes, like the proposal and transition: history replay and
+      // finalized GC (PR33.1) dereference the certificate artifact to reach
+      // the proposal digest its quorum actually signed, so it must be
+      // resolvable wherever the transition itself is.
+      _ = source.put(cert.artifact)
       _ = node.cas.put(cert.artifact)
       transition = preCertTransition.copy(finality = Some(cert.digest))
       _ <- VerifiedFederationTransition.verify(transition, priorState, newState, transactions, cert, federationId, source)

@@ -90,18 +90,32 @@ class FederationNetworkSuite extends munit.FunSuite:
       assertEquals(FederationFinality.FederationFinalityCertificate.verify(cert2, manifest), Right(()))
     finally https.foreach(_.stop())
 
-  /** A real, PR30-deep-certifiable single-namespace round (mirrors
-    * `FederationReplicaVerificationSuite`'s own fixture shape) plus the
-    * proposal naming it. Returns the round-specific artifacts separately
-    * from the rest so a test can withhold exactly those from one replica's
-    * CAS — standing in for "a replica that has genesis but is missing
-    * everything from this round" — while every other supporting artifact
-    * (language/machine/grammar/evidence/etc., which every replica already
-    * shares) is present everywhere.
+  /** A real, PR30-deep-certifiable single-namespace federation history —
+    * TWO sequential generations (mirrors `FederationReplicaVerificationSuite`'s
+    * own fixture shape) plus the proposals naming them. Returns each
+    * round's artifacts separately from the shared supporting set so a test
+    * can withhold exactly one round's closure from one replica's CAS —
+    * standing in for "a replica that has genesis but is missing everything
+    * from this round" — while every other supporting artifact (language/
+    * machine/grammar/evidence/etc., which every replica already shares) is
+    * present everywhere.
     */
+  private final case class DeepRounds(
+      shared: List[Artifact],
+      round1: List[Artifact],
+      proposal1: FederationFinality.FederationProposal,
+      round2: List[Artifact],
+      proposal2: FederationFinality.FederationProposal,
+      genesisState: FederationState,
+      state1: FederationState,
+      state2: FederationState,
+      transition1: FederationTransition,
+      transition2: FederationTransition,
+  )
+
   private def deepFixture(
       federationId: Digest, replicaSetDigest: Digest,
-  ): (List[Artifact], List[Artifact], FederationFinality.FederationProposal) =
+  ): DeepRounds =
     val lang = Stlc.language
     val dl = Delta.deltaOf(lang).toOption.get
     val m0 = Module(List("a" -> Stlc.tru))
@@ -152,7 +166,34 @@ class FederationNetworkSuite extends munit.FunSuite:
     val roundSpecific = List(commit.artifact, state1.artifact, transition.artifact).distinctBy(_.digest)
     val proposal = FederationFinality.FederationProposal(
       federationId, transition.digest, genesisState.digest, state1.digest, epoch = 1L, replicaSetDigest)
-    (shared, roundSpecific, proposal)
+
+    // -- Generation 2: a second real change on the same namespace,
+    //    extending state1 exactly the way generation 1 extended genesis. --
+    val change2 = Parser.parse(dl.grammar, "{ add extra = true ; add second = false ; }").fold(e => fail(e), identity)
+    val (result2, vcs2) = Delta.apply(lang, m0, change2).fold(e => fail(e), identity)
+    val evidence2 = AcceptanceEvidence(lang.digest, m0.digest, Some(vcs2.artifact.digest), result2.digest,
+      AcceptancePolicy.open.digest, "", capabilities.changeModel.digest, constitution = Some(constitution.digest),
+      runtime = Some(runtime.digest))
+    val trace2 = ChangeAlgebra.accessTrace(lang, m0, vcs2.change, capabilities.changeModel).fold(e => fail(e.toString), identity)
+    val context2 = trace2.accesses.map(a => ContextDependency(a.location, Set.empty))
+    val causal2 = CausalChange(vcs2.artifact.digest, Set.empty, context2, m0.digest, result2.digest, runtime.digest,
+      acceptanceEvidence = Some(evidence2.digest))
+    val graph2 = NativeRepository(changes = Map(causal2.id -> causal2), heads = Map("main" -> Set(causal2.id)))
+    val branchView2 = BranchManifest("main", None, Nil, acceptanceEvidence = Some(evidence2.digest),
+      domainRuntime = Some(runtime.digest), repositoryGraph = Some(graph2.digest))
+    val epoch2 = ReplicatedGcEpoch(2,
+      graph2.gcRoots ++ Set(graph2.digest, appManifest.digest, trustManifest.digest, release.digest), Some(nextEpoch.digest))
+    val commit2 = FederationCommit("org-fetch", "main", graph2.digest, branchView2.artifact.digest, evidence2.digest,
+      runtime.digest, appManifest.digest, release.digest, trustManifest.digest, epoch2.digest)
+    val repoIndex2 = RepositoryIndex(Map("org-fetch" -> graph2.digest))
+    val state2 = FederationState(ledgerStandIn.digest, repoIndex2.digest, appIndex.digest, nsIndex.digest,
+      replicaSetDigest, epoch2.digest)
+    val transition2 = FederationTransition(state1.digest, List(commit2.digest), state2.digest, List(trustManifest.digest), None)
+    val round2 = List(vcs2.artifact, result2.artifact, evidence2.artifact, graph2.artifact, branchView2.artifact,
+      epoch2.artifact, repoIndex2.artifact, commit2.artifact, state2.artifact, transition2.artifact).distinctBy(_.digest)
+    val proposal2 = FederationFinality.FederationProposal(
+      federationId, transition2.digest, state1.digest, state2.digest, epoch = 2L, replicaSetDigest)
+    DeepRounds(shared, roundSpecific, proposal, round2, proposal2, genesisState, state1, state2, transition, transition2)
 
   test("a replica missing this round's closure catches up via /blob/<hex> and independently mints a matching certificate"):
     val auth = Keypair.dev("federation-network-fetch-auth")
@@ -161,7 +202,8 @@ class FederationNetworkSuite extends munit.FunSuite:
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val ids = manifest.ids
     val federationId = Digest.of(Canon.CStr("federation-network-fetch-federation"))
-    val (shared, roundSpecific, proposal) = deepFixture(federationId, manifest.replicaSetDigest)
+    val rounds = deepFixture(federationId, manifest.replicaSetDigest)
+    val (shared, roundSpecific, proposal) = (rounds.shared, rounds.round1, rounds.proposal1)
     val catchingUp = "r3"
     val homes = ids.map(id => id -> java.nio.file.Files.createTempDirectory(s"cairn-federation-fetch-$id")).toMap
     val nodes = homes.map { (id, home) =>

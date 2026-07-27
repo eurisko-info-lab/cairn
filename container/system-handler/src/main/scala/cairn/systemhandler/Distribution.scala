@@ -25,6 +25,34 @@ final class HttpNode(
   private var server: HttpServer | Null = null
   private var executor: java.util.concurrent.ExecutorService | Null = null
 
+  /** Verified federation peer base URLs from the peer registry: only peers
+    * whose registered key matches the replica-set manifest's authority for
+    * that name AND whose URL binding self-verifies, minus this replica
+    * itself. Same filter the federation fan-out paths apply.
+    */
+  private def federationPeerUrls(replica: FederationReplica): List[String] =
+    peersRoot.toList
+      .flatMap(root => PeerRegistry.load(root).toOption.toList.flatMap(_.replicas))
+      .filter { peer =>
+        replica.authorities.get(peer.name).contains(peer.publicKey.getOrElse(Vector.empty)) &&
+          PeerRegistry.Peer.verifyBinding(peer).isRight
+      }
+      .filterNot(_.name == replica.keypair.name)
+      .map(_.baseUrl)
+
+  /** PR33.1 slice 4: catch this node's federation replica up with its
+    * peers' finalized history — [[FederationSync.synchronizeFinality]]
+    * against the registry's verified peers. Run after startup/reconnect and
+    * periodically from [[GossipDaemon]]; the `/federation/msg` handler also
+    * triggers it inline when a message names an epoch beyond the local
+    * cursor. `Right(None)` when this node hosts no federation replica.
+    */
+  def synchronizeFederationFinality(maxGenerations: Int = 64): Either[String, Option[FederationSync.SyncResult]] =
+    federation match
+      case None => Right(None)
+      case Some(replica) =>
+        FederationSync.synchronizeFinality(replica, node, federationPeerUrls(replica), maxGenerations).map(Some(_))
+
   def start(port: Int = 0): Int =
     val s = HttpServer.create(InetSocketAddress(port), 0)
     val pool = java.util.concurrent.Executors.newCachedThreadPool()
@@ -144,32 +172,15 @@ final class HttpNode(
           Canon.decode(readBody(ex)).flatMap(BftFinality.SignedMsg.fromCanon) match
             case Left(e) => reply(ex, 400, e.getBytes)
             case Right(sm) =>
-              def peerUrls: List[String] =
-                peersRoot.toList.flatMap(replicaPeers).filterNot(_.name == replica.keypair.name).map(_.baseUrl)
-              // A digest reported missing could be a real CAS blob (the
-              // transition/state/commit artifacts `FederationReplicaVerification`
-              // checks) or a proposal this replica never received over
-              // `/federation/propose` (keyed by state digest, since that's
-              // the only handle available) — try both; an unrecognized 404
-              // for the wrong kind is harmless.
-              def tryFetch(digest: Digest): Boolean =
-                val urls = peerUrls
-                val gotProposal = urls.exists { url =>
-                  FederationFinality.fetchProposal(url, digest) match
-                    case Right(p) if p.after == digest => replica.learnProposal(p); true
-                    case _ => false
-                }
-                val gotBlob = urls.exists { url =>
-                  BftFinality.httpGet(s"$url/blob/${digest.hex}") match
-                    case Right(bytes) if Digest.ofBytes(bytes) == digest => node.cas.putBytes(bytes); true
-                    case _ => false
-                }
-                gotProposal || gotBlob
+              def peerUrls: List[String] = federationPeerUrls(replica)
               // Bounded, not a single fixed retry: recovering the proposal
               // (this replica missed the broadcast) and recovering deep CAS
               // closure (verified only once the proposal itself is known)
               // surface as two SEPARATE MissingClosure rounds from `receive`,
               // so one request can need more than one fetch-and-retry pass.
+              // A missing digest could be a real CAS blob or a proposal this
+              // replica never received — `FederationSync.fetchMissing` tries
+              // both, verifying whatever the peer serves.
               def attempt(remaining: Int): Either[String, List[BftFinality.SignedMsg]] =
                 replica.receive(sm) match
                   case Right(out) => Right(out)
@@ -178,8 +189,17 @@ final class HttpNode(
                     else
                       FederationReplica.missingClosureDigests(e) match
                         case Some(digests) if digests.nonEmpty =>
-                          if digests.toList.map(tryFetch).exists(identity) then attempt(remaining - 1) else Left(e)
-                        case _ => Left(e)
+                          if digests.toList.map(FederationSync.fetchMissing(_, peerUrls, replica, node)).exists(identity)
+                          then attempt(remaining - 1) else Left(e)
+                        case _ =>
+                          // PR33.1 slice 4: a message whose proposal doesn't
+                          // extend the local finalized cursor usually means
+                          // this replica missed one or more finalized
+                          // generations — adopt them from peers, then retry.
+                          if e.contains("does not extend finalized cursor") &&
+                              FederationSync.synchronizeFinality(replica, node, peerUrls).exists(_.adopted.nonEmpty)
+                          then attempt(remaining - 1)
+                          else Left(e)
               attempt(4) match
                 case Left(e) => reply(ex, 400, e.getBytes)
                 case Right(out) =>
@@ -221,7 +241,7 @@ final class HttpNode(
         val hex = ex.getRequestURI.getPath.stripPrefix("/federation/proposal/")
         Digest.parse(hex).toOption.flatMap(replica.knownProposal) match
           case Some(proposal) => reply(ex, 200, Canon.encode(proposal.canon))
-          case None            => reply(ex, 404, s"no known proposal for state $hex".getBytes))
+          case None            => reply(ex, 404, s"no known proposal $hex".getBytes))
       s.createContext("/federation/status", ex =>
         reply(ex, 200, Canon.encode(replica.viewStatus.canon)))
       s.createContext("/federation/view-change", ex =>

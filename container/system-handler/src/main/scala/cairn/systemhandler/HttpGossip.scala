@@ -131,13 +131,20 @@ object HttpGossip:
       PeerRegistry.save(localRoot, merged).map(_ => merged)
     }
 
-/** Timed multi-peer gossip daemon: runs [[HttpGossip.round]] on an interval. */
+/** Timed multi-peer gossip daemon: runs [[HttpGossip.round]] on an interval.
+  * When this process also hosts a [[FederationReplica]], each tick first
+  * runs [[FederationSync.synchronizeFinality]] against the registry's
+  * verified replica peers — the periodic leg of PR33.1's network-driven
+  * certificate adoption (startup/reconnect and the `/federation/msg`
+  * behind-cursor path are the event-driven legs).
+  */
 final class GossipDaemon(
     localName: String,
     local: Node,
     peersRoot: java.nio.file.Path,
     authorities: Map[String, Vector[Byte]],
     intervalMs: Long = 2000L,
+    federation: Option[FederationReplica] = None,
 ):
   private val scheduler = Executors.newSingleThreadScheduledExecutor { r =>
     val t = new Thread(r, s"cairn-gossip-$localName")
@@ -152,6 +159,19 @@ final class GossipDaemon(
   def last: HttpGossip.RoundReport = lastReport.get()
 
   def tick(): HttpGossip.RoundReport =
+    val federationSyncErrors = federation.toList.flatMap { replica =>
+      val peerUrls = PeerRegistry.load(peersRoot).toOption.toList
+        .flatMap(_.replicas)
+        .filter { peer =>
+          replica.authorities.get(peer.name).contains(peer.publicKey.getOrElse(Vector.empty)) &&
+            PeerRegistry.Peer.verifyBinding(peer).isRight
+        }
+        .filterNot(_.name == replica.keypair.name)
+        .map(_.baseUrl)
+      FederationSync.synchronizeFinality(replica, local, peerUrls) match
+        case Right(_) => Nil
+        case Left(e)  => List(s"federation sync: $e")
+    }
     val report = for
       _ <- BftFinality.resumeFollowerAdoption(peersRoot, local, authorities)
       directory <- PeerRegistry.load(peersRoot)
@@ -160,8 +180,8 @@ final class GossipDaemon(
       localName, local, directory.gossipPeers, authorities,
       checkpoint = checkpoint, checkpointHome = Some(peersRoot))
     val completed = report match
-      case Right(value) => value
-      case Left(e) => HttpGossip.RoundReport(Nil, Nil, List(e))
+      case Right(value) => value.copy(errors = federationSyncErrors ++ value.errors)
+      case Left(e) => HttpGossip.RoundReport(Nil, Nil, federationSyncErrors :+ e)
     lastReport.set(completed)
     completed
 

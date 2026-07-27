@@ -162,6 +162,36 @@ class FederationReplicaSuite extends munit.FunSuite:
     assertEquals(r.finalizedCursor.epoch, 2L, "cursor must not roll back")
     assertEquals(r.finalityCerts.map(_.epoch).sorted, List(1L, 2L))
 
+  test("adoption rejects a quorum-sealed certificate whose unsigned projections were doctored"):
+    // PR33.1 slice 4: the quorum signs only the proposal DIGEST; the
+    // certificate's transition/stateDigest/previousState/epoch fields are
+    // unsigned conveniences. A certificate carrying perfectly valid seals
+    // but tampered projections must never be adoptable — every projection
+    // is re-checked against the signed proposal's actual content.
+    val nodes = buildReplicas()
+    val late = replicas.last.name
+    val live = nodes.filterNot(_._1 == late)
+    val proposal = sampleProposal(epoch = 1L)
+    dispatch(live, proposal, live(replicas.head.name).propose(view = 0, proposal).fold(e => fail(e), identity))
+    val minted = live(replicas.head.name).finalityCerts.head
+    val bogus = Digest.of(Canon.CStr("doctored"))
+    val doctored = List(
+      "stateDigest" -> minted.copy(stateDigest = bogus),
+      "transition" -> minted.copy(transition = bogus),
+      "previousState" -> minted.copy(previousState = bogus),
+      "epoch" -> minted.copy(epoch = 7L),
+      "replicaSet" -> minted.copy(replicaSet = bogus),
+      "federationId" -> minted.copy(federationId = bogus))
+    doctored.foreach { (field, cert) =>
+      val result = nodes(late).adoptCertificate(cert, proposal)
+      assert(result.isLeft, s"doctored $field must be rejected: $result")
+      assertEquals(nodes(late).finalizedCursor.epoch, 0L, s"doctored $field must not advance the cursor")
+    }
+    // The undoctored certificate still adopts — proving the rejections
+    // above were the projection checks, not something else.
+    assertEquals(nodes(late).adoptCertificate(minted, proposal),
+      Right(FederationReplica.AdoptedGeneration(proposal.after, proposal.transition, 1L)))
+
   test("adopted certificate and cursor persist across restart"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-federation-replica-adopt")
     val stateStores = replicas.map(k => k.name -> dir.resolve(s"${k.name}-state.canon")).toMap

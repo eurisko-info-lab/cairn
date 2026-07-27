@@ -105,6 +105,11 @@ class FederationGcSuite extends munit.FunSuite:
     cas.put(state.artifact)
     val proposal = FederationFinality.FederationProposal(federationId, Digest.of(Canon.CStr("transition")),
       Digest.of(Canon.CStr("genesis")), state.digest, 1L, manifest.replicaSetDigest)
+    // reclaimAgainstFinalizedEpoch (PR33.1 slice 4) independently fetches
+    // the certified proposal by digest to verify the certificate's
+    // projections against it — so the fixture's proposal must be a real,
+    // CAS-resident artifact, exactly as publishWithCert persists it.
+    cas.put(proposal.artifact)
     val cert = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, manifest, view = 0, proposal)
       .fold(e => fail(e), identity)
 

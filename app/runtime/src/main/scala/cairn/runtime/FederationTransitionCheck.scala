@@ -242,13 +242,20 @@ object VerifiedFederationTransition:
       before: FederationState,
       after: FederationState,
       federationId: Digest,
+      activeManifest: ReplicaSetManifest,
       cas: Cas,
   ): Either[String, Unit] =
     for
       proposalArtifact <- cas.getByDigest(finality.proposal)
       proposal <- FederationFinality.FederationProposal.fromArtifact(proposalArtifact)
-      _ <- Either.cond(proposal.transition == finality.transition, (),
-        "federation transition: certified proposal's transition does not match the certificate's own projection")
+      // PR33.1 slice 4: the ONE shared cert↔proposal verifier — quorum seals
+      // bind exactly this proposal, and every unsigned certificate projection
+      // (`transition`/`stateDigest`/`previousState`/`epoch`/`replicaSet`/
+      // `federationId`) matches the signed proposal's real fields. The same
+      // check `FederationReplica.adoptCertificate`/`mintCertificateIfReady`
+      // and `FederationFinality`'s network `pollCert` run — no path consumes
+      // raw certificate projections after verifying only the proposal digest.
+      _ <- FederationFinality.verifyCertificateForProposal(finality, proposal, activeManifest)
       votedTransitionArtifact <- cas.getByDigest(proposal.transition)
       votedTransition <- FederationTransition.fromArtifact(votedTransitionArtifact)
       _ <- Either.cond(
@@ -259,10 +266,6 @@ object VerifiedFederationTransition:
         "federation transition: certified proposal's before-state does not match the supplied before-state")
       _ <- Either.cond(proposal.after == after.digest, (),
         "federation transition: certified proposal's after-state does not match the supplied after-state")
-      _ <- Either.cond(proposal.epoch == finality.epoch, (),
-        "federation transition: certified proposal's epoch does not match the certificate's own projection")
-      _ <- Either.cond(proposal.replicaSet == finality.replicaSet, (),
-        "federation transition: certified proposal's replicaSet does not match the certificate's own projection")
       _ <- Either.cond(proposal.federationId == federationId, (),
         "federation transition: certified proposal's federationId does not match the expected federation")
     yield ()
@@ -284,5 +287,5 @@ object VerifiedFederationTransition:
       activeManifest <- ReplicaSetManifest.fromCanon(trustArtifact.body)
       _ <- FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(
         finality, activeManifest, federationId, before.digest, after.digest)
-      _ <- verifyProposalBinding(finality, transition, before, after, federationId, cas)
+      _ <- verifyProposalBinding(finality, transition, before, after, federationId, activeManifest, cas)
     yield VerifiedFederationTransition(transition, before, after, commits, finality)
