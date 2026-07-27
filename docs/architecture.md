@@ -1,10 +1,32 @@
 # Architecture: trust and effect boundaries
 
+This is the detailed architecture reference. New readers should first read the
+[project overview](../README.md) and [core concepts](concepts.md).
+
 Present-tense source of truth for Cairn's container / content / app split
 (and, within that, the Kernel / Core / System / User / Runtime trust tiers),
 current test health, and parity against the summarized prior projects (§13
 of [CAIRN-PROMPT.md](../CAIRN-PROMPT.md)). This file describes what *is*,
 not the history of how it got here.
+
+## System lifecycle
+
+The module graph below supports one artifact-native lifecycle:
+
+```text
+Language Studio (ΔMeta / ΔGrammar)
+  → application manifest
+  → signed ecosystem release
+  → artifact-only installation
+  → generated Studio + durable ΔL workspace
+  → validation / proof / review / acceptance
+  → accepted branch, migration, and successor release
+```
+
+Release, accepted-branch, and proposal-workspace histories are separate. PR25's
+two-node ceremony closes this loop for Cairn's own Meta language without a
+host-supplied language, capability, migration, profile, or entry-point map; see
+[Self-hosting and hardening](self-hosting-and-hardening.md).
 
 ## Areas
 
@@ -378,7 +400,7 @@ LeanCore `#check` envelope.
   `EffectMeta` Fragment digests; families load as CAS-pinned
   `effect-interface` artifacts (`EffectMeta.PinnedInterface` /
   `ActionKey.fromPinned`). Bootstrap path: primordial Meta → load
-  `languages/effect-interface.cairn` → load each `effect-*` vocabulary +
+  `content/languages/effect-interface.cairn` → load each `effect-*` vocabulary +
   `iface.cairn` declaration module (`EffectBootstrap`) → derive actions /
   resources / pins. **No hand-maintained Action enum** — ActionKeys register
   from packs. Residual: `Effects.Family` thin JVM routing tag (ids ↔ packDecls)
@@ -386,16 +408,16 @@ LeanCore `#check` envelope.
 - **Replay sync** — `ReplayStore` snapshots publish/merge via CAS digests
   (issuer-scoped absorb). Revocation via `ReplayReplication` / `checkGrant`.
   Not multi-node consensus; `BftQuorum` is separate research/sim.
-- **SDS vs report formats** — SDS (`languages/sds.cairn`) is semantic only.
+- **SDS vs report formats** — SDS (`content/languages/sds.cairn`) is semantic only.
   JSON/XML/CSV/PDF are `sds-report` projection surfaces that *consume* SDS
   modules — not SDS constructors. Module path: `OutlineProjector` +
   `SectionReport.printSurface`; PDF bytes via `PdfMinimal`. Residual:
   `ChemicalDoc`→`toCst` emit/view path (disk chemicals are SoT).
 - **Dirty-subtree (M7)** — `dirtyOps` / `putReassociated`: structural equality
   + LCS delete alignment; inserts without an original span still parent-reprint.
-- **SDS workflow / evidence packs** — `languages/sds-workflow.cairn` +
+- **SDS workflow / evidence packs** — `content/languages/sds-workflow.cairn` +
   `causal.cairn` declare the author→…→publish sequence (`workflowStepOk` /
-  `workflowPhaseOk`) and `bind` handler ids. `languages/sds-certificate.cairn` +
+  `workflowPhaseOk`) and `bind` handler ids. `content/languages/sds-certificate.cairn` +
   `workflow-kinds.cairn` declare approval/sign/publication kinds
   (`certificateKindOk`). `SdsCausalWorkflow` plants `SdsDomainTree` then
   dispatches via `HandlerRegistry`. Forever-host: CAS/Branches/Ed25519/ledger
@@ -420,8 +442,9 @@ end via `sbt "examples/runMain cairn.examples.Main transcript transcripts/…"`.
 Charb YAML themes promote through [porcelain.md](porcelain.md) (`Plumbing` /
 `Porcelain` / `porcelain THEME ;`) when engines exist; otherwise they stay
 `deferred`. Exact Charb dispositions are pinned in
-`transcripts/charb/dispositions.tsv`. `emit-languages` regenerates the
-checked-in `.cairn` mirrors for `pki`/`law`/`sds`/`search`/`stlc`/`meta`;
+`transcripts/charb/dispositions.tsv`. `emit-languages` checks and
+format-preserves the checked-in runtime sources for
+`pki`/`law`/`sds`/`search`/`stlc`/`meta`;
 `git diff --exit-code content/languages/` must be clean after running it — CI enforces
 this (the language-sync check).
 
@@ -433,11 +456,11 @@ state, at the level that stays true across individual pack changes:
 
 | Source | Top-level capability | State |
 |---|---|---|
-| GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | Parity — Waves A–C, H1; `languages/meta.cairn` fixpoint |
-| GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | Parity — `languages/pki.cairn` + `PkiMax`/`DemoPki`/`PkiTutorial` |
+| GRANITE | Workbench: fragments, grammar-as-data, ΔL, CAS, meta bootstrap | Parity — Waves A–C, H1; `content/languages/meta.cairn` fixpoint |
+| GRANITE | PKI pack: registry, ΔPKI, chain validation, tutorial, ledger publish | Parity — `content/languages/pki.cairn` + `PkiMax`/`DemoPki`/`PkiTutorial` |
 | GRANITE | Sharing encryption (X25519 hybrid seal) | Parity — `system-handler.Encryption`; seal/open tests |
-| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `languages/sds.cairn` + `eu-clp` + `sds-report` + `sds-workflow`/`sds-certificate` packs; production report/JSON/XML/OOXML/PDF/SVG providers share canonical semantic results, evidence, migration, and source localization |
-| GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `languages/law.cairn` requires `cert`; `LawTutorial` |
+| GRANITE | SDS flagship spine: objects, ΔSDS, shadow, multilingual, sealing, tutorial, publish, causal workflow | Parity — `content/languages/sds.cairn` + `eu-clp` + `sds-report` + `sds-workflow`/`sds-certificate` packs; production report/JSON/XML/OOXML/PDF/SVG providers share canonical semantic results, evidence, migration, and source localization |
+| GRANITE | Law pack (PKI→Law→SDS) | Parity (thin) — `content/languages/law.cairn` requires `cert`; `LawTutorial` |
 | GRANITE | Computation / Bend profile | Parity — `AffineNet`/`IcNet`/`Bend` (GRANITE Bend is spec-only) |
 | GRANITE | SDS Studio UI / governed authoring workspace | Native Cairn implementation — grammar/profile-generated widgets, branch sessions, ΔSDS proposals, ΔConflict, migration, previews, and constitutional acceptance; trust administration remains separate |
 | GRANITE | Durable distributed workspaces | Native Cairn implementation — `WorkspaceDraft`, signed review/approval/handoff artifacts, immutable offline revision chains, restart-safe aliases, semantic rebase, and digest-verified CAS graph replication; process-local browser state is only a transport cache, never workspace identity |

@@ -15,7 +15,9 @@ step by step, in terms of the layers.
 
 STLC ships as five fragments — `base`, `types`, `lambda`, `booleans`, `typing` —
 each pure data: sorts, constructors (with binder positions), grammar alternatives,
-rewrite rules, judgment rules ([Stlc.scala](../app/examples/src/main/scala/cairn/examples/stlc/Stlc.scala)).
+rewrite rules, and judgment rules. The runtime source of truth is
+[stlc.cairn](../content/languages/stlc.cairn); Scala retains a bootstrap seed
+used by digest-fixpoint tests.
 
 `Compose.compose("stlc", fragments)` amalgamates them by pushout: shared identical
 definitions unify, same-name-different-definition is a structured `ComposeError`
@@ -72,10 +74,10 @@ fragments — `Meta.fragment` (composition IR: `language`/`fragment`/`sort`/
 top) and `Meta.grammarFragment` (the grammar-authoring vocabulary: `syntax`/
 `print`/`infix`/`tok`/`cat`/…) — each of which can describe and reconstruct
 itself, and which compose together (`meta requires grammar`) into the one
-bootstrap grammar that parses every `.cairn` file. `languages/meta.cairn`
-and `languages/grammar.cairn` each match their Scala seed digest-for-digest
+bootstrap grammar that parses every `.cairn` file. `content/languages/meta.cairn`
+and `content/languages/grammar.cairn` each match their Scala seed digest-for-digest
 ([docs/assumptions.md](assumptions.md) §11). Object languages split
-semantics vs surfaces under `languages/<name>/surfaces/`; meta itself is now
+semantics vs surfaces under `content/languages/<name>/surfaces/`; meta itself is now
 split the same way, into composition IR (`meta.cairn`) and grammar vocabulary
 (`grammar.cairn`) — the primordial meta-language/grammar-language pair.
 
@@ -114,8 +116,8 @@ STLC/meta `.cairn` files are runtime **source of truth** (loaded by
 `PackLoader`, same as exemplars); `emit-languages` format-preserves them
 against git HEAD.
 
-**Query / Policy (Core-facing lift):** `languages/query.cairn` +
-`languages/policy.cairn` with `surfaces/default.cairn` are runtime SoT
+**Query / Policy (Core-facing lift):** `content/languages/query.cairn` +
+`content/languages/policy.cairn` with `surfaces/default.cairn` are runtime SoT
 (digest-equal to Scala seeds in `core.Query` / `user.policy.PolicyLang`).
 `emit-languages` format-preserves them. Residuals: `Query.run` matching
 engine and ledger policy *enforcement* remain host.

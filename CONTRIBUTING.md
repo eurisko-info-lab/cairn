@@ -4,6 +4,8 @@ Cairn is developed under a fairly strict architectural discipline — most of
 what a contribution needs to respect is already written down. Read these
 first:
 
+- [docs/development.md](docs/development.md) — practical build, test, source
+  location, canonical-data, and common change recipes.
 - [CAIRN-PROMPT.md](CAIRN-PROMPT.md) — the project constitution: vision,
   vocabulary, module boundaries, phased roadmap, non-negotiable requirements.
 - [docs/architecture.md](docs/architecture.md) — the current, authoritative
@@ -45,7 +47,7 @@ first:
 ```bash
 sbt test                                            # full suite (100k fuzz corpus included)
 sbt "examples/runMain cairn.examples.Main digests"  # regenerate golden digests
-sbt "examples/runMain cairn.examples.Main emit-languages"  # re-derive content/languages/*.cairn from Scala seeds
+sbt "examples/runMain cairn.examples.Main emit-languages"  # validate/format-preserve checked-in language sources
 ```
 
 CI (`.github/workflows/ci.yml`) runs the full suite, a fat-jar smoke test, a
@@ -64,8 +66,9 @@ before opening a PR.
 3. Write commit messages that explain *why*, not just *what* — the codebase
    has a strong precedent for this; look at recent `git log` for the tone.
 4. If your change touches `content/languages/*.cairn`, run `emit-languages`
-   and commit the result — these files are meant to stay byte-identical to
-   what the Scala seeds (or pack grammar) would produce.
+   and inspect the result. Checked-in pack text is runtime source of truth;
+   bootstrap seeds exist only for the Meta/STLC/effect fixpoint paths that
+   explicitly test digest equality.
 
 ## Reporting bugs / requesting features
 

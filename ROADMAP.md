@@ -71,31 +71,25 @@ has been going pack-by-pack and mechanism-by-mechanism:
 
 ## What's next
 
-See [docs/assumptions.md](docs/assumptions.md) for the fuller list of
-documented gaps. The post-migration priority order (roughly
-dependency-ordered, chosen deliberately in that order):
+PR25 closes the foundational architecture programme. New work should now be
+driven by operational use and compatibility rather than another universal
+abstraction. See [docs/assumptions.md](docs/assumptions.md) for the precise
+remaining gaps.
 
-1. **Effect interfaces become Meta-defined** — typed rights/resource
-   vocabularies generated from a Cairn language, not hardcoded Kernel enums.
-2. **Replace ambient globals** (`PackAccess`, `AuthorityGate`) with explicit
-   runtime contexts and injected capabilities — no more implicit singletons.
-3. **Make all privileged handler paths capability-gated**; remove/quarantine
-   raw convenience entry points that bypass the gate.
-4. **Complete the authority calculus**: conditions, attenuation proofs,
-   delegation, expiry, nonces, replay protection, canonical artifacts.
-5. **Unify changes/commutation/merge/conflicts/branches** into one native
-   Pijul-like repository path — ΔL, ValidationModel, and ChangeCapability are
-   each independently pack-declared now, but not yet consolidated into a
-   single `DomainRuntime`-style identity, which was deliberately deferred
-   while those pieces were still individually moving.
-6. **Define precise agreement relations for Lean and HVM** before calling
-   their Cairn calculi "executable reference models" — currently more
-   aspirational than checked.
-7. **Docs pass last** — rewrite README/constitution sections around the
-   settled end state once 1–4 land, rather than describing an intermediate
-   one. This file and `docs/architecture.md` are kept current as work lands
-   in the meantime.
+Current directions:
 
-Bend remaining an envelope (Phase 8) is a separate, lower-priority item: the
-constitution itself gates a full implementation on interaction-net lowering
-being judged real, which hasn't been prioritized against the list above.
+1. **Cairn 1.0 discipline** — stabilize canonical formats and compatibility
+   policy, reproducible releases, recovery procedures, resource limits, and a
+   focused security review.
+2. **Real deployments** — deepen SDS, PKI/trust-registry, regulated-document,
+   collaborative language-development, and proof-oriented workflows using the
+   existing application/Studio substrate.
+3. **Alternative verification** — develop a Rust verifier and more precise
+   Lean models; expand cross-kernel replay and agreement evidence without
+   confusing it with proof.
+4. **Long-lived ecosystem operations** — mirroring, revocation, trust-root
+   rotation, compatibility discovery, and migration testing across old release
+   histories.
+5. **Selected semantic depth** — a fuller Bend implementation remains gated on
+   real interaction-net lowering; repository algebra can still move closer to
+   a native Pijul-like model where real workflows justify it.

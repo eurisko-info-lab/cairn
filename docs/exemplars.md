@@ -11,7 +11,7 @@ files under [content/languages/](../content/languages/) (same meta+grammar surfa
 **Purity invariant:** Domain apps (PKI, Law, SDS, and future packs such as
 loaner) are Cairn. Any domain-specific Scala is a failure of the platform —
 not an app feature. Statute/chemical fixtures load from disk via
-[[cairn.runtime.ModuleSource]] (e.g. `languages/law/acts/`). Forever-host
+[[cairn.runtime.ModuleSource]] (e.g. `content/languages/law/acts/`). Forever-host
 concerns (Ed25519, CAS, FS, ledger I/O) must be generic effects, never
 domain classes.
 
@@ -22,7 +22,7 @@ domain classes.
   `MultilingualResolve` for lang→en→any; `MultilingualRestale` for the generic
   stale-on-source-change algorithm (`PhraseStaleness`/`SectionFieldStaleness`
   supply state tags/projection only); `Sds.render`'s product-phrase document
-  view now loads `languages/sds-document.cairn` + its `default` surface via
+  view now loads `content/languages/sds-document.cairn` + its `default` surface via
   `PackLoader` — same pattern as `sds-report` — instead of a host `GrammarSpec`
   literal.
 - **Forever-host OK:** causal handler *bodies* (CAS/Branches/Ed25519/ledger),
@@ -30,7 +30,7 @@ domain classes.
   maps (`Acetone.pure`/`.thin`, `Ethanol.pure`/`.thin`) — scoped to
   `EmitChemicalCairn`'s one-shot fixture regeneration only; every other call
   site (tutorials, workflow, `SectionReport`, tests) loads the disk `.cairn`
-  under `languages/sds/chemicals/` via `ChemicalSource`, which stays SoT;
+  under `content/languages/sds/chemicals/` via `ChemicalSource`, which stays SoT;
   `Law.freeTextCiteCheck` — a named migration aid keeping the model statute's
   inline "Section N" prose consistent with its structured `cites` terms; the
   one fixture is prose *and* structure (not structured-only), so there is
@@ -50,9 +50,9 @@ on demand. It is **never materialized** as checked-in `.cairn` (no `dpki` /
 
 | Pack | File | Provides | Requires |
 |---|---|---|---|
-| PKI | `languages/pki.cairn` | `cert` | — |
-| Law | `languages/law.cairn` | `law` | `cert` |
-| SDS | `languages/sds.cairn` | `sds` | `law` (⇒ PKI) |
+| PKI | `content/languages/pki.cairn` | `cert` | — |
+| Law | `content/languages/law.cairn` | `law` | `cert` |
+| SDS | `content/languages/sds.cairn` | `sds` | `law` (⇒ PKI) |
 
 Compose of Law without PKI, or SDS without Law/PKI, fails. Closed SDS
 amalgamates demoted Law+PKI fragments (certs + statutes + SDS objects).
@@ -65,7 +65,7 @@ under `SDS` via `forkFrom` / `underSds`.
 
 ## PKI — on par with GRANITE top-level
 
-`languages/pki.cairn` + `user/pki` (pack façade) + `examples/pki` (Ed25519/chain glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
+`content/languages/pki.cairn` + `content/user/pki` (pack façade) + `app/examples/pki` (Ed25519/chain glue + `PkiMax` + `DemoPki` + `PkiTutorial`):
 
 - Registry object language: `cert` and optional soft `revocation` entries.
 - ΔPKI = generic free ΔL (`add` issues, `remove` hard-revokes; soft revoke =
@@ -84,17 +84,17 @@ under `SDS` via `forkFrom` / `underSds`.
 
 ## Law — middle link (PKI → Law → SDS)
 
-`languages/law.cairn` + `user/law` (pack façade) + `examples/law` (`LawTutorial`):
+`content/languages/law.cairn` + `content/user/law` (pack façade) + `app/examples/law` (`LawTutorial`):
 
 - Statute sections + `enactedBy` citing a PKI cert name as authority.
 - Structured `cites` + pack judgments `citeOk` / `enactedByOk` via `Search.prove`.
 - Free-text "Section N" scan is a migration aid (must match a `cites` term).
-- Model Chemical Safety Act: `languages/law/acts/model-chemical-safety.cairn` via `ModuleSource`.
+- Model Chemical Safety Act: `content/languages/law/acts/model-chemical-safety.cairn` via `ModuleSource`.
 - Full statute corpora / jurisdiction profiles still deferred (loaner will add `law-*-credit` packs).
 
-## SDS — on par with GRANITE flagship *spine* (not Studio)
+## SDS — complete Studio and production-surface vertical
 
-`languages/sds.cairn` + `examples/sds` (`Sds` glue + `CompositionSealing` +
+`content/languages/sds.cairn` + `app/examples/sds` (`Sds` glue + `CompositionSealing` +
 `PhraseStaleness` + `SectionNumbering` / `EuClp` + `Chemicals` /
 `ChemicalSource` + `SectionReport` + `SectionFieldStaleness` + `SdsTutorial` +
 `SdsCausalWorkflow`):
@@ -116,18 +116,19 @@ under `SDS` via `forkFrom` / `underSds`.
   over pure projection.
 - Section-field staleness (`SectionFieldStaleness`): same restale machine;
   EN rewrite derives ΔSDS with `sectionFieldState` marks. Industrial overrides
-  remain `sectionFieldShadow` (not Studio).
-- Regulatory profile: versioned `languages/eu-clp.cairn` + annex-II v1;
+  remain `sectionFieldShadow`; Studio edits them through semantic widgets and
+  ordinary ΔSDS proposals.
+- Regulatory profile: versioned `content/languages/eu-clp.cairn` + annex-II v1;
   `sectionNumberOk` / `sectionTitleOk` / `profileVersionOk`;
   `EuClp.conform` host orchestration over those Cairn judgments;
   `SectionNumbering` prefers the profile.
-- Chemical instances: `.cairn` under `languages/sds/chemicals/` (acetone /
+- Chemical instances: `.cairn` under `content/languages/sds/chemicals/` (acetone /
   ethanol full euSection + thin typed 1–16 subset) via `ChemicalSource`.
 - **Report projection (not SDS language):** `sds-report` pack under
-  `languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv` / `pdf`
+  `content/languages/sds-report*` — surfaces `default` / `json` / `xml` / `csv` / `pdf`
   *consume* SDS modules/outlines. `PdfMinimal` emits one-page PDF bytes.
   RoundTrip trust gate for text surfaces.
-- Causal workflow: `languages/sds-workflow.cairn` + `causal.cairn` (checked
+- Causal workflow: `content/languages/sds-workflow.cairn` + `causal.cairn` (checked
   sequence); host `SdsCausalWorkflow` plants `SdsDomainTree` then runs
   effectful Branches/ledger steps under SDS and attaches judgment-checked
   certificates (`sds-certificate` / `certificateKindOk`).
@@ -144,13 +145,21 @@ under `SDS` via `forkFrom` / `underSds`.
 sbt "examples/runMain cairn.examples.Main sds-tutorial"
 ```
 
-Remaining gaps vs GRANITE (Studio still deferred — no Studio UI in this slice):
-- Studio-persisted phrase corpus / authoring UI.
+The Studio vertical adds grammar-derived forms, FieldId/keyed navigation,
+multilingual phrase/shadow editing, proposal workspaces, inline validation,
+source/report previews, constitutional commits, semantic conflict resolution,
+migration assistance, and final evidence inspection. Production foreign
+providers cover JSON, XML, genuine XLSX/OOXML, report text, deterministic PDF,
+and image/SVG projection with provenance and source localization.
+
+Remaining SDS/application depth gaps:
+- richer deployed phrase-corpus operations and domain-specific Studio profile
+  polish beyond the tested Acetone workflow;
 - Effect-interface: `effect-interface` language + `iface.cairn` decls are
   runtime SoT (`EffectBootstrap`); ActionKeys from packs (**no Action enum**);
   `Family` thin routing + Fragment/`packDecls` cold-start seeds remain.
-- Production BFT / peer discovery (replay sync is digest-merge; `BftQuorum` is
-  research/sim only).
+- open-membership discovery and permissionless consensus; Cairn's live BFT is
+  authenticated configured-replica finality, not a public-chain protocol.
 - Multilingual: FR deepened + DE on ethanol + corpus `fieldLocaleRef`;
   lang-scoped shadows still absent (shadows are lang-blind).
 - Residual debt listed under **Host boundary** above — SDS/platform gate is
@@ -171,7 +180,7 @@ HVM2 books; live `hvm run` when on PATH. See [agreement.md](agreement.md).
 
 ## Unison Core — general-purpose hosted language, peer to STLC/MiniTT (§2c)
 
-`languages/unisoncore.cairn` + `examples/unison` (`UnisonCore` glue +
+`content/languages/unisoncore.cairn` + `app/examples/unison` (`UnisonCore` glue +
 `Unison` store/codebase). Was an "ideas pack" (α-invariant digests + name
 aliases + patch-as-ΔL over *borrowed* STLC terms); §2c/§5b's amendment
 sanctioned a real term language for that store, not a Unison fork — Unison
@@ -219,7 +228,7 @@ user-declarable ADTs/abilities.
 
 ## MiniTT — the formal-methods IR ladder's dependent-types rung (§8b)
 
-`languages/minitt.cairn` + `languages/minitt/surfaces/default.cairn` + `examples/minitt` (`MiniTT` glue). A minimal,
+`content/languages/minitt.cairn` + `content/languages/minitt/surfaces/default.cairn` + `app/examples/minitt` (`MiniTT` glue). A minimal,
 closed dependent type core — Π types, a 2-level non-cumulative universe
 hierarchy (`Type : Type1`, `Type1` itself untyped), and one hardcoded `Nat`
 inductive with a dependent-motive recursor — checked by the *same* generic
@@ -255,7 +264,7 @@ MiniTT doesn't yet use it). Identity types are LeanCore's, not this pack's.
 
 ## LeanCore — identity types and a checked-declaration environment (§2c amendment)
 
-`languages/leancore.cairn` + `examples/leancore` (`LeanCore` glue). The next
+`content/languages/leancore.cairn` + `app/examples/leancore` (`LeanCore` glue). The next
 rung: everything MiniTT has, plus `Eq`/`refl`/`subst` (identity types) and a
 minimal environment of checked declarations — §2c's "executable reference vs.
 optimized backend" amendment's Lean-kernel *fragment*, named as future work
@@ -312,7 +321,7 @@ open problem in mathematics) and undecidable by Cairn's kernel (a decidable
 syntactic term checker, §2b/L2, with no business in continuous complex
 analysis).
 
-`languages/riemann.cairn` + `languages/riemann/surfaces/default.cairn` is a small standalone (no `requires`) pack for
+`content/languages/riemann.cairn` + `content/languages/riemann/surfaces/default.cairn` is a small standalone (no `requires`) pack for
 analytic propositions (`Term`/`RExpr`/`Prop` sorts). `examples/riemann/Riemann.scala`
 builds the standard critical-strip formalization — "∀s, (ζ(s)=0 ∧ 0<Re(s)<1)
 → Re(s)=1/2" — as a `cairn.proof.Claim`, and projects it to Lean, referencing
@@ -329,7 +338,7 @@ the Haskell/Rust ports skipping when `runghc`/`cargo` are unavailable.
 
 ## Search — Fact–Intent–Hint board spine
 
-`languages/search.cairn` + `examples/search` (`Search` glue + `SearchTutorial`):
+`content/languages/search.cairn` + `app/examples/search` (`Search` glue + `SearchTutorial`):
 
 - Standalone pack (`provides search`, no `requires`) — not part of PKI→Law→SDS.
 - Sorts Fact / Intent / Hint / Edge / Board; ctors `origin`, `goal`, `fact`,

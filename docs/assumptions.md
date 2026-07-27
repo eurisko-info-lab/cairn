@@ -55,16 +55,16 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    deferred (`BftQuorum` is research/sim only).
    Effect interfaces pin as CAS `effect-interface` artifacts
    (`PinnedInterface` / `ActionKey.fromPinned`). Runtime SoT:
-   `languages/effect-interface.cairn` plus per-family vocabulary
-   (`languages/effect-*.cairn`) and declaration modules
-   (`languages/effect-*/iface.cairn`), loaded by `EffectBootstrap`.
+   `content/languages/effect-interface.cairn` plus per-family vocabulary
+   (`content/languages/effect-*.cairn`) and declaration modules
+   (`content/languages/effect-*/iface.cairn`), loaded by `EffectBootstrap`.
    **No hand-maintained Action enum** — ActionKeys from pack decls.
    Residual: `Effects.Family` thin JVM routing tag + cold-start Fragment /
    `packDecls` seeds (verified against disk). `EffectContext.capabilities`
    threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
    atomic transaction. SDS *uses* report projection pack `sds-report`
-   (text + JSON + XML + CSV + pdf surfaces under `languages/sds-report/surfaces/`);
+   (text + JSON + XML + CSV + pdf surfaces under `content/languages/sds-report/surfaces/`);
    print path is PackLoader + RoundTrip (`SectionReport.printSurface`);
    PDF bytes via `PdfMinimal`; `toCst` remains host projection. Causal workflow
    sequence and certificate kinds are Cairn packs (`sds-workflow`,
@@ -93,8 +93,8 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     split**: `core/Meta.scala` holds two composing fragments — `Meta.fragment`
     (composition IR) and `Meta.grammarFragment` (grammar productions, print
     rules, infix tables — the vocabulary every language's `syntax`/`print`/
-    `infix` declarations use); `languages/meta.cairn` and
-    `languages/grammar.cairn` each pass their own self-description fixpoint,
+    `infix` declarations use); `content/languages/meta.cairn` and
+    `content/languages/grammar.cairn` each pass their own self-description fixpoint,
     and `meta requires grammar` composes them into the one bootstrap grammar
     that parses every `.cairn` file — the primordial meta-language/
     grammar-language pair (§2b) is no longer deferred. **STLC/meta/grammar
@@ -103,8 +103,8 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     remain the bootstrap seeds (digest-equality / fixpoint tests).
     `emit-languages` format-preserves against git HEAD. **Surface-file split
     (Phase 2)** landed for stlc/search/pki/law/sds **and** Core-facing
-    `query` / `policy`: semantic `languages/<name>.cairn` +
-    `languages/<name>/surfaces/default.cairn`.
+    `query` / `policy`: semantic `content/languages/<name>.cairn` +
+    `content/languages/<name>/surfaces/default.cairn`.
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
     unisoncore) split the same way. Residuals: `Query.run` / policy

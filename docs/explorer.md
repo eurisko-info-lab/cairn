@@ -1,7 +1,8 @@
 # Cairn Explorer (Web UI)
 
-Local-first browser for a PoA node / CAS root: walk the chain, open
-transactions, and view **typed** artifacts with kind-specific surfaces.
+Local-first browser and semantic cockpit for a PoA node / CAS root. It combines
+typed artifact inspection, branch history, generated Studio proposals,
+conflict/migration assistance, evidence review, and trust consequences.
 
 ## Where is the data? (`CAIRN_HOME`)
 
@@ -46,11 +47,14 @@ sbt "examples/runMain cairn.examples.Main ui /path/to/store/nodeA 8765"
 | Board | Read-only Fact–Intent–Hint graph from a search IR module |
 | Trust | Capability revocation + delegation hops (`RevocationLog` / `DelegationLog`; CAS digest-merge — **not** BFT / Studio) |
 | Languages | Loaded packs; scratch editor with parse/print validate |
+| Studio | Branch-bound semantic navigation, staged ΔL proposals, validation, previews, conflicts, migrations, submission, and evidence |
 
 ## Typed viewers / editors
 
 Surfaces: **text** (grammar printer), **json** (Canon tree), **canon** (debug).
-Editor is propose-only (`POST /api/parse`) — no silent CAS/ledger writes.
+The scratch parser is propose-only. Studio staging produces ordinary ΔL and
+cannot mutate a module directly; governed submission flows through validation,
+the branch's `AcceptanceConstitution`, an accepted tip, and a branch transaction.
 
 ## Search board
 
@@ -71,11 +75,14 @@ sbt "examples/runMain cairn.examples.Main ui"   # Board tab
 `GET /api/trust/revocations`, `POST /api/trust/revoke`,
 `GET /api/trust/delegations`, `POST /api/trust/delegate`,
 `GET /api/blocks/{height|digest}`, `GET /api/artifacts/{digest}[/view]`,
-`POST /api/parse`. Static UI at `/` and `/ui/…`.
+`POST /api/parse`; `POST /api/studio/open|stage|collection|undo|mode|
+resolve-conflict|migrate|submit`; and `GET /api/studio/review/{id}` /
+`status/{id}`. Static UI at `/` and `/ui/…`.
 
 ### Trust tab
 
 Revocation publishes CAS `capability-revocation` digests via `RevocationLog`;
 delegation hops publish `capability-delegation` digests via `DelegationLog`.
 Both follow the `ReplayReplication` want/have shape — merge, not consensus.
-Studio product UI remains deferred.
+Trust administration stays outside Studio: Studio displays acceptance and trust
+consequences, while the Trust tab governs revocation and delegation.
