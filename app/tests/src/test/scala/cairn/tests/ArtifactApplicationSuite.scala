@@ -12,8 +12,9 @@ class ArtifactApplicationSuite extends munit.FunSuite:
   private val grammarArtifact = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar))
   private val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
   private val runtime = ResolvedDomainRuntime.create(capabilities, constitution).toOption.get
-  private val machine = GenericMachine.declare(List(runtime.digest),
+  private val declaredMachine = GenericMachine.declare(List(runtime.digest),
     Map("change" -> capabilities.change.semantics.digest))
+  private val machine = declaredMachine.machine
   private val manifest = ApplicationManifest("artifact-app", machine.digest, List(ApplicationLanguage(
     "stlc", language.digest, grammarArtifact.digest, capabilities.descriptor.digest, Some(runtime.digest))),
     List(ApplicationEntry("quicksort", QuickSort2.module.artifact.digest, ArtifactKind.RosettaDecl)))
@@ -23,8 +24,9 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     language.fragments.foreach(f => cas.put(f.artifact))
     List(language.artifact, grammarArtifact, capabilities.change.semantics.artifact,
       capabilities.change.surface.artifact, capabilities.descriptor.artifact,
-      constitution.artifact, runtime.descriptor.artifact, machine.artifact,
+      constitution.artifact, runtime.descriptor.artifact,
       QuickSort2.module.artifact, manifest.artifact).foreach(cas.put)
+    declaredMachine.installInto(cas.put)
     cas
 
   test("one root digest installs and resolves the entire application"):
@@ -35,6 +37,8 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     val app = resolver.resolve(manifest.digest).fold(e => fail(e), identity)
     assertEquals(app.manifest.name, "artifact-app")
     assertEquals(app.machine, machine)
+    assertEquals(app.implementations.map(_.component).toSet, MachineComponent.values.toSet)
+    assert(app.implementations.forall(_.bounds.validate.isRight))
     assertEquals(app.languages.keySet, Set("stlc"))
     assertEquals(app.languages("stlc").language.digest, language.digest)
     assertEquals(app.languages("stlc").descriptor, capabilities.descriptor)
@@ -51,13 +55,13 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     assert(capabilityDeps.contains(capabilities.change.surface.digest))
 
   test("generic machine is exactly six mechanisms and routes only artifact identities"):
-    assertEquals(machine.interpreters.map(_.component).toSet, MachineComponent.values.toSet)
+    assertEquals(machine.implementations.size, MachineComponent.values.length)
     assertEquals(machine.semanticProgram("change"), Right(capabilities.change.semantics.digest))
     assert(machine.semanticProgram("host-callback").isLeft)
     val routed = machine.copy(effectRoutes = Map("custom.effect" -> grammarArtifact.digest))
     assertEquals(routed.effectRoute("custom.effect"), Right(grammarArtifact.digest))
     assert(routed.effectRoute("undeclared.effect").isLeft)
-    assert(machine.copy(interpreters = machine.interpreters.tail).validate.isLeft)
+    assert(machine.copy(implementations = machine.implementations.tail).validate.isLeft)
 
   test("installation fails closed when a discovered dependency is absent"):
     val incomplete = MemCas()
@@ -66,6 +70,70 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     incomplete.put(manifest.artifact)
     assert(ArtifactApplicationResolver(MemCas()).install(manifest.digest, incomplete).isLeft)
     assert(ArtifactApplicationResolver(MemCas()).install(manifest.digest, origin).isRight)
+
+  test("a bare implementation digest cannot satisfy machine startup"):
+    val origin = source()
+    val missing = Digest.of(Canon.CStr("named-but-not-supplied-implementation"))
+    val badMachine = machine.copy(implementations = missing :: machine.implementations.tail)
+    origin.put(badMachine.artifact)
+    val badRoot = manifest.copy(machine = badMachine.digest)
+    origin.put(badRoot.artifact)
+    assert(ArtifactApplicationResolver(MemCas()).install(badRoot.digest, origin).isLeft)
+
+  test("conformance evidence and executable are recursively installed"):
+    val origin = source()
+    val installed = MemCas()
+    val resolver = ArtifactApplicationResolver(installed)
+    val graph = resolver.install(manifest.digest, origin).toOption.get
+    val selected = resolver.resolve(manifest.digest).toOption.get.implementations
+    selected.foreach { implementation =>
+      assert(graph.contains(implementation.artifact.digest))
+      assert(graph.contains(implementation.executable))
+      assert(graph.contains(implementation.conformance))
+      assert(graph.contains(implementation.conformanceSuite))
+    }
+
+  test("a second certified implementation set can replace the default machine"):
+    val alternative = GenericMachine.declare(List(runtime.digest),
+      Map("change" -> capabilities.change.semantics.digest), version = "alternate-machine-v1")
+    val root = manifest.copy(machine = alternative.machine.digest)
+    val origin = source()
+    alternative.installInto(origin.put)
+    origin.put(root.artifact)
+    val installed = MemCas()
+    val resolver = ArtifactApplicationResolver(installed)
+    resolver.install(root.digest, origin).fold(e => fail(e), identity)
+    val replaced = resolver.resolve(root.digest).fold(e => fail(e), identity)
+    assertEquals(replaced.languages.view.mapValues(_.language.digest).toMap,
+      Map("stlc" -> language.digest))
+    assertEquals(replaced.runtimes("stlc").digest, runtime.digest)
+    assertEquals(replaced.implementations.map(_.component).toSet, MachineComponent.values.toSet)
+    assertEquals(replaced.implementations.map(i => i.component -> i.interface).toMap,
+      declaredMachine.supportArtifacts.filter(_.kind == ArtifactKind.InterpreterImplementation)
+        .flatMap(a => InterpreterImplementation.fromArtifact(a).toOption)
+        .map(i => i.component -> i.interface).toMap)
+    assertNotEquals(replaced.machine.digest, machine.digest)
+
+  test("disagreeing conformance results fail startup after complete installation"):
+    val origin = source()
+    val selectedArtifact = declaredMachine.supportArtifacts.find(a =>
+      a.kind == ArtifactKind.InterpreterImplementation && a.digest == machine.implementations.head).get
+    val selected = InterpreterImplementation.fromArtifact(selectedArtifact).toOption.get
+    val badResults = ConformanceResults(List((selected.conformanceSuite,
+      Digest.of(Canon.CStr("reference")), Digest.of(Canon.CStr("candidate")))))
+    val oldEvidence = declaredMachine.supportArtifacts.find(_.digest == selected.conformance).get
+    val badEvidence = InterpreterConformance.fromArtifact(oldEvidence).toOption.get
+      .copy(results = badResults.artifact.digest)
+    val badImplementation = selected.copy(conformance = badEvidence.artifact.digest)
+    val badMachine = machine.copy(implementations =
+      (badImplementation.artifact.digest :: machine.implementations.tail).sortBy(_.hex))
+    List(badResults.artifact, badEvidence.artifact, badImplementation.artifact, badMachine.artifact).foreach(origin.put)
+    val badRoot = manifest.copy(machine = badMachine.digest)
+    origin.put(badRoot.artifact)
+    val installed = MemCas()
+    val resolver = ArtifactApplicationResolver(installed)
+    assert(resolver.install(badRoot.digest, origin).isRight)
+    assert(resolver.resolve(badRoot.digest).left.exists(_.contains("conformance corpus disagrees")))
 
   test("resolution rejects a capability bundle bound to another language"):
     val origin = source()

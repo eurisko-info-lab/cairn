@@ -176,7 +176,7 @@ honest self-ref boundary land in WaveESuite).
 
 Together with span-less concrete-syntax insertion and the remaining
 `ChemicalDoc` → `Cst` host projection, the fuller Bend/HVM path is tracked as
-[PR32 fidelity work](../ROADMAP.md#pr32--eliminate-fidelity-residuals), not a
+[PR33 fidelity work](../ROADMAP.md#pr33--fidelity-and-backend-depth), not a
 foundational architecture blocker.
 
 **Agreement envelope** (not full HVM compatibility): AffineNet/IcNet claim the

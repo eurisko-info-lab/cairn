@@ -10,11 +10,14 @@ class EcosystemSuite extends munit.FunSuite:
   private val alice = Keypair.dev("alice")
   private val bob = Keypair.dev("bob")
   private val bootstrap = Artifact(ArtifactKind.Fragment, Canon.CStr("ecosystem-bootstrap"))
-  private val machine = GenericMachine.declare(List(bootstrap.digest))
+  private val declaredMachine = GenericMachine.declare(List(bootstrap.digest))
+  private val machine = declaredMachine.machine
   private val app1 = ApplicationManifest("demo-1", machine.digest, Nil, Nil)
   private val app2 = ApplicationManifest("demo-2", machine.digest, Nil, Nil)
   private def putApplications(cas: cairn.systeminterface.Cas): Unit =
-    List(bootstrap, machine.artifact, app1.artifact, app2.artifact).foreach(cas.put)
+    cas.put(bootstrap)
+    declaredMachine.installInto(cas.put)
+    List(app1.artifact, app2.artifact).foreach(cas.put)
   private val lang1 = Digest.of(Canon.CStr("lang-1"))
   private val lang2 = Digest.of(Canon.CStr("lang-2"))
   private val lang3 = Digest.of(Canon.CStr("lang-3"))
@@ -96,5 +99,6 @@ class EcosystemSuite extends munit.FunSuite:
     origin.put(bundle.artifact)
     val replica = MemCas()
     val graph = EcosystemReplication.pull(bundle.digest, origin, replica).fold(e => fail(e), identity)
-    assertEquals(graph, Set(bundle.digest, app1.digest, machine.digest, bootstrap.digest))
+    assertEquals(graph, (declaredMachine.supportArtifacts.map(_.digest) ++
+      List(bundle.digest, app1.digest, machine.digest, bootstrap.digest)).toSet)
     assert(replica.contains(bundle.digest) && replica.contains(app1.digest))

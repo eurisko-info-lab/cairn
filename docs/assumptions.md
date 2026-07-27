@@ -25,7 +25,7 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    to parent reprint. Format-preserving ΔL `remove`/`rename` are supported.
    Default print rules are derived from
    syntax productions (`PrintDerive`); an explicit `print` line is an override.
-   RoundTrip still gates trust — derivation is not trusted alone. PR32 targets
+   RoundTrip still gates trust — derivation is not trusted alone. PR33 targets
    the remaining insertion/parent-reprint fidelity gap.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
    are name-reference sets via the language's variable constructor. Change
@@ -64,11 +64,11 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    `packDecls` seeds (verified against disk). `EffectContext.capabilities`
    threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
-   atomic transaction; PR30 owns transactional publication and replicated-GC
+   atomic transaction; PR31 owns transactional publication and replicated-GC
    safety. SDS *uses* report projection pack `sds-report`
    (text + JSON + XML + CSV + pdf surfaces under `content/languages/sds-report/surfaces/`);
    print path is PackLoader + RoundTrip (`SectionReport.printSurface`);
-   PDF bytes via `PdfMinimal`; `toCst` remains host projection (PR32). Causal workflow
+   PDF bytes via `PdfMinimal`; `toCst` remains host projection (PR33). Causal workflow
    sequence and certificate kinds are Cairn packs (`sds-workflow`,
    `sds-certificate`); Scala runs effectful Branches/Ed25519/ledger steps under
    authority. Formats are **not** SDS vocabulary.
@@ -82,7 +82,7 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    majority-quorum add/remove, round-robin sealing. BFT finality certificates
    (`BftFinality`) require **distinct** authenticated replicas (`2f+1`), bind a
    replica-set digest, and certify **replay-valid sealed PoA blocks** (not
-   arbitrary digests). Open-membership / public-ledger BFT remains out; PR30
+   arbitrary digests). Open-membership / public-ledger BFT remains out; PR31
    owns the next distributed hardening step.
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
@@ -119,9 +119,9 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental
-    edits or workspace folders. PR31 owns productionization.
+    edits or workspace folders. PR32 owns productionization.
 14. **Gossip** (M39) is an in-process simulation over real node stores; the
-    HTTP surface (M38) is the transport a daemon would use. PR30 owns
+    HTTP surface (M38) is the transport a daemon would use. PR31 owns
     authenticated discovery and consensus/transaction hardening beyond the
     current directory and configured-replica model.
 15. **Runtime selection is one constitution.** `DomainRuntime` binds the exact
@@ -133,7 +133,9 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     partial imports, resident conflicts and dependent resolutions, head views,
     transfer closure, and GC roots. `PatchGraph` and ordered branch histories
     remain compatibility paths for pre-PR27 repositories.
-17. **Optimization evidence is narrow.** `OptimizationEquivalence` currently
-    covers digest-keyed dependency discovery. PR29 generalizes the same
-    model/interpreter/input/result binding to parsers, printers, evaluation,
-    changes, merges, migrations, and native surface providers.
+17. **Machine implementations are installed artifacts.** Each of the six
+    selections recursively binds executable bytes, interface, version,
+    conformance corpus/evidence, compatibility rules, and resource bounds.
+    Startup checks the full closure. `SemanticEquivalence` binds differential
+    outcomes across optimized and native alternatives; Lean/HVM remain narrow
+    envelopes rather than claims of whole-runtime compatibility.

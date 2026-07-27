@@ -41,9 +41,10 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
     val installedLanguages = List(
       installLanguage(node, Meta.language, meta).copy(name = "meta"),
       installLanguage(node, Meta.grammarLanguage, grammar).copy(name = "grammar"))
-    val machine = GenericMachine.declare(installedLanguages.flatMap(_.runtime), Map(
+    val declaredMachine = GenericMachine.declare(installedLanguages.flatMap(_.runtime), Map(
       "meta" -> meta.descriptor.digest, "grammar" -> grammar.descriptor.digest))
-    node.cas.put(machine.artifact)
+    declaredMachine.installInto(node.cas.put)
+    val machine = declaredMachine.machine
     val manifest = ApplicationManifest("cairn", machine.digest, installedLanguages, Nil)
     node.cas.put(manifest.artifact)
     val bundle = EcosystemBundles.sign("org.cairn", SemanticVersion(1, 0, 0), manifest.digest,
@@ -111,9 +112,9 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
 
   test("optimized dependency discovery carries a model/interpreter/input equivalence witness"):
     val seed = Digest.of(Canon.CStr("equivalence-bootstrap"))
-    val app = ApplicationManifest("equivalence", GenericMachine.declare(List(seed)).digest, Nil, Nil).artifact
+    val app = ApplicationManifest("equivalence", GenericMachine.declare(List(seed)).machine.digest, Nil, Nil).artifact
     val cache = ArtifactDependencyCache()
     val witness = cache.verify(app).fold(e => fail(e), identity)
     assert(witness.valid)
     assertEquals(witness.input, app.digest)
-    assertEquals(witness.artifact.kind, ArtifactKind.Trace)
+    assertEquals(witness.artifact.kind, ArtifactKind.SemanticEquivalence)

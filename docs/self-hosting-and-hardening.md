@@ -45,9 +45,9 @@ evidence. Evidence is individually classified as independently checked,
 replayed, digest-bound, signed, host code, or external-native agreement; these
 categories do not imply one another.
 
-Optimization paths carry `OptimizationEquivalence` traces keyed by semantic
-model digest, interpreter-version digest, and input digest. The dependency
-cache is accepted only when its canonical and optimized result digests agree.
+Optimization paths carry `SemanticEquivalence` artifacts keyed by semantic
+model, implementation, input, and both outcome digests. The dependency cache
+is accepted only when its canonical and optimized results agree.
 Deleting the cache leaves artifact installation and audit semantics unchanged.
 
 ## Generic machine closure
@@ -57,10 +57,9 @@ binds one generic-machine digest. Its transitive dependency graph contains the
 bootstrap roots, semantic programs, and effect-family routes; startup fails if
 any are absent. A hardening report takes interpreter identities from that
 loaded artifact, never from a process-local default. Pack authors may declare a
-machine, but production startup only decodes and verifies it.
-
-`OptimizationEquivalence` currently proves only dependency-discovery cache
-agreement. [PR29](../ROADMAP.md#pr29--generalized-semantic-equivalence-evidence)
-extends the same digest-bound law to parsing, printing, evaluation, change
-replay, merge, migration, and native surface providers. Existing Lean and HVM
-certificates remain narrow agreement envelopes throughout that work.
+machine, but production startup only decodes and verifies it. PR29 closes the
+remaining naming gap: every selection is an installed
+`InterpreterImplementation` with executable, interface, version, explicit
+resource bounds, compatibility rules, corpus, checker, and conformance result
+artifacts. Missing or disagreeing evidence fails startup. Existing Lean and HVM
+certificates remain narrow agreement envelopes.

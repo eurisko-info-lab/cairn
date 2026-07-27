@@ -83,10 +83,12 @@ remaining gaps.
 | PR26 | Runtime constitution closure | ✅ |
 | PR27 | Complete native Pijul-like repository | ✅ |
 | PR28 | Contract the remaining host TCB | ✅ |
-| PR29 | Generalized semantic-equivalence evidence | ⬜ |
-| PR30 | Distributed transaction and consensus hardening | ⬜ |
-| PR31 | Studio productionization | ⬜ |
-| PR32 | Eliminate fidelity residuals | ⬜ |
+| PR29 | Certified generic machine and semantic equivalence | ✅ |
+| PR30 | Certified causal replication | ⬜ |
+| PR31 | Atomic federation | ⬜ |
+| PR32 | Production Studio | ⬜ |
+| PR33 | Fidelity and backend depth | ⬜ |
+| PR34 | Cairn 1.0 discipline | ⬜ |
 
 #### PR26 — Runtime constitution closure
 
@@ -161,54 +163,55 @@ closure without process-local assembly. Scala remains the implementation of
 the six generic mechanisms; language-, query-, policy-, change-, and
 effect-specific selection is artifact data.
 
-#### PR29 — Generalized semantic-equivalence evidence
+#### PR29 — Certified generic machine and semantic equivalence
 
-Extend `OptimizationEquivalence` beyond dependency discovery to:
+Every one of the six generic-machine components is now selected through a
+canonical `InterpreterImplementation` artifact. It recursively binds an
+interface, executable, conformance corpus, implementation version, explicit
+resource bounds, compatibility rules, and `InterpreterConformance` evidence.
+Startup loads the complete graph, checks artifact kinds and bindings, verifies
+the recorded reference/candidate outcomes, and requires exactly one certified
+implementation per component. A digest with no implementation artifact fails
+installation. A second certified implementation set can replace the default
+set while resolving the same application runtime and semantic state.
 
-- parser ↔ compiled parser;
-- printer ↔ derived printer;
-- `TreeEngine` ↔ compiled rewrite machine;
-- canonical change interpretation ↔ optimized replay;
-- repository merge ↔ incremental merge;
-- migration ↔ compiled migration;
-- Cairn surface provider ↔ external native provider.
+`SemanticEquivalence` generalizes differential evidence across grammar,
+rule/search, change, proof, repository, effect, migration, and dependency-cache
+boundaries. Each artifact binds the semantic model, implementation, input, and
+both outcome digests, including structured failures. The compiled parser and
+rewrite engine exercise this path. Lean and HVM retain their narrower,
+honestly named envelopes rather than implying whole-runtime compatibility.
 
-Every agreement binds the semantic model, interpreter implementation, input,
-and both result digests. Lean and HVM remain narrow, honestly named agreement
-envelopes—not claims of full Lean-kernel or HVM-runtime compatibility.
+#### PR30 — Certified causal replication
 
-#### PR30 — Distributed transaction and consensus hardening
+Certify each incoming causal change before graph admission: resolve its
+`DomainRuntime`, replay the `ValidatedChangeSet`, verify base/result and
+semantic context, re-evaluate the acceptance constitution, and retain valid but
+incomplete changes as pending. The graph decoder must verify from roots.
 
-Address the current non-atomic and closed-membership boundaries with
-transactional publication, authenticated peer discovery, durable consensus
-recovery, equivocation evidence, namespace federation, and replicated
-garbage-collection safety. The starting point remains explicit: local
-acceptance is journaled but not a distributed atomic transaction; discovery is
-directory-based; BFT finalizes sealed PoA blocks; replay/revocation state merges
-through CAS rather than consensus; and there is no open-membership ledger.
+#### PR31 — Atomic federation
 
-#### PR31 — Studio productionization
+Atomically publish repository root, branch view, acceptance evidence, ecosystem
+release, and ledger transaction. Add durable consensus recovery, authenticated
+discovery, equivocation proofs, governed namespace federation, trust rotation,
+and replicated GC epochs.
 
-Turn the three complete semantic Studio verticals into a daily production
-environment:
+#### PR32 — Production Studio
 
-- incremental document synchronization;
-- multi-file and workspace-folder LSP;
-- large-document virtualization;
-- background validation and indexing;
-- an accessible semantic conflict editor;
-- user/session identity and permissions;
-- deployment, monitoring, and operational observability.
+Productionize the semantic Studios with incremental and multi-file sync,
+background indexing, virtualization, offline editing, accessible conflict
+resolution, identity/roles, monitoring, backup, and disaster recovery, driven
+by the full SDS collaboration workflow.
 
-The current LSP remains full-document only.
+#### PR33 — Fidelity and backend depth
 
-#### PR32 — Eliminate fidelity residuals
+Eliminate spanless-insertion parent reprinting, move `ChemicalDoc` → `Cst` into
+a declared projection/import surface, and extend HVM/Bend only where a real
+lowering and differential corpus exist.
 
-Close the remaining localized fidelity and coverage gaps:
+#### PR34 — Cairn 1.0 discipline
 
-- preserve inserted concrete syntax without parent reprint when no original
-  span exists;
-- move the remaining `ChemicalDoc` → `Cst` projection out of host glue;
-- extend Bend/HVM lowering beyond the narrow agreement corpus.
-
-These are no longer foundational architecture blockers.
+Freeze canonical formats, artifact and repository protocols, machine-interface
+versions, migration guarantees, resource limits, security review, malformed
+artifact corpora, recovery runbooks, reproducible releases, and permanent
+fixtures from older releases.

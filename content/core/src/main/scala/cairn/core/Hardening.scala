@@ -61,17 +61,6 @@ object TrustedClosure:
     ExternalAssumption("ed25519", "Ed25519 verification authenticates possession of the signing key"),
     ExternalAssumption("durable-io", "successful CAS and ledger writes survive process restart"))
 
-final case class OptimizationEquivalence(
-    semanticModel: Digest, interpreterVersion: Digest, input: Digest,
-    canonicalResult: Digest, optimizedResult: Digest,
-):
-  def valid: Boolean = canonicalResult == optimizedResult
-  def artifact: Artifact = Artifact(ArtifactKind.Trace, Canon.CTag("optimization-equivalence", Canon.cmap(
-    "semanticModel" -> Canon.CStr(semanticModel.hex),
-    "interpreterVersion" -> Canon.CStr(interpreterVersion.hex),
-    "input" -> Canon.CStr(input.hex), "canonicalResult" -> Canon.CStr(canonicalResult.hex),
-    "optimizedResult" -> Canon.CStr(optimizedResult.hex))))
-
 final case class SelfHostingWitness(
     baseProject: Digest,
     resultProject: Digest,

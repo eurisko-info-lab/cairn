@@ -22,21 +22,20 @@ final class ArtifactDependencyCache:
         result
   }
   def stats: DependencyCacheStats = synchronized(DependencyCacheStats(hitCount, missCount, entries.size))
-  def verify(artifact: Artifact): Either[String, OptimizationEquivalence] = for
+  def verify(artifact: Artifact): Either[String, SemanticEquivalence] = for
     canonical <- ArtifactDependencies.direct(artifact)
     optimized <- direct(artifact)
     model = Digest.of(Canon.CStr("artifact-dependency-model-v1"))
     interpreter = Digest.of(Canon.CStr("artifact-dependency-interpreter-v1"))
-    canonicalDigest = Digest.of(Canon.cstrs(canonical.map(_.hex)))
-    optimizedDigest = Digest.of(Canon.cstrs(optimized.map(_.hex)))
-    witness = OptimizationEquivalence(model, interpreter, artifact.digest, canonicalDigest, optimizedDigest)
-    _ <- Either.cond(witness.valid, (), "optimized dependency discovery disagrees with canonical semantics")
+    witness <- SemanticEquivalence.certify(EquivalenceKind.DependencyDiscovery, model, interpreter,
+      artifact.digest, Right(Canon.cstrs(canonical.map(_.hex))), Right(Canon.cstrs(optimized.map(_.hex))))
   yield witness
 
 final case class ResolvedApplication(
     root: Digest,
     manifest: ApplicationManifest,
     machine: GenericMachine,
+    implementations: List[InterpreterImplementation],
     languages: Map[String, ResolvedLanguageCapabilities],
     entries: Map[String, Artifact],
     installed: Set[Digest],
@@ -94,6 +93,38 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
     machine <- GenericMachine.fromArtifact(machineArtifact)
     _ <- machine.dependencies.foldLeft[Either[String, Unit]](Right(())) { (acc, digest) =>
       for _ <- acc; _ <- local.getByDigest(digest) yield () }
+    implementations <- machine.implementations.foldLeft[Either[String, List[InterpreterImplementation]]](Right(Nil)) {
+      (acc, digest) => for
+        done <- acc
+        artifact <- local.getByDigest(digest)
+        implementation <- InterpreterImplementation.fromArtifact(artifact)
+        interface <- local.getByDigest(implementation.interface)
+        _ <- Either.cond(interface.kind == ArtifactKind.Capability, (), s"${implementation.component.id}: invalid interface artifact")
+        _ <- Either.cond(scala.util.Try(interface.body.field("machineInterface").asStr).toOption
+          .contains(implementation.compatibility.interfaceVersion), (),
+          s"${implementation.component.id}: interface compatibility version mismatch")
+        executable <- local.getByDigest(implementation.executable)
+        _ <- Either.cond(executable.kind == ArtifactKind.VmImage, (), s"${implementation.component.id}: invalid executable artifact")
+        suite <- local.getByDigest(implementation.conformanceSuite)
+        _ <- Either.cond(suite.kind == ArtifactKind.TestSuite, (), s"${implementation.component.id}: invalid conformance corpus")
+        reference <- local.getByDigest(implementation.referenceSemantics)
+        _ <- Either.cond(reference.kind == ArtifactKind.Ir, (), s"${implementation.component.id}: invalid reference semantics")
+        version <- local.getByDigest(implementation.implementationVersion)
+        _ <- Either.cond(version.kind == ArtifactKind.Source, (), s"${implementation.component.id}: invalid implementation version")
+        evidenceArtifact <- local.getByDigest(implementation.conformance)
+        evidence <- InterpreterConformance.fromArtifact(evidenceArtifact)
+        _ <- Either.cond(evidence.implementation == implementation.executable &&
+          evidence.interface == implementation.interface && evidence.corpus == implementation.conformanceSuite, (),
+          s"${implementation.component.id}: conformance evidence is not bound to the selected implementation")
+        resultsArtifact <- local.getByDigest(evidence.results)
+        results <- ConformanceResults.fromArtifact(resultsArtifact)
+        _ <- Either.cond(results.valid, (), s"${implementation.component.id}: conformance corpus disagrees")
+        checker <- local.getByDigest(evidence.checker)
+        _ <- Either.cond(checker.kind == ArtifactKind.ProofTerm, (), s"${implementation.component.id}: invalid conformance checker")
+      yield done :+ implementation }
+    _ <- Either.cond(implementations.map(_.component).toSet == MachineComponent.values.toSet &&
+      implementations.map(_.component).distinct.size == implementations.size, (),
+      "generic machine does not resolve exactly one certified implementation for each component")
     languagePairs <- manifest.languages.foldLeft[Either[String, List[(String, ResolvedLanguageCapabilities)]]](Right(Nil)) {
       (acc, spec) => for
         xs <- acc
@@ -133,7 +164,7 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
             yield Some(spec.name -> resolved)
       yield xs ++ pair.toList }
     installed <- audit(root)
-  yield ResolvedApplication(root, manifest, machine, languagePairs.toMap, entryPairs.toMap, installed, runtimePairs.toMap)
+  yield ResolvedApplication(root, manifest, machine, implementations, languagePairs.toMap, entryPairs.toMap, installed, runtimePairs.toMap)
 
   def audit(root: Digest): Either[String, Set[Digest]] =
     def walk(todo: List[Digest], seen: Set[Digest]): Either[String, Set[Digest]] = todo match
@@ -166,13 +197,15 @@ final class ApplicationHardeningAuditor(local: Cas, resolver: ArtifactApplicatio
       case ArtifactKind.ChangeSet | ArtifactKind.ConflictResolution => Some(TrustedEvidence(artifact.digest, TrustBasis.Replayed))
       case ArtifactKind.EcosystemBundle => Some(TrustedEvidence(artifact.digest, TrustBasis.Signed))
       case ArtifactKind.AgreementCertificate => Some(TrustedEvidence(artifact.digest, TrustBasis.ExternalNativeTool))
+      case ArtifactKind.SemanticEquivalence | ArtifactKind.InterpreterConformance =>
+        Some(TrustedEvidence(artifact.digest, TrustBasis.IndependentlyChecked))
       case ArtifactKind.ProjectionEvidence | ArtifactKind.SurfaceEvidence => Some(TrustedEvidence(artifact.digest, TrustBasis.DigestBound))
       case _ => None }
     providers = artifacts.collect {
       case a if Set(ArtifactKind.ForeignSurface, ArtifactKind.StudioProfileSemantics,
         ArtifactKind.StudioProfileSurface).contains(a.kind) =>
         ProviderIdentity(a.kind.name, a.digest, TrustBasis.DigestBound) }
-    closure = TrustedClosure(root, installed.toList, application.machine.interpreters.map(_.identity),
+    closure = TrustedClosure(root, installed.toList, application.implementations.map(_.identity),
       providers, TrustedClosure.assumptions, evidence).normalized
   yield HardeningAuditReport(root, application.manifest.name, installed.toList.sortBy(_.hex),
     kinds, application.languages.view.mapValues(_.language.digest).toMap, TrustedBoundary.minimal, closure)

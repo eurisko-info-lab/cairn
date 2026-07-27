@@ -91,7 +91,7 @@ consequences, while the Trust tab governs revocation and delegation.
 
 The semantic Studio vertical is complete, but the current LSP remains
 full-document only and the UI is not yet a large-document, multi-user daily
-environment. [PR31](../ROADMAP.md#pr31--studio-productionization) owns
+environment. [PR32](../ROADMAP.md#pr32--production-studio) owns
 incremental synchronization, multi-file/workspace LSP, virtualization,
 background validation/indexing, accessibility, identity/permissions, and
 deployment observability.

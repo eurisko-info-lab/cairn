@@ -66,6 +66,8 @@ object ArtifactDependencies:
       List(r.language, r.capabilities, r.acceptance))
     case ArtifactKind.RepositoryGraph => NativeRepository.fromArtifact(artifact).map(_.gcRoots.toList.sortBy(_.hex))
     case ArtifactKind.GenericMachine => GenericMachine.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.InterpreterImplementation => InterpreterImplementation.fromArtifact(artifact).map(_.dependencies)
+    case ArtifactKind.InterpreterConformance => InterpreterConformance.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.Application => ApplicationManifest.fromArtifact(artifact).map(_.roots)
     case ArtifactKind.Language => scala.util.Try(
       artifact.body.field("fragments").asList.map(x => Digest(x.asStr))).toEither

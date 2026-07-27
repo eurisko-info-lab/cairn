@@ -86,7 +86,7 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 ## Honesty bounds
 
 These bounds form the starting point for
-[PR30](../ROADMAP.md#pr30--distributed-transaction-and-consensus-hardening),
+[PR31](../ROADMAP.md#pr31--atomic-federation),
 which covers transactional publication, authenticated discovery, durable
 recovery/equivocation evidence, namespace federation, and replicated-GC safety.
 It does not retroactively describe the current local journal as a distributed
