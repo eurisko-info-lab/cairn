@@ -562,23 +562,36 @@ final class FederationReplica private (
         viewChangeEvidence.clear(); viewChangeEvidence ++= priorVc
         certificates = priorCerts
 
+      /** Real, potentially expensive: PR30 deep re-certification pays real
+        * CPU work (ΔL replay, access-trace recomputation, constitution
+        * rerun) per namespace. Gossip fan-out redelivers an already-known
+        * PrePrepare to a replica through multiple paths routinely (every
+        * `/federation/msg` success re-broadcasts to every peer, regardless
+        * of whether the delivery was actually novel) — without this
+        * short-circuit, each redundant delivery would re-pay that full
+        * cost from scratch, compounding with cluster size and quickly
+        * dominating wall-clock time under real network fan-out.
+        */
       def bindPrePrepare(pp: Msg.PrePrepare): Either[String, Unit] =
         val stateDigest = stateDigestOf(pp.value)
-        for
-          _ <- Either.cond(designatedPrimary(replicaIds, pp.view).contains(pp.from), (),
-            s"federation: PrePrepare from ${pp.from.id} is not the designated primary for view ${pp.view}")
-          proposal <- knownProposals.get(stateDigest)
-            .toRight(s"$missingClosurePrefix${stateDigest.hex}")
-          _ <-
-            val (outcome, updatedCache) = verifyProposal(pp.from, proposal, nsCache)
-            if updatedCache != nsCache then
-              nsCache = updatedCache
-              persistNsCache()
-            outcome match
-              case VerifyOutcome.Verified => Right(())
-              case VerifyOutcome.MissingClosure(digests) => Left(s"$missingClosurePrefix${digests.map(_.hex).mkString(",")}")
-              case VerifyOutcome.Rejected(reason) => Left(s"federation: proposal rejected: $reason")
-        yield ()
+        val alreadyBound = state.slots.get((pp.view, pp.seq)).flatMap(_.prePrepare).contains(pp)
+        if alreadyBound then Right(())
+        else
+          for
+            _ <- Either.cond(designatedPrimary(replicaIds, pp.view).contains(pp.from), (),
+              s"federation: PrePrepare from ${pp.from.id} is not the designated primary for view ${pp.view}")
+            proposal <- knownProposals.get(stateDigest)
+              .toRight(s"$missingClosurePrefix${stateDigest.hex}")
+            _ <-
+              val (outcome, updatedCache) = verifyProposal(pp.from, proposal, nsCache)
+              if updatedCache != nsCache then
+                nsCache = updatedCache
+                persistNsCache()
+              outcome match
+                case VerifyOutcome.Verified => Right(())
+                case VerifyOutcome.MissingClosure(digests) => Left(s"$missingClosurePrefix${digests.map(_.hex).mkString(",")}")
+                case VerifyOutcome.Rejected(reason) => Left(s"federation: proposal rejected: $reason")
+          yield ()
 
       /** A conflicting PrePrepare — same (view, seq, from), different value —
         * arriving after this replica already recorded one is first-class

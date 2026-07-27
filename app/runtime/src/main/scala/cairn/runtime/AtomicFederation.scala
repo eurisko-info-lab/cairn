@@ -312,6 +312,24 @@ final class FederationTransactionCoordinator(
   /** Production path: mints the certificate over the real network —
     * `activeManifest`'s OTHER replicas are genuinely independent processes,
     * never private keys this one holds (see [[FederationFinality.agreeNetworkRemote]]).
+    *
+    * `polls`/`pollSleepMs`/`maxViews` are exposed (unlike `agreeNetworkRemote`'s
+    * own BFT-block-finality-shaped defaults) because [[FederationReplica.FederationPrimaryTimeoutMs]]
+    * (2000ms — real PR30 deep re-certification work every honest replica
+    * pays before voting) is roughly 6-7x [[BftReplica.PrimaryTimeoutMs]]
+    * (300ms); the default `pollCert` budget (`polls * pollSleepMs`) needs
+    * proportionally more headroom to reliably let a view-change's local
+    * timeout evidence actually accumulate before `maxViews` is exhausted.
+    *
+    * `view` is also exposed (unlike a fresh `agreeForFederationStateLocalTestOnly`
+    * call, view persists ACROSS separate `publish` calls on real,
+    * longer-lived `FederationReplica` processes — a prior generation's
+    * view-change does not reset back to 0 for the next one). Defaults to 0
+    * for a coordinator's first-ever publish; a caller driving several
+    * generations against the same durable replica set should pass the
+    * cluster's actual current view (observable via `FederationFinality.
+    * fetchViewStatus`/the previous call's own returned certificate) so the
+    * first propose attempt isn't a guaranteed-wasted round at a stale view.
     */
   def publish(
       transactions: List[FederationCommit],
@@ -321,9 +339,15 @@ final class FederationTransactionCoordinator(
       authority: Keypair,
       authorities: Map[String, Vector[Byte]],
       crash: FederationTransactionPhase = FederationTransactionPhase.None,
+      view: Int = 0,
+      polls: Int = 64,
+      pollSleepMs: Long = 50,
+      maxViews: Int = 8,
   ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
     publishWithCert(transactions, priorState, newState, epoch, authority, authorities, crash,
-      proposal => FederationFinality.agreeNetworkRemote(replicaUrls, proposal, authority, activeManifest.authorities))
+      proposal => FederationFinality.agreeNetworkRemote(
+        replicaUrls, proposal, authority, activeManifest.authorities,
+        view = view, polls = polls, pollSleepMs = pollSleepMs, maxViews = maxViews))
 
   /** TEST-ONLY: identical crash/journal/ledger machinery as [[publish]],
     * differing only in how the certificate is minted — every replica's
