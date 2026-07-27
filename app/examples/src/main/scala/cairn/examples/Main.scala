@@ -3,8 +3,9 @@ import cairn.runtime.EffectContexts
 
 import cairn.runtime.PackLoader
 import cairn.runtime.ArtifactApplicationResolver
+import cairn.runtime.FederationHistory
 import cairn.surface.Cli
-import cairn.systemhandler.{DiskCas, Filesystem}
+import cairn.systemhandler.{DiskCas, Filesystem, Node}
 import cairn.kernel.Digest
 import cairn.systeminterface.Filesystem as Fs
 import java.nio.file.Path
@@ -38,6 +39,24 @@ import java.nio.file.Path
         yield graph
         installed match
           case Right(graph) => println(s"installed ${graph.size} artifacts from root $rootText")
+          case Left(error) => System.err.println(s"error: $error"); sys.exit(1)
+        return
+      case List("federation", "audit-transition", homeText, digestText) =>
+        // The federation's own chain identity, per the same convention used
+        // throughout its tests: the genesis ledger block's own digest.
+        val node = Node(Path.of(homeText), EffectContexts.forLedger())
+        val audited = for
+          digest <- Digest.parse(digestText)
+          federationId <- node.chainDigests.headOption.toRight("federation audit-transition: empty ledger, no chain identity")
+          verified <- FederationHistory.auditTransition(node, node.cas, digest, federationId)
+        yield verified
+        audited match
+          case Right(verified) =>
+            println(s"transition ${verified.transition.digest.hex} verified")
+            println(s"  before ${verified.before.digest.hex}")
+            println(s"  after  ${verified.after.digest.hex}")
+            println(s"  transactions ${verified.commits.size}")
+            println(s"  finality ${verified.finality.digest.hex}")
           case Left(error) => System.err.println(s"error: $error"); sys.exit(1)
         return
       case _ => ()
