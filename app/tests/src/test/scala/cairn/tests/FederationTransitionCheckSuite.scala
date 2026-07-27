@@ -248,3 +248,52 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val transition = FederationTransition(before.digest, Nil, after.digest, List(successor.digest), Some(cert.digest))
     val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
     assert(result.isLeft, result.toString)
+
+  /** A transition that advances the GC epoch only — repository/application/
+    * namespace/trust-roots all unchanged, no commits.
+    */
+  private def gcEpochFixture(afterEpoch: ReplicatedGcEpoch): (DiskCas, FederationState, FederationState) =
+    val dir = Files.createTempDirectory("cairn-fedtx-check-gcepoch")
+    val cas = DiskCas(dir.resolve("cas"))
+    val ledger = standIn("ledger-stand-in-gcepoch")
+    val beforeEpoch = ReplicatedGcEpoch(0, Set.empty, None)
+    val repoIndex = RepositoryIndex(Map("org-a" -> standIn("gcepoch-repo")))
+    val appIndex = ApplicationIndex(Map("org-a" -> standIn("gcepoch-app")))
+    val nsIndex = NamespaceIndex(Map("org-a" -> trustManifest.digest))
+    val before = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndex.digest, replicaSet.digest, beforeEpoch.digest)
+    val after = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndex.digest, replicaSet.digest, afterEpoch.digest)
+    List(replicaSet.artifact, trustManifest.artifact, repoIndex.artifact, appIndex.artifact, nsIndex.artifact,
+      beforeEpoch.artifact, afterEpoch.artifact, before.artifact, after.artifact).foreach(cas.put)
+    (cas, before, after)
+
+  test("verify accepts a gcEpoch that strictly increases and hash-links to its predecessor"):
+    val beforeEpoch = ReplicatedGcEpoch(0, Set.empty, None)
+    val afterEpoch = ReplicatedGcEpoch(1, Set.empty, Some(beforeEpoch.digest))
+    val (cas, before, after) = gcEpochFixture(afterEpoch)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
+    val verified = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+      .fold(e => fail(e), identity)
+    assertEquals(verified.after, after)
+
+  test("verify rejects a gcEpoch that does not hash-link to its predecessor"):
+    val afterEpoch = ReplicatedGcEpoch(1, Set.empty, Some(Digest.of(Canon.CStr("some-other-epoch"))))
+    val (cas, before, after) = gcEpochFixture(afterEpoch)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.left.exists(_.contains("does not hash-link")), result.toString)
+
+  test("verify rejects a gcEpoch number that does not strictly increase"):
+    val afterEpoch = ReplicatedGcEpoch(0, Set.empty, Some(Digest.of(Canon.CStr("dummy-predecessor"))))
+    val (cas, before, after) = gcEpochFixture(afterEpoch)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.left.exists(_.contains("does not exceed predecessor")), result.toString)

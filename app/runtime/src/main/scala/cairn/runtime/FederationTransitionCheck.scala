@@ -115,6 +115,25 @@ object VerifiedFederationTransition:
           "federation transition: replica-set rotation is not listed in transition.approvals")
       yield ()
 
+  /** GC advancement as an explicit, checked transition constituent: if the
+    * epoch actually changed, it must strictly increase and hash-link back
+    * to the predecessor via [[ReplicatedGcEpoch.previous]] (that field is
+    * already the epoch's own hash-link — no new field is needed anywhere).
+    */
+  private def diffGcEpoch(before: Digest, after: Digest, cas: Cas): Either[String, Unit] =
+    if before == after then Right(())
+    else
+      for
+        beforeArtifact <- cas.getByDigest(before)
+        beforeEpoch <- ReplicatedGcEpoch.fromArtifact(beforeArtifact)
+        afterArtifact <- cas.getByDigest(after)
+        afterEpoch <- ReplicatedGcEpoch.fromArtifact(afterArtifact)
+        _ <- Either.cond(afterEpoch.number > beforeEpoch.number, (),
+          s"federation transition: gcEpoch number ${afterEpoch.number} does not exceed predecessor ${beforeEpoch.number}")
+        _ <- Either.cond(afterEpoch.previous.contains(before), (),
+          "federation transition: gcEpoch does not hash-link back to its predecessor")
+      yield ()
+
   /** `federationId` is the fixed chain identity (external context, not
     * itself part of [[FederationState]]); `activeManifest` is decoded from
     * `after.trustRoots`, not `before` — confirmed against
@@ -169,4 +188,5 @@ object VerifiedFederationTransition:
       }
       _ <- diffNamespaceTrust(nsBefore.manifests, nsAfter.manifests, transition.approvals, cas)
       _ <- diffReplicaSet(before.trustRoots, after.trustRoots, transition.approvals, cas)
+      _ <- diffGcEpoch(before.gcEpoch, after.gcEpoch, cas)
     yield VerifiedFederationTransition(transition, before, after, commits, finality)
