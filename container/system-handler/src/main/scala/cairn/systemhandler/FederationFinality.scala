@@ -517,6 +517,15 @@ object FederationFinality:
   def fetchViewStatus(baseUrl: String): Either[String, FederationViewStatus] =
     BftFinality.httpGet(s"$baseUrl/federation/status").flatMap(body => Canon.decode(body).flatMap(FederationViewStatus.fromCanon))
 
+  /** Slice 6: asks a peer for the [[FederationProposal]] whose `after`
+    * field equals `stateDigest` — the only handle a replica missing this
+    * closure has, since the PrePrepare's `Value` never carries the
+    * proposal's own artifact digest. Backed by `FederationReplica.knownProposal`
+    * via the `/federation/proposal/<hex>` endpoint.
+    */
+  def fetchProposal(baseUrl: String, stateDigest: Digest): Either[String, FederationProposal] =
+    BftFinality.httpGet(s"$baseUrl/federation/proposal/${stateDigest.hex}").flatMap(body => Canon.decode(body).flatMap(FederationProposal.fromCanon))
+
   /** Unlike [[BftFinality.fanoutQuorum]] (which returns — and CANCELS every
     * still-pending request — the instant `q` requests succeed), this waits
     * out each request's own share of the timeout regardless of how many

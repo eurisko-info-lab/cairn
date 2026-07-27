@@ -144,7 +144,43 @@ final class HttpNode(
           Canon.decode(readBody(ex)).flatMap(BftFinality.SignedMsg.fromCanon) match
             case Left(e) => reply(ex, 400, e.getBytes)
             case Right(sm) =>
-              replica.receive(sm) match
+              def peerUrls: List[String] =
+                peersRoot.toList.flatMap(replicaPeers).filterNot(_.name == replica.keypair.name).map(_.baseUrl)
+              // A digest reported missing could be a real CAS blob (the
+              // transition/state/commit artifacts `FederationReplicaVerification`
+              // checks) or a proposal this replica never received over
+              // `/federation/propose` (keyed by state digest, since that's
+              // the only handle available) — try both; an unrecognized 404
+              // for the wrong kind is harmless.
+              def tryFetch(digest: Digest): Boolean =
+                val urls = peerUrls
+                val gotProposal = urls.exists { url =>
+                  FederationFinality.fetchProposal(url, digest) match
+                    case Right(p) if p.after == digest => replica.learnProposal(p); true
+                    case _ => false
+                }
+                val gotBlob = urls.exists { url =>
+                  BftFinality.httpGet(s"$url/blob/${digest.hex}") match
+                    case Right(bytes) if Digest.ofBytes(bytes) == digest => node.cas.putBytes(bytes); true
+                    case _ => false
+                }
+                gotProposal || gotBlob
+              // Bounded, not a single fixed retry: recovering the proposal
+              // (this replica missed the broadcast) and recovering deep CAS
+              // closure (verified only once the proposal itself is known)
+              // surface as two SEPARATE MissingClosure rounds from `receive`,
+              // so one request can need more than one fetch-and-retry pass.
+              def attempt(remaining: Int): Either[String, List[BftFinality.SignedMsg]] =
+                replica.receive(sm) match
+                  case Right(out) => Right(out)
+                  case Left(e) =>
+                    if remaining <= 0 then Left(e)
+                    else
+                      FederationReplica.missingClosureDigests(e) match
+                        case Some(digests) if digests.nonEmpty =>
+                          if digests.toList.map(tryFetch).exists(identity) then attempt(remaining - 1) else Left(e)
+                        case _ => Left(e)
+              attempt(4) match
                 case Left(e) => reply(ex, 400, e.getBytes)
                 case Right(out) =>
                   reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
@@ -181,6 +217,11 @@ final class HttpNode(
       )
       s.createContext("/federation/certs", ex =>
         reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
+      s.createContext("/federation/proposal/", ex =>
+        val hex = ex.getRequestURI.getPath.stripPrefix("/federation/proposal/")
+        Digest.parse(hex).toOption.flatMap(replica.knownProposal) match
+          case Some(proposal) => reply(ex, 200, Canon.encode(proposal.canon))
+          case None            => reply(ex, 404, s"no known proposal for state $hex".getBytes))
       s.createContext("/federation/status", ex =>
         reply(ex, 200, Canon.encode(replica.viewStatus.canon)))
       s.createContext("/federation/view-change", ex =>

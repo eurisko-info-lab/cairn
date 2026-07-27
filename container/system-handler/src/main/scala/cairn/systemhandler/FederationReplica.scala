@@ -352,6 +352,16 @@ final class FederationReplica private (
   def learnProposal(proposal: FederationFinality.FederationProposal): Unit =
     knownProposals(proposal.after) = proposal
 
+  /** Lets a peer catch another replica up on a proposal it never received
+    * over `/federation/propose` (e.g. it was down, or its own delivery was
+    * lost) — the HTTP layer's `/federation/proposal/<hex>` endpoint serves
+    * this, keyed by state digest since that's the only handle a replica
+    * missing the closure actually has (the PrePrepare's `Value` commits to
+    * `proposal.after`, never to the proposal's own artifact digest).
+    */
+  def knownProposal(stateDigest: Digest): Option[FederationFinality.FederationProposal] =
+    knownProposals.get(stateDigest)
+
   private def stateDigestOf(value: Value): Digest =
     Digest(String(value.bytes.toArray, java.nio.charset.StandardCharsets.US_ASCII))
 
