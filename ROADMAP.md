@@ -85,10 +85,14 @@ remaining gaps.
 | PR28 | Contract the remaining host TCB | ✅ |
 | PR29 | Certified generic machine and semantic equivalence | ✅ |
 | PR30 | Certified causal replication | ✅ |
-| PR31 | Atomic federation | ⬜ |
-| PR32 | Production Studio | ⬜ |
-| PR33 | Fidelity and backend depth | ⬜ |
-| PR34 | Cairn 1.0 discipline | ⬜ |
+| PR31 | Atomic federation | ✅ |
+| PR32 | Canonical replayable federation history | ✅ |
+| PR33 | Real multi-process federation | ⬜ |
+| PR34 | Independent full-state verifier | ⬜ |
+| PR35 | Retention constitutions and semantic archives | ⬜ |
+| PR36 | Federated production SDS Studio | ⬜ |
+| PR37 | Cairn 1.0 protocol and security freeze | ⬜ |
+| PR38 | Fidelity and computational depth | ⬜ |
 
 #### PR26 — Runtime constitution closure
 
@@ -208,22 +212,87 @@ release, and ledger transaction. Add durable consensus recovery, authenticated
 discovery, equivocation proofs, governed namespace federation, trust rotation,
 and replicated GC epochs.
 
-#### PR32 — Production Studio
+#### PR32 — Canonical replayable federation history
 
-Productionize the semantic Studios with incremental and multi-file sync,
-background indexing, virtualization, offline editing, accessible conflict
-resolution, identity/roles, monitoring, backup, and disaster recovery, driven
-by the full SDS collaboration workflow.
+Make `FederationTransition` — not just `FederationState` — the operational
+history object: mint, verify, and ledger-anchor one transition per
+publication; maintain a hash-linked transition history walkable directly off
+the ledger's own block sequence (no separate index needed); recover using the
+transition artifact, never bare journal strings; verify exact per-namespace
+state diffs and an exact authority/replica-rotation approval closure; extend
+GC to retain the thin transition/state/index/manifest spine forever while
+still reclaiming superseded repository/application content; and reconstruct
+any historic `FederationState` by replaying transitions from genesis. PR32.1
+followed with two closure fixes found before PR33 started — a ledger-aware
+`auditPublishedTransition` (the earlier `auditTransition` never checked the
+audited transition was actually finalized, not just well-formed) and an
+exact rather than superset `transition.approvals` closure — plus this
+truth-sync pass.
 
-#### PR33 — Fidelity and backend depth
+#### PR33 — Real multi-process federation
+
+Replace `agreeForFederationState`'s local-orchestration prototype — every
+replica's private key and state machine constructed in one process, which
+signs on every replica's behalf — with a real network protocol where each
+process holds exactly one private key. Each replica independently receives
+proposals, checks active-manifest membership, fetches any missing
+transition/state closure, verifies the `FederationTransition` and resulting
+`FederationState`, re-certifies changed namespaces' repositories before
+voting (unchanged namespaces reuse their previous certification plus digest
+identity), persists its prepared lock and votes before transmitting them, and
+participates in timeout/view-change. The coordinator collects signed
+protocol messages but never holds a replica's key or synthesizes its
+execution. Exit ceremony: four real OS processes, separate homes/keystores/
+identities, kill-the-primary/partition/equivocate/rotate-authority/
+rotate-replica-set/crash-after-ledger-before-exposure/restart-from-disk,
+confirming identical final state and replayed history on every honest node,
+with no process ever having held another's private key.
+
+#### PR34 — Independent full-state verifier
+
+A separate (ideally Rust) verifier, trusted only for canon decoding/hashing,
+artifact dependency traversal, `GenericMachine`/`DomainRuntime` resolution,
+`ValidatedChangeSet` replay, acceptance-constitution evaluation,
+`NativeRepository` verification, and `FederationTransition`/`FederationFinality`/
+history-replay verification — independently re-executing each step from
+canonical bytes rather than comparing recorded outcome digests, producing its
+own `VerifiedFederation`. This is also where PR29's conformance evidence
+becomes real independent execution rather than recorded matching digests.
+
+#### PR35 — Retention constitutions and semantic archives
+
+PR32 preserves a thin transition/state metadata spine forever while letting
+historic repository/application content be reclaimed — enough to reproduce
+state digests and verify transition authorization, but not necessarily to
+re-run every historic language change once that content is gone. Make
+retention an explicit, namespace-governed choice (current-state-only,
+transition-metadata-only, full semantic history, or checkpointed/archived
+history with independent attestation) rather than an accident of when GC
+last ran; regulated deployments will likely require the fuller modes.
+
+#### PR36 — Federated production SDS Studio
+
+The product milestone: a real supplier namespace and regulatory namespace
+joined by an actual federation transition, offline causal branches, semantic
+conflict resolution, approval certificates, federated publication, historic
+audit, and foreign report projections — plus the production Studio work
+itself (incremental multi-file sync, background indexing, large-document
+virtualization, accessible conflict editing, identity/roles, monitoring,
+backup, disaster recovery).
+
+#### PR37 — Cairn 1.0 protocol and security freeze
+
+Freeze canon format, `ArtifactKind` registry, `GenericMachine` interfaces,
+`DomainRuntime`, `NativeRepository`, `FederationState`, `FederationTransition`,
+finality certificates, the network protocol, migration rules, retention
+rules, error encodings, and resource limits. Add permanent cross-version
+fixtures and adversarial corpora, and do a real security-hardening pass
+(malformed artifacts, equivocation/crash/resource-exhaustion/GC-retention
+attacks, reproducible releases).
+
+#### PR38 — Fidelity and computational depth
 
 Eliminate spanless-insertion parent reprinting, move `ChemicalDoc` → `Cst` into
-a declared projection/import surface, and extend HVM/Bend only where a real
-lowering and differential corpus exist.
-
-#### PR34 — Cairn 1.0 discipline
-
-Freeze canonical formats, artifact and repository protocols, machine-interface
-versions, migration guarantees, resource limits, security review, malformed
-artifact corpora, recovery runbooks, reproducible releases, and permanent
-fixtures from older releases.
+a declared projection/import surface, extend HVM/Bend only where a real
+lowering and differential corpus exist, broaden Lean/HVM agreement envelopes,
+and add further machine implementations.
