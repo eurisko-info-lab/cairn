@@ -111,7 +111,7 @@ class FederationReplicaSuite extends munit.FunSuite:
     val other = nodes(replicas.tail.head.name)
     val result = other.receive(pp)
     assert(result.isLeft)
-    assert(FederationReplica.missingClosureDigests(result.left.getOrElse("")).contains(Set(proposal.after)), result.toString)
+    assert(FederationReplica.missingClosureDigests(result.left.getOrElse("")).contains(Set(proposal.digest)), result.toString)
 
   test("restart from disk restores identical protocol state"):
     val dir = java.nio.file.Files.createTempDirectory("cairn-federation-replica")

@@ -285,6 +285,12 @@ final class FederationTransactionCoordinator(
       _ = node.cas.put(preCertTransition.artifact)
       proposal = FederationFinality.FederationProposal(
         federationId, preCertTransition.digest, priorState.digest, newState.digest, epoch, activeManifest.replicaSetDigest)
+      // Persisted as a real CAS artifact (PR33.1): a replica missing this
+      // exact proposal can now fetch it by its own digest through the
+      // ordinary CAS route — the same digest every Commit vote is
+      // cryptographically over (see FederationFinality.valueOfProposal).
+      _ = source.put(proposal.artifact)
+      _ = node.cas.put(proposal.artifact)
       _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
       cert <- mintCert(proposal)
@@ -373,9 +379,7 @@ final class FederationTransactionCoordinator(
       crash: FederationTransactionPhase = FederationTransactionPhase.None,
   ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
     publishWithCert(transactions, priorState, newState, epoch, authority, authorities, crash,
-      proposal => FederationFinality.agreeForFederationStateLocalTestOnly(
-        replicas, activeManifest, view = 0, stateDigest = proposal.after,
-        epoch = proposal.epoch, previousState = proposal.before, federationId = proposal.federationId))
+      proposal => FederationFinality.agreeForFederationStateLocalTestOnly(replicas, activeManifest, view = 0, proposal))
 
   /** Anything staged/proposed/certified but never ledgered is safely
     * abandoned (old state stands). Only a ledgered generation is completed

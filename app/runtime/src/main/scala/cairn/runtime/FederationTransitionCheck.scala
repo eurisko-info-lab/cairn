@@ -214,6 +214,59 @@ object VerifiedFederationTransition:
     * only a rotation discriminates between the two choices, and `after` is
     * the one that matches real certificates.
     */
+  /** PR33.1: the certificate's `proposal` digest is the ONLY thing every
+    * Commit seal is actually cryptographically over (see
+    * `FederationFinality.valueOfProposal`'s doc comment) — `transition`/
+    * `stateDigest`/`previousState`/`epoch`/`replicaSet`/`federationId` on
+    * the certificate are unsigned convenience projections of that same
+    * proposal's own fields. `verifyAgainstFederationHistory` (system-handler,
+    * no CAS access) can only compare those projections against what the
+    * CALLER already claims; this independently fetches and decodes the
+    * actual `FederationProposal` artifact `finality.proposal` names and
+    * confirms it REALLY has those exact fields, closing the gap a
+    * certificate with internally-consistent-looking but merely ASSERTED
+    * projections (never checked against real content) would otherwise leave.
+    *
+    * `proposal.transition` names the PRE-CERT transition (`finality = None`)
+    * — a structurally DIFFERENT artifact/digest from the FINAL, finality-
+    * bound `transition` this function is handed (`finality = Some(finality.digest)`),
+    * by the same two-step design `FederationTransactionCoordinator.publishWithCert`
+    * itself uses (the final transition cannot exist before the certificate
+    * naming it does). So this compares CONTENT — `before`/`transactions`/
+    * `after`/`approvals`, the only fields that must be identical between
+    * the two — not digest equality, which could never hold by construction.
+    */
+  private def verifyProposalBinding(
+      finality: FederationFinality.FederationFinalityCertificate,
+      transition: FederationTransition,
+      before: FederationState,
+      after: FederationState,
+      federationId: Digest,
+      cas: Cas,
+  ): Either[String, Unit] =
+    for
+      proposalArtifact <- cas.getByDigest(finality.proposal)
+      proposal <- FederationFinality.FederationProposal.fromArtifact(proposalArtifact)
+      _ <- Either.cond(proposal.transition == finality.transition, (),
+        "federation transition: certified proposal's transition does not match the certificate's own projection")
+      votedTransitionArtifact <- cas.getByDigest(proposal.transition)
+      votedTransition <- FederationTransition.fromArtifact(votedTransitionArtifact)
+      _ <- Either.cond(
+        votedTransition.before == transition.before && votedTransition.transactions == transition.transactions &&
+          votedTransition.after == transition.after && votedTransition.approvals == transition.approvals, (),
+        "federation transition: the transition the quorum actually voted on does not match this transition's content")
+      _ <- Either.cond(proposal.before == before.digest, (),
+        "federation transition: certified proposal's before-state does not match the supplied before-state")
+      _ <- Either.cond(proposal.after == after.digest, (),
+        "federation transition: certified proposal's after-state does not match the supplied after-state")
+      _ <- Either.cond(proposal.epoch == finality.epoch, (),
+        "federation transition: certified proposal's epoch does not match the certificate's own projection")
+      _ <- Either.cond(proposal.replicaSet == finality.replicaSet, (),
+        "federation transition: certified proposal's replicaSet does not match the certificate's own projection")
+      _ <- Either.cond(proposal.federationId == federationId, (),
+        "federation transition: certified proposal's federationId does not match the expected federation")
+    yield ()
+
   def verify(
       transition: FederationTransition,
       before: FederationState,
@@ -231,4 +284,5 @@ object VerifiedFederationTransition:
       activeManifest <- ReplicaSetManifest.fromCanon(trustArtifact.body)
       _ <- FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(
         finality, activeManifest, federationId, before.digest, after.digest)
+      _ <- verifyProposalBinding(finality, transition, before, after, federationId, cas)
     yield VerifiedFederationTransition(transition, before, after, commits, finality)

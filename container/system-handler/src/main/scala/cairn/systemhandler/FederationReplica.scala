@@ -346,6 +346,10 @@ final class FederationReplica private (
   // `/federation/propose`/`/federation/msg` request body for every other
   // replica — PR33 slice 5) before any PrePrepare referencing it is
   // reprocessed; never a correctness input on its own (see `learnProposal`).
+  // Keyed by the proposal's OWN artifact digest (PR33.1) — the same digest
+  // `valueOfProposal` embeds in the wire `Value`, since that's now what a
+  // vote is cryptographically over (see `FederationFinality.valueOfProposal`'s
+  // doc comment for why keying by `proposal.after` alone was ambiguous).
   private val knownProposals = scala.collection.mutable.Map.empty[Digest, FederationFinality.FederationProposal]
   private var certificates: List[FederationFinality.FederationFinalityCertificate] = Nil
   private var ioError: Option[String] = None
@@ -400,19 +404,19 @@ final class FederationReplica private (
     * rejection, never a wrongly-accepted vote.
     */
   def learnProposal(proposal: FederationFinality.FederationProposal): Unit =
-    knownProposals(proposal.after) = proposal
+    knownProposals(proposal.digest) = proposal
 
   /** Lets a peer catch another replica up on a proposal it never received
     * over `/federation/propose` (e.g. it was down, or its own delivery was
     * lost) — the HTTP layer's `/federation/proposal/<hex>` endpoint serves
-    * this, keyed by state digest since that's the only handle a replica
-    * missing the closure actually has (the PrePrepare's `Value` commits to
-    * `proposal.after`, never to the proposal's own artifact digest).
+    * this, keyed by the proposal's own artifact digest (PR33.1 — the same
+    * digest a `PrePrepare`'s `Value` now embeds, recoverable directly via
+    * `proposalDigestOf`).
     */
-  def knownProposal(stateDigest: Digest): Option[FederationFinality.FederationProposal] =
-    knownProposals.get(stateDigest)
+  def knownProposal(proposalDigest: Digest): Option[FederationFinality.FederationProposal] =
+    knownProposals.get(proposalDigest)
 
-  private def stateDigestOf(value: Value): Digest =
+  private def proposalDigestOf(value: Value): Digest =
     Digest(String(value.bytes.toArray, java.nio.charset.StandardCharsets.US_ASCII))
 
   def drainOutbound(): List[BftFinality.SignedMsg] =
@@ -464,18 +468,19 @@ final class FederationReplica private (
 
   def namespaceCertCache: FederationReplica.NamespaceCertCache = nsCache
 
-  /** Real certificate minting: recovers the state digest this slot decided
-    * on directly from its own `PrePrepare`'s `Value` bytes (recoverable
-    * ASCII hex — see `FederationFinality.valueOfState`'s doc comment), then
-    * looks up the full proposal via [[learnProposal]] for the
-    * `previousState`/`epoch` fields the minted certificate needs beyond
-    * the bare state digest.
+  /** Real certificate minting: recovers the PROPOSAL digest this slot
+    * decided on directly from its own `PrePrepare`'s `Value` bytes
+    * (recoverable ASCII hex — see `FederationFinality.valueOfProposal`'s
+    * doc comment), then looks up the full proposal via [[learnProposal]]
+    * for the `after`/`previousState`/`epoch`/`transition` fields the
+    * minted certificate needs beyond the bare digest every vote actually
+    * signed.
     */
   private def mintCertificateIfReady(view: Int, seq: Int): Unit =
     (for
       slot <- state.slots.get((view, seq))
       decidedValue <- slot.decided
-      proposal <- knownProposals.get(stateDigestOf(decidedValue))
+      proposal <- knownProposals.get(proposalDigestOf(decidedValue))
     yield (decidedValue, proposal)) match
       case None => ()
       case Some((decidedValue, proposal)) =>
@@ -485,7 +490,7 @@ final class FederationReplica private (
             case ((v, s, hex, rid), seal) if v == view && s == seq && hex == decidedValue.digest.hex => ReplicaId(rid) -> seal
           }.toList
           if commits.map(_._1.id).distinct.length >= quorumSize(n) then
-            val cert = FederationFinality.FederationFinalityCertificate(
+            val cert = FederationFinality.FederationFinalityCertificate(proposal.digest, proposal.transition,
               proposal.after, view, seq, commits, setDigest, proposal.epoch, proposal.before, proposal.federationId)
             if FederationFinality.FederationFinalityCertificate.verify(cert, manifest).isRight then
               certificates = certificates :+ cert
@@ -505,7 +510,7 @@ final class FederationReplica private (
         _ <- Either.cond(proposal.federationId == federationId, (), "federation: proposal federationId mismatch")
         _ <- Either.cond(proposal.replicaSet == setDigest, (), "federation: proposal replicaSet mismatch")
         _ = learnProposal(proposal)
-        pp <- BftFinality.sign(keypair, Msg.PrePrepare(view, proposal.epoch.toInt, FederationFinality.valueOfState(proposal.after), primary), setDigest, federationId)
+        pp <- BftFinality.sign(keypair, Msg.PrePrepare(view, proposal.epoch.toInt, FederationFinality.valueOfProposal(proposal.digest), primary), setDigest, federationId)
         out <- receive(pp)
       yield pp :: out
     }
@@ -573,15 +578,15 @@ final class FederationReplica private (
         * dominating wall-clock time under real network fan-out.
         */
       def bindPrePrepare(pp: Msg.PrePrepare): Either[String, Unit] =
-        val stateDigest = stateDigestOf(pp.value)
+        val proposalDigest = proposalDigestOf(pp.value)
         val alreadyBound = state.slots.get((pp.view, pp.seq)).flatMap(_.prePrepare).contains(pp)
         if alreadyBound then Right(())
         else
           for
             _ <- Either.cond(designatedPrimary(replicaIds, pp.view).contains(pp.from), (),
               s"federation: PrePrepare from ${pp.from.id} is not the designated primary for view ${pp.view}")
-            proposal <- knownProposals.get(stateDigest)
-              .toRight(s"$missingClosurePrefix${stateDigest.hex}")
+            proposal <- knownProposals.get(proposalDigest)
+              .toRight(s"$missingClosurePrefix${proposalDigest.hex}")
             _ <-
               val (outcome, updatedCache) = verifyProposal(pp.from, proposal, nsCache)
               if updatedCache != nsCache then

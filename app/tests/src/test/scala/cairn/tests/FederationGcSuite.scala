@@ -103,9 +103,10 @@ class FederationGcSuite extends munit.FunSuite:
       applications = appIndex.digest, namespaces = nsIndex.digest,
       trustRoots = manifest.digest, gcEpoch = epoch.digest)
     cas.put(state.artifact)
-    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
-      replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
-      previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
+    val proposal = FederationFinality.FederationProposal(federationId, Digest.of(Canon.CStr("transition")),
+      Digest.of(Canon.CStr("genesis")), state.digest, 1L, manifest.replicaSetDigest)
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, manifest, view = 0, proposal)
+      .fold(e => fail(e), identity)
 
     val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
     val report = FederationGc.reclaimAgainstFinalizedEpoch(
@@ -125,9 +126,10 @@ class FederationGcSuite extends munit.FunSuite:
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val differentState = state.copy(ledger = Digest.of(Canon.CStr("different-ledger")))
+    val differentProposal = FederationFinality.FederationProposal(federationId, Digest.of(Canon.CStr("transition")),
+      Digest.of(Canon.CStr("genesis")), differentState.digest, 1L, manifest.replicaSetDigest)
     val certForDifferentState = FederationFinality.agreeForFederationStateLocalTestOnly(
-      replicas, manifest, view = 0, stateDigest = differentState.digest, epoch = 1L,
-      previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
+      replicas, manifest, view = 0, differentProposal).fold(e => fail(e), identity)
     val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
     val rejected = FederationGc.reclaimAgainstFinalizedEpoch(
       dir.resolve("cas"), state, cas, certForDifferentState, manifest, federationId, casCtx, node)
@@ -143,9 +145,10 @@ class FederationGcSuite extends munit.FunSuite:
     val federationId = Digest.of(Canon.CStr("federation-gc-test-3"))
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
-    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
-      replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
-      previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
+    val proposal = FederationFinality.FederationProposal(federationId, Digest.of(Canon.CStr("transition")),
+      Digest.of(Canon.CStr("genesis")), state.digest, 1L, manifest.replicaSetDigest)
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, manifest, view = 0, proposal)
+      .fold(e => fail(e), identity)
     val wrongFederation = Digest.of(Canon.CStr("some-other-federation"))
     val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
     val rejected = FederationGc.reclaimAgainstFinalizedEpoch(

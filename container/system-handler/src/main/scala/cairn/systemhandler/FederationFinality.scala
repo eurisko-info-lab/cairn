@@ -80,16 +80,29 @@ object FederationFinality:
       if artifact.kind != ArtifactKind.FederationProposal then Left("artifact is not a federation proposal")
       else fromCanon(artifact.body)
 
-  // Deliberately no separate `valueOfProposal`: `FederationFinalityCertificate.verify`
-  // reconstructs each Commit's expected value as `valueOfState(cert.stateDigest)`
-  // (below) — an existing, unchanged contract shared with the local-orchestration
-  // path — so the wire `Value` a `FederationReplica` actually agrees over must stay
-  // exactly `valueOfState(proposal.after)`. `Value.bytes` is the state digest's own
-  // ASCII hex (recoverable directly, not just its hash — see `valueOfState`), which
-  // is how a receiving replica recovers `stateDigest` from a bare `PrePrepare`; the
-  // REST of the proposal (`transition`/`before`/`epoch`) is learned out-of-band —
-  // `FederationReplica.learnProposal`, populated by `propose` locally and by the
-  // HTTP `/federation/propose` request body for every other replica (PR33 slice 5).
+  /** PR33.1: the wire `Value` a `FederationReplica` actually agrees over —
+    * `proposal.digest`'s own ASCII hex, recoverable directly from `Value.bytes`
+    * the same way [[valueOfState]]'s digest is (not just its hash), so a
+    * receiving replica recovers the EXACT proposal digest from a bare
+    * `PrePrepare` alone.
+    *
+    * PR33's original scheme signed over `valueOfState(proposal.after)` —
+    * only the RESULTING state digest, with `transition`/`before`/`epoch`
+    * learned out-of-band and never cryptographically bound to the vote at
+    * all. That leaves a real ambiguity: two structurally different
+    * proposals sharing the same `after`/`epoch` but different `transition`
+    * constituents produce INDISTINGUISHABLE Commit signatures — a
+    * certificate could combine votes from replicas that each verified a
+    * different proposal, since nothing signed ever named which one. Signing
+    * over `proposal.digest` instead binds `transition`/`before`/`after`/
+    * `epoch`/`replicaSet`/`federationId` together as one atomic,
+    * cryptographically-committed unit — the same property [[FederationFinalityCertificate]]'s
+    * new `proposal` field lets a verifier independently re-check post-hoc
+    * (fetch the exact artifact by digest via the ordinary CAS `/blob/<hex>`
+    * route — no separate `after -> proposal` side index needed).
+    */
+  def valueOfProposal(proposalDigest: Digest): Value =
+    Value(proposalDigest.hex.getBytes(StandardCharsets.US_ASCII).toVector)
 
   /** Quorum certificate over a `cairn.core.FederationState` digest.
     * `epoch` is the ledger height this generation is anchored at (the same
@@ -100,8 +113,23 @@ object FederationFinality:
     * `parent`, but a state hash-chain link, not a ledger-block one.
     * `federationId` reuses the ledger's chain identity
     * ([[BftFinality.chainId]]) rather than inventing a second genesis concept.
+    *
+    * `proposal`/`transition` (PR33.1) are what closes the ambiguity
+    * [[valueOfProposal]]'s doc comment describes: `proposal` is the EXACT
+    * digest every `commits` seal is cryptographically over (via
+    * `valueOfProposal`); `stateDigest`/`previousState`/`epoch`/`replicaSet`/
+    * `federationId`/`transition` are convenience projections of that same
+    * proposal's own fields, kept alongside for cheap filtering/indexing
+    * without a CAS round-trip — but a verifier holding CAS access (like
+    * [[VerifiedFederationTransition.verify]]) MUST independently fetch and
+    * decode `proposal` and confirm these projections actually match its
+    * real fields; nothing here alone proves that on its own, since only
+    * `proposal`'s digest (not these convenience fields) is what the
+    * signatures are actually over.
     */
   final case class FederationFinalityCertificate(
+      proposal: Digest,
+      transition: Digest,
       stateDigest: Digest,
       view: Int,
       seq: Int,
@@ -112,6 +140,8 @@ object FederationFinality:
       federationId: Digest,
   ):
     def canon: Canon = Canon.CTag("federation-finality", Canon.cmap(
+      "proposal" -> Canon.CStr(proposal.hex),
+      "transition" -> Canon.CStr(transition.hex),
       "state" -> Canon.CStr(stateDigest.hex),
       "view" -> Canon.CInt(view),
       "seq" -> Canon.CInt(seq),
@@ -137,6 +167,8 @@ object FederationFinality:
                 case _          => throw CodecError("seal"))
             }
             Right(FederationFinalityCertificate(
+              Digest(m.field("proposal").asStr),
+              Digest(m.field("transition").asStr),
               Digest(m.field("state").asStr),
               m.field("view").asInt.toInt,
               m.field("seq").asInt.toInt,
@@ -173,7 +205,7 @@ object FederationFinality:
         else if ids.distinct.length < q then
           Left(s"federation finality: ${ids.distinct.length} distinct commits < quorum $q")
         else
-          val valueDigest = valueOfState(cert.stateDigest).digest
+          val valueDigest = valueOfProposal(cert.proposal).digest
           cert.commits.foldLeft[Either[String, Unit]](Right(())) { case (acc, (id, seal)) =>
             acc.flatMap { _ =>
               val commit = Msg.Commit(cert.view, cert.seq, valueDigest, id)
@@ -197,6 +229,21 @@ object FederationFinality:
       * (not the `FederationState` value itself) because `system-handler`
       * does not depend on `content/core` — callers in `app/runtime`, which
       * depends on both, pass `priorState.digest`/`claimedState.digest`.
+      *
+      * Deliberately does NOT compare `cert.transition` against a caller-
+      * supplied expectation the way `previousState`/`stateDigest` are:
+      * `cert.transition` is always the PRE-CERT transition's own digest
+      * (`finality = None`) — a structurally DIFFERENT artifact/digest from
+      * whatever FINAL, finality-bound transition (`finality = Some(cert.digest)`)
+      * a caller here would be verifying, by the two-step design
+      * `FederationTransactionCoordinator.publishWithCert` itself uses (the
+      * final transition cannot exist before the certificate that names it
+      * does). A digest-equality check here could never pass by construction.
+      * [[VerifiedFederationTransition.verify]]'s own proposal-binding check
+      * does the CORRECT thing instead: decodes `cert.proposal`'s named
+      * transition and compares its CONTENT (before/transactions/after/
+      * approvals — the only fields that must be identical between the two)
+      * against the transition actually being verified.
       */
     def verifyAgainstFederationHistory(
         cert: FederationFinalityCertificate,
@@ -248,19 +295,18 @@ object FederationFinality:
       replicas: List[Keypair],
       manifest: ReplicaSetManifest,
       view: Int,
-      stateDigest: Digest,
-      epoch: Long,
-      previousState: Digest,
-      federationId: Digest,
+      proposal: FederationProposal,
       maxRounds: Int = 16,
   ): Either[String, FederationFinalityCertificate] =
     val ids = replicas.map(_.name)
     for
       _ <- Either.cond(manifest.ids.toSet == ids.toSet, (),
         "federation finality: manifest membership does not match the supplied replicas")
+      _ <- Either.cond(manifest.replicaSetDigest == proposal.replicaSet, (),
+        "federation finality: proposal replicaSet does not match the supplied manifest")
       primaryId <- BftFinality.designatedPrimary(ids, view)
       primary <- replicas.find(_.name == primaryId.id).toRight(s"federation finality: missing primary ${primaryId.id}")
-      cert <- runAgreement(replicas, manifest, primary, view, stateDigest, epoch, previousState, federationId, maxRounds)
+      cert <- runAgreement(replicas, manifest, primary, view, proposal, maxRounds)
     yield cert
 
   private def runAgreement(
@@ -268,18 +314,16 @@ object FederationFinality:
       manifest: ReplicaSetManifest,
       primary: Keypair,
       view: Int,
-      stateDigest: Digest,
-      epoch: Long,
-      previousState: Digest,
-      federationId: Digest,
+      proposal: FederationProposal,
       maxRounds: Int,
   ): Either[String, FederationFinalityCertificate] =
-    val seq = epoch.toInt
+    val federationId = proposal.federationId
+    val seq = proposal.epoch.toInt
     val ids = replicas.map(k => ReplicaId(k.name))
     val auth = manifest.authorities
     val setDig = manifest.replicaSetDigest
     locally {
-      val value = valueOfState(stateDigest)
+      val value = valueOfProposal(proposal.digest)
       val primaryId = ReplicaId(primary.name)
       var states: Map[ReplicaId, ReplicaState] =
         ids.map(id => id -> ReplicaState(id, ids.length, faulty = false)).toMap
@@ -323,8 +367,8 @@ object FederationFinality:
           if commits.map(_._1.id).distinct.length < q then
             Left(s"federation finality: only ${commits.map(_._1.id).distinct.length} distinct commits, need $q")
           else
-            val cert = FederationFinalityCertificate(
-              stateDigest, view, seq, commits, setDig, epoch, previousState, federationId)
+            val cert = FederationFinalityCertificate(proposal.digest, proposal.transition, proposal.after,
+              view, seq, commits, setDig, proposal.epoch, proposal.before, federationId)
             FederationFinalityCertificate.verify(cert, manifest).map(_ => cert)
       }
     }

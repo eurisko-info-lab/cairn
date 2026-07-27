@@ -133,11 +133,21 @@ class FederationHistorySuite extends munit.FunSuite:
     val stray = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndex.digest, replicaSet.digest, gcEpoch.digest)
     List(gcEpoch.artifact, repoIndex.artifact, appIndex.artifact, nsIndex.artifact, replicaSet.artifact, stray.artifact)
       .foreach(node.cas.put)
-    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
-      replicas, replicaSet, view = 0, stateDigest = stray.digest, epoch = 1L,
-      previousState = stray.digest, federationId = federationId).fold(e => fail(e), identity)
+    // Two-step construction (mirrors FederationTransactionCoordinator.publishWithCert):
+    // the proposal a replica would have voted on names the PRE-cert transition
+    // (finality = None); only once a certificate exists does the FINAL,
+    // finality-bound transition (a different digest) get built — needed since
+    // PR33.1's VerifiedFederationTransition.verify independently fetches and
+    // decodes `cert.proposal`, requiring it to be a real, resolvable artifact.
+    val preCertTransition = FederationTransition(stray.digest, Nil, stray.digest, Nil, None)
+    node.cas.put(preCertTransition.artifact)
+    val proposal = FederationFinality.FederationProposal(
+      federationId, preCertTransition.digest, stray.digest, stray.digest, 1L, replicaSet.replicaSetDigest)
+    node.cas.put(proposal.artifact)
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, replicaSet, view = 0, proposal)
+      .fold(e => fail(e), identity)
     node.cas.put(cert.artifact)
-    val unpublished = FederationTransition(stray.digest, Nil, stray.digest, Nil, Some(cert.digest))
+    val unpublished = preCertTransition.copy(finality = Some(cert.digest))
     node.cas.put(unpublished.artifact)
     val result = FederationHistory.auditPublishedTransition(node, node.cas, unpublished.digest, federationId)
     assert(result.left.exists(_.contains("were not co-published")), result.toString)
