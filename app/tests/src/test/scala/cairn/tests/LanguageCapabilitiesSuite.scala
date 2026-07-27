@@ -51,3 +51,46 @@ class LanguageCapabilitiesSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     val (_, evidence) = Delta.apply(bundle, Module(Nil), change).fold(e => fail(e), identity)
     assertEquals(evidence.changeModel, bundle.changeModel.digest)
+
+  test("PR26 domain runtime closes language capabilities and acceptance"):
+    val bundle = load(Meta.grammarLanguage)
+    val constitution = AcceptanceConstitution.open(bundle.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(bundle, constitution).fold(e => fail(e), identity)
+    assertEquals(runtime.descriptor.language, bundle.language.digest)
+    assertEquals(runtime.descriptor.capabilities, bundle.descriptor.digest)
+    assertEquals(runtime.descriptor.acceptance, constitution.digest)
+    assertEquals(ArtifactDependencies.direct(runtime.descriptor.artifact),
+      Right(List(bundle.language.digest, bundle.descriptor.digest, constitution.digest)))
+
+    val wrong = constitution.copy(changeModel = Digest.of(Canon.CStr("another-change-model")))
+    assert(ResolvedDomainRuntime.create(bundle, wrong).isLeft)
+
+  test("PR26 governed tips and evidence carry one runtime identity"):
+    val bundle = load(Meta.grammarLanguage)
+    val constitution = AcceptanceConstitution.open(bundle.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(bundle, constitution).fold(e => fail(e), identity)
+    val delta = bundle.delta.fold(es => fail(es.map(_.render).mkString("\n")), identity)
+    val change = Parser.parse(delta.language.grammar, "{ }").fold(e => fail(e), identity)
+    val base = Module(Nil)
+    val result = SemanticRepository.commit(runtime, base, change).fold(e => fail(e), identity)._1
+    val accepted = AcceptedTip.checkTip(runtime,
+      SemanticRepository.Tip(base, result, change)).fold(e => fail(e), identity)
+    assertEquals(accepted.runtime, Some(runtime.digest))
+    assertEquals(accepted.evidence.runtime, Some(runtime.digest))
+
+  test("PR26 migration bindings name exact source and target runtimes without a digest cycle"):
+    val base = load(Meta.grammarLanguage)
+    val migration = LangMigration(base.language.digest, base.language.digest, Map.empty, Map.empty)
+    val descriptor = base.descriptor.copy(migrations = List(migration.artifact.digest))
+    val selected = ResolvedLanguageCapabilities.check(descriptor, base.language, base.change,
+      base.validation, List(migration.artifact), base.queries, base.policies, base.projections)
+      .fold(e => fail(e), identity)
+    val constitution = AcceptanceConstitution.open(selected.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(selected, constitution).fold(e => fail(e), identity)
+    val binding = RuntimeMigration(migration.artifact.digest, runtime.digest, runtime.digest)
+    val resolved = ResolvedRuntimeMigration.check(binding, migration, runtime, runtime)
+      .fold(e => fail(e), identity)
+    assertEquals(ArtifactDependencies.direct(resolved.artifact),
+      Right(List(migration.artifact.digest, runtime.digest, runtime.digest)))
+    val wrong = binding.copy(toRuntime = Digest.of(Canon.CStr("wrong-runtime")))
+    assert(ResolvedRuntimeMigration.check(wrong, migration, runtime, runtime).isLeft)

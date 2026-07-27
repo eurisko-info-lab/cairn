@@ -10,8 +10,10 @@ class ArtifactApplicationSuite extends munit.FunSuite:
   private val language = PackLoader(EffectContexts.forPackLoader()).requireClosed("stlc")
   private val capabilities = LanguageCapabilities.standard(language)
   private val grammarArtifact = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar))
+  private val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+  private val runtime = ResolvedDomainRuntime.create(capabilities, constitution).toOption.get
   private val manifest = ApplicationManifest("artifact-app", List(ApplicationLanguage(
-    "stlc", language.digest, grammarArtifact.digest, capabilities.descriptor.digest)),
+    "stlc", language.digest, grammarArtifact.digest, capabilities.descriptor.digest, Some(runtime.digest))),
     List(ApplicationEntry("quicksort", QuickSort2.module.artifact.digest, ArtifactKind.RosettaDecl)))
 
   private def source(): MemCas =
@@ -19,6 +21,7 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     language.fragments.foreach(f => cas.put(f.artifact))
     List(language.artifact, grammarArtifact, capabilities.change.semantics.artifact,
       capabilities.change.surface.artifact, capabilities.descriptor.artifact,
+      constitution.artifact, runtime.descriptor.artifact,
       QuickSort2.module.artifact, manifest.artifact).foreach(cas.put)
     cas
 
@@ -32,6 +35,7 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     assertEquals(app.languages.keySet, Set("stlc"))
     assertEquals(app.languages("stlc").language.digest, language.digest)
     assertEquals(app.languages("stlc").descriptor, capabilities.descriptor)
+    assertEquals(app.runtimes("stlc").digest, runtime.digest)
     assertEquals(app.entries("quicksort").digest, QuickSort2.module.artifact.digest)
     assertEquals(app.installed, graph)
     assert(graph.contains(language.fragments.head.digest))

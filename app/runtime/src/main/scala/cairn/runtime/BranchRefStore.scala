@@ -138,9 +138,10 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         * [[BranchManifest.acceptanceEvidence]]).
         */
       acceptanceEvidence: Option[Digest] = None,
+      domainRuntime: Option[Digest] = None,
   ):
     def rootDigests: List[Digest] =
-      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList
+      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList ++ domainRuntime.toList
 
     def encode: String =
       val lines = List(
@@ -153,7 +154,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         s"phase=$phase",
         s"extras=${extras.map(_.hex).mkString(",")}",
         s"gateJudgment=${gateJudgment.getOrElse("")}",
-        s"acceptanceEvidence=${acceptanceEvidence.map(_.hex).getOrElse("")}")
+        s"acceptanceEvidence=${acceptanceEvidence.map(_.hex).getOrElse("")}",
+        s"domainRuntime=${domainRuntime.map(_.hex).getOrElse("")}")
       lines.mkString("\n")
 
   private object AcceptJournal:
@@ -174,9 +176,10 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         extras = m.getOrElse("extras", "").split(',').toList.map(_.trim).filter(_.nonEmpty).map(Digest(_))
         gateJudgment = m.get("gateJudgment").filter(_.nonEmpty)
         acceptanceEvidence = m.get("acceptanceEvidence").filter(_.nonEmpty).map(Digest(_))
+        domainRuntime = m.get("domainRuntime").filter(_.nonEmpty).map(Digest(_))
       yield AcceptJournal(
         branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras,
-        gateJudgment, acceptanceEvidence)
+        gateJudgment, acceptanceEvidence, domainRuntime)
 
   private def writeJournal(j: AcceptJournal): Unit =
     refsMkdirs()
@@ -206,7 +209,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       parents = j.parents,
       causalHistoryRoot = j.causalHistoryRoot,
       gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil),
-      acceptanceEvidence = j.acceptanceEvidence)
+      acceptanceEvidence = j.acceptanceEvidence,
+      domainRuntime = j.domainRuntime)
 
   /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
     * On ledger failure after refs, journal stays at phase=publish for recovery.
@@ -231,6 +235,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       extraPuts: List[Artifact] = Nil,
       gateJudgment: Option[String] = None,
       acceptanceEvidence: Option[Digest] = None,
+      domainRuntime: Option[Digest] = None,
       conflictResolution: Option[Artifact] = None,
   ): Either[String, BranchManifest] =
     if module.digest != vcs.result then
@@ -253,7 +258,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       val extras = extraKeys.map(_.valueHash) :+ provDig
       var journal = AcceptJournal(
         branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras,
-        gateJudgment, acceptanceEvidence)
+        gateJudgment, acceptanceEvidence, domainRuntime)
       writeJournal(journal)
       val manifest = applyRefs(journal)
       journal = journal.copy(phase = "refs")
@@ -451,6 +456,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         * accept, if any. Same overwrite-not-accumulate semantics as `gateEvidence`.
         */
       acceptanceEvidence: Option[Digest] = None,
+      domainRuntime: Option[Digest] = None,
   ): BranchManifest =
     val cur = load(branch)
     val nextHistory = acceptedChange match
@@ -469,6 +475,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       certificates = cur.certificates,
       gateEvidence = gateEvidence,
       acceptanceEvidence = acceptanceEvidence,
+      domainRuntime = domainRuntime,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)

@@ -89,7 +89,11 @@ object SelfHostingCeremony:
       language = proposal.result.assets(LanguageAssetId(LanguageAssetKind.Language, targetLanguage))
       grammarArtifact = proposal.result.assets(LanguageAssetId(LanguageAssetKind.Grammar, targetLanguage))
       capabilities = proposal.result.assets(LanguageAssetId(LanguageAssetKind.LanguageCapabilities, targetLanguage))
-      revisedSpec = oldSpec.copy(language = language.digest, grammar = grammarArtifact.digest, capabilities = capabilities.digest)
+      oldRuntime <- application.runtimes.get(targetLanguage).toRight("target language has no domain runtime")
+      revisedRuntime = DomainRuntime(language.digest, capabilities.digest, oldRuntime.acceptance.digest)
+      _ = first.put(revisedRuntime.artifact)
+      revisedSpec = oldSpec.copy(language = language.digest, grammar = grammarArtifact.digest,
+        capabilities = capabilities.digest, runtime = Some(revisedRuntime.digest))
       revisedEntries = application.manifest.entries ++ List(
         ApplicationEntry("self-hosting-proposal", proposal.artifact.digest, proposal.artifact.kind),
         ApplicationEntry("self-hosting-witness", witness.artifact.digest, witness.artifact.kind)) ++

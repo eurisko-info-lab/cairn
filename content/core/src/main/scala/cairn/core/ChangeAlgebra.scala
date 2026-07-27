@@ -177,6 +177,7 @@ object Merge:
       changeA: Digest,
       changeB: Digest,
       witness: Option[ConflictWitness] = None,
+      runtime: Option[Digest] = None,
   ):
     def canon: Canon =
       val base = List(
@@ -186,7 +187,8 @@ object Merge:
       val withWitness = witness match
         case None    => base
         case Some(w) => base :+ ("witness" -> w.canon)
-      Canon.cmap(withWitness*)
+      val withRuntime = runtime.fold(withWitness)(d => withWitness :+ ("runtime" -> Canon.CStr(d.hex)))
+      Canon.cmap(withRuntime*)
     def artifact: Artifact = Artifact(ArtifactKind.ChangeSet, Canon.CTag("merge-conflict", canon))
     def render: String =
       if overlap.nonEmpty then s"merge conflict on {${overlap.toList.map(_.render).sorted.mkString(", ")}} between ${changeA.short} and ${changeB.short}"
@@ -207,7 +209,8 @@ object Merge:
             overlap.map(locations => Conflict(
               locations.toSet,
               Digest(fields.field("changeA").asStr),
-              Digest(fields.field("changeB").asStr)))
+              Digest(fields.field("changeB").asStr),
+              runtime = fields.asMap.get("runtime").map(v => Digest(v.asStr))))
           catch case e: Exception => Left(s"invalid merge-conflict artifact: ${e.getMessage}")
         case _ => Left("not a merge-conflict artifact")
 

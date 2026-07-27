@@ -232,6 +232,7 @@ final case class AcceptanceEvidence(
     authorities: List[String] = Nil,
     migration: Option[Digest] = None,
     publicationRequested: Boolean = false,
+    runtime: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex),
@@ -248,7 +249,8 @@ final case class AcceptanceEvidence(
     "certificates" -> Canon.cstrs(certificates.map(_.hex).sorted),
     "authorities" -> Canon.cstrs(authorities.sorted),
     "migration" -> migration.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))),
-    "publicationRequested" -> Canon.CInt(if publicationRequested then 1 else 0))
+    "publicationRequested" -> Canon.CInt(if publicationRequested then 1 else 0),
+    "runtime" -> runtime.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))))
   def artifact: Artifact = Artifact(ArtifactKind.AcceptanceEvidence, canon)
   def digest: Digest = artifact.digest
 
@@ -281,7 +283,8 @@ object AcceptanceEvidence:
         c.asMap.get("certificates").map(_.asList.map(x => Digest(x.asStr))).getOrElse(Nil),
         c.asMap.get("authorities").map(_.asList.map(_.asStr)).getOrElse(Nil),
         optDigest("migration"),
-        c.asMap.get("publicationRequested").exists(_.asInt == 1L)))
+        c.asMap.get("publicationRequested").exists(_.asInt == 1L),
+        optDigest("runtime")))
     catch case CodecError(m) => Left(m)
 
   /** Independently re-derive whether `evidence` genuinely holds — never
@@ -366,6 +369,22 @@ object AcceptanceEvidence:
       _ <- AcceptanceConstitutionEvaluator.check(constitution, policy.gate, model.digest, result, facts)
     yield ()
 
+  def verifyComplete(
+      runtime: ResolvedDomainRuntime,
+      base: Module,
+      vcs: Option[Delta.ValidatedChangeSet],
+      policy: AcceptancePolicy,
+      facts: AcceptanceFacts,
+      result: Module,
+      evidence: AcceptanceEvidence,
+  ): Either[String, Unit] =
+    for
+      _ <- Either.cond(evidence.runtime.contains(runtime.digest), (),
+        "AcceptanceEvidence: domain runtime mismatch")
+      _ <- verifyComplete(runtime.language, base, vcs, policy, runtime.acceptance,
+        facts, result, evidence, runtime.changeModel)
+    yield ()
+
 /** The only way to advance a branch head under a policy: a module that has
   * both replayed cleanly against ΔL (carries a genuine
   * [[Delta.ValidatedChangeSet]] — itself only mintable by a successful
@@ -384,6 +403,7 @@ private[core] final case class AcceptedTipRepr(
     languageDigest: Digest,
     constitution: AcceptanceConstitution,
     facts: AcceptanceFacts,
+    runtime: Option[DomainRuntime],
 )
 
 opaque type AcceptedTip = AcceptedTipRepr
@@ -393,7 +413,27 @@ object AcceptedTip:
       base: Module, module: Module, change: Cst,
       vcs: Delta.ValidatedChangeSet, policy: AcceptancePolicy, languageDigest: Digest,
       constitution: AcceptanceConstitution, facts: AcceptanceFacts,
-  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest, constitution, facts)
+      runtime: Option[DomainRuntime] = None,
+  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest, constitution, facts, runtime)
+
+  /** Governed acceptance path: all selections come from one checked runtime. */
+  def checkTip(
+      runtime: ResolvedDomainRuntime,
+      proposed: SemanticRepository.Tip,
+  ): Either[String, AcceptedTip] = checkTip(runtime, proposed, AcceptanceFacts())
+
+  def checkTip(
+      runtime: ResolvedDomainRuntime,
+      proposed: SemanticRepository.Tip,
+      facts: AcceptanceFacts,
+  ): Either[String, AcceptedTip] =
+    val policy = AcceptancePolicy(runtime.moduleGate())
+    SemanticRepository.ValidatedTip.check(runtime, proposed).flatMap { vt =>
+      AcceptanceConstitutionEvaluator.check(runtime.acceptance, policy.gate,
+        runtime.changeModel.digest, vt.tip, facts).map(_ =>
+        mint(vt.base, vt.tip, vt.change, vt.vcs, policy, runtime.language.digest,
+          runtime.acceptance, facts, Some(runtime.descriptor)))
+    }
 
   /** Check a proposed [[SemanticRepository.Tip]]: ΔL replay, then `policy`. */
   def checkTip(
@@ -452,6 +492,8 @@ object AcceptedTip:
     def languageDigest: Digest = a.languageDigest
     def constitution: AcceptanceConstitution = a.constitution
     def facts: AcceptanceFacts = a.facts
+    def runtime: Option[Digest] = a.runtime.map(_.digest)
+    def runtimeArtifact: Option[Artifact] = a.runtime.map(_.artifact)
     def evidence: AcceptanceEvidence = AcceptanceEvidence(
       language = a.languageDigest,
       base = a.base.digest,
@@ -467,4 +509,5 @@ object AcceptedTip:
       certificates = a.facts.certificates.map(_.digest),
       authorities = a.facts.authorities.toList.sorted,
       migration = a.facts.migration,
-      publicationRequested = a.facts.publicationRequested)
+      publicationRequested = a.facts.publicationRequested,
+      runtime = a.runtime.map(_.digest))

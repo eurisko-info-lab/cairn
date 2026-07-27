@@ -12,6 +12,8 @@ final case class LanguageCapabilities(
     queries: List[Digest],
     policies: List[Digest],
     projections: List[Digest],
+    /** Grammar is part of the runtime closure, not a host-side companion. */
+    grammar: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex),
@@ -22,7 +24,8 @@ final case class LanguageCapabilities(
     "migrations" -> Canon.CList(migrations.map(d => Canon.CStr(d.hex))),
     "queries" -> Canon.CList(queries.map(d => Canon.CStr(d.hex))),
     "policies" -> Canon.CList(policies.map(d => Canon.CStr(d.hex))),
-    "projections" -> Canon.CList(projections.map(d => Canon.CStr(d.hex))))
+    "projections" -> Canon.CList(projections.map(d => Canon.CStr(d.hex))),
+    "grammar" -> grammar.fold[Canon](Canon.CTag("none", Canon.CInt(0)))(d => Canon.CTag("some", Canon.CStr(d.hex))))
 
   def artifact: Artifact = Artifact(ArtifactKind.LanguageCapabilities, canon)
   def digest: Digest = artifact.digest
@@ -37,13 +40,16 @@ object LanguageCapabilities:
       c.field("validation") match
         case Canon.CTag("some", Canon.CStr(d)) => Some(Digest(d))
         case _                                  => None,
-      digests("migrations"), digests("queries"), digests("policies"), digests("projections"))
+      digests("migrations"), digests("queries"), digests("policies"), digests("projections"),
+      c.asMap.get("grammar").flatMap {
+        case Canon.CTag("some", Canon.CStr(d)) => Some(Digest(d)); case _ => None })
 
   def standard(language: ComposedLanguage): ResolvedLanguageCapabilities =
     val change = ChangeCapability.standard
     ResolvedLanguageCapabilities(
       LanguageCapabilities(language.digest, change.semantics.digest, change.surface.digest,
-        None, Nil, Nil, Nil, Nil),
+        None, Nil, Nil, Nil, Nil,
+        Some(Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar)).digest)),
       language, change, None, Nil, Nil, Nil, Nil)
 
   /** Resolve an artifact-loaded descriptor against an already resolved
@@ -116,7 +122,8 @@ final case class ResolvedLanguageCapabilities(
     Delta.deltaOf(language, change).map { derived =>
       val next = LanguageCapabilities(
         derived.digest, change.semantics.digest, change.surface.digest,
-        None, Nil, Nil, Nil, Nil)
+        None, Nil, Nil, Nil, Nil,
+        Some(Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(derived.grammar)).digest))
       ResolvedLanguageCapabilities(next, derived, change, None, Nil, Nil, Nil, Nil)
     }
 
@@ -137,6 +144,9 @@ object ResolvedLanguageCapabilities:
         s"$label digest mismatch: expected ${expected.map(_.short)}, got ${got.map(_.short)}")
     for
       _ <- Either.cond(language.digest == descriptor.language, (), "language capability language digest mismatch")
+      _ <- descriptor.grammar.fold[Either[String, Unit]](Right(()))(expected =>
+        Either.cond(expected == Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar)).digest, (),
+          "language capability grammar digest mismatch"))
       _ <- Either.cond(change.semantics.digest == descriptor.changeSemantics, (), "language capability change-semantics digest mismatch")
       _ <- Either.cond(change.surface.digest == descriptor.changeSurface, (), "language capability change-surface digest mismatch")
       _ <- Either.cond(validation.map(_.digest) == descriptor.validation, (), "language capability validation digest mismatch")

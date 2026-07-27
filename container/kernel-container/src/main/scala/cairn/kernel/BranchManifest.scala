@@ -59,6 +59,8 @@ final case class BranchManifest(
       * was accepted without a policy (or is a bootstrap import).
       */
     acceptanceEvidence: Option[Digest] = None,
+    /** One digest binds language, capabilities, and acceptance constitution. */
+    domainRuntime: Option[Digest] = None,
 ):
   def canon: Canon = Canon.cmap(
     "branch" -> Canon.CStr(branch),
@@ -76,7 +78,8 @@ final case class BranchManifest(
     "domainAgreement" -> optDigest(domainAgreement),
     "gateEvidence" -> Canon.CList(gateEvidence.map { (j, d) =>
       Canon.cmap("judgment" -> Canon.CStr(j), "evidence" -> Canon.CStr(d.hex)) }),
-    "acceptanceEvidence" -> optDigest(acceptanceEvidence))
+    "acceptanceEvidence" -> optDigest(acceptanceEvidence),
+    "domainRuntime" -> optDigest(domainRuntime))
   def artifact: Artifact = Artifact(ArtifactKind.BranchManifest, canon)
   private def keyCanon(k: TypedKey): Canon = Canon.cmap(
     "kind" -> Canon.CStr(k.kind.name),
@@ -116,7 +119,8 @@ object BranchManifest:
       gateEvidence = m.get("gateEvidence").map(_.asList.map { c =>
         c.field("judgment").asStr -> Digest(c.field("evidence").asStr)
       }).getOrElse(Nil),
-      acceptanceEvidence = m.get("acceptanceEvidence").flatMap(dig))
+      acceptanceEvidence = m.get("acceptanceEvidence").flatMap(dig),
+      domainRuntime = m.get("domainRuntime").flatMap(dig))
 
 /** Pure checks for ledger domain ancestry (trunk / primary / references). */
 object DomainBranch:

@@ -72,6 +72,7 @@ enum ArtifactKind(val name: String):
   case ChangeSurfaceModel extends ArtifactKind("change-surface-model")
   case ChangeCapability extends ArtifactKind("change-capability")
   case LanguageCapabilities extends ArtifactKind("language-capabilities")
+  case DomainRuntime extends ArtifactKind("domain-runtime")
   case ValidationModel extends ArtifactKind("validation-model")
   case Application extends ArtifactKind("application")
   case EcosystemBundle extends ArtifactKind("ecosystem-bundle")

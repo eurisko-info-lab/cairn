@@ -23,6 +23,25 @@ import cairn.kernel.*
   */
 object SemanticRepository:
 
+  /** Runtime-constitutional entry points. These stamp the one runtime digest
+    * onto every repository result that can later become durable state. */
+  def commit(
+      runtime: ResolvedDomainRuntime, tip: Module, change: Cst,
+  ): Either[String, (Module, Delta.ValidatedChangeSet)] =
+    commit(runtime.capabilities, tip, change)
+
+  def tipAfter(
+      runtime: ResolvedDomainRuntime, base: Module, change: Cst,
+  ): Either[String, ValidatedTip] =
+    commit(runtime, base, change).map((tip, vcs) =>
+      ValidatedTip.mint(base, tip, change, vcs, Some(runtime.digest)))
+
+  def merge(
+      runtime: ResolvedDomainRuntime, base: Module, changeA: Cst, changeB: Cst,
+  ): Either[Merge.Conflict, (Module, Delta.ValidatedChangeSet)] =
+    Merge.threeWay(runtime.language, base, changeA, changeB,
+      runtime.moduleGate(), runtime.changeModel).left.map(_.copy(runtime = Some(runtime.digest)))
+
   /** Bundle-selected variants are the authoritative runtime entry points;
     * language/model/gate are all selected by one checked descriptor. */
   def commit(
@@ -71,12 +90,20 @@ object SemanticRepository:
   opaque type ValidatedTip = ValidatedTip.Repr
   object ValidatedTip:
     private[SemanticRepository] final case class Repr(
-        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet)
+        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet,
+        runtime: Option[Digest])
 
     private[SemanticRepository] def mint(
-        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet
+        base: Module, tip: Module, change: Cst, vcs: Delta.ValidatedChangeSet,
+        runtime: Option[Digest] = None,
     ): ValidatedTip =
-      Repr(base, tip, change, vcs)
+      Repr(base, tip, change, vcs, runtime)
+
+    def check(runtime: ResolvedDomainRuntime, proposed: Tip): Either[String, ValidatedTip] =
+      tipAfter(runtime, proposed.base, proposed.change).flatMap { checked =>
+        Either.cond(checked.tip.digest == proposed.tip.digest, checked,
+          s"tip forgery: apply yielded ${checked.tip.digest.short}, claimed ${proposed.tip.digest.short}")
+      }
 
     /** Check a proposed [[Tip]]: replay apply and require digest equality. */
     def check(
@@ -95,6 +122,7 @@ object SemanticRepository:
       def tip: Module = t.tip
       def change: Cst = t.change
       def vcs: Delta.ValidatedChangeSet = t.vcs
+      def runtime: Option[Digest] = t.runtime
       def tipDigest: Digest = t.tip.digest
       def baseDigest: Digest = t.base.digest
       def asTip: Tip = Tip(t.base, t.tip, t.change)

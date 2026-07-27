@@ -107,6 +107,57 @@ object ResolvedMigration:
       _ <- target.change.model.map(_ => ())
     yield ()
 
+/** PR26 migration boundary. A migration admitted here cannot be replayed
+  * under capability or acceptance selections from either adjacent release. */
+final case class RuntimeMigration(
+    migration: Digest,
+    fromRuntime: Digest,
+    toRuntime: Digest,
+):
+  def canon: Canon = Canon.cmap(
+    "migration" -> Canon.CStr(migration.hex),
+    "fromRuntime" -> Canon.CStr(fromRuntime.hex),
+    "toRuntime" -> Canon.CStr(toRuntime.hex))
+  def artifact: Artifact = Artifact(ArtifactKind.Migration, Canon.CTag("runtime-migration", canon))
+  def digest: Digest = artifact.digest
+
+object RuntimeMigration:
+  def fromArtifact(artifact: Artifact): Either[String, RuntimeMigration] = artifact.body match
+    case Canon.CTag("runtime-migration", body) => scala.util.Try(RuntimeMigration(
+      Digest(body.field("migration").asStr), Digest(body.field("fromRuntime").asStr),
+      Digest(body.field("toRuntime").asStr))).toEither.left.map(_.getMessage)
+    case _ => Left("expected runtime-migration artifact")
+
+final case class ResolvedRuntimeMigration private (
+    binding: RuntimeMigration,
+    model: LangMigration,
+    source: ResolvedDomainRuntime,
+    target: ResolvedDomainRuntime,
+):
+  def artifact: Artifact = binding.artifact
+  def module(value: Module): Either[String, Module] =
+    Migrate.module(model, source.language, target.language, value)
+  def change(value: Cst): Either[String, Cst] =
+    Migrate.changeset(model, source.language, target.language, value)
+
+object ResolvedRuntimeMigration:
+  def check(
+      binding: RuntimeMigration,
+      model: LangMigration,
+      source: ResolvedDomainRuntime,
+      target: ResolvedDomainRuntime,
+  ): Either[String, ResolvedRuntimeMigration] =
+    for
+      _ <- Either.cond(binding.migration == model.artifact.digest, (), "migration binding model mismatch")
+      _ <- Either.cond(model.fromLang == source.language.digest, (), "migration source language mismatch")
+      _ <- Either.cond(model.toLang == target.language.digest, (), "migration target language mismatch")
+      _ <- Either.cond(binding.fromRuntime == source.digest, (), "migration source runtime mismatch")
+      _ <- Either.cond(binding.toRuntime == target.digest, (), "migration target runtime mismatch")
+      _ <- Either.cond(source.capabilities.descriptor.migrations.contains(model.artifact.digest), (),
+        "migration is not selected by the source runtime")
+      _ <- ResolvedMigration.validateTargets(target.capabilities)
+    yield ResolvedRuntimeMigration(binding, model, source, target)
+
 final case class PendingEdit(language: Digest, base: Module, change: Cst):
   def canon: Canon = Canon.cmap(
     "language" -> Canon.CStr(language.hex), "base" -> base.canon, "change" -> Cst.toCanon(change))

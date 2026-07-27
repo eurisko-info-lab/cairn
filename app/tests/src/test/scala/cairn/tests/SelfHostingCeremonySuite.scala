@@ -13,12 +13,17 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
 
   private def installLanguage(node: Node, language: ComposedLanguage, capabilities: ResolvedLanguageCapabilities): ApplicationLanguage =
     val grammar = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar))
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+      .copy(validationModel = capabilities.validation.map(_.digest))
+    val runtime = ResolvedDomainRuntime.create(capabilities, constitution).toOption.get
     language.fragments.foreach(f => node.cas.put(f.artifact))
     val selected = capabilities.validation.map(_.artifact).toList ++ capabilities.migrations ++
       capabilities.queries ++ capabilities.policies ++ capabilities.projections
     (List(language.artifact, grammar, capabilities.change.semantics.artifact,
-      capabilities.change.surface.artifact, capabilities.descriptor.artifact) ++ selected).foreach(node.cas.put)
-    ApplicationLanguage(language.name, language.digest, grammar.digest, capabilities.descriptor.digest)
+      capabilities.change.surface.artifact, capabilities.descriptor.artifact,
+      constitution.artifact, runtime.descriptor.artifact) ++ selected).foreach(node.cas.put)
+    ApplicationLanguage(language.name, language.digest, grammar.digest,
+      capabilities.descriptor.digest, Some(runtime.digest))
 
   private def initial(node: Node): (SignedEcosystemBundle, ResolvedLanguageCapabilities, StudioProfileSurface) =
     val change = ChangeCapability.standard
@@ -48,7 +53,9 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
     val revisedGrammar = Meta.language.grammar.copy(tokens = Meta.language.grammar.tokens.copy(
       keywords = Meta.language.grammar.tokens.keywords :+ "pr25-closed"))
     val newProfile = oldProfile.copy(labels = oldProfile.labels.updated("language", "Cairn self-hosted language"))
-    val newDescriptor = meta.descriptor.copy(projections = meta.descriptor.projections.map {
+    val revisedGrammarDigest = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(revisedGrammar)).digest
+    val newDescriptor = meta.descriptor.copy(
+      grammar = Some(revisedGrammarDigest), projections = meta.descriptor.projections.map {
       case d if d == oldProfile.artifact.digest => newProfile.artifact.digest
       case d => d })
     val edits = List(

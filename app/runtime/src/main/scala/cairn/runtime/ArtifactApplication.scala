@@ -39,6 +39,7 @@ final case class ResolvedApplication(
     languages: Map[String, ResolvedLanguageCapabilities],
     entries: Map[String, Artifact],
     installed: Set[Digest],
+    runtimes: Map[String, ResolvedDomainRuntime] = Map.empty,
 )
 
 /** Installs and resolves an application from one digest. The resolver is the
@@ -109,8 +110,25 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
       artifact <- local.getByDigest(entry.artifact)
       _ <- Either.cond(artifact.kind == entry.kind, (), s"entry '${entry.name}' expected ${entry.kind.name}, got ${artifact.kind.name}")
     yield xs :+ (entry.name -> artifact) }
+    runtimePairs <- manifest.languages.foldLeft[Either[String, List[(String, ResolvedDomainRuntime)]]](Right(Nil)) {
+      (acc, spec) => for
+        xs <- acc
+        pair <- spec.runtime match
+          case None => Right(None)
+          case Some(runtimeDigest) =>
+            for
+              artifact <- local.getByDigest(runtimeDigest)
+              descriptor <- DomainRuntime.fromArtifact(artifact)
+              _ <- Either.cond(descriptor.language == spec.language && descriptor.capabilities == spec.capabilities, (),
+                s"${spec.name}: runtime does not bind the declared language and capabilities")
+              acceptanceArtifact <- local.getByDigest(descriptor.acceptance)
+              acceptance <- AcceptanceConstitution.fromArtifact(acceptanceArtifact)
+              capabilities <- languagePairs.toMap.get(spec.name).toRight(s"${spec.name}: unresolved capabilities")
+              resolved <- ResolvedDomainRuntime.check(descriptor, capabilities, acceptance)
+            yield Some(spec.name -> resolved)
+      yield xs ++ pair.toList }
     installed <- audit(root)
-  yield ResolvedApplication(root, manifest, languagePairs.toMap, entryPairs.toMap, installed)
+  yield ResolvedApplication(root, manifest, languagePairs.toMap, entryPairs.toMap, installed, runtimePairs.toMap)
 
   def audit(root: Digest): Either[String, Set[Digest]] =
     def walk(todo: List[Digest], seen: Set[Digest]): Either[String, Set[Digest]] = todo match

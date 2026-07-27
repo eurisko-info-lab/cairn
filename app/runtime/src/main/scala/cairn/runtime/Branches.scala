@@ -625,9 +625,10 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       publish = None,
       provenanceParents = List(accepted.base.digest),
       provenanceTool = "semantic-commit",
-      extraPuts = List(accepted.base.artifact, accepted.constitution.artifact, evidence.artifact),
+      extraPuts = List(accepted.base.artifact, accepted.constitution.artifact, evidence.artifact) ++ accepted.runtimeArtifact.toList,
       gateJudgment = if accepted.policy.gate.judgment.isEmpty then None else Some(accepted.policy.gate.judgment),
       acceptanceEvidence = Some(evidence.digest),
+      domainRuntime = accepted.runtime,
     ).fold(e => throw RuntimeException(e), identity)
 
   /** Load + replay-check the tip ValidatedChangeSet.
@@ -698,6 +699,7 @@ final class Branches(cas: Cas, refsDir: Path, ctx: EffectContext):
       certificates = cur.certificates,
       gateEvidence = cur.gateEvidence,
       acceptanceEvidence = cur.acceptanceEvidence,
+      domainRuntime = cur.domainRuntime,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)
