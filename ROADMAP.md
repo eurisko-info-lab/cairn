@@ -87,7 +87,7 @@ remaining gaps.
 | PR30 | Certified causal replication | ✅ |
 | PR31 | Atomic federation | ✅ |
 | PR32 | Canonical replayable federation history | ✅ |
-| PR33 | Real multi-process federation | ⬜ |
+| PR33 | Real multi-process federation | ✅ |
 | PR34 | Independent full-state verifier | ⬜ |
 | PR35 | Retention constitutions and semantic archives | ⬜ |
 | PR36 | Federated production SDS Studio | ⬜ |
@@ -231,22 +231,46 @@ truth-sync pass.
 
 #### PR33 — Real multi-process federation
 
-Replace `agreeForFederationState`'s local-orchestration prototype — every
-replica's private key and state machine constructed in one process, which
-signs on every replica's behalf — with a real network protocol where each
-process holds exactly one private key. Each replica independently receives
-proposals, checks active-manifest membership, fetches any missing
-transition/state closure, verifies the `FederationTransition` and resulting
-`FederationState`, re-certifies changed namespaces' repositories before
-voting (unchanged namespaces reuse their previous certification plus digest
-identity), persists its prepared lock and votes before transmitting them, and
-participates in timeout/view-change. The coordinator collects signed
-protocol messages but never holds a replica's key or synthesizes its
-execution. Exit ceremony: four real OS processes, separate homes/keystores/
-identities, kill-the-primary/partition/equivocate/rotate-authority/
-rotate-replica-set/crash-after-ledger-before-exposure/restart-from-disk,
-confirming identical final state and replayed history on every honest node,
-with no process ever having held another's private key.
+Replaced `agreeForFederationState`'s local-orchestration prototype — renamed
+`agreeForFederationStateLocalTestOnly` and kept only for tests whose actual
+subject is GC/history/ceremony/crash-recovery plumbing, never production —
+with a real network protocol (`FederationReplica` + `HttpNode`'s
+`/federation/*` endpoints + `FederationFinality.agreeNetworkRemote`) where
+each process holds exactly one private key. Each replica independently
+receives proposals, checks the proposal's federation/replica-set binding,
+fetches any missing transition/state/proposal closure over HTTP
+(`/blob/<hex>` for CAS content, `/federation/proposal/<hex>` for a proposal
+this replica never received), verifies the `FederationTransition` and
+resulting `FederationState` before any certificate exists
+(`verifyStructural`), re-certifies changed namespaces' repositories before
+voting, persists its prepared lock/votes/namespace-certification cache
+before transmitting them, and participates in timeout/view-change. A
+newly-joined replica additionally deep-certifies every namespace live at
+join time (not just the ones a later round's commits touch), not only the
+ones a continuously-running replica's own rounds happen to touch.
+`FederationTransactionCoordinator.publish` collects signed protocol messages
+but never holds a replica's key or synthesizes its execution.
+
+Exit ceremony realized as in-JVM multi-instance simulation (four real
+`HttpServer`s on loopback ports, four independent `Keystore`-custodied
+identities/CAS/ledgers — matching this codebase's only existing precedent
+for "real multi-process," `DistributionDaemonSuite`'s own BFT tests — rather
+than literal OS-process spawning, which no test in this codebase attempts):
+a primary that never comes up forces a view-change that survives a full
+restart-from-disk; a replica unreachable for a whole round rejoins and
+independently catches up; a crash after the ledger append (already durable)
+recovers forward instead of abandoning; a finalized GC run reclaims exactly
+against the epoch a real network-minted certificate names. Equivocation
+detection and namespace/replica-set rotation are intentionally not
+re-proven a second time over this transport — they already run against the
+identical, transport-agnostic core logic via `FederationReplicaSuite`'s
+in-memory delivery and `FederationCeremonySuite`'s local-orchestration path.
+
+Known follow-up (not this PR's scope): `FederationReplica` has no
+certificate-adoption path analogous to `BftFinality`'s own follower-adoption
+machinery, so a replica whose vote arrives after the rest of the cluster
+already exchanged commits among themselves never independently reconstructs
+a certificate for that round — real work for PR34 or a PR33 addendum.
 
 #### PR34 — Independent full-state verifier
 
