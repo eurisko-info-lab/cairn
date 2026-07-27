@@ -145,3 +145,104 @@ class FederationReplicaVerificationSuite extends munit.FunSuite:
       case FederationReplica.VerifyOutcome.Rejected(reason) =>
         assert(reason.contains("re-certification failed"), reason)
       case other => fail(s"expected Rejected, got $other")
+
+  /** One namespace's complete artifact set, independent of any particular
+    * round/commit — used to populate a `before` state with a namespace this
+    * round's own commits never touch, so a bootstrap test can plant a
+    * BROKEN entry there and confirm only a not-yet-bootstrapped replica
+    * ever looks at it.
+    */
+  private def preexistingNamespace(name: String, stripEvidence: Boolean): (List[Artifact], Digest, Digest) =
+    val change = parseChange("{ add extra = true ; }")
+    val (result, vcs) = Delta.apply(lang, m0, change).fold(e => fail(e), identity)
+    val capabilities = LanguageCapabilities.standard(lang)
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(capabilities, constitution).toOption.get
+    val machine = GenericMachine.declare(List(runtime.digest))
+    val grammar = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(lang.grammar))
+    val appLanguage = ApplicationLanguage("stlc", lang.digest, grammar.digest, capabilities.descriptor.digest, Some(runtime.digest))
+    val appManifest = ApplicationManifest(s"$name-app", machine.machine.digest, List(appLanguage), Nil)
+    val owner = Keypair.dev(s"$name-owner")
+    val trustManifest = NamespaceTrustManifest.of(name, List(owner.name -> owner.publicBytes)).fold(e => fail(e), identity)
+    val evidence = AcceptanceEvidence(lang.digest, m0.digest, Some(vcs.artifact.digest), result.digest,
+      AcceptancePolicy.open.digest, "", capabilities.changeModel.digest, constitution = Some(constitution.digest),
+      runtime = Some(runtime.digest))
+    val trace = ChangeAlgebra.accessTrace(lang, m0, vcs.change, capabilities.changeModel).fold(e => fail(e.toString), identity)
+    val context = trace.accesses.map(a => ContextDependency(a.location, Set.empty))
+    val causal = CausalChange(vcs.artifact.digest, Set.empty, context, m0.digest, result.digest, runtime.digest,
+      acceptanceEvidence = if stripEvidence then None else Some(evidence.digest))
+    val graph = NativeRepository(changes = Map(causal.id -> causal), heads = Map("main" -> Set(causal.id)))
+    val artifacts = (runtime.artifacts ++ machine.supportArtifacts ++ List(machine.machine.artifact, appManifest.artifact,
+      grammar, trustManifest.artifact, vcs.artifact, m0.artifact, result.artifact, evidence.artifact, graph.artifact))
+      .distinctBy(_.digest)
+    (artifacts, graph.digest, appManifest.digest)
+
+  /** `before` already has a live, untouched namespace ("org-old", possibly
+    * broken) alongside this round's own new namespace ("org-a", always
+    * well-formed) — proving [[FederationReplicaVerification.verifyWithCache]]
+    * only deep-certifies "org-old" the FIRST time (`!cache.bootstrapped`),
+    * never again once bootstrapped, exactly mirroring a continuously
+    * running replica that already covered it versus a freshly joined one
+    * that never has.
+    */
+  private def bootstrapFixture(
+      oldNamespaceBroken: Boolean,
+  ): (DiskCas, FederationFinality.FederationProposal) =
+    // Reuse `fixture()`'s own CAS/proposal as the base (org-a's full closure
+    // is already resident there) and splice "org-old" into both `before`
+    // and `after` identically alongside it.
+    val (cas, proposal, state1) = fixture()
+    val (oldArtifacts, oldGraphDigest, oldAppDigest) = preexistingNamespace("org-old", oldNamespaceBroken)
+    val oldOwner = Keypair.dev("org-old-owner")
+    val oldTrust = NamespaceTrustManifest.of("org-old", List(oldOwner.name -> oldOwner.publicBytes)).fold(e => fail(e), identity)
+
+    val genesis = FederationState.fromArtifact(cas.getByDigest(proposal.before).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+    val repoIndex = RepositoryIndex.fromArtifact(cas.getByDigest(state1.repository).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+    val appIndex = ApplicationIndex.fromArtifact(cas.getByDigest(state1.applications).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+    val nsIndex = NamespaceIndex.fromArtifact(cas.getByDigest(state1.namespaces).fold(e => fail(e), identity)).fold(e => fail(e), identity)
+
+    val repoIndexBefore = RepositoryIndex(Map("org-old" -> oldGraphDigest))
+    val appIndexBefore = ApplicationIndex(Map("org-old" -> oldAppDigest))
+    val nsIndexBefore = NamespaceIndex(Map("org-old" -> oldTrust.digest))
+    val genesisWithOld = genesis.copy(
+      repository = repoIndexBefore.digest, applications = appIndexBefore.digest, namespaces = nsIndexBefore.digest)
+
+    val repoIndexAfter = RepositoryIndex(repoIndex.namespaces ++ repoIndexBefore.namespaces)
+    val appIndexAfter = ApplicationIndex(appIndex.releases ++ appIndexBefore.releases)
+    val nsIndexAfter = NamespaceIndex(nsIndex.manifests ++ nsIndexBefore.manifests)
+    val state1WithOld = state1.copy(
+      repository = repoIndexAfter.digest, applications = appIndexAfter.digest, namespaces = nsIndexAfter.digest)
+
+    val transition = FederationTransition.fromArtifact(cas.getByDigest(proposal.transition).fold(e => fail(e), identity))
+      .fold(e => fail(e), identity)
+    val newTransition = transition.copy(before = genesisWithOld.digest, after = state1WithOld.digest)
+
+    (oldArtifacts ++ List(oldTrust.artifact, repoIndexBefore.artifact, appIndexBefore.artifact, nsIndexBefore.artifact,
+      genesisWithOld.artifact, repoIndexAfter.artifact, appIndexAfter.artifact, nsIndexAfter.artifact,
+      state1WithOld.artifact, newTransition.artifact))
+      .distinctBy(_.digest).foreach(cas.put)
+
+    val newProposal = FederationFinality.FederationProposal(
+      federationId, newTransition.digest, genesisWithOld.digest, state1WithOld.digest, epoch = 1L, replicaSet.replicaSetDigest)
+    (cas, newProposal)
+
+  test("verifyWithCache bootstrap-certifies an untouched pre-existing namespace on first use, catching a forgery an already-bootstrapped replica would miss"):
+    val (cas, proposal) = bootstrapFixture(oldNamespaceBroken = true)
+    val (freshOutcome, _) = FederationReplicaVerification.verifyWithCache(
+      proposerId, proposal, cas, FederationReplica.NamespaceCertCache.empty)
+    freshOutcome match
+      case FederationReplica.VerifyOutcome.Rejected(reason) => assert(reason.contains("re-certification failed"), reason)
+      case other => fail(s"expected a fresh (unbootstrapped) replica to reject on org-old's forgery, got $other")
+
+    val alreadyBootstrapped = FederationReplica.NamespaceCertCache(bootstrapped = true, certified = Map.empty)
+    val (bootstrappedOutcome, _) = FederationReplicaVerification.verifyWithCache(proposerId, proposal, cas, alreadyBootstrapped)
+    assertEquals(bootstrappedOutcome, FederationReplica.VerifyOutcome.Verified)
+
+  test("verifyWithCache accepts a well-formed bootstrap and records every live namespace as certified"):
+    val (cas, proposal) = bootstrapFixture(oldNamespaceBroken = false)
+    val (outcome, updatedCache) = FederationReplicaVerification.verifyWithCache(
+      proposerId, proposal, cas, FederationReplica.NamespaceCertCache.empty)
+    assertEquals(outcome, FederationReplica.VerifyOutcome.Verified)
+    assert(updatedCache.bootstrapped)
+    assert(updatedCache.certified.contains("org-old"), updatedCache.certified.toString)
+    assert(updatedCache.certified.contains("org-a"), updatedCache.certified.toString)

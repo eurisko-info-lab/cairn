@@ -13,7 +13,7 @@ class FederationReplicaSuite extends munit.FunSuite:
   private val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
   private val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
   private val federationId = Digest.of(Canon.CStr("federation-replica-suite-chain"))
-  private val alwaysVerified: FederationReplica.VerifyProposal = (_, _) => FederationReplica.VerifyOutcome.Verified
+  private val alwaysVerified: FederationReplica.VerifyProposal = (_, _, cache) => (FederationReplica.VerifyOutcome.Verified, cache)
 
   private def sampleProposal(epoch: Long): FederationFinality.FederationProposal =
     FederationFinality.FederationProposal(

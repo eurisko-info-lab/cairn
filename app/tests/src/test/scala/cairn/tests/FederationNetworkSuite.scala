@@ -17,7 +17,7 @@ import cairn.systemhandler.*
   */
 class FederationNetworkSuite extends munit.FunSuite:
   private val ledgerCtx = EffectContexts.forLedger()
-  private val alwaysVerified: FederationReplica.VerifyProposal = (_, _) => FederationReplica.VerifyOutcome.Verified
+  private val alwaysVerified: FederationReplica.VerifyProposal = (_, _, cache) => (FederationReplica.VerifyOutcome.Verified, cache)
 
   private def sampleProposal(
       federationId: Digest, replicaSetDigest: Digest, epoch: Long,
@@ -177,7 +177,7 @@ class FederationNetworkSuite extends munit.FunSuite:
       val ports = ids.map { id =>
         val home = homes(id)
         val verify: FederationReplica.VerifyProposal =
-          (proposerId, prop) => FederationReplicaVerification.verify(proposerId, prop, nodes(id).cas)
+          (proposerId, prop, cache) => FederationReplicaVerification.verifyWithCache(proposerId, prop, nodes(id).cas, cache)
         val federation = FederationReplica.certified(
           replicas.find(_.name == id).get, manifest, federationId, verify,
           certStore = Some(home.resolve("federation-certs.canon")),

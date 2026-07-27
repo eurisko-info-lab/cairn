@@ -51,14 +51,50 @@ object FederationReplica:
     case MissingClosure(digests: Set[Digest])
     case Rejected(reason: String)
 
+  /** PR33 slice 7: durable record of which namespaces this replica has
+    * independently deep-certified, and whether it has ever completed the
+    * join-time bootstrap (certifying every namespace live at the time,
+    * not just the ones a later round's commits happen to touch — see
+    * `FederationReplicaVerification.verifyWithCache`'s doc comment for why
+    * a newly-joined replica needs this and a continuously-running one
+    * doesn't). Never itself a correctness input: the verify callback
+    * always independently re-derives everything from CAS content, so a
+    * lost, corrupted, or simply absent cache only ever costs redundant
+    * re-certification work, never a wrongly-accepted vote — restore/persist
+    * failures here are deliberately non-fatal, unlike `state`/`certStore`.
+    */
+  final case class NamespaceCertCache(bootstrapped: Boolean, certified: Map[String, Digest]):
+    def canon: Canon = Canon.CTag("federation-ns-cert-cache", Canon.cmap(
+      "bootstrapped" -> Canon.CInt(if bootstrapped then 1 else 0),
+      "certified" -> Canon.CList(certified.toList.sortBy(_._1).map { (ns, d) =>
+        Canon.cmap("namespace" -> Canon.CStr(ns), "digest" -> Canon.CStr(d.hex))
+      })))
+
+  object NamespaceCertCache:
+    val empty: NamespaceCertCache = NamespaceCertCache(false, Map.empty)
+    def fromCanon(c: Canon): Either[String, NamespaceCertCache] =
+      c match
+        case Canon.CTag("federation-ns-cert-cache", m) =>
+          try
+            val bootstrapped = m.field("bootstrapped").asInt != 0
+            val certified = m.field("certified").asList.map { row =>
+              row.field("namespace").asStr -> Digest(row.field("digest").asStr)
+            }.toMap
+            Right(NamespaceCertCache(bootstrapped, certified))
+          catch case e: CodecError => Left(e.getMessage)
+        case other => Left(s"not a federation-ns-cert-cache: $other")
+
   /** Local-CAS-only proposal check, injected at construction time. The real
     * implementation (wrapping `VerifiedFederationTransition.verify` plus
     * per-changed-namespace deep re-certification) lives in `app/runtime`
     * (`FederationReplicaVerification`, PR33 slice 4) — this seam exists
     * because system-handler cannot depend on content/core, not because the
-    * check is conceptually generic.
+    * check is conceptually generic. Threads the namespace-certification
+    * cache through functionally (in, updated-out) rather than via mutable
+    * shared state, since the callback itself lives in a different module
+    * than the durable store that persists it.
     */
-  type VerifyProposal = (ReplicaId, FederationFinality.FederationProposal) => VerifyOutcome
+  type VerifyProposal = (ReplicaId, FederationFinality.FederationProposal, NamespaceCertCache) => (VerifyOutcome, NamespaceCertCache)
 
   private val missingClosurePrefix = "federation: missing closure "
 
@@ -263,13 +299,14 @@ object FederationReplica:
       resolveUrl: ReplicaId => Option[String] = _ => None,
       stateStore: Option[Path] = None,
       certStore: Option[Path] = None,
+      nsCacheStore: Option[Path] = None,
   ): Either[String, FederationReplica] =
     for
       _ <- ReplicaSetManifest.verifySeals(manifest, Ed25519.verify)
       expected <- manifest.authorities.get(keypair.name).toRight(s"federation: replica '${keypair.name}' not in replica-set manifest")
       _ <- Either.cond(expected == keypair.publicBytes, (),
         s"federation: local key for '${keypair.name}' does not match replica-set manifest")
-    yield new FederationReplica(keypair, manifest, federationId, verify, resolveUrl, stateStore, certStore)
+    yield new FederationReplica(keypair, manifest, federationId, verify, resolveUrl, stateStore, certStore, nsCacheStore)
 
 /** See [[FederationReplica$]] (companion) for the rationale. Constructed
   * only via [[FederationReplica.certified]].
@@ -282,6 +319,7 @@ final class FederationReplica private (
     private val resolveUrl: BftQuorum.ReplicaId => Option[String],
     stateStore: Option[Path],
     certStore: Option[Path],
+    nsCacheStore: Option[Path],
 ):
   import BftQuorum.*
   import FederationReplica.*
@@ -314,6 +352,7 @@ final class FederationReplica private (
   private var lastViewChangeStartedAt: Long = 0L
   private var lastPrimaryActivityAt: Long = System.currentTimeMillis()
   private var latestNewView: Option[Digest] = None
+  private var nsCache: FederationReplica.NamespaceCertCache = FederationReplica.NamespaceCertCache.empty
 
   certStore.foreach { path =>
     loadCerts(path) match
@@ -338,6 +377,17 @@ final class FederationReplica private (
             s"federation-state identity mismatch: file has ${decoded.state.id.id}/n=${decoded.state.n}, " +
               s"replica is ${keypair.name}/n=$n")
         case Left(e) => ioError = Some(s"federation-state restore failed: $e")
+  }
+
+  // Deliberately fail-OPEN, unlike state/certStore above: a lost or
+  // corrupted namespace-cert cache degrades to "treat as never bootstrapped"
+  // (redundant re-certification on the next round), never to "trust
+  // without checking" — see `NamespaceCertCache`'s own doc comment.
+  nsCacheStore.foreach { path =>
+    if Files.exists(path) then
+      Canon.decode(Files.readAllBytes(path)).flatMap(FederationReplica.NamespaceCertCache.fromCanon) match
+        case Right(cache) => nsCache = cache
+        case Left(_) => ()
   }
 
   /** Registers a proposal's content so a later `PrePrepare` naming its
@@ -403,6 +453,16 @@ final class FederationReplica private (
         DurableIo.writeConsensus(path, Canon.encode(c)) match
           case Left(e) => ioError = Some(e); Left(e)
           case Right(()) => Right(())
+
+  /** Best-effort only — see `NamespaceCertCache`'s doc comment for why a
+    * write failure here must never trip fail-closed the way `persistState`/
+    * `persistCerts` do: the cache is purely an optimization/bootstrap
+    * marker, never a correctness input.
+    */
+  private def persistNsCache(): Unit =
+    nsCacheStore.foreach(path => DurableIo.writeConsensus(path, Canon.encode(nsCache.canon)))
+
+  def namespaceCertCache: FederationReplica.NamespaceCertCache = nsCache
 
   /** Real certificate minting: recovers the state digest this slot decided
     * on directly from its own `PrePrepare`'s `Value` bytes (recoverable
@@ -509,10 +569,15 @@ final class FederationReplica private (
             s"federation: PrePrepare from ${pp.from.id} is not the designated primary for view ${pp.view}")
           proposal <- knownProposals.get(stateDigest)
             .toRight(s"$missingClosurePrefix${stateDigest.hex}")
-          _ <- verifyProposal(pp.from, proposal) match
-            case VerifyOutcome.Verified => Right(())
-            case VerifyOutcome.MissingClosure(digests) => Left(s"$missingClosurePrefix${digests.map(_.hex).mkString(",")}")
-            case VerifyOutcome.Rejected(reason) => Left(s"federation: proposal rejected: $reason")
+          _ <-
+            val (outcome, updatedCache) = verifyProposal(pp.from, proposal, nsCache)
+            if updatedCache != nsCache then
+              nsCache = updatedCache
+              persistNsCache()
+            outcome match
+              case VerifyOutcome.Verified => Right(())
+              case VerifyOutcome.MissingClosure(digests) => Left(s"$missingClosurePrefix${digests.map(_.hex).mkString(",")}")
+              case VerifyOutcome.Rejected(reason) => Left(s"federation: proposal rejected: $reason")
         yield ()
 
       /** A conflicting PrePrepare — same (view, seq, from), different value —
