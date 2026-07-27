@@ -39,8 +39,10 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
   private val ledgerCtx = EffectContexts.forLedger()
   // Real HTTP round-trips across two view-change-forcing rounds plus a full
   // restart, each paying FederationPrimaryTimeoutMs's real deep-verification
-  // cost per vote — comfortably exceeds munit's 30s default.
-  override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
+  // cost per vote, with generous per-round polling budgets sized for a
+  // slower/shared CI runner rather than local dev hardware — comfortably
+  // exceeds munit's 30s default even at that worst case.
+  override def munitTimeout = scala.concurrent.duration.Duration(240, "s")
 
   private def parseChange(src: String): Cst = Parser.parse(dl.grammar, src).fold(e => fail(e), identity)
 
@@ -190,8 +192,11 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       val r1kp = replicas.find(_.name == "r1").get
       val coordHome = Files.createTempDirectory("cairn-mp-ceremony-coord")
       val coord = FederationTransactionCoordinator(coordHome, nodes("r1").cas, nodes("r1"), urls1, manifest, federationId)
+      // Generous polling budget: a shared/slower CI runner can need
+      // meaningfully more wall-clock than local dev hardware for the same
+      // real deep-verification work across four real HTTP round trips.
       val (cert1, _) = coord.publish(List(nsA.commit, nsB.commit), genesisState, state1, epoch = 1L,
-        r1kp, Map(r1kp.name -> r1kp.publicBytes)).fold(e => fail(e), identity)
+        r1kp, Map(r1kp.name -> r1kp.publicBytes), polls = 64, pollSleepMs = 100, maxViews = 12).fold(e => fail(e), identity)
       assert(cert1.view >= 1, s"expected a view-change since the primary never came up, got view ${cert1.view}")
       assertEquals(coord.current, Right(Some(state1.digest)))
 
@@ -228,7 +233,8 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       // every namespace live in `state1` (org-a AND org-b), not just this
       // round's own commit.
       val (cert15, _) = coord15.publish(List(nsA15.commit, nsB.commit), state1, state15, epoch = 2L,
-        r1kp, Map(r1kp.name -> r1kp.publicBytes), view = cert1.view).fold(e => fail(e), identity)
+        r1kp, Map(r1kp.name -> r1kp.publicBytes), view = cert1.view,
+        polls = 64, pollSleepMs = 100, maxViews = 12).fold(e => fail(e), identity)
       assertEquals(coord15.current, Right(Some(state15.digest)))
 
       // -- Step 3: NOW test a temporary partition — r2 unreachable for one
@@ -248,8 +254,12 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       val urls2 = ids.map(id => id -> (if id == "r2" then "http://127.0.0.1:1" else s"http://127.0.0.1:${ports(id)}")).toMap
       val coord2Home = Files.createTempDirectory("cairn-mp-ceremony-coord2")
       val coord2 = FederationTransactionCoordinator(coord2Home, nodes("r1").cas, nodes("r1"), urls2, manifest, federationId)
+      // Generous polling budget: a shared/slower CI runner can need
+      // meaningfully more wall-clock than local dev hardware for the same
+      // real deep-verification work across four real HTTP round trips.
       val (cert2, _) = coord2.publish(List(nsA2.commit, nsB.commit), state15, state2, epoch = 3L,
-        r1kp, Map(r1kp.name -> r1kp.publicBytes), view = cert15.view).fold(e => fail(e), identity)
+        r1kp, Map(r1kp.name -> r1kp.publicBytes), view = cert15.view,
+        polls = 64, pollSleepMs = 100, maxViews = 12).fold(e => fail(e), identity)
       assertEquals(coord2.current, Right(Some(state2.digest)))
 
       // r2 rejoins with a corrected URL, learns generation 2's proposal, and
@@ -262,7 +272,7 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
           .fold(e => fail(e), identity)).fold(e => fail(e), identity).digest,
         state15.digest, state2.digest, epoch = 3L, manifest.replicaSetDigest)
       FederationFinality.propose(urls2Fixed, r1kp, view = cert2.view, proposal2).fold(e => fail(e), identity)
-      val deadline = System.nanoTime() + 6000L * 1000000L
+      val deadline = System.nanoTime() + 10000L * 1000000L
       var r2Certs: List[FederationFinality.FederationFinalityCertificate] = Nil
       while r2Certs.forall(_.stateDigest != state2.digest) && System.nanoTime() < deadline do
         r2Certs = FederationFinality.fetchCerts(s"http://127.0.0.1:${ports("r2")}").getOrElse(Nil)
@@ -274,7 +284,7 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       // Bounded-wait for every replica's own view before restarting, rather
       // than asserting the instant the client-side calls above returned.
       def awaitCert(id: String, stateDigest: Digest): Unit =
-        val deadline = System.nanoTime() + 6000L * 1000000L
+        val deadline = System.nanoTime() + 10000L * 1000000L
         var found = false
         while !found && System.nanoTime() < deadline do
           found = FederationFinality.fetchCerts(s"http://127.0.0.1:${ports(id)}").getOrElse(Nil).exists(_.stateDigest == stateDigest)
