@@ -81,16 +81,16 @@ class FederationHistorySuite extends munit.FunSuite:
     List(repoIndex1.artifact, appIndex.artifact, nsIndex.artifact).foreach(cas.put)
     val state1 = FederationState(ledgerStandIn.digest, repoIndex1.digest, appIndex.digest, nsIndex.digest,
       replicaSet.digest, epoch1.digest)
-    val coord1 = FederationTransactionCoordinator(dir.resolve("home-1"), cas, node, replicas, replicaSet, federationId)
-    coord1.publish(List(commit1), genesisState, state1, epoch = 1L, authority, authorities).fold(e => fail(e), identity)
+    val coord1 = FederationTransactionCoordinator(dir.resolve("home-1"), cas, node, Map.empty, replicaSet, federationId)
+    coord1.publishLocalTestOnly(replicas, List(commit1), genesisState, state1, epoch = 1L, authority, authorities).fold(e => fail(e), identity)
 
     val (graph2, commit2, epoch2) = buildGeneration("{ add extra = true ; add second = false ; }", epoch1, 2L)
     val repoIndex2 = RepositoryIndex(Map("org-a" -> graph2.digest))
     cas.put(repoIndex2.artifact)
     val state2 = FederationState(ledgerStandIn.digest, repoIndex2.digest, appIndex.digest, nsIndex.digest,
       replicaSet.digest, epoch2.digest)
-    val coord2 = FederationTransactionCoordinator(dir.resolve("home-2"), cas, node, replicas, replicaSet, federationId)
-    coord2.publish(List(commit2), state1, state2, epoch = 2L, authority, authorities).fold(e => fail(e), identity)
+    val coord2 = FederationTransactionCoordinator(dir.resolve("home-2"), cas, node, Map.empty, replicaSet, federationId)
+    coord2.publishLocalTestOnly(replicas, List(commit2), state1, state2, epoch = 2L, authority, authorities).fold(e => fail(e), identity)
 
     (cas, node, federationId, genesisState, state1, state2, replicaSet)
 
@@ -133,7 +133,7 @@ class FederationHistorySuite extends munit.FunSuite:
     val stray = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndex.digest, replicaSet.digest, gcEpoch.digest)
     List(gcEpoch.artifact, repoIndex.artifact, appIndex.artifact, nsIndex.artifact, replicaSet.artifact, stray.artifact)
       .foreach(node.cas.put)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = stray.digest, epoch = 1L,
       previousState = stray.digest, federationId = federationId).fold(e => fail(e), identity)
     node.cas.put(cert.artifact)

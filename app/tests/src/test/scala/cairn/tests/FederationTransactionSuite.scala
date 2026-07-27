@@ -91,7 +91,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     (cas, node, commit, genesisState, newState, replicaSet, federationId)
 
   private def coordinator(home: java.nio.file.Path, source: DiskCas, node: Node, replicaSet: ReplicaSetManifest, federationId: Digest) =
-    FederationTransactionCoordinator(home, source, node, replicas, replicaSet, federationId)
+    FederationTransactionCoordinator(home, source, node, Map.empty, replicaSet, federationId)
 
   private def authorities = Map(authority.name -> authority.publicBytes)
 
@@ -99,7 +99,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     val (cas, node, commit, genesis, newState, replicaSet, federationId) = fixture()
     val home = Files.createTempDirectory("cairn-fedtx-home-ok")
     val coord = coordinator(home, cas, node, replicaSet, federationId)
-    val (cert, block) = coord.publish(List(commit), genesis, newState, epoch = 1L, authority, authorities)
+    val (cert, block) = coord.publishLocalTestOnly(replicas, List(commit), genesis, newState, epoch = 1L, authority, authorities)
       .fold(e => fail(e), identity)
     assertEquals(cert.stateDigest, newState.digest)
     assertEquals(coord.current, Right(Some(newState.digest)))
@@ -111,7 +111,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     val (cas, node, commit, genesis, newState, replicaSet, federationId) = fixture()
     val home = Files.createTempDirectory("cairn-fedtx-home-staged")
     val coord = coordinator(home, cas, node, replicaSet, federationId)
-    assert(coord.publish(List(commit), genesis, newState, 1L, authority, authorities,
+    assert(coord.publishLocalTestOnly(replicas, List(commit), genesis, newState, 1L, authority, authorities,
       FederationTransactionPhase.AfterStaged).isLeft)
     assertEquals(coord.current, Right(None))
     assertEquals(node.state(authorities).fold(e => fail(e), identity).heads, Map.empty)
@@ -122,7 +122,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     val (cas, node, commit, genesis, newState, replicaSet, federationId) = fixture()
     val home = Files.createTempDirectory("cairn-fedtx-home-proposed")
     val coord = coordinator(home, cas, node, replicaSet, federationId)
-    assert(coord.publish(List(commit), genesis, newState, 1L, authority, authorities,
+    assert(coord.publishLocalTestOnly(replicas, List(commit), genesis, newState, 1L, authority, authorities,
       FederationTransactionPhase.AfterProposed).isLeft)
     assertEquals(coord.current, Right(None))
     assertEquals(node.state(authorities).fold(e => fail(e), identity).heads, Map.empty)
@@ -132,7 +132,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     val (cas, node, commit, genesis, newState, replicaSet, federationId) = fixture()
     val home = Files.createTempDirectory("cairn-fedtx-home-certified")
     val coord = coordinator(home, cas, node, replicaSet, federationId)
-    assert(coord.publish(List(commit), genesis, newState, 1L, authority, authorities,
+    assert(coord.publishLocalTestOnly(replicas, List(commit), genesis, newState, 1L, authority, authorities,
       FederationTransactionPhase.AfterCertified).isLeft)
     assertEquals(coord.current, Right(None))
     assertEquals(node.state(authorities).fold(e => fail(e), identity).heads, Map.empty,
@@ -143,7 +143,7 @@ class FederationTransactionSuite extends munit.FunSuite:
     val (cas, node, commit, genesis, newState, replicaSet, federationId) = fixture()
     val home = Files.createTempDirectory("cairn-fedtx-home-ledgered")
     val coord = coordinator(home, cas, node, replicaSet, federationId)
-    assert(coord.publish(List(commit), genesis, newState, 1L, authority, authorities,
+    assert(coord.publishLocalTestOnly(replicas, List(commit), genesis, newState, 1L, authority, authorities,
       FederationTransactionPhase.AfterLedgered).isLeft)
     assertEquals(coord.current, Right(None), "not yet exposed locally — that's the crash point")
     val ledgerState = node.state(authorities).fold(e => fail(e), identity)

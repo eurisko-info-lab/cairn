@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets
   * digest chain (`transition.before == priorState.digest`), not ledger
   * replay. Reusing [[BftQuorum]]'s already-generic `Msg`/`Value`/quorum math
   * plus [[BftFinality]]'s signing/`SignedMsg` conventions (copied, not
-  * imported, for the same reason — see [[agreeForFederationState]]) keeps
+  * imported, for the same reason — see [[agreeForFederationStateLocalTestOnly]]) keeps
   * the existing, heavily-tested block-finality path untouched.
   */
 object FederationFinality:
@@ -214,7 +214,19 @@ object FederationFinality:
           "federation finality: certificate subject is not the claimed state")
       yield ()
 
-  /** Agree over a `cairn.core.FederationState` digest. Mirrors
+  /** PR33 slice 8: TEST-ONLY local orchestration — every replica's state
+    * machine runs synchronously in this one process/call, given every
+    * replica's PRIVATE key directly in `replicas`. Real BFT safety requires
+    * that no single process ever hold more than one replica's signing
+    * key; production code must go through [[agreeNetworkRemote]] instead,
+    * where each replica is a genuinely independent process/`FederationReplica`
+    * reachable only over HTTP. Kept, unrenamed in behavior, purely so
+    * tests whose actual subject is GC/history/ceremony/crash-recovery
+    * plumbing (not the network transport itself, already covered by
+    * `FederationNetworkSuite`) can obtain a real, verifiable certificate
+    * without standing up real HTTP replicas for every fixture.
+    *
+    * Agrees over a `cairn.core.FederationState` digest. Mirrors
     * [[BftFinality.agreeLocalProven]] (the "caller already knows
     * epoch/predecessor" variant, not [[BftFinality.agreeForSealedBlock]]'s
     * "rediscover from chain" variant — a federation state isn't
@@ -232,7 +244,7 @@ object FederationFinality:
     * Caught by the PR31 exit ceremony's successor-replica-set-activation
     * step, where the active manifest is never the bare genesis shape).
     */
-  def agreeForFederationState(
+  def agreeForFederationStateLocalTestOnly(
       replicas: List[Keypair],
       manifest: ReplicaSetManifest,
       view: Int,

@@ -121,8 +121,8 @@ class FederationCeremonySuite extends munit.FunSuite:
       replicaSet0.digest, epoch1.digest)
 
     val home1 = dir.resolve("home-1")
-    val coord1 = FederationTransactionCoordinator(home1, cas, node, replicas, replicaSet0, federationId)
-    val (cert1, _) = coord1.publish(List(nsA0.commit, nsB0.commit), genesisState, state1, epoch = 1L, authority, authorities)
+    val coord1 = FederationTransactionCoordinator(home1, cas, node, Map.empty, replicaSet0, federationId)
+    val (cert1, _) = coord1.publishLocalTestOnly(replicas, List(nsA0.commit, nsB0.commit), genesisState, state1, epoch = 1L, authority, authorities)
       .fold(e => fail(e), identity)
     assertEquals(coord1.current, Right(Some(state1.digest)))
     assertEquals(cert1.stateDigest, state1.digest)
@@ -162,14 +162,14 @@ class FederationCeremonySuite extends munit.FunSuite:
       FederationTransactionPhase.AfterCertified,
     ).zipWithIndex.foreach { (phase, i) =>
       val home = dir.resolve(s"home-crash-$i")
-      val coord = FederationTransactionCoordinator(home, cas, node, replicas, replicaSet0, federationId)
-      assert(coord.publish(List(nsA1.commit, nsB0.commit), state1, state2, epoch = 2L, authority, authorities, phase).isLeft)
+      val coord = FederationTransactionCoordinator(home, cas, node, Map.empty, replicaSet0, federationId)
+      assert(coord.publishLocalTestOnly(replicas, List(nsA1.commit, nsB0.commit), state1, state2, epoch = 2L, authority, authorities, phase).isLeft)
       assertEquals(coord.current, Right(None), s"phase $phase: nothing exposed locally on this fresh coordinator yet")
     }
     // The actual generation-2 transition, uninterrupted, on its own coordinator home.
     val home2 = dir.resolve("home-2")
-    val coord2 = FederationTransactionCoordinator(home2, cas, node, replicas, replicaSet0, federationId)
-    val (cert2, _) = coord2.publish(List(nsA1.commit, nsB0.commit), state1, state2, epoch = 2L, authority, authorities)
+    val coord2 = FederationTransactionCoordinator(home2, cas, node, Map.empty, replicaSet0, federationId)
+    val (cert2, _) = coord2.publishLocalTestOnly(replicas, List(nsA1.commit, nsB0.commit), state1, state2, epoch = 2L, authority, authorities)
       .fold(e => fail(e), identity)
     assertEquals(coord2.current, Right(Some(state2.digest)))
 
@@ -217,8 +217,8 @@ class FederationCeremonySuite extends munit.FunSuite:
     val state3 = FederationState(ledgerStandIn.digest, repoIndex2.digest, appIndex2.digest, nsIndex3.digest,
       successorReplicaSet.digest, epoch3.digest)
     val home3 = dir.resolve("home-3")
-    val coord3 = FederationTransactionCoordinator(home3, cas, node, successorReplicas, successorReplicaSet, federationId)
-    val (cert3, _) = coord3.publish(Nil, state2, state3, epoch = 3L, authority, authorities)
+    val coord3 = FederationTransactionCoordinator(home3, cas, node, Map.empty, successorReplicaSet, federationId)
+    val (cert3, _) = coord3.publishLocalTestOnly(successorReplicas, Nil, state2, state3, epoch = 3L, authority, authorities)
       .fold(e => fail(e), identity)
     assertEquals(coord3.current, Right(Some(state3.digest)))
     assertEquals(cert3.replicaSet, successorReplicaSet.replicaSetDigest)
@@ -282,7 +282,7 @@ class FederationCeremonySuite extends munit.FunSuite:
     //    instances against the SAME on-disk paths — and confirm convergence. --
     val restartedCas = DiskCas(dir.resolve("cas"))
     val restartedNode = Node(nodeHome, EffectContexts.forLedger())
-    val restartedCoord = FederationTransactionCoordinator(home3, restartedCas, restartedNode, successorReplicas, successorReplicaSet, federationId)
+    val restartedCoord = FederationTransactionCoordinator(home3, restartedCas, restartedNode, Map.empty, successorReplicaSet, federationId)
     assertEquals(restartedCoord.current, Right(Some(state3.digest)), "restart from disk must converge on the same federation root")
     assertEquals(verifyFederationState(state3, restartedCas).map(_ => ()), Right(()))
 

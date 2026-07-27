@@ -159,7 +159,7 @@ enum FederationTransactionPhase:
   *
   * Phases: '''stage''' (verify + install the complete closure) →
   * '''propose''' (broadcast to the replica quorum) → '''certify'''
-  * ([[FederationFinality.agreeForFederationState]] mints a
+  * ([[FederationFinality.agreeNetworkRemote]] mints a
   * [[FederationFinality.FederationFinalityCertificate]]) → '''ledger'''
   * (one batched append: the new state, every touched namespace's head, and
   * the certificate anchor) → '''GC epoch advanced''' (no separate journal
@@ -179,7 +179,7 @@ enum FederationTransactionPhase:
   */
 final class FederationTransactionCoordinator(
     home: Path, source: Cas, node: Node,
-    replicas: List[Keypair], activeManifest: ReplicaSetManifest, federationId: Digest,
+    replicaUrls: Map[String, String], activeManifest: ReplicaSetManifest, federationId: Digest,
 ):
   private val intent = home.resolve("federation-state.intent")
   private val visible = home.resolve("federation-state.current")
@@ -229,21 +229,36 @@ final class FederationTransactionCoordinator(
   /** `epoch` is the ledger height this generation is anchored at (shared
     * clock with `newState`'s own gcEpoch/namespace-trust activation
     * points); `priorState` is the exact predecessor the minted certificate
-    * must chain from. Mints, verifies, and ledger-anchors (in the same
+    * must chain from. Mints (via `mintCert`, see [[publish]]/
+    * [[publishLocalTestOnly]]), verifies, and ledger-anchors (in the same
     * block as `newState` itself) a [[FederationTransition]] binding this
     * whole generation — the canonical, replayable history object (PR32) —
-    * though `publish`'s own return type stays the certificate/block pair
+    * though the public return type stays the certificate/block pair
     * callers already depend on; the transition becomes externally visible
     * through `current`/`recover`/[[FederationHistory]].
+    *
+    * The transition named in the PROPOSAL (`finality = None`) is a
+    * DIFFERENT artifact/digest from the one ultimately ledgered
+    * (`finality = Some(cert.digest)`) — a replica verifying before any
+    * quorum exists structurally checks the former
+    * (`VerifiedFederationTransition.verifyStructural`, PR33 slice 4); only
+    * once a certificate exists can the latter, fully bound transition be
+    * built and pass the full `.verify` (finality-binding included) this
+    * function itself still requires before ledgering. Building `approvals`/
+    * the pre-cert transition earlier than the original single-transition
+    * version did changes no crash-recovery semantics: the `intent` journal's
+    * strings/ordering/checkpoints are unchanged, and everything moved
+    * earlier is a pure, non-durable, side-effect-free computation.
     */
-  def publish(
+  private def publishWithCert(
       transactions: List[FederationCommit],
       priorState: FederationState,
       newState: FederationState,
       epoch: Long,
       authority: Keypair,
       authorities: Map[String, Vector[Byte]],
-      crash: FederationTransactionPhase = FederationTransactionPhase.None,
+      crash: FederationTransactionPhase,
+      mintCert: FederationFinality.FederationProposal => Either[String, FederationFinality.FederationFinalityCertificate],
   ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
     source.put(newState.artifact)
     for
@@ -264,14 +279,17 @@ final class FederationTransactionCoordinator(
       // never reaches it — the ledger transactions below only publish its
       // KEY, not its bytes. Recovery needs the bare artifact to decode it.
       _ = transactions.foreach(c => node.cas.put(c.artifact))
+      approvals <- computeApprovals(priorState, newState, source)
+      preCertTransition = FederationTransition(priorState.digest, transactions.map(_.digest), newState.digest, approvals, None)
+      _ = source.put(preCertTransition.artifact)
+      _ = node.cas.put(preCertTransition.artifact)
+      proposal = FederationFinality.FederationProposal(
+        federationId, preCertTransition.digest, priorState.digest, newState.digest, epoch, activeManifest.replicaSetDigest)
       _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
-      cert <- FederationFinality.agreeForFederationState(
-        replicas, activeManifest, view = 0, stateDigest = newState.digest, epoch = epoch,
-        previousState = priorState.digest, federationId = federationId)
+      cert <- mintCert(proposal)
       _ = node.cas.put(cert.artifact)
-      approvals <- computeApprovals(priorState, newState, source)
-      transition = FederationTransition(priorState.digest, transactions.map(_.digest), newState.digest, approvals, Some(cert.digest))
+      transition = preCertTransition.copy(finality = Some(cert.digest))
       _ <- VerifiedFederationTransition.verify(transition, priorState, newState, transactions, cert, federationId, source)
       _ = source.put(transition.artifact)
       _ = node.cas.put(transition.artifact)
@@ -290,6 +308,50 @@ final class FederationTransactionCoordinator(
       _ <- write(visible, transition.digest.hex)
       _ = Files.deleteIfExists(intent)
     yield (cert, block)
+
+  /** Production path: mints the certificate over the real network —
+    * `activeManifest`'s OTHER replicas are genuinely independent processes,
+    * never private keys this one holds (see [[FederationFinality.agreeNetworkRemote]]).
+    */
+  def publish(
+      transactions: List[FederationCommit],
+      priorState: FederationState,
+      newState: FederationState,
+      epoch: Long,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+      crash: FederationTransactionPhase = FederationTransactionPhase.None,
+  ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
+    publishWithCert(transactions, priorState, newState, epoch, authority, authorities, crash,
+      proposal => FederationFinality.agreeNetworkRemote(replicaUrls, proposal, authority, activeManifest.authorities))
+
+  /** TEST-ONLY: identical crash/journal/ledger machinery as [[publish]],
+    * differing only in how the certificate is minted — every replica's
+    * state machine runs synchronously in this one call, given every
+    * replica's PRIVATE key directly in `replicas` (see
+    * [[FederationFinality.agreeForFederationStateLocalTestOnly]]'s own doc
+    * comment for why this must never be production's own path). Exists so
+    * tests whose actual subject is GC/history/ceremony/crash-recovery
+    * plumbing — not the network transport itself, already covered by
+    * `FederationNetworkSuite` — don't need to stand up real HTTP replicas
+    * for every fixture; the crash-phase/journal logic they exercise is
+    * identical either way, since `publishWithCert`'s shared body doesn't
+    * care how its `mintCert` argument obtains a certificate.
+    */
+  def publishLocalTestOnly(
+      replicas: List[Keypair],
+      transactions: List[FederationCommit],
+      priorState: FederationState,
+      newState: FederationState,
+      epoch: Long,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+      crash: FederationTransactionPhase = FederationTransactionPhase.None,
+  ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
+    publishWithCert(transactions, priorState, newState, epoch, authority, authorities, crash,
+      proposal => FederationFinality.agreeForFederationStateLocalTestOnly(
+        replicas, activeManifest, view = 0, stateDigest = proposal.after,
+        epoch = proposal.epoch, previousState = proposal.before, federationId = proposal.federationId))
 
   /** Anything staged/proposed/certified but never ledgered is safely
     * abandoned (old state stands). Only a ledgered generation is completed

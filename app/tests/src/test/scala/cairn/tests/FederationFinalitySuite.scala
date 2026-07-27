@@ -5,7 +5,7 @@ import cairn.systemhandler.{BftFinality, FederationFinality, Keypair}
 
 /** PR31 slice 4: BFT finality over a federation-state digest. Mirrors
   * `DistributionDaemonSuite`'s existing `BftFinality.agreeForSealedBlock`
-  * certificate tests, retargeted at `FederationFinality.agreeForFederationState`
+  * certificate tests, retargeted at `FederationFinality.agreeForFederationStateLocalTestOnly`
   * — a parallel, digest-generic certificate path that never touches the
   * ledger/`Block`-coupled block-finality machinery.
   */
@@ -16,8 +16,8 @@ class FederationFinalitySuite extends munit.FunSuite:
   private val federationId = Digest.of(Canon.CStr("federation-chain-id"))
   private val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
 
-  test("agreeForFederationState mints a verifiable 2f+1 certificate"):
-    val cert = FederationFinality.agreeForFederationState(
+  test("agreeForFederationStateLocalTestOnly mints a verifiable 2f+1 certificate"):
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     assertEquals(cert.stateDigest, stateDigest)
@@ -30,14 +30,14 @@ class FederationFinalitySuite extends munit.FunSuite:
     assertEquals(FederationFinality.FederationFinalityCertificate.verify(cert, manifest), Right(()))
 
   test("canon/fromCanon round-trip"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 2L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     val back = FederationFinality.FederationFinalityCertificate.fromCanon(cert.canon).fold(e => fail(e), identity)
     assertEquals(back, cert)
 
   test("certificate rejects duplicate replica commits"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     val (id0, seal0) = cert.commits.head
@@ -45,21 +45,21 @@ class FederationFinalitySuite extends munit.FunSuite:
     assert(FederationFinality.FederationFinalityCertificate.verify(duped, manifest).isLeft)
 
   test("certificate rejects under-quorum commits"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     val thin = cert.copy(commits = cert.commits.take(1))
     assert(FederationFinality.FederationFinalityCertificate.verify(thin, manifest).isLeft)
 
   test("certificate rejects a forged epoch (seq must equal epoch)"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     val forged = cert.copy(epoch = 99L)
     assert(FederationFinality.FederationFinalityCertificate.verify(forged, manifest).isLeft)
 
   test("certificate rejects a replica set mismatch"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     val otherReplicas = List("s0", "s1", "s2", "s3").map(Keypair.dev)
@@ -67,7 +67,7 @@ class FederationFinalitySuite extends munit.FunSuite:
     assert(FederationFinality.FederationFinalityCertificate.verify(cert, otherManifest).isLeft)
 
   test("verifyAgainstFederationHistory checks federationId/previousState/stateDigest bindings"):
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = stateDigest, epoch = 1L,
       previousState = previousState, federationId = federationId).fold(e => fail(e), identity)
     assertEquals(FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(

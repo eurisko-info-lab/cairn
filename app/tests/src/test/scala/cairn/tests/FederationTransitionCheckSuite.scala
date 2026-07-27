@@ -50,7 +50,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     List(replicaSet.artifact, gcEpoch.artifact, trustManifest.artifact, commit.artifact,
       repoBefore.artifact, appBefore.artifact, repoAfter.artifact, appAfter.artifact, nsIndex.artifact,
       before.artifact, after.artifact).foreach(cas.put)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, List(commit.digest), after.digest, Nil, Some(cert.digest))
@@ -143,7 +143,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val after = before
     List(replicaSet.artifact, gcEpoch.artifact, trustManifest.artifact, repoIndex.artifact, appIndex.artifact,
       nsIndex.artifact, before.artifact).foreach(cas.put)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
@@ -181,7 +181,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
     val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
     cas.put(trustManifest.artifact); cas.put(rotated.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, List(rotated.digest), Some(cert.digest))
@@ -197,7 +197,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
     val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
     cas.put(trustManifest.artifact); cas.put(rotated.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     // The rotation itself is correctly approved and listed — but an extra,
@@ -215,7 +215,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
       replaces = Some(trustManifest.digest), activationEpoch = 1L).fold(e => fail(e), identity)
     val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
     cas.put(trustManifest.artifact); cas.put(rotated.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, List(rotated.digest), Some(cert.digest))
@@ -230,7 +230,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
     val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
     cas.put(trustManifest.artifact); cas.put(rotated.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
@@ -248,7 +248,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
       .fold(e => fail(e), identity).copy(predecessorApprovals = approvedDraft.predecessorApprovals)
     val (cas, before, after) = rotationFixture(trustManifest.digest, trustManifest.digest, replicaSet, successor)
     cas.put(trustManifest.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       successorReplicas, successor, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, List(successor.digest), Some(cert.digest))
@@ -262,7 +262,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     val (cas, before, after) = rotationFixture(trustManifest.digest, trustManifest.digest, replicaSet, successor)
     cas.put(trustManifest.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       successorReplicas, successor, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, List(successor.digest), Some(cert.digest))
@@ -290,7 +290,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val beforeEpoch = ReplicatedGcEpoch(0, Set.empty, None)
     val afterEpoch = ReplicatedGcEpoch(1, Set.empty, Some(beforeEpoch.digest))
     val (cas, before, after) = gcEpochFixture(afterEpoch)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
@@ -301,7 +301,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
   test("verify rejects a gcEpoch that does not hash-link to its predecessor"):
     val afterEpoch = ReplicatedGcEpoch(1, Set.empty, Some(Digest.of(Canon.CStr("some-other-epoch"))))
     val (cas, before, after) = gcEpochFixture(afterEpoch)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
@@ -311,7 +311,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
   test("verify rejects a gcEpoch number that does not strictly increase"):
     val afterEpoch = ReplicatedGcEpoch(0, Set.empty, Some(Digest.of(Canon.CStr("dummy-predecessor"))))
     val (cas, before, after) = gcEpochFixture(afterEpoch)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))

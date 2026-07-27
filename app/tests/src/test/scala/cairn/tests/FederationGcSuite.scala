@@ -103,7 +103,7 @@ class FederationGcSuite extends munit.FunSuite:
       applications = appIndex.digest, namespaces = nsIndex.digest,
       trustRoots = manifest.digest, gcEpoch = epoch.digest)
     cas.put(state.artifact)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
 
@@ -125,7 +125,7 @@ class FederationGcSuite extends munit.FunSuite:
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val differentState = state.copy(ledger = Digest.of(Canon.CStr("different-ledger")))
-    val certForDifferentState = FederationFinality.agreeForFederationState(
+    val certForDifferentState = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = differentState.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
     val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
@@ -143,7 +143,7 @@ class FederationGcSuite extends munit.FunSuite:
     val federationId = Digest.of(Canon.CStr("federation-gc-test-3"))
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
-    val cert = FederationFinality.agreeForFederationState(
+    val cert = FederationFinality.agreeForFederationStateLocalTestOnly(
       replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
     val wrongFederation = Digest.of(Canon.CStr("some-other-federation"))
@@ -217,8 +217,8 @@ class FederationGcSuite extends munit.FunSuite:
     val state1 = FederationState(ledgerStandIn.digest, repoIndex1.digest, appIndex.digest, nsIndex.digest,
       replicaSet.digest, epoch1.digest)
 
-    val coord1 = FederationTransactionCoordinator(dir.resolve("home-1"), cas, node, replicas, replicaSet, federationId)
-    coord1.publish(List(commit1), genesisState, state1, epoch = 1L, authority, authorities).fold(e => fail(e), identity)
+    val coord1 = FederationTransactionCoordinator(dir.resolve("home-1"), cas, node, Map.empty, replicaSet, federationId)
+    coord1.publishLocalTestOnly(replicas, List(commit1), genesisState, state1, epoch = 1L, authority, authorities).fold(e => fail(e), identity)
     val transitionDigestsAfterGen1 = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
     assertEquals(transitionDigestsAfterGen1.length, 1)
     val transition1Digest = transitionDigestsAfterGen1.head
@@ -229,8 +229,8 @@ class FederationGcSuite extends munit.FunSuite:
     val state2 = FederationState(ledgerStandIn.digest, repoIndex2.digest, appIndex.digest, nsIndex.digest,
       replicaSet.digest, epoch2.digest)
 
-    val coord2 = FederationTransactionCoordinator(dir.resolve("home-2"), cas, node, replicas, replicaSet, federationId)
-    val (cert2, _) = coord2.publish(List(commit2), state1, state2, epoch = 2L, authority, authorities).fold(e => fail(e), identity)
+    val coord2 = FederationTransactionCoordinator(dir.resolve("home-2"), cas, node, Map.empty, replicaSet, federationId)
+    val (cert2, _) = coord2.publishLocalTestOnly(replicas, List(commit2), state1, state2, epoch = 2L, authority, authorities).fold(e => fail(e), identity)
 
     val orphan = Artifact(ArtifactKind.Claim, Canon.CStr("history-retention-orphan"))
     val orphanDigest = CasEffects.put(cas, orphan, casCtx).fold(e => fail(e.toString), _.valueHash)

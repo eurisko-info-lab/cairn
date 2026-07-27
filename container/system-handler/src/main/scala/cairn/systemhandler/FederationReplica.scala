@@ -492,7 +492,7 @@ final class FederationReplica private (
 
   /** Primary-only: propose a [[FederationFinality.FederationProposal]] for
     * agreement at `view`. `seq` is `proposal.epoch` (the shared clock
-    * convention already established by [[FederationFinality.agreeForFederationState]]:
+    * convention already established by [[FederationFinality.agreeForFederationStateLocalTestOnly]]:
     * `seq == epoch`).
     */
   def propose(view: Int, proposal: FederationFinality.FederationProposal): Either[String, List[BftFinality.SignedMsg]] =
