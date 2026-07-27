@@ -6,13 +6,14 @@ import cairn.runtime.*
 import cairn.systemhandler.{BftFinality, DiskCas, FederationFinality, Keypair}
 import java.nio.file.Files
 
-/** PR32 slices 1-2: [[VerifiedFederationTransition]]'s core structural
+/** PR32 slices 1-3: [[VerifiedFederationTransition]]'s core structural
   * checks (before/after digest bindings, no dangling/duplicate transactions
   * or approvals, finality certificate binding sourced from `after.trustRoots`)
   * plus per-namespace `RepositoryIndex`/`ApplicationIndex` diffing (every
   * changed entry traces to exactly one authorizing commit, every untouched
   * entry is byte-identical, and each commit cites its own governing trust
-  * manifest). Namespace-trust/replica-set amendment policy and GC-epoch
+  * manifest), plus namespace-trust/replica-set amendment-policy checks for
+  * pure rotation transitions (no backing commit). GC-epoch
   * checks land in later slices.
   */
 class FederationTransitionCheckSuite extends munit.FunSuite:
@@ -149,3 +150,101 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
     val verified = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
       .fold(e => fail(e), identity)
     assertEquals(verified.after, after)
+
+  /** A pure rotation transition: repository/application indices untouched,
+    * no commits, only `nsDigest`/`replicaSet` differ between before/after.
+    */
+  private def rotationFixture(nsDigestBefore: Digest, nsDigestAfter: Digest,
+      replicaSetBefore: ReplicaSetManifest, replicaSetAfter: ReplicaSetManifest,
+  ): (DiskCas, FederationState, FederationState) =
+    val dir = Files.createTempDirectory("cairn-fedtx-check-rotation")
+    val cas = DiskCas(dir.resolve("cas"))
+    val ledger = standIn("ledger-stand-in-rotation")
+    val gcEpoch = ReplicatedGcEpoch(0, Set.empty, None)
+    val repoIndex = RepositoryIndex(Map("org-a" -> standIn("rotation-repo")))
+    val appIndex = ApplicationIndex(Map("org-a" -> standIn("rotation-app")))
+    val nsIndexBefore = NamespaceIndex(Map("org-a" -> nsDigestBefore))
+    val nsIndexAfter = NamespaceIndex(Map("org-a" -> nsDigestAfter))
+    val before = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndexBefore.digest,
+      replicaSetBefore.digest, gcEpoch.digest)
+    val after = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndexAfter.digest,
+      replicaSetAfter.digest, gcEpoch.digest)
+    List(gcEpoch.artifact, repoIndex.artifact, appIndex.artifact, nsIndexBefore.artifact, nsIndexAfter.artifact,
+      replicaSetBefore.artifact, replicaSetAfter.artifact, before.artifact, after.artifact).foreach(cas.put)
+    (cas, before, after)
+
+  test("verify accepts a namespace-trust rotation with predecessor majority and a listed approval"):
+    val newOwner = Keypair.dev("org-a-owner-2")
+    val draft = NamespaceTrustManifest.of("org-a", List(newOwner.name -> newOwner.publicBytes),
+      replaces = Some(trustManifest.digest), activationEpoch = 1L).fold(e => fail(e), identity)
+    val payload = Canon.encode(draft.bodyCanon)
+    val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
+    val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
+    cas.put(trustManifest.artifact); cas.put(rotated.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, List(rotated.digest), Some(cert.digest))
+    val verified = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+      .fold(e => fail(e), identity)
+    assertEquals(verified.after, after)
+
+  test("verify rejects a namespace-trust rotation missing predecessor majority approval"):
+    val newOwner = Keypair.dev("org-a-owner-3")
+    val rotated = NamespaceTrustManifest.of("org-a", List(newOwner.name -> newOwner.publicBytes),
+      replaces = Some(trustManifest.digest), activationEpoch = 1L).fold(e => fail(e), identity)
+    val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
+    cas.put(trustManifest.artifact); cas.put(rotated.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, List(rotated.digest), Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.isLeft, result.toString)
+
+  test("verify rejects a properly-approved namespace-trust rotation absent from transition.approvals"):
+    val newOwner = Keypair.dev("org-a-owner-4")
+    val draft = NamespaceTrustManifest.of("org-a", List(newOwner.name -> newOwner.publicBytes),
+      replaces = Some(trustManifest.digest), activationEpoch = 1L).fold(e => fail(e), identity)
+    val payload = Canon.encode(draft.bodyCanon)
+    val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
+    val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
+    cas.put(trustManifest.artifact); cas.put(rotated.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.left.exists(_.contains("not listed in transition.approvals")), result.toString)
+
+  test("verify accepts a replica-set rotation with predecessor quorum and a listed approval"):
+    val successorReplicas = replicas.take(3) ++ List(Keypair.dev("r4"))
+    val draft = ReplicaSetManifest.of(successorReplicas.map(k => k.name -> k.publicBytes),
+      replaces = Some(replicaSet.digest), activationHeight = 1L).fold(e => fail(e), identity)
+    val payload = Canon.encode(draft.bodyCanon)
+    val approvals = replicas.take(BftQuorum.quorumSize(4)).map(k => k.name -> k.sign(payload))
+    val approvedDraft = ReplicaSetManifest.withPredecessorApprovals(draft, approvals).fold(e => fail(e), identity)
+    val successor = BftFinality.sealReplicaSet(successorReplicas, replaces = Some(replicaSet.digest), activationHeight = 1L)
+      .fold(e => fail(e), identity).copy(predecessorApprovals = approvedDraft.predecessorApprovals)
+    val (cas, before, after) = rotationFixture(trustManifest.digest, trustManifest.digest, replicaSet, successor)
+    cas.put(trustManifest.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      successorReplicas, successor, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, List(successor.digest), Some(cert.digest))
+    val verified = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+      .fold(e => fail(e), identity)
+    assertEquals(verified.after, after)
+
+  test("verify rejects a replica-set rotation missing predecessor quorum"):
+    val successorReplicas = replicas.take(3) ++ List(Keypair.dev("r5"))
+    val successor = BftFinality.sealReplicaSet(successorReplicas, replaces = Some(replicaSet.digest), activationHeight = 1L)
+      .fold(e => fail(e), identity)
+    val (cas, before, after) = rotationFixture(trustManifest.digest, trustManifest.digest, replicaSet, successor)
+    cas.put(trustManifest.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      successorReplicas, successor, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    val transition = FederationTransition(before.digest, Nil, after.digest, List(successor.digest), Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.isLeft, result.toString)

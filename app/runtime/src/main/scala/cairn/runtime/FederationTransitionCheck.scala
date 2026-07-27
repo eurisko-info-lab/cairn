@@ -3,7 +3,7 @@ package cairn.runtime
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systeminterface.Cas
-import cairn.systemhandler.FederationFinality
+import cairn.systemhandler.{Ed25519, FederationFinality}
 
 /** PR32: makes [[cairn.core.FederationTransition]] the actual canonical
   * history object, not scaffolding around [[cairn.core.FederationState]]
@@ -60,6 +60,61 @@ object VerifiedFederationTransition:
       }
     }
 
+  /** A namespace's trust manifest may rotate WITHOUT any backing commit (a
+    * pure authority-rotation transition) — unlike repository/application
+    * entries, so this is checked independently of `diffCommitBackedIndex`.
+    * Every rotation must satisfy [[NamespaceTrustManifest.allowsTransition]]
+    * against its own predecessor, and its new manifest digest must be
+    * listed in `transition.approvals` — the explicit "authority rotation is
+    * a transition constituent" record.
+    *
+    * No `minActivation` high-water is enforced here: a rotation is
+    * self-activating within the very generation that installs it (confirmed
+    * against `FederationCeremonySuite`'s rotation step, where
+    * `activationEpoch`/`activationHeight` equals that generation's own
+    * epoch) — `allowsTransition`'s own strictly-increasing-over-predecessor
+    * check is the monotonicity guard that applies here.
+    */
+  private def diffNamespaceTrust(
+      before: Map[String, Digest], after: Map[String, Digest],
+      approvals: List[Digest], cas: Cas,
+  ): Either[String, Unit] =
+    (before.keySet ++ after.keySet).toList.foldLeft[Either[String, Unit]](Right(())) { (acc, ns) =>
+      acc.flatMap { _ =>
+        if before.get(ns) == after.get(ns) then Right(())
+        else
+          for
+            live <- before.get(ns) match
+              case None => Right(None)
+              case Some(d) => cas.getByDigest(d).flatMap(NamespaceTrustManifest.fromArtifact).map(Some(_))
+            newDigest <- after.get(ns).toRight(s"federation transition: namespace-trust entry for '$ns' was removed")
+            newArtifact <- cas.getByDigest(newDigest)
+            proposed <- NamespaceTrustManifest.fromArtifact(newArtifact)
+            _ <- NamespaceTrustManifest.allowsTransition(proposed, live, before.get(ns), Ed25519.verify)
+            _ <- Either.cond(approvals.contains(newDigest), (),
+              s"federation transition: namespace-trust rotation for '$ns' is not listed in transition.approvals")
+          yield ()
+      }
+    }
+
+  /** Symmetric to [[diffNamespaceTrust]], for the single federation-wide
+    * replica set.
+    */
+  private def diffReplicaSet(
+      before: Digest, after: Digest, approvals: List[Digest], cas: Cas,
+  ): Either[String, Unit] =
+    if before == after then Right(())
+    else
+      for
+        liveArtifact <- cas.getByDigest(before)
+        live <- ReplicaSetManifest.fromCanon(liveArtifact.body)
+        newArtifact <- cas.getByDigest(after)
+        proposed <- ReplicaSetManifest.fromCanon(newArtifact.body)
+        _ <- ReplicaSetManifest.allowsTransition(proposed, Some(live), Some(before), Ed25519.verify)
+        _ <- Either.cond(approvals.contains(after), (),
+          "federation transition: replica-set rotation is not listed in transition.approvals")
+      yield ()
+
   /** `federationId` is the fixed chain identity (external context, not
     * itself part of [[FederationState]]); `activeManifest` is decoded from
     * `after.trustRoots`, not `before` — confirmed against
@@ -102,7 +157,7 @@ object VerifiedFederationTransition:
       commitsByNamespace = commits.map(c => c.namespace -> c).toMap
       beforeIndices <- decodeIndices(before, cas)
       afterIndices <- decodeIndices(after, cas)
-      (repoBefore, appBefore, _) = beforeIndices
+      (repoBefore, appBefore, nsBefore) = beforeIndices
       (repoAfter, appAfter, nsAfter) = afterIndices
       _ <- diffCommitBackedIndex("repository", repoBefore.namespaces, repoAfter.namespaces, commitsByNamespace, _.repositoryGraph)
       _ <- diffCommitBackedIndex("application", appBefore.releases, appAfter.releases, commitsByNamespace, _.application)
@@ -112,4 +167,6 @@ object VerifiedFederationTransition:
             s"federation transition: commit for namespace '${c.namespace}' does not cite its own governing trust manifest")
         }
       }
+      _ <- diffNamespaceTrust(nsBefore.manifests, nsAfter.manifests, transition.approvals, cas)
+      _ <- diffReplicaSet(before.trustRoots, after.trustRoots, transition.approvals, cas)
     yield VerifiedFederationTransition(transition, before, after, commits, finality)
