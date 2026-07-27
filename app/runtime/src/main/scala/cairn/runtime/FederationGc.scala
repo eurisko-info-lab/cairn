@@ -64,12 +64,27 @@ object FederationGc:
       case SignedTx(Tx.PublishArtifact(key), _, _) if key.kind == ArtifactKind.FederationTransition => key.valueHash
     }))
 
+  private val emptyNamespaceIndexDigest: Digest = NamespaceIndex(Map.empty).digest
+
+  /** [[VerifiedFederationTransition]] independently re-decodes each
+    * `NamespaceTrustManifest` a `NamespaceIndex` entry names (to check
+    * amendment policy against its predecessor), so — unlike
+    * `RepositoryIndex`/`ApplicationIndex` entries, whose bodies the checker
+    * never dereferences, only compares digests for — these ARE artifacts
+    * replay needs resolvable. Still small, still flat (one level past the
+    * index itself, never the repository/application content a namespace's
+    * OTHER index entries point to).
+    */
+  private def namespaceTrustDigests(state: FederationState, cas: Cas): Either[String, Set[Digest]] =
+    if state.namespaces == emptyNamespaceIndexDigest then Right(Set.empty)
+    else cas.getByDigest(state.namespaces).flatMap(NamespaceIndex.fromArtifact).map(_.manifests.values.toSet)
+
   /** The federation's transition/state history is small, metadata-only
     * content (digests and short field lists — never a repository/release
     * body), so retaining it forever is cheap and doesn't require retaining
     * the heavy content it references (which stays exactly as reclaimable as
     * [[reclaimAgainstFinalizedEpoch]]'s existing current-closure protection
-    * already makes it). This is a FLAT, one-level union over every
+    * already makes it). This is a FLAT, one-to-two-level union over every
     * transition ever published — deliberately not a recursive
     * [[ArtifactApplicationResolver.audit]] walk, which would pull in the
     * full historic `NativeRepository`/application/release closures these
@@ -87,7 +102,10 @@ object FederationGc:
           before <- FederationState.fromArtifact(beforeArtifact)
           afterArtifact <- cas.getByDigest(transition.after)
           after <- FederationState.fromArtifact(afterArtifact)
-        yield xs + transition.digest ++ transition.dependencies ++ before.dependencies ++ after.dependencies
+          beforeNsDigests <- namespaceTrustDigests(before, cas)
+          afterNsDigests <- namespaceTrustDigests(after, cas)
+        yield xs + transition.digest ++ transition.dependencies ++ before.dependencies ++ after.dependencies ++
+          beforeNsDigests ++ afterNsDigests
       }
     yield roots
 

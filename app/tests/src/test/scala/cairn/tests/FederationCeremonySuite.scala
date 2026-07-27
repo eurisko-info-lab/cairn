@@ -8,13 +8,16 @@ import cairn.examples.stlc.Stlc
 import cairn.systemhandler.{BftFinality, DiskCas, Ed25519, FederationFinality, Keypair, Node}
 import java.nio.file.Files
 
-/** PR31 exit ceremony: four replicas, two namespaces. Publishes a valid
+/** PR31/PR32 exit ceremony: four replicas, two namespaces. Publishes a valid
   * change and successor application, crashes during each transaction
   * phase, rotates one namespace authority, activates a successor replica
   * set, injects an equivocating proposal, restarts every node from disk,
   * and verifies: all honest nodes expose the same federation root; no
   * referenced artifact was reclaimed; the entire state reconstructs from
-  * that one root.
+  * that one root; and (PR32) deleting every coordinator's local journal/
+  * sidecar files does not destroy federation history — replaying the
+  * ordered transition closure from genesis, off the ledger's own hash-linked
+  * block sequence, reproduces the final state exactly.
   *
   * Broken into separate `test(...)` blocks per ceremony step (rather than
   * one monolithic scenario) so a failure localizes to one step, per the
@@ -144,9 +147,19 @@ class FederationCeremonySuite extends munit.FunSuite:
     val state2 = FederationState(ledgerStandIn.digest, repoIndex2.digest, appIndex2.digest, nsIndex2.digest,
       replicaSet0.digest, epoch2.digest)
 
+    // AfterLedgered is deliberately NOT exercised in this loop (unlike the
+    // other three phases): its crash happens AFTER the real, irreversible
+    // ledger append, so a fresh coordinator hitting it here would
+    // permanently ledger-anchor a second, competing transition also
+    // branching from state1 — the real generation-2 transition published
+    // right below branches from state1 too, and a linear, hash-linked
+    // ledger cannot contain two independent transitions from the same
+    // prior state (PR32's replay correctly refuses to treat that as one
+    // valid sequence). FederationTransactionSuite already covers
+    // AfterLedgered's own crash/recover behavior in full isolation.
     List(
       FederationTransactionPhase.AfterStaged, FederationTransactionPhase.AfterProposed,
-      FederationTransactionPhase.AfterCertified, FederationTransactionPhase.AfterLedgered,
+      FederationTransactionPhase.AfterCertified,
     ).zipWithIndex.foreach { (phase, i) =>
       val home = dir.resolve(s"home-crash-$i")
       val coord = FederationTransactionCoordinator(home, cas, node, replicas, replicaSet0, federationId)
@@ -296,3 +309,21 @@ class FederationCeremonySuite extends munit.FunSuite:
     assertEquals(installedClosure, finalClosure)
     val reconstructed = verifyFederationState(state3, freshCas).fold(e => fail(e), identity)
     assertEquals(reconstructed, finalClosure)
+
+    // -- Step 9 (PR32): deleting every coordinator's local journal/sidecar
+    //    files must not destroy federation history — the ledger's own
+    //    transition sequence is the source of truth, not those files.
+    //    Replaying the ordered transition closure from genesis must
+    //    reproduce state3 exactly. --
+    List(home1, home2, home3).foreach { home =>
+      Files.deleteIfExists(home.resolve("federation-state.intent"))
+      Files.deleteIfExists(home.resolve("federation-state.current"))
+    }
+    // Replay reads from the NODE's own durable CAS, not the test's separate
+    // content `cas` — a FederationFinalityCertificate (and a generation's
+    // priorState/commit artifacts) are only ever shallow-put into node.cas
+    // by the coordinator, never into `source`, exactly like recover()'s own
+    // exclusive use of node.cas.
+    val replayed = FederationHistory.replayFromGenesis(restartedNode, restartedNode.cas, genesisState, federationId)
+      .fold(e => fail(e), identity)
+    assertEquals(replayed.digest, state3.digest)
