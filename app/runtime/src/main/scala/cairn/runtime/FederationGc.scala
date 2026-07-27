@@ -3,7 +3,7 @@ package cairn.runtime
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systeminterface.Cas
-import cairn.systemhandler.{CasAdmin, CasAdminEffects, EffectContext, FederationFinality}
+import cairn.systemhandler.{CasAdmin, CasAdminEffects, EffectContext, FederationFinality, Node}
 import java.nio.file.Path
 
 /** PR31's "replicated GC safety" invariant: deletion requires a finalized
@@ -54,6 +54,43 @@ object FederationGc:
       releaseRoots <- foldRoots(liveReleases.values)(r => resolver.audit(r.digest))
     yield repoRoots ++ appRoots ++ releaseRoots
 
+  /** Every [[FederationTransition]] ever ledger-anchored, in the order
+    * `node.blocks` (itself hash-linked, height-ordered) recorded them —
+    * this IS the federation's hash-linked transition history; no separate
+    * index or pointer structure is needed to enumerate it.
+    */
+  def orderedTransitionDigests(node: Node): Either[String, List[Digest]] =
+    node.blocks.map(_.flatMap(_.txs.collect {
+      case SignedTx(Tx.PublishArtifact(key), _, _) if key.kind == ArtifactKind.FederationTransition => key.valueHash
+    }))
+
+  /** The federation's transition/state history is small, metadata-only
+    * content (digests and short field lists — never a repository/release
+    * body), so retaining it forever is cheap and doesn't require retaining
+    * the heavy content it references (which stays exactly as reclaimable as
+    * [[reclaimAgainstFinalizedEpoch]]'s existing current-closure protection
+    * already makes it). This is a FLAT, one-level union over every
+    * transition ever published — deliberately not a recursive
+    * [[ArtifactApplicationResolver.audit]] walk, which would pull in the
+    * full historic `NativeRepository`/application/release closures these
+    * digests reference and defeat GC entirely.
+    */
+  def permanentHistoryRoots(node: Node, cas: Cas): Either[String, Set[Digest]] =
+    for
+      digests <- orderedTransitionDigests(node)
+      roots <- digests.foldLeft[Either[String, Set[Digest]]](Right(Set.empty)) { (acc, td) =>
+        for
+          xs <- acc
+          transitionArtifact <- cas.getByDigest(td)
+          transition <- FederationTransition.fromArtifact(transitionArtifact)
+          beforeArtifact <- cas.getByDigest(transition.before)
+          before <- FederationState.fromArtifact(beforeArtifact)
+          afterArtifact <- cas.getByDigest(transition.after)
+          after <- FederationState.fromArtifact(afterArtifact)
+        yield xs + transition.digest ++ transition.dependencies ++ before.dependencies ++ after.dependencies
+      }
+    yield roots
+
   /** Reclaim is only ever driven by the last epoch that survived BFT
     * finality, never by a node's transient local view: `certificate` must
     * independently verify against `activeManifest`, name exactly
@@ -83,6 +120,7 @@ object FederationGc:
       activeManifest: ReplicaSetManifest,
       federationId: Digest,
       ctx: EffectContext,
+      node: Node,
   ): Either[String, CasAdmin.GcReport] =
     for
       _ <- FederationFinality.FederationFinalityCertificate.verify(certificate, activeManifest)
@@ -92,5 +130,6 @@ object FederationGc:
       epochArtifact <- cas.getByDigest(latestFinalized.gcEpoch)
       epoch <- ReplicatedGcEpoch.fromArtifact(epochArtifact)
       currentClosure <- ArtifactApplicationResolver(cas).audit(latestFinalized.digest)
-      report <- CasAdminEffects.gc(casRoot, epoch.roots ++ currentClosure, ctx).left.map(casErr)
+      historyRoots <- permanentHistoryRoots(node, cas)
+      report <- CasAdminEffects.gc(casRoot, epoch.roots ++ currentClosure ++ historyRoots, ctx).left.map(casErr)
     yield report

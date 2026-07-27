@@ -283,7 +283,7 @@ class FederationCeremonySuite extends munit.FunSuite:
     val orphanDigest = cas.put(orphan).valueHash
     assert(cas.getByDigest(orphanDigest).isRight)
     val report = FederationGc.reclaimAgainstFinalizedEpoch(
-      casRoot, state3, cas, cert3, successorReplicaSet, federationId, casCtx).fold(e => fail(e), identity)
+      casRoot, state3, cas, cert3, successorReplicaSet, federationId, casCtx, node).fold(e => fail(e), identity)
     assert(report.swept >= 1, report.toString)
     assert(cas.getByDigest(orphanDigest).isLeft, "the orphan must actually be swept")
     finalClosure.foreach(d => assert(cas.getByDigest(d).isRight, s"reclaim must never have touched live digest ${d.short}"))
