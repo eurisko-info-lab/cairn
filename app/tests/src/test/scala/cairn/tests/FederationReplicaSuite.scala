@@ -119,6 +119,72 @@ class FederationReplicaSuite extends munit.FunSuite:
     assert(result.isLeft)
     assert(result.left.exists(_.contains("does not extend finalized cursor")), result.toString)
 
+  test("a replica missing the original quorum round adopts the later certificate"):
+    val nodes = buildReplicas()
+    val late = replicas.last.name
+    val live = nodes.filterNot(_._1 == late)
+    val proposal = sampleProposal(epoch = 1L)
+    val msgs = live(replicas.head.name).propose(view = 0, proposal).fold(e => fail(e), identity)
+    dispatch(live, proposal, msgs)
+    val minted = live(replicas.head.name).finalityCerts.headOption.getOrElse(fail("no certificate minted among live replicas"))
+    assertEquals(nodes(late).finalityCerts, Nil)
+    assertEquals(nodes(late).finalizedCursor.epoch, 0L)
+
+    val adopted = nodes(late).adoptCertificate(minted, proposal).fold(e => fail(e), identity)
+    assertEquals(adopted, FederationReplica.AdoptedGeneration(proposal.after, proposal.transition, 1L))
+    assertEquals(nodes(late).finalizedCursor, FederationReplica.FinalizedFederationCursor(proposal.after, Some(proposal.transition), 1L))
+    assertEquals(nodes(late).finalityCerts, List(minted))
+
+  test("adopting the same certificate twice is idempotent"):
+    val nodes = buildReplicas()
+    val late = replicas.last.name
+    val live = nodes.filterNot(_._1 == late)
+    val proposal = sampleProposal(epoch = 1L)
+    dispatch(live, proposal, live(replicas.head.name).propose(view = 0, proposal).fold(e => fail(e), identity))
+    val minted = live(replicas.head.name).finalityCerts.head
+    nodes(late).adoptCertificate(minted, proposal).fold(e => fail(e), identity)
+    val second = nodes(late).adoptCertificate(minted, proposal)
+    assertEquals(second, Right(FederationReplica.AdoptedGeneration(proposal.after, proposal.transition, 1L)))
+    assertEquals(nodes(late).finalityCerts, List(minted))
+
+  test("an adopted certificate cannot roll the finalized cursor backward"):
+    val nodes = buildReplicas()
+    val proposal1 = sampleProposal(epoch = 1L)
+    dispatch(nodes, proposal1, nodes(replicas.head.name).propose(view = 0, proposal1).fold(e => fail(e), identity))
+    val cert1 = nodes(replicas.head.name).finalityCerts.head
+    val proposal2 = sampleProposal(epoch = 2L).copy(before = proposal1.after)
+    dispatch(nodes, proposal2, nodes(replicas.head.name).propose(view = 0, proposal2).fold(e => fail(e), identity))
+    val r = nodes(replicas.head.name)
+    assertEquals(r.finalizedCursor.epoch, 2L)
+
+    val result = r.adoptCertificate(cert1, proposal1)
+    assert(result.isLeft, result.toString)
+    assertEquals(r.finalizedCursor.epoch, 2L, "cursor must not roll back")
+    assertEquals(r.finalityCerts.map(_.epoch).sorted, List(1L, 2L))
+
+  test("adopted certificate and cursor persist across restart"):
+    val dir = java.nio.file.Files.createTempDirectory("cairn-federation-replica-adopt")
+    val stateStores = replicas.map(k => k.name -> dir.resolve(s"${k.name}-state.canon")).toMap
+    val certStores = replicas.map(k => k.name -> dir.resolve(s"${k.name}-certs.canon")).toMap
+    val nodes = buildReplicas(stateStores = stateStores, certStores = certStores)
+    val late = replicas.last.name
+    val live = nodes.filterNot(_._1 == late)
+    val proposal = sampleProposal(epoch = 1L)
+    dispatch(live, proposal, live(replicas.head.name).propose(view = 0, proposal).fold(e => fail(e), identity))
+    val minted = live(replicas.head.name).finalityCerts.head
+    nodes(late).adoptCertificate(minted, proposal).fold(e => fail(e), identity)
+
+    // Commit order within a certificate is incidental (not canon-sorted
+    // until encoded — see the "restart from disk" test above), so compare
+    // the commit SET via the same normalization, not list order.
+    def normalized(c: FederationFinality.FederationFinalityCertificate) =
+      c.copy(commits = c.commits.sortBy(_._1.id))
+    val preRestartCursor = nodes(late).finalizedCursor
+    val preRestartCerts = nodes(late).finalityCerts.map(normalized)
+    val restarted = buildReplicas(stateStores = stateStores, certStores = certStores)
+    assertEquals(restarted(late).finalizedCursor, preRestartCursor)
+    assertEquals(restarted(late).finalityCerts.map(normalized), preRestartCerts)
+
   test("only the designated primary for the current view may propose"):
     val nodes = buildReplicas()
     val nonPrimary = nodes(replicas.tail.head.name)

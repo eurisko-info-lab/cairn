@@ -94,6 +94,12 @@ object FederationReplica:
           catch case e: CodecError => Left(e.getMessage)
         case other => Left(s"not a federation-finalized-cursor: $other")
 
+  /** PR33.1 slice 3: what [[FederationReplica.adoptCertificate]] returns on
+    * success — the generation this replica now considers locally finalized,
+    * independent of whether it ever cast a vote for it.
+    */
+  final case class AdoptedGeneration(state: Digest, transition: Digest, epoch: Long)
+
   /** PR33 slice 7: durable record of which namespaces this replica has
     * independently deep-certified, and whether it has ever completed the
     * join-time bootstrap (certifying every namespace live at the time,
@@ -547,6 +553,81 @@ final class FederationReplica private (
             if FederationFinality.FederationFinalityCertificate.verify(cert, manifest).isRight then
               certificates = certificates :+ cert
               cursor.advancedBy(cert).foreach(next => cursor = next)
+
+  /** PR33.1 slice 3: adopt a certificate this replica never voted on — the
+    * late-arriving-vote gap the roadmap already flagged (a replica whose
+    * own Commit lands after another quorum has already finished cannot,
+    * before this, ever independently learn the resulting certificate).
+    * `certificate`/`proposal` are expected to have been fetched by the
+    * caller from a peer, keyed by `certificate.proposal` (the ordinary CAS/
+    * `/federation/proposal/<hex>` route — no separate wire path needed).
+    *
+    * Deliberately mirrors `bindPrePrepare`'s checks rather than trusting the
+    * certificate at face value: signatures alone prove a quorum voted for
+    * `certificate.proposal`, not that `proposal` genuinely deep-verifies, so
+    * adoption re-runs the same local-CAS-only `verifyProposal` callback
+    * (same `MissingClosure`/`Rejected` outcomes, same `missingClosurePrefix`
+    * convention) — the HTTP layer fetches and retries exactly as it already
+    * does for `receive`. Never performs network I/O itself.
+    */
+  def adoptCertificate(
+      certificate: FederationFinality.FederationFinalityCertificate,
+      proposal: FederationFinality.FederationProposal,
+  ): Either[String, AdoptedGeneration] =
+    refuseIfCorrupt {
+      val priorCerts = certificates
+      val priorCursor = cursor
+      val priorNsCache = nsCache
+      def rollback(): Unit =
+        certificates = priorCerts
+        cursor = priorCursor
+        nsCache = priorNsCache
+
+      val already =
+        if certificate.epoch < cursor.epoch then
+          Some(Left(s"federation: certificate epoch ${certificate.epoch} is behind the finalized cursor (epoch ${cursor.epoch})"))
+        else if certificate.epoch == cursor.epoch then
+          Some(
+            if cursor.state == certificate.stateDigest then
+              Right(AdoptedGeneration(cursor.state, cursor.transition.getOrElse(certificate.transition), cursor.epoch))
+            else
+              Left(s"federation: certificate at epoch ${certificate.epoch} names a different state than this replica's finalized cursor"))
+        else None
+
+      already.getOrElse {
+        val result =
+          for
+            _ <- Either.cond(certificate.proposal == proposal.digest, (),
+              "federation: certificate does not name this proposal")
+            _ <- FederationFinality.FederationFinalityCertificate.verify(certificate, manifest)
+            _ <- Either.cond(proposal.federationId == federationId, (), "federation: proposal federationId mismatch")
+            _ <- Either.cond(proposal.replicaSet == setDigest, (), "federation: proposal replicaSet mismatch")
+            _ <- Either.cond(cursor.extendedBy(proposal), (),
+              s"federation: proposal does not extend finalized cursor (cursor state=${cursor.state.short} epoch=${cursor.epoch}, " +
+                s"proposal before=${proposal.before.short} epoch=${proposal.epoch})")
+            outcome <-
+              val (o, updatedCache) = verifyProposal(designatedPrimary(replicaIds, certificate.view).getOrElse(id), proposal, nsCache)
+              nsCache = updatedCache
+              o match
+                case VerifyOutcome.Verified => Right(())
+                case VerifyOutcome.MissingClosure(digests) => Left(s"$missingClosurePrefix${digests.map(_.hex).mkString(",")}")
+                case VerifyOutcome.Rejected(reason) => Left(s"federation: proposal rejected: $reason")
+          yield ()
+        result match
+          case Left(e) => rollback(); Left(e)
+          case Right(()) =>
+            if !certificates.exists(c => c.proposal == certificate.proposal) then
+              certificates = certificates :+ certificate
+            cursor.advancedBy(certificate).foreach(next => cursor = next)
+            persistNsCache()
+            (for
+              _ <- persistState()
+              _ <- persistCerts()
+            yield AdoptedGeneration(certificate.stateDigest, certificate.transition, certificate.epoch)) match
+              case Left(e) => rollback(); Left(e)
+              case Right(gen) => Right(gen)
+      }
+    }
 
   /** Primary-only: propose a [[FederationFinality.FederationProposal]] for
     * agreement at `view`. `seq` is `proposal.epoch` (the shared clock
