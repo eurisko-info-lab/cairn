@@ -39,9 +39,11 @@ implemented and heavily tested; it is not yet a stabilized 1.0 distribution.
 ## The model in one picture
 
 ```text
-language + grammar + capabilities
+language + grammar + capabilities + acceptance
               │
               ▼
+          DomainRuntime
+              │
        ApplicationManifest
               │
         signed ecosystem release
@@ -56,7 +58,10 @@ language + grammar + capabilities
       validate / prove / review
               │
               ▼
-       constitutionally accepted branch
+       constitutionally accepted change
+              │
+       native causal repository
+        (branches are head views)
               │
         migrate and publish successor
 ```
@@ -66,7 +71,7 @@ Three histories remain deliberately separate:
 | History | What it records |
 |---|---|
 | Release history | Evolution of available application definitions |
-| Branch history | Accepted domain state |
+| Causal change graph | Accepted domain state; branches are named head views |
 | Workspace history | Proposals, reviews, approvals, handoffs, and rebases |
 
 See [Core concepts](docs/concepts.md) for the vocabulary behind this diagram.

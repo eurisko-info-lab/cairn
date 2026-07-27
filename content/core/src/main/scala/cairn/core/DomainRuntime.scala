@@ -44,6 +44,16 @@ final case class ResolvedDomainRuntime private (
   def changeModel: ChangeModel = capabilities.changeModel
   def moduleGate(resolveProvider: Digest => Option[ComposedLanguage] = _ => None): ModuleGate =
     capabilities.moduleGate(resolveProvider)
+  def artifacts: List[Artifact] =
+    capabilities.language.fragments.map(_.artifact) ++ List(
+      capabilities.language.artifact,
+      Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(capabilities.language.grammar)),
+      capabilities.change.semantics.artifact,
+      capabilities.change.surface.artifact,
+      capabilities.descriptor.artifact,
+      acceptance.artifact,
+      descriptor.artifact) ++ capabilities.validation.map(_.artifact) ++
+      capabilities.migrations ++ capabilities.queries ++ capabilities.policies ++ capabilities.projections
 
 object ResolvedDomainRuntime:
   def check(

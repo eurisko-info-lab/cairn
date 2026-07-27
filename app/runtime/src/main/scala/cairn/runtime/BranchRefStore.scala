@@ -1,7 +1,8 @@
 package cairn.runtime
 
 import cairn.kernel.*
-import cairn.core.{Delta, Module}
+import cairn.core.{ArtifactDependencies, CausalChange, ContextDependency, Delta, Module, NativeRepository,
+  PartialApplication, SemanticLocation}
 import cairn.systeminterface.Cas
 import cairn.systeminterface.Filesystem as Fs
 import cairn.systemhandler.{CasEffects, CasAdmin, CasAdminEffects, Filesystem, EffectContext, Node, Keypair, Provenance}
@@ -114,9 +115,76 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
   private[runtime] def conflictContextRefPath(branch: String): Path =
     refsDir.resolve(s"$branch.conflict-context")
 
+  private def repositoryGraphRefPath: Path = refsDir.resolve("repository.graph")
+
   private def isSidecar(name: String): Boolean =
     name.endsWith(".change") || name.endsWith(".changes") ||
-      name.endsWith(".accepting") || name.endsWith(".conflict") || name.endsWith(".conflict-context")
+      name.endsWith(".accepting") || name.endsWith(".conflict") || name.endsWith(".conflict-context") ||
+      name == "repository.graph"
+
+  def nativeRepository: Either[String, NativeRepository] =
+    if !refsExists(repositoryGraphRefPath) then Right(NativeRepository.empty)
+    else
+      val digest = Digest(refsRead(repositoryGraphRefPath).trim)
+      getByDigest(digest).flatMap(NativeRepository.fromArtifact)
+
+  private def storeNativeRepository(repository: NativeRepository): Digest =
+    val digest = putArt(repository.artifact).valueHash
+    refsMkdirs()
+    refsWrite(repositoryGraphRefPath, digest.hex)
+    digest
+
+  /** Change-centric transfer: branches contribute only their current head view. */
+  def pullChanges(branch: String, receiverHas: Set[Digest]): Either[String, List[CausalChange]] =
+    nativeRepository.flatMap(repo => repo.transfer(repo.heads.getOrElse(branch, Set.empty), receiverHas))
+
+  def pushChanges(changes: List[CausalChange]): Either[String, PartialApplication] =
+    nativeRepository.flatMap(_.offer(changes)).map { case (repo, result) =>
+      storeNativeRepository(repo)
+      result
+    }
+
+  /** Complete CAS payload for a change-centric pull, including the selected
+    * runtime and every canonically discoverable dependency. */
+  def pullChangeArtifacts(branch: String, receiverHas: Set[Digest]): Either[String, List[Artifact]] =
+    pullChanges(branch, receiverHas).flatMap { changes =>
+      def walk(todo: List[Digest], seen: Set[Digest], out: List[Artifact]): Either[String, List[Artifact]] = todo match
+        case Nil => Right(out)
+        case digest :: rest if seen(digest) => walk(rest, seen, out)
+        case digest :: rest =>
+          for
+            artifact <- getByDigest(digest)
+            dependencies <- ArtifactDependencies.direct(artifact)
+            result <- walk(dependencies ++ rest, seen + digest, artifact :: out)
+          yield result
+      val roots = changes.flatMap(c => List(c.change, c.base, c.result, c.runtime))
+      walk(roots, Set.empty, changes.map(_.artifact)).map(_.distinctBy(_.digest).sortBy(_.digest.hex))
+    }
+
+  def pushChangeArtifacts(artifacts: List[Artifact]): Either[String, PartialApplication] =
+    val causal = artifacts.filter(a => a.kind == ArtifactKind.ChangeSet).flatMap(a => CausalChange.fromArtifact(a).toOption)
+    if causal.isEmpty then Left("change transfer contains no causal changes")
+    else
+      artifacts.foreach(putArt)
+      pushChanges(causal)
+
+  private[runtime] def recordNativeConflict(
+      target: String, branches: List[String], conflict: cairn.core.Merge.Conflict,
+  ): Either[String, Option[Digest]] = nativeRepository.flatMap { repo =>
+    val causes = branches.flatMap(b => repo.heads.getOrElse(b, Set.empty)).toSet
+    if causes.size < 2 then Right(None)
+    else repo.recordConflict(cairn.core.RepositoryConflict(
+      conflict.artifact.digest, causes, conflict.overlap)).flatMap(_.setHeads(target, causes)).map { next =>
+      Some(storeNativeRepository(next))
+    }
+  }
+
+  private[runtime] def copyNativeHeads(into: String, from: String): Either[String, Option[Digest]] =
+    nativeRepository.flatMap { repo =>
+      repo.heads.get(from) match
+        case None => Right(None)
+        case Some(heads) => repo.setHeads(into, heads).map(next => Some(storeNativeRepository(next)))
+    }
 
   /** Journaled accept intent (CAS digests + intended ref / ledger steps). */
   private final case class AcceptJournal(
@@ -139,9 +207,11 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         */
       acceptanceEvidence: Option[Digest] = None,
       domainRuntime: Option[Digest] = None,
+      repositoryGraph: Option[Digest] = None,
   ):
     def rootDigests: List[Digest] =
-      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList ++ domainRuntime.toList
+      moduleDigest :: vcsDigest :: parents ++ causalHistoryRoot.toList ++ extras ++ acceptanceEvidence.toList ++
+        domainRuntime.toList ++ repositoryGraph.toList
 
     def encode: String =
       val lines = List(
@@ -155,7 +225,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         s"extras=${extras.map(_.hex).mkString(",")}",
         s"gateJudgment=${gateJudgment.getOrElse("")}",
         s"acceptanceEvidence=${acceptanceEvidence.map(_.hex).getOrElse("")}",
-        s"domainRuntime=${domainRuntime.map(_.hex).getOrElse("")}")
+        s"domainRuntime=${domainRuntime.map(_.hex).getOrElse("")}",
+        s"repositoryGraph=${repositoryGraph.map(_.hex).getOrElse("")}")
       lines.mkString("\n")
 
   private object AcceptJournal:
@@ -177,9 +248,10 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         gateJudgment = m.get("gateJudgment").filter(_.nonEmpty)
         acceptanceEvidence = m.get("acceptanceEvidence").filter(_.nonEmpty).map(Digest(_))
         domainRuntime = m.get("domainRuntime").filter(_.nonEmpty).map(Digest(_))
+        repositoryGraph = m.get("repositoryGraph").filter(_.nonEmpty).map(Digest(_))
       yield AcceptJournal(
         branch, Digest(mod), Digest(vcs), parents, causal, histAppend, phase, extras,
-        gateJudgment, acceptanceEvidence, domainRuntime)
+        gateJudgment, acceptanceEvidence, domainRuntime, repositoryGraph)
 
   private def writeJournal(j: AcceptJournal): Unit =
     refsMkdirs()
@@ -202,7 +274,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
     else
       refsMkdirs()
       refsWrite(changeRefPath(j.branch), vcsArt.key.valueHash.hex)
-    advanceRaw(
+    val manifest = advanceRaw(
       j.branch,
       modArt.key,
       acceptedChange = Some(vcsArt.key.valueHash),
@@ -210,7 +282,11 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       causalHistoryRoot = j.causalHistoryRoot,
       gateEvidence = j.gateJudgment.map(g => List(g -> j.moduleDigest)).getOrElse(Nil),
       acceptanceEvidence = j.acceptanceEvidence,
-      domainRuntime = j.domainRuntime)
+      domainRuntime = j.domainRuntime,
+      repositoryGraph = j.repositoryGraph,
+      appendChangeHistory = j.historyAppend)
+    j.repositoryGraph.foreach(d => refsWrite(repositoryGraphRefPath, d.hex))
+    manifest
 
   /** All-or-nothing accept: CAS → journal → refs → optional ledger → clear.
     * On ledger failure after refs, journal stays at phase=publish for recovery.
@@ -236,6 +312,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       gateJudgment: Option[String] = None,
       acceptanceEvidence: Option[Digest] = None,
       domainRuntime: Option[Digest] = None,
+      contextLocations: Set[SemanticLocation] = Set.empty,
+      resolves: Option[Digest] = None,
       conflictResolution: Option[Artifact] = None,
   ): Either[String, BranchManifest] =
     if module.digest != vcs.result then
@@ -249,6 +327,20 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       val extraKeys = (extraPuts ++ conflictResolution.toList).map(putArt)
       val vcsKey = putArt(vcs.artifact)
       val modKey = putArt(module.artifact)
+      val repositoryUpdate = domainRuntime match
+        case None => Right(None)
+        case Some(runtime) => nativeRepository.flatMap { repo =>
+          val dependencies = repo.heads.getOrElse(branch, Set.empty)
+          val context = contextLocations.toList.sortBy(_.render).map(ContextDependency(_, dependencies))
+          val change = CausalChange(vcsKey.valueHash, dependencies, context, vcs.base, vcs.result, runtime, resolves)
+          val added = resolves match
+            case Some(_) => repo.addResolution(change)
+            case None    => repo.add(change)
+          added.flatMap(_.setHeads(branch, Set(change.id))).map(next => Some(next -> putArt(next.artifact).valueHash))
+        }
+      val repositoryDigest = repositoryUpdate match
+        case Left(error) => return Left(error)
+        case Right(value) => value.map(_._2)
       val provDig =
         Provenance.record(
           cas, module.digest,
@@ -258,7 +350,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       val extras = extraKeys.map(_.valueHash) :+ provDig
       var journal = AcceptJournal(
         branch, modKey.valueHash, vcsKey.valueHash, parents, causalHistoryRoot, historyAppend, "cas", extras,
-        gateJudgment, acceptanceEvidence, domainRuntime)
+        gateJudgment, acceptanceEvidence, domainRuntime, repositoryDigest)
       writeJournal(journal)
       val manifest = applyRefs(journal)
       journal = journal.copy(phase = "refs")
@@ -356,6 +448,13 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
               refsRead(p).linesIterator.foreach(addHex)
             else if name.endsWith(".change") || name.endsWith(".conflict") then
               addHex(refsRead(p))
+            else if name.endsWith(".conflict-context") then addHex(refsRead(p))
+            else if name == "repository.graph" then
+              val hex = refsRead(p).trim
+              addHex(hex)
+              Digest.parse(hex).foreach(d => getByDigest(d).flatMap(NativeRepository.fromArtifact).foreach { repo =>
+                repo.gcRoots.foreach(roots += _)
+              })
             else if !name.contains('.') then
               val hex = refsRead(p).trim
               addHex(hex)
@@ -372,6 +471,8 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
                     m.certificates.foreach(roots += _)
                     m.history.foreach(k => roots += k.valueHash)
                     m.acceptanceEvidence.foreach(roots += _)
+                    m.domainRuntime.foreach(roots += _)
+                    m.repositoryGraph.foreach(roots += _)
                 }
               }
           Right(roots.toSet)
@@ -457,9 +558,11 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         */
       acceptanceEvidence: Option[Digest] = None,
       domainRuntime: Option[Digest] = None,
+      repositoryGraph: Option[Digest] = None,
+      appendChangeHistory: Boolean = true,
   ): BranchManifest =
     val cur = load(branch)
-    val nextHistory = acceptedChange match
+    val nextHistory = if !appendChangeHistory then cur.changeHistory else acceptedChange match
       case Some(d) if cur.changeHistory.lastOption.contains(d) => cur.changeHistory
       case Some(d) => cur.changeHistory :+ d
       case None => cur.changeHistory
@@ -476,6 +579,7 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
       gateEvidence = gateEvidence,
       acceptanceEvidence = acceptanceEvidence,
       domainRuntime = domainRuntime,
+      repositoryGraph = repositoryGraph,
       primaryAncestor = cur.primaryAncestor,
       references = cur.references,
       domainAgreement = cur.domainAgreement)

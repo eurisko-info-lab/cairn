@@ -204,11 +204,9 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
 
 `LanguageCapabilities` binds an exact language revision to change models,
 validation, migrations, queries, policies, projections, and Studio profiles.
-`AcceptanceConstitution` independently binds acceptance rules. Both are
-digest-addressed and checked, but repository artifacts do not yet make their
-pairing inseparable. [PR26](../ROADMAP.md#pr26--runtime-constitution-closure)
-introduces `DomainRuntime` and threads it through tips, manifests, conflicts,
-migrations, and acceptance evidence.
+`AcceptanceConstitution` binds acceptance rules. `DomainRuntime` makes their
+pairing inseparable and is threaded through governed tips, manifests,
+conflicts, migrations, application startup, and acceptance evidence.
 
 ## EffectContext, AuthorizedEffect, and AuditedEffect
 
@@ -313,7 +311,8 @@ branch state
 | ----- | ------ | ---- |
 | `SemanticRepository` | `core` | Pure orchestration; proposes `Tip`, mints `ValidatedTip` |
 | `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Engines; opaque `ValidatedChangeSet` via apply/check |
-| `PatchGraph` | `core` | Explicit causal patch DAG (parent edges + LCA); thin pending PR27's native dependency/context graph |
+| `NativeRepository` | `core` | Canonical causal graph: dependencies, semantic context, pending changes, conflicts, resolutions, and head views |
+| `PatchGraph` | `core` | Legacy/compatibility DAG and LCA adapter |
 | `BranchManifest` | `kernel` | Accepted branch state + causal digests |
 | `Branches` | `runtime` | Effectful refs; `commitTip` = ΔL path; `importModule` = bootstrap/import only |
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
@@ -326,22 +325,19 @@ branch state
 acceptance** — plants a module tip without a ValidatedChangeSet; it is not the
 ordinary ΔL path. Loaded histories are replay-checked before merge.
 
-`BranchManifest` carries `causalHistoryRoot`, `parents`, `acceptedChange`,
-`changeHistory`, `conflictState` (CAS digests), plus **domain ancestry**:
+`BranchManifest` carries the `repositoryGraph` and `domainRuntime` roots plus
+legacy causal/history fields for decode compatibility, and **domain ancestry**:
 `primaryAncestor` (strongest binding, or `None` = hang off the ledger trunk)
 and `references` (soft cross-domain ancestors). The ledger / blockchain is the
 global trunk of domains (like DNS roots); e.g. `LAW` off the trunk, `SDS`
 with primary `LAW` and a reference to `CHEMISTRY`. Kernel `DomainBranch.wellFormed`
 checks names; `Branches.forkFrom` / `referTo` plant and extend that graph.
-Refs `.change` / `.changes` sidecars remain write-through caches;
-`loadChangeHistory` / `loadChange` prefer manifest digests. `mergeBranches`
-prefers `PatchGraph` DAG LCA when change-set digests form an explicit parent
-graph, falling back to shared module-result digests, then merges divergent
-suffixes.
-Explicit context dependencies, partial application, conflicts resident in
-repository state, dependent resolution changes, and change-centric transfer
-remain the [PR27](../ROADMAP.md#pr27--complete-the-native-pijul-like-repository)
-boundary. Until then `Branches` is more than porcelain over `PatchGraph`.
+For runtime-governed branches, `NativeRepository` is authoritative:
+`loadChangeHistory` derives the causal closure from the branch head view;
+semantic context dependencies come from access traces; conflicts remain graph
+state; resolution changes depend on both causes; and pull/push moves complete
+change artifact closures. Refs `.change` / `.changes`, manifest histories, and
+`PatchGraph` remain compatibility caches/adapters for older repositories.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
 `Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via

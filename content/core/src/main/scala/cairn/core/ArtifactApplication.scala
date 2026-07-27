@@ -61,6 +61,7 @@ object ArtifactDependencies:
   def direct(artifact: Artifact): Either[String, List[Digest]] = artifact.kind match
     case ArtifactKind.DomainRuntime => DomainRuntime.fromArtifact(artifact).map(r =>
       List(r.language, r.capabilities, r.acceptance))
+    case ArtifactKind.RepositoryGraph => NativeRepository.fromArtifact(artifact).map(_.gcRoots.toList.sortBy(_.hex))
     case ArtifactKind.Application => ApplicationManifest.fromArtifact(artifact).map(_.roots)
     case ArtifactKind.Language => scala.util.Try(
       artifact.body.field("fragments").asList.map(x => Digest(x.asStr))).toEither

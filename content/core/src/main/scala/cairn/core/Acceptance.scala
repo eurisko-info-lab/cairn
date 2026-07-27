@@ -403,7 +403,8 @@ private[core] final case class AcceptedTipRepr(
     languageDigest: Digest,
     constitution: AcceptanceConstitution,
     facts: AcceptanceFacts,
-    runtime: Option[DomainRuntime],
+    runtime: Option[ResolvedDomainRuntime],
+    accessTrace: Option[AccessTrace],
 )
 
 opaque type AcceptedTip = AcceptedTipRepr
@@ -413,8 +414,10 @@ object AcceptedTip:
       base: Module, module: Module, change: Cst,
       vcs: Delta.ValidatedChangeSet, policy: AcceptancePolicy, languageDigest: Digest,
       constitution: AcceptanceConstitution, facts: AcceptanceFacts,
-      runtime: Option[DomainRuntime] = None,
-  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest, constitution, facts, runtime)
+      runtime: Option[ResolvedDomainRuntime] = None,
+      accessTrace: Option[AccessTrace] = None,
+  ): AcceptedTip = AcceptedTipRepr(base, module, change, vcs, policy, languageDigest,
+    constitution, facts, runtime, accessTrace)
 
   /** Governed acceptance path: all selections come from one checked runtime. */
   def checkTip(
@@ -429,10 +432,14 @@ object AcceptedTip:
   ): Either[String, AcceptedTip] =
     val policy = AcceptancePolicy(runtime.moduleGate())
     SemanticRepository.ValidatedTip.check(runtime, proposed).flatMap { vt =>
-      AcceptanceConstitutionEvaluator.check(runtime.acceptance, policy.gate,
-        runtime.changeModel.digest, vt.tip, facts).map(_ =>
+      for
+        trace <- ChangeAlgebra.accessTrace(runtime.language, proposed.base, proposed.change, runtime.changeModel)
+          .left.map(_.render)
+        _ <- AcceptanceConstitutionEvaluator.check(runtime.acceptance, policy.gate,
+          runtime.changeModel.digest, vt.tip, facts)
+      yield
         mint(vt.base, vt.tip, vt.change, vt.vcs, policy, runtime.language.digest,
-          runtime.acceptance, facts, Some(runtime.descriptor)))
+          runtime.acceptance, facts, Some(runtime), Some(trace))
     }
 
   /** Check a proposed [[SemanticRepository.Tip]]: ΔL replay, then `policy`. */
@@ -483,6 +490,22 @@ object AcceptedTip:
       constitution, policy.gate, outcome.vcs.changeModel, outcome.module, facts).map(_ =>
       mint(base, outcome.module, outcome.mergedChange, outcome.vcs, policy, language.digest, constitution, facts))
 
+  def checkMerged(
+      runtime: ResolvedDomainRuntime,
+      base: Module,
+      outcome: SemanticRepository.Outcome.Accepted,
+      facts: AcceptanceFacts,
+  ): Either[String, AcceptedTip] =
+    val policy = AcceptancePolicy(runtime.moduleGate())
+    for
+      _ <- Either.cond(outcome.vcs.language == runtime.language.digest, (), "merged change language differs from runtime")
+      _ <- Either.cond(outcome.vcs.changeModel == runtime.changeModel.digest, (), "merged change model differs from runtime")
+      trace <- ChangeAlgebra.accessTrace(runtime.language, base, outcome.mergedChange, runtime.changeModel).left.map(_.render)
+      _ <- AcceptanceConstitutionEvaluator.check(runtime.acceptance, policy.gate,
+        runtime.changeModel.digest, outcome.module, facts)
+    yield mint(base, outcome.module, outcome.mergedChange, outcome.vcs, policy,
+      runtime.language.digest, runtime.acceptance, facts, Some(runtime), Some(trace))
+
   extension (a: AcceptedTip)
     def base: Module = a.base
     def module: Module = a.module
@@ -493,7 +516,8 @@ object AcceptedTip:
     def constitution: AcceptanceConstitution = a.constitution
     def facts: AcceptanceFacts = a.facts
     def runtime: Option[Digest] = a.runtime.map(_.digest)
-    def runtimeArtifact: Option[Artifact] = a.runtime.map(_.artifact)
+    def runtimeArtifacts: List[Artifact] = a.runtime.toList.flatMap(_.artifacts)
+    def accessTrace: Option[AccessTrace] = a.accessTrace
     def evidence: AcceptanceEvidence = AcceptanceEvidence(
       language = a.languageDigest,
       base = a.base.digest,

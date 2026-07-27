@@ -80,8 +80,8 @@ remaining gaps.
 
 | PR | Capability | Status |
 |---|---|---|
-| PR26 | Runtime constitution closure | ⬜ |
-| PR27 | Complete native Pijul-like repository | ⬜ |
+| PR26 | Runtime constitution closure | ✅ |
+| PR27 | Complete native Pijul-like repository | ✅ |
 | PR28 | Contract the remaining host TCB | ⬜ |
 | PR29 | Generalized semantic-equivalence evidence | ⬜ |
 | PR30 | Distributed transaction and consensus hardening | ⬜ |
@@ -122,6 +122,14 @@ branch histories:
 
 `Branches` then becomes porcelain over one change graph instead of a second
 history mechanism.
+
+Implemented by `NativeRepository`: accepted changes carry explicit causal and
+semantic-location context dependencies; unavailable transfers remain pending
+until their prerequisites arrive; conflicts and dependent ΔConflict
+resolutions live in graph state; pull/push transfers causal artifact closure;
+named branches are head-set views; and CAS liveness is derived from graph
+roots. `PatchGraph` and ordered histories remain decode/legacy compatibility
+adapters, not the authority for runtime-governed branches.
 
 #### PR28 — Contract the remaining host TCB
 

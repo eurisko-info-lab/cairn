@@ -1,10 +1,10 @@
 package cairn.tests
 import cairn.runtime.EffectContexts
 
-import cairn.core.{ChangeAlgebra, Delta, Module, PatchGraph}
+import cairn.core.*
 import cairn.examples.stlc.Stlc
-import cairn.kernel.{Cst, Digest}
-import cairn.runtime.{Branches, WorkflowRunner}
+import cairn.kernel.{Canon, Cst, Digest}
+import cairn.runtime.{Branches, ConflictResolutionOutcome, WorkflowRunner}
 import cairn.systemhandler.MemCas
 
 /** Patch DAG + bootstrap import + workflow runner (architecture priorities 4–6). */
@@ -12,6 +12,11 @@ class PatchGraphSuite extends munit.FunSuite:
 
   private def dig(tag: String): Digest =
     Digest.of(cairn.kernel.Canon.CStr(tag))
+
+  private def causal(label: String, deps: Set[Digest] = Set.empty,
+      context: List[ContextDependency] = Nil, resolves: Option[Digest] = None): CausalChange =
+    CausalChange(dig(s"vcs-$label"), deps, context, dig(s"base-$label"),
+      dig(s"result-$label"), dig("runtime"), resolves)
 
   private val lang = Stlc.language
   private val dl = Delta.deltaOf(lang).toOption.get
@@ -95,3 +100,113 @@ class PatchGraphSuite extends munit.FunSuite:
       .add(PatchGraph.mergeNode(merge, List(left, right), dig("r0"), dig("rM"))).toOption.get
     assertEquals(g2.lca(left, right), Some(dig("root")))
     assertEquals(g2.lca(merge, left), Some(left))
+
+  test("PR27 native graph admits explicit change and semantic-context dependencies"):
+    val root = causal("root")
+    val location = SemanticLocation.WholeDefinition("sheet")
+    val child = causal("child", Set(root.id), List(ContextDependency(location, Set(root.id))))
+    val graph = NativeRepository.empty.add(root).flatMap(_.add(child)).fold(e => fail(e), identity)
+    assertEquals(graph.ancestors(Set(child.id)), Set(root.id, child.id))
+    assert(graph.add(causal("bad", context = List(ContextDependency(location, Set(root.id))))).isLeft)
+    assertEquals(NativeRepository.fromArtifact(graph.artifact), Right(graph))
+
+  test("PR27 partial application retains unavailable changes and resumes when dependencies arrive"):
+    val root = causal("partial-root")
+    val child = causal("partial-child", Set(root.id))
+    val first = NativeRepository.empty.offer(List(child)).fold(e => fail(e), identity)
+    assertEquals(first._2.applied, Nil)
+    assertEquals(first._2.pending, Set(child.id))
+    assertEquals(first._2.missing, Set(root.id))
+    val second = first._1.offer(List(root)).fold(e => fail(e), identity)
+    assertEquals(second._2.applied, List(root.id, child.id))
+    assertEquals(second._1.pending, Map.empty)
+
+  test("PR27 conflicts remain graph state and resolution is an ordinary dependent change"):
+    val left = causal("conflict-left")
+    val right = causal("conflict-right")
+    val conflictId = dig("conflict-artifact")
+    val location = SemanticLocation.WholeDefinition("sheet")
+    val graph = NativeRepository.empty.add(left).flatMap(_.add(right)).flatMap(_.recordConflict(
+      RepositoryConflict(conflictId, Set(left.id, right.id), Set(location)))).fold(e => fail(e), identity)
+    assert(graph.addResolution(causal("invalid-resolution", Set(left.id), resolves = Some(conflictId))).isLeft)
+    val resolution = causal("resolution", Set(left.id, right.id), resolves = Some(conflictId))
+    val resolved = graph.addResolution(resolution).fold(e => fail(e), identity)
+    assertEquals(resolved.conflicts(conflictId).resolution, Some(resolution.id))
+    assertEquals(resolved.conflicts(conflictId).unresolved, Set.empty)
+
+  test("PR27 pull and push transfer causal closures; heads are views and GC roots come from graph"):
+    val root = causal("transfer-root")
+    val child = causal("transfer-child", Set(root.id))
+    val graph = NativeRepository.empty.add(root).flatMap(_.add(child))
+      .flatMap(_.setHeads("main", Set(child.id))).fold(e => fail(e), identity)
+    val payload = graph.transfer(Set(child.id), Set.empty).fold(e => fail(e), identity)
+    assertEquals(payload.map(_.id), List(root.id, child.id))
+    val receiver = NativeRepository.empty.offer(payload).fold(e => fail(e), identity)._1
+    assertEquals(receiver.changes.keySet, Set(root.id, child.id))
+    assertEquals(graph.heads("main"), Set(child.id))
+    assert(graph.gcRoots.contains(child.change))
+    assert(ArtifactDependencies.direct(graph.artifact).toOption.get.contains(root.change))
+
+  test("PR27 Branches persists governed commits as native graph heads"):
+    val capabilities = LanguageCapabilities.standard(lang)
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(capabilities, constitution).fold(e => fail(e), identity)
+    val base = Module(List("a" -> Stlc.tru))
+    val change = parseChange("{ replace a = false ; }")
+    val result = SemanticRepository.commit(runtime, base, change).fold(e => fail(e), identity)._1
+    val accepted = AcceptedTip.checkTip(runtime, SemanticRepository.Tip(base, result, change))
+      .fold(e => fail(e), identity)
+    val sourceCas = MemCas()
+    val branches = Branches(sourceCas, java.nio.file.Files.createTempDirectory("cairn-native-repo"),
+      EffectContexts.forBranches())
+    branches.importModule("main", base)
+    val manifest = branches.commitTip("main", accepted)
+    assertEquals(manifest.domainRuntime, Some(runtime.digest))
+    assert(manifest.repositoryGraph.nonEmpty)
+    val graph = branches.nativeRepository.fold(e => fail(e), identity)
+    assertEquals(manifest.changeHistory, Nil)
+    assertEquals(graph.heads("main").size, 1)
+    val head = graph.heads("main").head
+    assertEquals(graph.changes(head).change, accepted.vcs.artifact.digest)
+    val roots = branches.liveCasRoots().fold(e => fail(e), identity)
+    assert(graph.gcRoots.subsetOf(roots))
+    assertEquals(branches.pullChanges("main", Set.empty).toOption.get.map(_.id), List(head))
+    val payload = branches.pullChangeArtifacts("main", Set.empty).fold(e => fail(e), identity)
+    val receiver = Branches(MemCas(), java.nio.file.Files.createTempDirectory("cairn-native-receiver"),
+      EffectContexts.forBranches())
+    val imported = receiver.pushChangeArtifacts(payload).fold(e => fail(e), identity)
+    assertEquals(imported.applied, List(head))
+    assertEquals(receiver.nativeRepository.toOption.get.changes.keySet, Set(head))
+
+  test("PR27 Branches preserves conflicts in graph state and resolves them as dependent changes"):
+    val capabilities = LanguageCapabilities.standard(lang)
+    val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
+    val runtime = ResolvedDomainRuntime.create(capabilities, constitution).fold(e => fail(e), identity)
+    val base = Module(List("a" -> Stlc.tru))
+    val left = parseChange("{ replace a = false ; }")
+    val right = parseChange("{ edit a at [] = fun x : Bool . x ; }")
+    val branches = Branches(MemCas(), java.nio.file.Files.createTempDirectory("cairn-native-conflict"),
+      EffectContexts.forBranches())
+    def commit(branch: String, change: Cst): Unit =
+      branches.importModule(branch, base)
+      val result = SemanticRepository.commit(runtime, base, change).toOption.get._1
+      val accepted = AcceptedTip.checkTip(runtime, SemanticRepository.Tip(base, result, change)).toOption.get
+      branches.commitTip(branch, accepted)
+    commit("ours", left)
+    commit("theirs", right)
+    val conflict = branches.mergeBranches(runtime, "merged", "ours", "theirs")
+      .fold(e => fail(e), identity).left.toOption.getOrElse(fail("expected conflict"))
+    val conflicted = branches.nativeRepository.fold(e => fail(e), identity)
+    assertEquals(conflicted.heads("merged"), conflicted.heads("ours") ++ conflicted.heads("theirs"))
+    assertEquals(conflicted.conflicts(conflict.artifact.digest).unresolved, conflict.overlap)
+    val resolutionLanguage = ConflictDelta.deltaOf(lang).toOption.get
+    val program = Parser.parse(resolutionLanguage.grammar, "{ accept-left; }").fold(e => fail(e), identity)
+    branches.resolveConflict(runtime, "merged", base, left, right, program)
+      .fold(e => fail(e), identity) match
+        case ConflictResolutionOutcome.Accepted(_, _) => ()
+        case _ => fail("expected accepted resolution")
+    val resolved = branches.nativeRepository.fold(e => fail(e), identity)
+    val record = resolved.conflicts(conflict.artifact.digest)
+    assert(record.resolution.nonEmpty)
+    assertEquals(record.unresolved, Set.empty)
+    assert(record.causes.subsetOf(resolved.changes(record.resolution.get).dependencies))

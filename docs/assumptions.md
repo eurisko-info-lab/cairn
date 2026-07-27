@@ -122,14 +122,15 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     HTTP surface (M38) is the transport a daemon would use. PR30 owns
     authenticated discovery and consensus/transaction hardening beyond the
     current directory and configured-replica model.
-15. **Runtime selection is not yet one constitution.** `LanguageCapabilities`
-    binds language behavior and `AcceptanceConstitution` binds acceptance, but
-    repository artifacts do not yet identify one `DomainRuntime` joining both.
-    PR26 closes the cross-release mix-and-match hazard.
-16. **Repository causality remains thin-Pijul.** `PatchGraph`, access traces,
-    change histories, and conflict changes are real, but branches still carry
-    history and some dependency/context information is reconstructed. PR27
-    makes the causal change graph native.
+15. **Runtime selection is one constitution.** `DomainRuntime` binds the exact
+    language, complete capability bundle, and acceptance constitution. Governed
+    tips, evidence, manifests, conflicts, migrations, and application startup
+    carry or resolve that digest; legacy decoders remain for stored artifacts.
+16. **Repository causality is native for governed branches.**
+    `NativeRepository` owns explicit change/context dependencies, pending
+    partial imports, resident conflicts and dependent resolutions, head views,
+    transfer closure, and GC roots. `PatchGraph` and ordered branch histories
+    remain compatibility paths for pre-PR27 repositories.
 17. **Optimization evidence is narrow.** `OptimizationEquivalence` currently
     covers digest-keyed dependency discovery. PR29 generalizes the same
     model/interpreter/input/result binding to parsers, printers, evaluation,
