@@ -29,11 +29,14 @@ by artifact digest and memoizes the result of the pure canonical dependency
 decoder. It neither supplies dependencies nor bypasses validation, and deleting
 it changes performance but not results.
 
-The report embeds the explicit trusted boundary. Canonical encoding, SHA-256
-identity, language checking, change replay, validation checking, and ledger
-transition are trusted mechanisms. Studio orchestration, application assembly,
-caches, surface renderers, and audit orchestration remain outside the TCB; their
-outputs must pass through the trusted mechanisms before acquiring authority.
+The report embeds the explicit trusted boundary. The resolved application's
+`GenericMachine` artifact selects exactly six trusted mechanisms: canonical
+decoder, grammar interpreter, rule/search interpreter, change-program
+interpreter, proof checker, and effect dispatcher. SHA-256, Ed25519, and durable
+I/O are recorded separately as external assumptions. Studio orchestration,
+application resolution, caches, surface renderers, and audit orchestration
+remain outside the TCB; their outputs must pass through the selected machine
+before acquiring authority.
 
 The embedded `TrustedClosure` is the machine-readable accounting view. It
 separates semantic artifact digests, digest-bound host interpreter identities,
@@ -47,12 +50,14 @@ model digest, interpreter-version digest, and input digest. The dependency
 cache is accepted only when its canonical and optimized result digests agree.
 Deleting the cache leaves artifact installation and audit semantics unchanged.
 
-## Remaining contraction work
+## Generic machine closure
 
-PR25 makes the boundary explicit; it does not claim to erase native code.
-[PR28](../ROADMAP.md#pr28--contract-the-remaining-host-tcb) targets the
-remaining bootstrap seeds, host interpreters, and effect routing until the host
-is a small generic decoder/interpreter/checker/dispatcher machine.
+PR28 contracts rather than erases native code. An application manifest now
+binds one generic-machine digest. Its transitive dependency graph contains the
+bootstrap roots, semantic programs, and effect-family routes; startup fails if
+any are absent. A hardening report takes interpreter identities from that
+loaded artifact, never from a process-local default. Pack authors may declare a
+machine, but production startup only decodes and verifies it.
 
 `OptimizationEquivalence` currently proves only dependency-discovery cache
 agreement. [PR29](../ROADMAP.md#pr29--generalized-semantic-equivalence-evidence)

@@ -98,8 +98,15 @@ object SelfHostingCeremony:
         ApplicationEntry("self-hosting-proposal", proposal.artifact.digest, proposal.artifact.kind),
         ApplicationEntry("self-hosting-witness", witness.artifact.digest, witness.artifact.kind)) ++
         evidence.zipWithIndex.map((a, i) => ApplicationEntry(s"self-hosting-evidence-$i", a.digest, a.kind))
+      revisedMachine = application.machine.copy(
+        bootstrapRoots = application.machine.bootstrapRoots.map(d => if d == oldRuntime.digest then revisedRuntime.digest else d),
+        semanticPrograms = application.machine.semanticPrograms.view.mapValues { d =>
+          if d == oldSpec.capabilities then capabilities.digest else d }.toMap)
+      _ <- revisedMachine.validate
+      _ = first.put(revisedMachine.artifact)
       successor = application.manifest.copy(
         name = application.manifest.name + "-successor",
+        machine = revisedMachine.digest,
         languages = application.manifest.languages.map(s => if s.name == targetLanguage then revisedSpec else s),
         entries = revisedEntries)
       _ = first.put(successor.artifact)

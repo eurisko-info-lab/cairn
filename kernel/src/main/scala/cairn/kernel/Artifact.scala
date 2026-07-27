@@ -74,6 +74,7 @@ enum ArtifactKind(val name: String):
   case LanguageCapabilities extends ArtifactKind("language-capabilities")
   case DomainRuntime extends ArtifactKind("domain-runtime")
   case RepositoryGraph extends ArtifactKind("repository-graph")
+  case GenericMachine extends ArtifactKind("generic-machine")
   case ValidationModel extends ArtifactKind("validation-model")
   case Application extends ArtifactKind("application")
   case EcosystemBundle extends ArtifactKind("ecosystem-bundle")

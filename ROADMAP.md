@@ -82,7 +82,7 @@ remaining gaps.
 |---|---|---|
 | PR26 | Runtime constitution closure | ✅ |
 | PR27 | Complete native Pijul-like repository | ✅ |
-| PR28 | Contract the remaining host TCB | ⬜ |
+| PR28 | Contract the remaining host TCB | ✅ |
 | PR29 | Generalized semantic-equivalence evidence | ⬜ |
 | PR30 | Distributed transaction and consensus hardening | ⬜ |
 | PR31 | Studio productionization | ⬜ |
@@ -148,6 +148,18 @@ Targets include the Scala Meta/Grammar bootstrap seeds, host `Query.run`,
 policy enforcement, `TreeEngine`, `Delta`, and effect-family routing/cold-start
 seeds. The goal is not zero native code; it is to move every non-generic choice
 into artifacts loaded and checked by those engines.
+
+Implemented by the application-selected `GenericMachine` artifact. Every
+application manifest binds one machine digest; startup recursively installs
+and validates its bootstrap roots, semantic programs, and effect routes. The
+machine admits exactly the six generic components above, with distinct
+digest-bound interface and implementation identities. Hardening reports derive
+their interpreter closure from that resolved artifact rather than a host-built
+list. Self-hosting successor releases revise and persist the machine selection
+alongside revised runtime artifacts, so a restart reconstructs the same TCB
+closure without process-local assembly. Scala remains the implementation of
+the six generic mechanisms; language-, query-, policy-, change-, and
+effect-specific selection is artifact data.
 
 #### PR29 — Generalized semantic-equivalence evidence
 

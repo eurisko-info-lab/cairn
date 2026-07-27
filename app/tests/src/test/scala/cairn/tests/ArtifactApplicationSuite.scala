@@ -12,7 +12,9 @@ class ArtifactApplicationSuite extends munit.FunSuite:
   private val grammarArtifact = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(language.grammar))
   private val constitution = AcceptanceConstitution.open(capabilities.changeModel.digest)
   private val runtime = ResolvedDomainRuntime.create(capabilities, constitution).toOption.get
-  private val manifest = ApplicationManifest("artifact-app", List(ApplicationLanguage(
+  private val machine = GenericMachine.declare(List(runtime.digest),
+    Map("change" -> capabilities.change.semantics.digest))
+  private val manifest = ApplicationManifest("artifact-app", machine.digest, List(ApplicationLanguage(
     "stlc", language.digest, grammarArtifact.digest, capabilities.descriptor.digest, Some(runtime.digest))),
     List(ApplicationEntry("quicksort", QuickSort2.module.artifact.digest, ArtifactKind.RosettaDecl)))
 
@@ -21,7 +23,7 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     language.fragments.foreach(f => cas.put(f.artifact))
     List(language.artifact, grammarArtifact, capabilities.change.semantics.artifact,
       capabilities.change.surface.artifact, capabilities.descriptor.artifact,
-      constitution.artifact, runtime.descriptor.artifact,
+      constitution.artifact, runtime.descriptor.artifact, machine.artifact,
       QuickSort2.module.artifact, manifest.artifact).foreach(cas.put)
     cas
 
@@ -32,6 +34,7 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     val graph = resolver.install(manifest.digest, origin).fold(e => fail(e), identity)
     val app = resolver.resolve(manifest.digest).fold(e => fail(e), identity)
     assertEquals(app.manifest.name, "artifact-app")
+    assertEquals(app.machine, machine)
     assertEquals(app.languages.keySet, Set("stlc"))
     assertEquals(app.languages("stlc").language.digest, language.digest)
     assertEquals(app.languages("stlc").descriptor, capabilities.descriptor)
@@ -46,6 +49,15 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     val capabilityDeps = ArtifactDependencies.direct(capabilities.descriptor.artifact).toOption.get
     assert(capabilityDeps.contains(capabilities.change.semantics.digest))
     assert(capabilityDeps.contains(capabilities.change.surface.digest))
+
+  test("generic machine is exactly six mechanisms and routes only artifact identities"):
+    assertEquals(machine.interpreters.map(_.component).toSet, MachineComponent.values.toSet)
+    assertEquals(machine.semanticProgram("change"), Right(capabilities.change.semantics.digest))
+    assert(machine.semanticProgram("host-callback").isLeft)
+    val routed = machine.copy(effectRoutes = Map("custom.effect" -> grammarArtifact.digest))
+    assertEquals(routed.effectRoute("custom.effect"), Right(grammarArtifact.digest))
+    assert(routed.effectRoute("undeclared.effect").isLeft)
+    assert(machine.copy(interpreters = machine.interpreters.tail).validate.isLeft)
 
   test("installation fails closed when a discovered dependency is absent"):
     val incomplete = MemCas()
@@ -98,6 +110,8 @@ class ArtifactApplicationSuite extends munit.FunSuite:
     assertEquals(report.closure.toSet, closure)
     assertEquals(report.languages, Map("stlc" -> language.digest))
     assertEquals(report.kinds(ArtifactKind.Application.name), 1)
+    assertEquals(report.trustedClosure.hostInterpreters.map(_.name).toSet,
+      MachineComponent.values.map(_.id).toSet)
     assert(report.trustedBoundary.excluded.contains("language-studio"))
     assert(!report.trustedBoundary.mechanisms.contains("language-studio"))
     assertEquals(HardeningAuditReport.fromArtifact(report.artifact), Right(report))

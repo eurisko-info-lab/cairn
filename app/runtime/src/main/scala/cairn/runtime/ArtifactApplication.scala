@@ -36,6 +36,7 @@ final class ArtifactDependencyCache:
 final case class ResolvedApplication(
     root: Digest,
     manifest: ApplicationManifest,
+    machine: GenericMachine,
     languages: Map[String, ResolvedLanguageCapabilities],
     entries: Map[String, Artifact],
     installed: Set[Digest],
@@ -89,6 +90,10 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
   def resolve(root: Digest): Either[String, ResolvedApplication] = for
     rootArtifact <- local.getByDigest(root)
     manifest <- ApplicationManifest.fromArtifact(rootArtifact)
+    machineArtifact <- local.getByDigest(manifest.machine)
+    machine <- GenericMachine.fromArtifact(machineArtifact)
+    _ <- machine.dependencies.foldLeft[Either[String, Unit]](Right(())) { (acc, digest) =>
+      for _ <- acc; _ <- local.getByDigest(digest) yield () }
     languagePairs <- manifest.languages.foldLeft[Either[String, List[(String, ResolvedLanguageCapabilities)]]](Right(Nil)) {
       (acc, spec) => for
         xs <- acc
@@ -128,7 +133,7 @@ final class ArtifactApplicationResolver(local: Cas, val dependencyCache: Artifac
             yield Some(spec.name -> resolved)
       yield xs ++ pair.toList }
     installed <- audit(root)
-  yield ResolvedApplication(root, manifest, languagePairs.toMap, entryPairs.toMap, installed, runtimePairs.toMap)
+  yield ResolvedApplication(root, manifest, machine, languagePairs.toMap, entryPairs.toMap, installed, runtimePairs.toMap)
 
   def audit(root: Digest): Either[String, Set[Digest]] =
     def walk(todo: List[Digest], seen: Set[Digest]): Either[String, Set[Digest]] = todo match
@@ -167,7 +172,7 @@ final class ApplicationHardeningAuditor(local: Cas, resolver: ArtifactApplicatio
       case a if Set(ArtifactKind.ForeignSurface, ArtifactKind.StudioProfileSemantics,
         ArtifactKind.StudioProfileSurface).contains(a.kind) =>
         ProviderIdentity(a.kind.name, a.digest, TrustBasis.DigestBound) }
-    closure = TrustedClosure(root, installed.toList, TrustedClosure.hostInterpreters,
+    closure = TrustedClosure(root, installed.toList, application.machine.interpreters.map(_.identity),
       providers, TrustedClosure.assumptions, evidence).normalized
   yield HardeningAuditReport(root, application.manifest.name, installed.toList.sortBy(_.hex),
     kinds, application.languages.view.mapValues(_.language.digest).toMap, TrustedBoundary.minimal, closure)

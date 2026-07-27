@@ -9,8 +9,12 @@ import java.nio.file.Files
 class EcosystemSuite extends munit.FunSuite:
   private val alice = Keypair.dev("alice")
   private val bob = Keypair.dev("bob")
-  private val app1 = ApplicationManifest("demo-1", Nil, Nil)
-  private val app2 = ApplicationManifest("demo-2", Nil, Nil)
+  private val bootstrap = Artifact(ArtifactKind.Fragment, Canon.CStr("ecosystem-bootstrap"))
+  private val machine = GenericMachine.declare(List(bootstrap.digest))
+  private val app1 = ApplicationManifest("demo-1", machine.digest, Nil, Nil)
+  private val app2 = ApplicationManifest("demo-2", machine.digest, Nil, Nil)
+  private def putApplications(cas: cairn.systeminterface.Cas): Unit =
+    List(bootstrap, machine.artifact, app1.artifact, app2.artifact).foreach(cas.put)
   private val lang1 = Digest.of(Canon.CStr("lang-1"))
   private val lang2 = Digest.of(Canon.CStr("lang-2"))
   private val lang3 = Digest.of(Canon.CStr("lang-3"))
@@ -23,7 +27,7 @@ class EcosystemSuite extends munit.FunSuite:
 
   test("signed releases support trusted semantic-version discovery"):
     val cas = MemCas()
-    List(app1.artifact, app2.artifact).foreach(cas.put)
+    putApplications(cas)
     val v1 = EcosystemBundles.sign("org.demo", SemanticVersion(1, 0, 0), app1.digest,
       EcosystemRootKind.Application, Nil, Nil, alice)
     val v2 = EcosystemBundles.sign("org.demo", SemanticVersion(1, 2, 0), app2.digest,
@@ -41,7 +45,7 @@ class EcosystemSuite extends munit.FunSuite:
 
   test("trust policy rejects forged keys, namespace violations, and revocation"):
     val cas = MemCas()
-    cas.put(app1.artifact)
+    putApplications(cas)
     val byBob = EcosystemBundles.sign("org.demo", SemanticVersion(1, 0, 0), app1.digest,
       EcosystemRootKind.Application, Nil, Nil, bob)
     cas.put(byBob.artifact)
@@ -58,7 +62,8 @@ class EcosystemSuite extends munit.FunSuite:
 
   test("migration discovery finds a trusted multi-release route"):
     val cas = MemCas()
-    List(app1.artifact, migration12.artifact, migration23.artifact).foreach(cas.put)
+    putApplications(cas)
+    List(migration12.artifact, migration23.artifact).foreach(cas.put)
     val v1 = EcosystemBundles.sign("org.demo", SemanticVersion(1, 0, 0), app1.digest,
       EcosystemRootKind.Application, List(migration12.artifact.digest), Nil, alice)
     val v2 = EcosystemBundles.sign("org.demo", SemanticVersion(2, 0, 0), app1.digest,
@@ -74,7 +79,7 @@ class EcosystemSuite extends munit.FunSuite:
   test("publication anchors the exact signed bundle in the ledger"):
     val node = Node(Files.createTempDirectory("cairn-ecosystem-node"), EffectContexts.forLedger())
     val authorities = Map(alice.name -> alice.publicBytes)
-    node.cas.put(app1.artifact)
+    putApplications(node.cas)
     val bundle = EcosystemBundles.sign("org.demo", SemanticVersion(1, 0, 0), app1.digest,
       EcosystemRootKind.Application, Nil, Nil, alice)
     EcosystemBundles.publish(bundle, node, alice, authorities).fold(e => fail(e), identity)
@@ -85,11 +90,11 @@ class EcosystemSuite extends munit.FunSuite:
 
   test("replication installs the signed bundle and its application closure"):
     val origin = MemCas()
-    origin.put(app1.artifact)
+    putApplications(origin)
     val bundle = EcosystemBundles.sign("org.demo", SemanticVersion(1, 0, 0), app1.digest,
       EcosystemRootKind.Application, Nil, Nil, alice)
     origin.put(bundle.artifact)
     val replica = MemCas()
     val graph = EcosystemReplication.pull(bundle.digest, origin, replica).fold(e => fail(e), identity)
-    assertEquals(graph, Set(bundle.digest, app1.digest))
+    assertEquals(graph, Set(bundle.digest, app1.digest, machine.digest, bootstrap.digest))
     assert(replica.contains(bundle.digest) && replica.contains(app1.digest))

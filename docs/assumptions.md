@@ -110,9 +110,11 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     `content/languages/<name>/surfaces/default.cairn`.
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
-    unisoncore) split the same way. Residuals: `Query.run` / policy
-    enforcement / TreeEngine / Delta stay Scala interpreters of `.cairn` data
-    and are explicit PR28 TCB-contraction targets.
+    unisoncore) split the same way. `Query.run`, policy enforcement,
+    `TreeEngine`, and `Delta` remain Scala implementations of generic
+    mechanisms, but PR28 removes them as independent application choices: one
+    content-addressed `GenericMachine` selects the semantic programs and effect
+    routes loaded at startup.
     Effect `ResourceSchema` uses typed `PathPattern` (`Digest|Path` for Cas).
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename

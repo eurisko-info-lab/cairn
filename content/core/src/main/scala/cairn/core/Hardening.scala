@@ -13,8 +13,7 @@ final case class TrustedBoundary(mechanisms: List[String], excluded: List[String
 
 object TrustedBoundary:
   val minimal: TrustedBoundary = TrustedBoundary(
-    List("canonical-codec", "sha256-artifact-identity", "language-checker",
-      "change-replay", "validation-checker", "ledger-transition").sorted,
+    MachineComponent.values.toList.map(_.id).sorted,
     List("language-studio", "application-resolver", "dependency-cache",
       "surface-renderers", "audit-orchestration").sorted)
 
@@ -57,11 +56,6 @@ final case class TrustedClosure(
     "checkedEvidence" -> Canon.CList(checkedEvidence.sortBy(e => (e.artifact.hex, e.basis.toString)).map(_.canon)))
 
 object TrustedClosure:
-  private def digest(label: String): Digest = Digest.of(Canon.CStr(s"cairn-interpreter-v1:$label"))
-  val hostInterpreters: List[InterpreterIdentity] = List(
-    "canonical-codec", "language-checker", "generic-parser-printer", "change-replay",
-    "proof-checker", "validation-checker", "signature-verifier", "ledger-transition"
-  ).map(name => InterpreterIdentity(name, digest(s"$name-interface"), digest(s"$name-implementation")))
   val assumptions: List[ExternalAssumption] = List(
     ExternalAssumption("sha-256", "SHA-256 collision and second-preimage resistance"),
     ExternalAssumption("ed25519", "Ed25519 verification authenticates possession of the signing key"),

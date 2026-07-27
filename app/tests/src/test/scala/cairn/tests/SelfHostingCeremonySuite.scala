@@ -38,9 +38,13 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
     val meta = ResolvedLanguageCapabilities.check(descriptor, Meta.language, change, Some(validation),
       List(migration.artifact), Nil, Nil, List(profileSemantics.artifact, profileSurface.artifact)).toOption.get
     val grammar = LanguageCapabilities.standard(Meta.grammarLanguage)
-    val manifest = ApplicationManifest("cairn", List(
+    val installedLanguages = List(
       installLanguage(node, Meta.language, meta).copy(name = "meta"),
-      installLanguage(node, Meta.grammarLanguage, grammar).copy(name = "grammar")), Nil)
+      installLanguage(node, Meta.grammarLanguage, grammar).copy(name = "grammar"))
+    val machine = GenericMachine.declare(installedLanguages.flatMap(_.runtime), Map(
+      "meta" -> meta.descriptor.digest, "grammar" -> grammar.descriptor.digest))
+    node.cas.put(machine.artifact)
+    val manifest = ApplicationManifest("cairn", machine.digest, installedLanguages, Nil)
     node.cas.put(manifest.artifact)
     val bundle = EcosystemBundles.sign("org.cairn", SemanticVersion(1, 0, 0), manifest.digest,
       EcosystemRootKind.Application, List(migration.artifact.digest), Nil, publisher)
@@ -102,9 +106,12 @@ class SelfHostingCeremonySuite extends munit.FunSuite:
     assert(report.trustedClosure.checkedEvidence.exists(_.basis == TrustBasis.IndependentlyChecked))
     assert(report.trustedClosure.checkedEvidence.exists(_.basis == TrustBasis.DigestBound))
     assert(report.trustedClosure.hostInterpreters.forall(i => i.interfaceDigest != i.implementationDigest))
+    assertEquals(report.trustedClosure.hostInterpreters.map(_.name).toSet,
+      MachineComponent.values.map(_.id).toSet)
 
   test("optimized dependency discovery carries a model/interpreter/input equivalence witness"):
-    val app = ApplicationManifest("equivalence", Nil, Nil).artifact
+    val seed = Digest.of(Canon.CStr("equivalence-bootstrap"))
+    val app = ApplicationManifest("equivalence", GenericMachine.declare(List(seed)).digest, Nil, Nil).artifact
     val cache = ArtifactDependencyCache()
     val witness = cache.verify(app).fold(e => fail(e), identity)
     assert(witness.valid)

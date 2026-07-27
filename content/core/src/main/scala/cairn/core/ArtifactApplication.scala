@@ -19,18 +19,20 @@ final case class ApplicationEntry(name: String, artifact: Digest, kind: Artifact
   * never pass a host-built language map or application assembly list. */
 final case class ApplicationManifest(
     name: String,
+    machine: Digest,
     languages: List[ApplicationLanguage],
     entries: List[ApplicationEntry],
     dependencies: List[Digest] = Nil,
 ):
   def canon: Canon = Canon.cmap(
     "name" -> Canon.CStr(name),
+    "machine" -> Canon.CStr(machine.hex),
     "languages" -> Canon.CList(languages.sortBy(_.name).map(_.canon)),
     "entries" -> Canon.CList(entries.sortBy(_.name).map(_.canon)),
     "dependencies" -> Canon.cstrs(dependencies.distinct.sortBy(_.hex).map(_.hex)))
   def artifact: Artifact = Artifact(ArtifactKind.Application, canon)
   def digest: Digest = artifact.digest
-  def roots: List[Digest] = languages.flatMap(l => List(l.language, l.grammar, l.capabilities) ++ l.runtime.toList) ++
+  def roots: List[Digest] = machine :: languages.flatMap(l => List(l.language, l.grammar, l.capabilities) ++ l.runtime.toList) ++
     entries.map(_.artifact) ++ dependencies
   def validate: Either[String, Unit] =
     if name.isEmpty then Left("application name is required")
@@ -44,6 +46,7 @@ object ApplicationManifest:
     if artifact.kind != ArtifactKind.Application then Left("startup root is not an application artifact")
     else try Right(ApplicationManifest(
       artifact.body.field("name").asStr,
+      Digest(artifact.body.field("machine").asStr),
       artifact.body.field("languages").asList.map { l => ApplicationLanguage(
         l.field("name").asStr, Digest(l.field("language").asStr),
         Digest(l.field("grammar").asStr), Digest(l.field("capabilities").asStr),
@@ -62,6 +65,7 @@ object ArtifactDependencies:
     case ArtifactKind.DomainRuntime => DomainRuntime.fromArtifact(artifact).map(r =>
       List(r.language, r.capabilities, r.acceptance))
     case ArtifactKind.RepositoryGraph => NativeRepository.fromArtifact(artifact).map(_.gcRoots.toList.sortBy(_.hex))
+    case ArtifactKind.GenericMachine => GenericMachine.fromArtifact(artifact).map(_.dependencies)
     case ArtifactKind.Application => ApplicationManifest.fromArtifact(artifact).map(_.roots)
     case ArtifactKind.Language => scala.util.Try(
       artifact.body.field("fragments").asList.map(x => Digest(x.asStr))).toEither
