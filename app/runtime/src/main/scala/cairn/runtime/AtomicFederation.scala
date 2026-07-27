@@ -3,7 +3,7 @@ package cairn.runtime
 import cairn.kernel.*
 import cairn.core.*
 import cairn.systeminterface.Cas
-import cairn.systemhandler.{DurableIo, Keypair, Node}
+import cairn.systemhandler.{DurableIo, FederationFinality, Keypair, Node}
 import java.nio.file.{Files, Path}
 
 enum FederationCrashPoint:
@@ -147,3 +147,117 @@ final class AtomicFederation(home: Path, source: Cas, node: Node):
           _ = Files.deleteIfExists(intent)
         yield Some(d)
       case _ => Left("invalid federation recovery journal") }
+
+/** Journal phase reached when a crash interrupts [[FederationTransactionCoordinator.publish]]. */
+enum FederationTransactionPhase:
+  case None, AfterStaged, AfterProposed, AfterCertified, AfterLedgered
+
+/** PR31's six-phase crash-recoverable transition protocol, generalizing
+  * [[AtomicFederation.publish]]/`.recover`'s two-phase (`prepared:`/
+  * `published:`) journal to a full [[FederationState]] finalized by real
+  * BFT quorum rather than a single authority's ledger append.
+  *
+  * Phases: '''stage''' (verify + install the complete closure) →
+  * '''propose''' (broadcast to the replica quorum) → '''certify'''
+  * ([[FederationFinality.agreeForFederationState]] mints a
+  * [[FederationFinality.FederationFinalityCertificate]]) → '''ledger'''
+  * (one batched append: the new state, every touched namespace's head, and
+  * the certificate anchor) → '''GC epoch advanced''' (no separate journal
+  * entry — the certified/ledgered state's own `gcEpoch` is now usable by
+  * [[FederationGc.reclaimAgainstFinalizedEpoch]]; the certificate itself is
+  * the authorization) → '''expose''' (`federation.current` updated).
+  *
+  * Recovery collapses the first three phases to one action: anything before
+  * the ledger append has no durable external side effect yet, so a crash
+  * there is always safely abandoned (old state stands) — the finer-grained
+  * phase vocabulary exists so each boundary can be crash-tested
+  * independently, not because recovery needs to distinguish them. Only a
+  * crash AFTER the ledger append requires completing forward, and even then
+  * only after independently re-verifying the certificate and the ledger's
+  * own recorded state — never trusting the journal string alone, mirroring
+  * [[AtomicFederation.recover]]'s exact posture.
+  */
+final class FederationTransactionCoordinator(
+    home: Path, source: Cas, node: Node,
+    replicas: List[Keypair], activeManifest: ReplicaSetManifest, federationId: Digest,
+):
+  private val intent = home.resolve("federation-state.intent")
+  private val visible = home.resolve("federation-state.current")
+
+  private def write(path: Path, value: String): Either[String, Unit] =
+    DurableIo.writeConsensus(path, (value + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8))
+
+  private def read(path: Path): Either[String, String] = try
+    Right(String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8).trim)
+  catch case e: Exception => Left(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
+
+  def current: Either[String, Option[Digest]] =
+    if !Files.exists(visible) then Right(None) else read(visible).flatMap(Digest.parse).map(Some(_))
+
+  /** `epoch` is the ledger height this generation is anchored at (shared
+    * clock with `newState`'s own gcEpoch/namespace-trust activation
+    * points); `priorState` is the exact predecessor the minted certificate
+    * must chain from.
+    */
+  def publish(
+      transactions: List[FederationCommit],
+      priorState: FederationState,
+      newState: FederationState,
+      epoch: Long,
+      authority: Keypair,
+      authorities: Map[String, Vector[Byte]],
+      crash: FederationTransactionPhase = FederationTransactionPhase.None,
+  ): Either[String, (FederationFinality.FederationFinalityCertificate, Block)] =
+    source.put(newState.artifact)
+    for
+      _ <- verifyFederationState(newState, source)
+      _ <- write(intent, s"staged:${newState.digest.hex}")
+      _ <- Either.cond(crash != FederationTransactionPhase.AfterStaged, (), "simulated crash after federation-state staged")
+      _ <- ArtifactApplicationResolver(node.cas).install(newState.digest, source).map(_ => ())
+      _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
+      _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
+      cert <- FederationFinality.agreeForFederationState(
+        replicas, view = 0, stateDigest = newState.digest, epoch = epoch,
+        previousState = priorState.digest, federationId = federationId)
+      _ = node.cas.put(cert.artifact)
+      _ <- write(intent, s"certified:${newState.digest.hex}:${cert.digest.hex}")
+      _ <- Either.cond(crash != FederationTransactionPhase.AfterCertified, (), "simulated crash after federation-state certified")
+      block <- node.append(authority, authorities,
+        authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes)) ::
+        authority.signTx(Tx.PublishArtifact(newState.artifact.key)) ::
+        authority.signTx(Tx.RecordCertificate(cert.digest, "federation-finality")) ::
+        transactions.flatMap(c => List(
+          authority.signTx(Tx.PublishArtifact(c.artifact.key)),
+          authority.signTx(Tx.SetBranchHead(s"${c.namespace}/${c.branch}", c.artifact.key)))))
+      _ <- write(intent, s"ledgered:${newState.digest.hex}:${block.digest.hex}")
+      _ <- Either.cond(crash != FederationTransactionPhase.AfterLedgered, (), "simulated crash after federation-state ledgered")
+      _ <- write(visible, newState.digest.hex)
+      _ = Files.deleteIfExists(intent)
+    yield (cert, block)
+
+  /** Anything staged/proposed/certified but never ledgered is safely
+    * abandoned (old state stands). Only a ledgered generation is completed
+    * — and only after re-verifying the certificate against the currently
+    * active replica-set manifest and cross-checking the ledger's own
+    * recorded state, never trusting the journal string alone.
+    */
+  def recover(authorities: Map[String, Vector[Byte]]): Either[String, Option[Digest]] =
+    if !Files.exists(intent) then current
+    else read(intent).flatMap { text => text.split(':').toList match
+      case "ledgered" :: digest :: _ :: Nil =>
+        val d = Digest(digest)
+        for
+          artifact <- node.cas.getByDigest(d)
+          newState <- FederationState.fromArtifact(artifact)
+          _ <- verifyFederationState(newState, node.cas)
+          certArtifact <- node.cas.getByDigest(newState.trustRoots).orElse(Left("federation recovery: trust roots not resolvable"))
+          _ <- ReplicaSetManifest.fromCanon(certArtifact.body).left.map(_ => "federation recovery: trust roots do not decode")
+          state <- node.state(authorities)
+          _ <- Either.cond(state.published.contains(artifact.key.render), (),
+            "federation recovery cannot prove the ledger generation")
+          _ <- write(visible, d.hex)
+          _ = Files.deleteIfExists(intent)
+        yield Some(d)
+      case ("staged" | "proposed" | "certified") :: _ =>
+        Files.deleteIfExists(intent); current
+      case _ => Left("invalid federation-state recovery journal") }
