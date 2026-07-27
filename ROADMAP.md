@@ -76,20 +76,119 @@ driven by operational use and compatibility rather than another universal
 abstraction. See [docs/assumptions.md](docs/assumptions.md) for the precise
 remaining gaps.
 
-Current directions:
+### Revised remaining roadmap
 
-1. **Cairn 1.0 discipline** — stabilize canonical formats and compatibility
-   policy, reproducible releases, recovery procedures, resource limits, and a
-   focused security review.
-2. **Real deployments** — deepen SDS, PKI/trust-registry, regulated-document,
-   collaborative language-development, and proof-oriented workflows using the
-   existing application/Studio substrate.
-3. **Alternative verification** — develop a Rust verifier and more precise
-   Lean models; expand cross-kernel replay and agreement evidence without
-   confusing it with proof.
-4. **Long-lived ecosystem operations** — mirroring, revocation, trust-root
-   rotation, compatibility discovery, and migration testing across old release
-   histories.
-5. **Selected semantic depth** — a fuller Bend implementation remains gated on
-   real interaction-net lowering; repository algebra can still move closer to
-   a native Pijul-like model where real workflows justify it.
+| PR | Capability | Status |
+|---|---|---|
+| PR26 | Runtime constitution closure | ⬜ |
+| PR27 | Complete native Pijul-like repository | ⬜ |
+| PR28 | Contract the remaining host TCB | ⬜ |
+| PR29 | Generalized semantic-equivalence evidence | ⬜ |
+| PR30 | Distributed transaction and consensus hardening | ⬜ |
+| PR31 | Studio productionization | ⬜ |
+| PR32 | Eliminate fidelity residuals | ⬜ |
+
+#### PR26 — Runtime constitution closure
+
+Introduce one digest-bound runtime selection:
+
+```scala
+final case class DomainRuntime(
+  language: Digest,
+  capabilities: Digest,
+  acceptance: Digest
+)
+```
+
+Its transitive graph includes language and grammar, change semantics and
+surface, validation and providers, migrations, queries, policies, projections,
+Studio profiles, and authority/publication requirements. Repository APIs,
+validated tips, branch manifests, conflicts, migrations, and acceptance
+evidence must identify this constitution. A caller must not be able to combine
+a language from one release with another release's change or validation model.
+
+#### PR27 — Complete the native Pijul-like repository
+
+Make causal dependencies native rather than reconstructing them primarily from
+branch histories:
+
+- explicit change and semantic-path context dependencies;
+- partial application;
+- conflicts preserved inside repository state;
+- conflict resolutions represented as dependent changes;
+- change-centric pull and push;
+- branch heads as views rather than history containers;
+- garbage collection rooted in the causal change graph.
+
+`Branches` then becomes porcelain over one change graph instead of a second
+history mechanism.
+
+#### PR28 — Contract the remaining host TCB
+
+Reduce the digest-accounted host boundary to a small generic machine:
+
+```text
+canonical decoder
+grammar interpreter
+rule/search interpreter
+change-program interpreter
+proof checker
+effect dispatcher
+```
+
+Targets include the Scala Meta/Grammar bootstrap seeds, host `Query.run`,
+policy enforcement, `TreeEngine`, `Delta`, and effect-family routing/cold-start
+seeds. The goal is not zero native code; it is to move every non-generic choice
+into artifacts loaded and checked by those engines.
+
+#### PR29 — Generalized semantic-equivalence evidence
+
+Extend `OptimizationEquivalence` beyond dependency discovery to:
+
+- parser ↔ compiled parser;
+- printer ↔ derived printer;
+- `TreeEngine` ↔ compiled rewrite machine;
+- canonical change interpretation ↔ optimized replay;
+- repository merge ↔ incremental merge;
+- migration ↔ compiled migration;
+- Cairn surface provider ↔ external native provider.
+
+Every agreement binds the semantic model, interpreter implementation, input,
+and both result digests. Lean and HVM remain narrow, honestly named agreement
+envelopes—not claims of full Lean-kernel or HVM-runtime compatibility.
+
+#### PR30 — Distributed transaction and consensus hardening
+
+Address the current non-atomic and closed-membership boundaries with
+transactional publication, authenticated peer discovery, durable consensus
+recovery, equivocation evidence, namespace federation, and replicated
+garbage-collection safety. The starting point remains explicit: local
+acceptance is journaled but not a distributed atomic transaction; discovery is
+directory-based; BFT finalizes sealed PoA blocks; replay/revocation state merges
+through CAS rather than consensus; and there is no open-membership ledger.
+
+#### PR31 — Studio productionization
+
+Turn the three complete semantic Studio verticals into a daily production
+environment:
+
+- incremental document synchronization;
+- multi-file and workspace-folder LSP;
+- large-document virtualization;
+- background validation and indexing;
+- an accessible semantic conflict editor;
+- user/session identity and permissions;
+- deployment, monitoring, and operational observability.
+
+The current LSP remains full-document only.
+
+#### PR32 — Eliminate fidelity residuals
+
+Close the remaining localized fidelity and coverage gaps:
+
+- preserve inserted concrete syntax without parent reprint when no original
+  span exists;
+- move the remaining `ChemicalDoc` → `Cst` projection out of host glue;
+- extend Bend/HVM lowering beyond the narrow agreement corpus.
+
+These are no longer foundational architecture blockers.

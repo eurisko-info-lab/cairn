@@ -174,6 +174,11 @@ Cairn ships a real thin surface because nets are real.
 Remaining: HVM strict/lazy modes; native NUM/OPR (Church numerals +
 honest self-ref boundary land in WaveESuite).
 
+Together with span-less concrete-syntax insertion and the remaining
+`ChemicalDoc` → `Cst` host projection, the fuller Bend/HVM path is tracked as
+[PR32 fidelity work](../ROADMAP.md#pr32--eliminate-fidelity-residuals), not a
+foundational architecture blocker.
+
 **Agreement envelope** (not full HVM compatibility): AffineNet/IcNet claim the
 classical IC rule table + corpus NFs vs recorded goldens; `HvmSurface` exports
 HVM2 books; live `hvm run` when on PATH. See [agreement.md](agreement.md).

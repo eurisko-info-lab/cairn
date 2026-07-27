@@ -25,7 +25,8 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    to parent reprint. Format-preserving ΔL `remove`/`rename` are supported.
    Default print rules are derived from
    syntax productions (`PrintDerive`); an explicit `print` line is an override.
-   RoundTrip still gates trust — derivation is not trusted alone.
+   RoundTrip still gates trust — derivation is not trusted alone. PR32 targets
+   the remaining insertion/parent-reprint fidelity gap.
 6. **ΔL scope**: module-level ops PLUS structural path edits (M15). Footprints
    are name-reference sets via the language's variable constructor. Change
    composition/inverses/commutation exist (M16); three-way semantic merge
@@ -63,10 +64,11 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    `packDecls` seeds (verified against disk). `EffectContext.capabilities`
    threads Kernel-minted grant bundles (SDS causal + AuthoritySuite).
    Journaled accept is local (CAS → journal → refs) — not a distributed
-   atomic transaction. SDS *uses* report projection pack `sds-report`
+   atomic transaction; PR30 owns transactional publication and replicated-GC
+   safety. SDS *uses* report projection pack `sds-report`
    (text + JSON + XML + CSV + pdf surfaces under `content/languages/sds-report/surfaces/`);
    print path is PackLoader + RoundTrip (`SectionReport.printSurface`);
-   PDF bytes via `PdfMinimal`; `toCst` remains host projection. Causal workflow
+   PDF bytes via `PdfMinimal`; `toCst` remains host projection (PR32). Causal workflow
    sequence and certificate kinds are Cairn packs (`sds-workflow`,
    `sds-certificate`); Scala runs effectful Branches/Ed25519/ledger steps under
    authority. Formats are **not** SDS vocabulary.
@@ -80,7 +82,8 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    majority-quorum add/remove, round-robin sealing. BFT finality certificates
    (`BftFinality`) require **distinct** authenticated replicas (`2f+1`), bind a
    replica-set digest, and certify **replay-valid sealed PoA blocks** (not
-   arbitrary digests). Open-membership / public-ledger BFT remains out.
+   arbitrary digests). Open-membership / public-ledger BFT remains out; PR30
+   owns the next distributed hardening step.
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
     Rosetta skeletons are golden-checked. All four pass whole-file byte
@@ -108,11 +111,26 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     **Phase 3**: Meta top `surface <style> for <lang> { … }` replaces the interim
     `language <style> { … }` hack; remaining fused packs (riemann/minitt/leancore/
     unisoncore) split the same way. Residuals: `Query.run` / policy
-    enforcement / TreeEngine / Delta stay Scala interpreters of `.cairn` data.
+    enforcement / TreeEngine / Delta stay Scala interpreters of `.cairn` data
+    and are explicit PR28 TCB-contraction targets.
     Effect `ResourceSchema` uses typed `PathPattern` (`Digest|Path` for Cas).
 12. **CLI CAS location**: `$CAIRN_HOME` or `./.cas` (gitignored).
 13. **LSP scope** (M44): full-document sync, diagnostics, formatting, rename
     (= ΔL rename emitting a `ValidatedChangeSet`), hover; no incremental
-    edits or workspace folders.
+    edits or workspace folders. PR31 owns productionization.
 14. **Gossip** (M39) is an in-process simulation over real node stores; the
-    HTTP surface (M38) is the transport a daemon would use.
+    HTTP surface (M38) is the transport a daemon would use. PR30 owns
+    authenticated discovery and consensus/transaction hardening beyond the
+    current directory and configured-replica model.
+15. **Runtime selection is not yet one constitution.** `LanguageCapabilities`
+    binds language behavior and `AcceptanceConstitution` binds acceptance, but
+    repository artifacts do not yet identify one `DomainRuntime` joining both.
+    PR26 closes the cross-release mix-and-match hazard.
+16. **Repository causality remains thin-Pijul.** `PatchGraph`, access traces,
+    change histories, and conflict changes are real, but branches still carry
+    history and some dependency/context information is reconstructed. PR27
+    makes the causal change graph native.
+17. **Optimization evidence is narrow.** `OptimizationEquivalence` currently
+    covers digest-keyed dependency discovery. PR29 generalizes the same
+    model/interpreter/input/result binding to parsers, printers, evaluation,
+    changes, merges, migrations, and native surface providers.

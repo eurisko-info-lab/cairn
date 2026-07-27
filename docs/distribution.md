@@ -85,6 +85,13 @@ What exists for multi-node sync, gossip, discovery, and BFT finality.
 
 ## Honesty bounds
 
+These bounds form the starting point for
+[PR30](../ROADMAP.md#pr30--distributed-transaction-and-consensus-hardening),
+which covers transactional publication, authenticated discovery, durable
+recovery/equivocation evidence, namespace federation, and replicated-GC safety.
+It does not retroactively describe the current local journal as a distributed
+transaction or the configured-replica protocol as open membership.
+
 | Capability | Bound |
 | --- | --- |
 | Peer discovery | Directory / announce — not open DHT. Replica URLs must verify against the **active manifest public key** (`resolveReplicaUrls`); sealed `generation` beats stale replays. Unsigned gossip plants remain operator-trust. |

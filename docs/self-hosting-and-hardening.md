@@ -46,3 +46,16 @@ Optimization paths carry `OptimizationEquivalence` traces keyed by semantic
 model digest, interpreter-version digest, and input digest. The dependency
 cache is accepted only when its canonical and optimized result digests agree.
 Deleting the cache leaves artifact installation and audit semantics unchanged.
+
+## Remaining contraction work
+
+PR25 makes the boundary explicit; it does not claim to erase native code.
+[PR28](../ROADMAP.md#pr28--contract-the-remaining-host-tcb) targets the
+remaining bootstrap seeds, host interpreters, and effect routing until the host
+is a small generic decoder/interpreter/checker/dispatcher machine.
+
+`OptimizationEquivalence` currently proves only dependency-discovery cache
+agreement. [PR29](../ROADMAP.md#pr29--generalized-semantic-equivalence-evidence)
+extends the same digest-bound law to parsing, printing, evaluation, change
+replay, merge, migration, and native surface providers. Existing Lean and HVM
+certificates remain narrow agreement envelopes throughout that work.

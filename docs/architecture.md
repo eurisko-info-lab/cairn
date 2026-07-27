@@ -200,6 +200,16 @@ Remaining follow-up (slice 3): finish neutralizing the container/content cut:
 - **Ports:** Rosetta projections are obligations, not Kernel-checked host
   proofs — see [rosetta.md](rosetta.md).
 
+### Runtime-constitution boundary
+
+`LanguageCapabilities` binds an exact language revision to change models,
+validation, migrations, queries, policies, projections, and Studio profiles.
+`AcceptanceConstitution` independently binds acceptance rules. Both are
+digest-addressed and checked, but repository artifacts do not yet make their
+pairing inseparable. [PR26](../ROADMAP.md#pr26--runtime-constitution-closure)
+introduces `DomainRuntime` and threads it through tips, manifests, conflicts,
+migrations, and acceptance evidence.
+
 ## EffectContext, AuthorizedEffect, and AuditedEffect
 
 Composition roots own authorization:
@@ -303,7 +313,7 @@ branch state
 | ----- | ------ | ---- |
 | `SemanticRepository` | `core` | Pure orchestration; proposes `Tip`, mints `ValidatedTip` |
 | `Delta` / `ChangeAlgebra` / `Merge` / `Migrate` | `core` | Engines; opaque `ValidatedChangeSet` via apply/check |
-| `PatchGraph` | `core` | Explicit causal patch DAG (parent edges + LCA); thin vs full Pijul |
+| `PatchGraph` | `core` | Explicit causal patch DAG (parent edges + LCA); thin pending PR27's native dependency/context graph |
 | `BranchManifest` | `kernel` | Accepted branch state + causal digests |
 | `Branches` | `runtime` | Effectful refs; `commitTip` = ΔL path; `importModule` = bootstrap/import only |
 | `Provenance` | `system-handler` | Records `semantic-merge` edges for `cairn why` |
@@ -328,6 +338,10 @@ Refs `.change` / `.changes` sidecars remain write-through caches;
 prefers `PatchGraph` DAG LCA when change-set digests form an explicit parent
 graph, falling back to shared module-result digests, then merges divergent
 suffixes.
+Explicit context dependencies, partial application, conflicts resident in
+repository state, dependent resolution changes, and change-centric transfer
+remain the [PR27](../ROADMAP.md#pr27--complete-the-native-pijul-like-repository)
+boundary. Until then `Branches` is more than porcelain over `PatchGraph`.
 Branch accepts are journaled: CAS blobs → accept journal → refs → optional
 ledger publish → journal clear (`recoverPendingAccepts` rolls forward).
 `Branches.reclaimOrphanBlobs(casRoot)` recovers then mark/sweeps via

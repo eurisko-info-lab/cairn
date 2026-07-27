@@ -86,3 +86,12 @@ delegation hops publish `capability-delegation` digests via `DelegationLog`.
 Both follow the `ReplayReplication` want/have shape — merge, not consensus.
 Trust administration stays outside Studio: Studio displays acceptance and trust
 consequences, while the Trust tab governs revocation and delegation.
+
+## Productionization boundary
+
+The semantic Studio vertical is complete, but the current LSP remains
+full-document only and the UI is not yet a large-document, multi-user daily
+environment. [PR31](../ROADMAP.md#pr31--studio-productionization) owns
+incremental synchronization, multi-file/workspace LSP, virtualization,
+background validation/indexing, accessibility, identity/permissions, and
+deployment observability.
