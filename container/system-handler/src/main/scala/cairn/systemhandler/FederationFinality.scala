@@ -316,3 +316,362 @@ object FederationFinality:
             FederationFinalityCertificate.verify(cert, manifest).map(_ => cert)
       }
     }
+
+  // ---------------------------------------------------------------------
+  // PR33: real network agreement — FederationReplica + HttpNode's
+  // /federation/* endpoints replace this section's local orchestration for
+  // production use. A distinct signing domain from BftFinality.MsgDomain
+  // keeps the two protocols' signed payloads structurally unmistakable even
+  // before considering their different canon tags.
+  // ---------------------------------------------------------------------
+
+  val MsgDomain: String = "cairn-federation-v1"
+
+  /** Authenticated request asking a replica to propose. Unlike
+    * [[BftFinality.ProposeRequest]] (which names a bare block digest plus
+    * separate chainId/replicaSet fields), this carries the FULL
+    * [[FederationProposal]] directly — federationId/replicaSet are already
+    * fields on it, and a receiving replica needs the whole proposal's
+    * content to run `FederationReplica`'s verify callback before voting,
+    * not just a value it agrees over.
+    */
+  final case class FederationProposeRequest(
+      view: Int,
+      proposal: FederationProposal,
+      signer: ReplicaId,
+      seal: Vector[Byte],
+  ):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap(
+      "domain" -> Canon.CStr(MsgDomain), "kind" -> Canon.CStr("propose"),
+      "view" -> Canon.CInt(view), "proposal" -> proposal.canon))
+    def canon: Canon = Canon.CTag("federation-propose-req", Canon.cmap(
+      "view" -> Canon.CInt(view), "proposal" -> proposal.canon,
+      "signer" -> Canon.CStr(signer.id), "seal" -> Canon.CBytes(seal)))
+
+  object FederationProposeRequest:
+    def sign(signer: Signer, view: Int, proposal: FederationProposal): FederationProposeRequest =
+      val req = FederationProposeRequest(view, proposal, ReplicaId(signer.name), Vector.empty)
+      req.copy(seal = signer.sign(req.payload))
+
+    def fromCanon(c: Canon): Either[String, FederationProposeRequest] =
+      c match
+        case Canon.CTag("federation-propose-req", m) =>
+          for
+            proposal <- FederationProposal.fromCanon(m.field("proposal"))
+            seal <- m.field("seal") match
+              case Canon.CBytes(bs) => Right(bs)
+              case other => Left(s"bad federation propose seal: $other")
+          yield FederationProposeRequest(m.field("view").asInt.toInt, proposal, ReplicaId(m.field("signer").asStr), seal)
+        case other => Left(s"not a federation-propose-req: $other")
+
+  def verifyProposeRequest(
+      authorities: Map[String, Vector[Byte]],
+      req: FederationProposeRequest,
+      expectedFederationId: Digest,
+      expectedReplicaSet: Digest,
+  ): Either[String, Unit] =
+    if req.proposal.federationId != expectedFederationId then
+      Left(s"federation: propose federationId ${req.proposal.federationId.short} != expected ${expectedFederationId.short}")
+    else if req.proposal.replicaSet != expectedReplicaSet then
+      Left(s"federation: propose replicaSet ${req.proposal.replicaSet.short} != expected ${expectedReplicaSet.short}")
+    else
+      authorities.get(req.signer.id) match
+        case None => Left(s"unknown federation replica '${req.signer.id}'")
+        case Some(pk) =>
+          if Ed25519.verify(pk, req.payload, req.seal) then Right(())
+          else Left(s"bad federation propose seal from ${req.signer.id}")
+
+  /** Authenticated request to trigger a view-change on a replica. Mirrors
+    * [[BftFinality.ViewChangeRequest]].
+    */
+  final case class FederationViewChangeRequest(
+      newView: Int,
+      federationId: Digest,
+      replicaSet: Digest,
+      signer: ReplicaId,
+      seal: Vector[Byte],
+  ):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap(
+      "domain" -> Canon.CStr(MsgDomain), "kind" -> Canon.CStr("view-change"),
+      "federationId" -> Canon.CStr(federationId.hex), "replicaSet" -> Canon.CStr(replicaSet.hex),
+      "newView" -> Canon.CInt(newView)))
+    def canon: Canon = Canon.CTag("federation-view-change-req", Canon.cmap(
+      "newView" -> Canon.CInt(newView), "federationId" -> Canon.CStr(federationId.hex),
+      "replicaSet" -> Canon.CStr(replicaSet.hex), "signer" -> Canon.CStr(signer.id), "seal" -> Canon.CBytes(seal)))
+
+  object FederationViewChangeRequest:
+    def sign(signer: Signer, newView: Int, federationId: Digest, replicaSet: Digest): FederationViewChangeRequest =
+      val req = FederationViewChangeRequest(newView, federationId, replicaSet, ReplicaId(signer.name), Vector.empty)
+      req.copy(seal = signer.sign(req.payload))
+
+    def fromCanon(c: Canon): Either[String, FederationViewChangeRequest] =
+      c match
+        case Canon.CTag("federation-view-change-req", m) =>
+          m.field("seal") match
+            case Canon.CBytes(bs) =>
+              Right(FederationViewChangeRequest(
+                m.field("newView").asInt.toInt, Digest(m.field("federationId").asStr),
+                Digest(m.field("replicaSet").asStr), ReplicaId(m.field("signer").asStr), bs))
+            case other => Left(s"bad federation view-change seal: $other")
+        case other => Left(s"not a federation-view-change-req: $other")
+
+  def verifyViewChangeRequest(
+      authorities: Map[String, Vector[Byte]],
+      req: FederationViewChangeRequest,
+      expectedFederationId: Digest,
+      expectedReplicaSet: Digest,
+  ): Either[String, Unit] =
+    if req.federationId != expectedFederationId then
+      Left(s"federation: view-change federationId ${req.federationId.short} != expected ${expectedFederationId.short}")
+    else if req.replicaSet != expectedReplicaSet then
+      Left(s"federation: view-change replicaSet ${req.replicaSet.short} != expected ${expectedReplicaSet.short}")
+    else
+      authorities.get(req.signer.id) match
+        case None => Left(s"unknown federation replica '${req.signer.id}'")
+        case Some(pk) =>
+          if Ed25519.verify(pk, req.payload, req.seal) then Right(())
+          else Left(s"bad federation view-change seal from ${req.signer.id}")
+
+  /** Signed snapshot of a replica's current view + latest installed NewView
+    * digest — lets a client determine the cluster's actual view via quorum
+    * evidence instead of guessing from HTTP fan-out timing. Mirrors
+    * [[BftFinality.ViewStatus]].
+    */
+  final case class FederationViewStatus(
+      replica: ReplicaId,
+      view: Int,
+      latestNewViewDigest: Option[Digest],
+      federationId: Digest,
+      replicaSet: Digest,
+      seal: Vector[Byte],
+  ):
+    def payload: Array[Byte] = Canon.encode(Canon.cmap(
+      "domain" -> Canon.CStr(MsgDomain), "kind" -> Canon.CStr("status"),
+      "replica" -> Canon.CStr(replica.id), "view" -> Canon.CInt(view),
+      "latestNewViewDigest" -> latestNewViewDigest.fold(Canon.CTag("none", Canon.CInt(0)))(d =>
+        Canon.CTag("some", Canon.CStr(d.hex))),
+      "federationId" -> Canon.CStr(federationId.hex), "replicaSet" -> Canon.CStr(replicaSet.hex)))
+    def canon: Canon = Canon.CTag("federation-view-status", Canon.cmap(
+      "replica" -> Canon.CStr(replica.id), "view" -> Canon.CInt(view),
+      "latestNewViewDigest" -> latestNewViewDigest.fold(Canon.CTag("none", Canon.CInt(0)))(d =>
+        Canon.CTag("some", Canon.CStr(d.hex))),
+      "federationId" -> Canon.CStr(federationId.hex), "replicaSet" -> Canon.CStr(replicaSet.hex),
+      "seal" -> Canon.CBytes(seal)))
+
+  object FederationViewStatus:
+    def sign(
+        signer: Signer, view: Int, latestNewViewDigest: Option[Digest],
+        federationId: Digest, replicaSet: Digest,
+    ): FederationViewStatus =
+      val vs = FederationViewStatus(ReplicaId(signer.name), view, latestNewViewDigest, federationId, replicaSet, Vector.empty)
+      vs.copy(seal = signer.sign(vs.payload))
+
+    def fromCanon(c: Canon): Either[String, FederationViewStatus] =
+      import Canon.*
+      c match
+        case CTag("federation-view-status", m) =>
+          try
+            val digest = m.asMap.get("latestNewViewDigest") match
+              case Some(CTag("some", CStr(h))) => Some(Digest(h))
+              case _ => None
+            m.field("seal") match
+              case CBytes(bs) =>
+                Right(FederationViewStatus(
+                  ReplicaId(m.field("replica").asStr), m.field("view").asInt.toInt, digest,
+                  Digest(m.field("federationId").asStr), Digest(m.field("replicaSet").asStr), bs))
+              case other => Left(s"bad federation view-status seal: $other")
+          catch case e: CodecError => Left(e.getMessage)
+        case other => Left(s"not a federation-view-status: $other")
+
+  def verifyViewStatus(
+      authorities: Map[String, Vector[Byte]],
+      vs: FederationViewStatus,
+      expectedFederationId: Digest,
+      expectedReplicaSet: Digest,
+  ): Either[String, Unit] =
+    if vs.federationId != expectedFederationId then
+      Left(s"federation view-status: federationId ${vs.federationId.short} != expected ${expectedFederationId.short}")
+    else if vs.replicaSet != expectedReplicaSet then
+      Left(s"federation view-status: replicaSet ${vs.replicaSet.short} != expected ${expectedReplicaSet.short}")
+    else
+      authorities.get(vs.replica.id) match
+        case None => Left(s"unknown federation replica '${vs.replica.id}'")
+        case Some(pk) =>
+          if Ed25519.verify(pk, vs.payload, vs.seal) then Right(())
+          else Left(s"bad federation view-status seal from ${vs.replica.id}")
+
+  def postMsg(baseUrl: String, sm: BftFinality.SignedMsg): Either[String, Unit] =
+    BftFinality.httpPost(s"$baseUrl/federation/msg", Canon.encode(sm.canon)).map(_ => ())
+
+  def fetchCerts(baseUrl: String): Either[String, List[FederationFinalityCertificate]] =
+    BftFinality.httpGet(s"$baseUrl/federation/certs").flatMap { body =>
+      Canon.decode(body).flatMap {
+        case Canon.CList(xs) =>
+          xs.foldLeft[Either[String, List[FederationFinalityCertificate]]](Right(Nil)) { (acc, c) =>
+            acc.flatMap(cs => FederationFinalityCertificate.fromCanon(c).map(cs :+ _))
+          }
+        case other => Left(s"bad federation certs payload: $other")
+      }
+    }
+
+  def fetchViewStatus(baseUrl: String): Either[String, FederationViewStatus] =
+    BftFinality.httpGet(s"$baseUrl/federation/status").flatMap(body => Canon.decode(body).flatMap(FederationViewStatus.fromCanon))
+
+  /** Fans the propose request out to EVERY replica URL, not just the
+    * primary's — the request body carries the full [[FederationProposal]],
+    * and every receiving replica's `/federation/propose` handler calls
+    * `learnProposal` unconditionally before checking whether it is itself
+    * the primary for `view` (only the primary additionally mints a
+    * PrePrepare). This is how a replica other than the primary comes to
+    * know a proposal's content at all — the PrePrepare it later receives
+    * over `/federation/msg` only carries a state digest, not the proposal.
+    */
+  def propose(replicaUrls: Map[String, String], initiator: Signer, view: Int, proposal: FederationProposal): Either[String, Unit] =
+    val req = FederationProposeRequest.sign(initiator, view, proposal)
+    val body = Canon.encode(req.canon)
+    BftFinality.fanoutQuorum(replicaUrls, { (name, url) => BftFinality.httpPost(s"$url/federation/propose", body).map(_ => ()) })
+
+  def requestNetworkViewChange(
+      replicaUrls: Map[String, String], newView: Int, initiator: Signer, federationId: Digest, replicaSet: Digest,
+  ): Either[String, Unit] =
+    val req = FederationViewChangeRequest.sign(initiator, newView, federationId, replicaSet)
+    val body = Canon.encode(req.canon)
+    BftFinality.fanoutQuorum(replicaUrls, { (name, url) => BftFinality.httpPost(s"$url/federation/view-change", body).map(_ => ()) })
+
+  /** Quorum EVIDENCE (not response timing) that the cluster has installed
+    * `targetView` or later. Mirrors [[BftFinality]]'s private helper of the
+    * same purpose.
+    */
+  private def viewQuorumConfirmed(
+      replicaUrls: Map[String, String], targetView: Int, authorities: Map[String, Vector[Byte]],
+      federationId: Digest, expectedReplicaSet: Digest, timeoutMs: Long = 1500L,
+  ): Boolean =
+    val urls = replicaUrls.values.toList
+    if urls.isEmpty then false
+    else
+      val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(urls.size, 8).max(1))
+      try
+        val futs = urls.map { url => java.util.concurrent.CompletableFuture.supplyAsync(() => fetchViewStatus(url), exec) }
+        val pending = scala.collection.mutable.ListBuffer.from(futs)
+        val results = scala.collection.mutable.ListBuffer.empty[Either[String, FederationViewStatus]]
+        val deadline = System.nanoTime() + timeoutMs * 1000000L
+        while pending.nonEmpty && System.nanoTime() < deadline do
+          val done = pending.filter(_.isDone).toList
+          if done.isEmpty then Thread.sleep(5)
+          else
+            done.foreach { f =>
+              try results += f.getNow(null)
+              catch case e: Exception => results += Left(e.getMessage)
+              pending -= f
+            }
+        pending.foreach(_.cancel(true))
+        val verified = results.collect { case Right(vs) => vs }
+          .filter(vs => verifyViewStatus(authorities, vs, federationId, expectedReplicaSet).isRight)
+        val q = BftQuorum.quorumSize(authorities.size)
+        verified.filter(_.view >= targetView).map(_.replica.id).distinct.length >= q
+      finally exec.shutdownNow()
+
+  /** Polls replica URLs for a certificate matching this exact proposal
+    * (state digest AND epoch, since a state digest alone could coincide
+    * across generations), verifying each candidate before it can win the
+    * race — mirrors [[BftFinality]]'s private `pollCert`.
+    */
+  private def pollCert(
+      replicaUrls: Map[String, String], proposal: FederationProposal, polls: Int, pollSleepMs: Long,
+      authorities: Map[String, Vector[Byte]], expectedReplicaSet: Digest,
+  ): Either[String, FederationFinalityCertificate] =
+    def fetchOnce(): Option[FederationFinalityCertificate] =
+      val urls = replicaUrls.values.toList
+      if urls.isEmpty then None
+      else
+        val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(urls.size, 8).max(1))
+        val found = new java.util.concurrent.atomic.AtomicReference[FederationFinalityCertificate](null)
+        val remaining = new java.util.concurrent.atomic.AtomicInteger(urls.size)
+        val done = new java.util.concurrent.CountDownLatch(1)
+        try
+          urls.foreach { url =>
+            exec.execute(() =>
+              try
+                fetchCerts(url).toOption.toList.flatten
+                  .find(c => c.stateDigest == proposal.after && c.epoch == proposal.epoch)
+                  .foreach { c =>
+                    if FederationFinalityCertificate.verify(c, authorities, expectedReplicaSet).isRight then
+                      found.compareAndSet(null, c)
+                      done.countDown()
+                  }
+              finally
+                if remaining.decrementAndGet() == 0 then done.countDown()
+            )
+          }
+          done.await(BftFinality.RpcTimeout.toMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+          Option(found.get())
+        finally exec.shutdownNow()
+    def loop(n: Int): Either[String, FederationFinalityCertificate] =
+      if n <= 0 then Left("federation network: no certificate minted")
+      else
+        fetchOnce() match
+          case Some(c) => Right(c)
+          case None =>
+            if pollSleepMs > 0 then Thread.sleep(pollSleepMs)
+            loop(n - 1)
+    loop(polls)
+
+  /** Request successor view-change; advances only on quorum EVIDENCE the
+    * cluster actually installed it (never this client's own fan-out
+    * response timing) — mirrors [[BftFinality]]'s private `kickViewChange`.
+    */
+  private def kickViewChange(
+      replicaUrls: Map[String, String], currentView: Int, initiator: Signer, proposal: FederationProposal,
+      polls: Int, backoffMs: Long, authorities: Map[String, Vector[Byte]],
+  ): Either[String, Int] =
+    val target = currentView + 1
+    requestNetworkViewChange(replicaUrls, target, initiator, proposal.federationId, proposal.replicaSet)
+    Thread.sleep(Math.max(backoffMs, 40L))
+    if viewQuorumConfirmed(replicaUrls, target, authorities, proposal.federationId, proposal.replicaSet) then
+      Right(target)
+    else
+      pollCert(replicaUrls, proposal, Math.min(polls, 4), Math.max(backoffMs / 4, 10L), authorities, proposal.replicaSet) match
+        case Right(_) => Right(currentView)
+        case Left(_)  => Right(currentView)
+
+  /** Deployable path: ask the primary to propose; on timeout, run
+    * view-change and retry. Mirrors [[BftFinality.agreeNetworkRemote]]
+    * exactly, keyed to [[FederationProposal]] instead of a bare block
+    * digest/height/parent/chainId.
+    */
+  def agreeNetworkRemote(
+      replicaUrls: Map[String, String],
+      proposal: FederationProposal,
+      initiator: Signer,
+      authorities: Map[String, Vector[Byte]],
+      view: Int = 0,
+      polls: Int = 64,
+      pollSleepMs: Long = 30,
+      maxViews: Int = 4,
+  ): Either[String, FederationFinalityCertificate] =
+    val ids = replicaUrls.keys.toList.map(ReplicaId(_))
+    def attempt(v: Int, remaining: Int, backoffMs: Long): Either[String, FederationFinalityCertificate] =
+      if remaining <= 0 then Left(s"federation network: no certificate after $maxViews views")
+      else if v > view + maxViews then Left(s"federation network: view $v exceeds bound ${view + maxViews}")
+      else
+        designatedPrimary(ids, v).toRight(s"federation: no designated primary for view $v").flatMap { primaryId =>
+          replicaUrls.get(primaryId.id).toRight(s"federation: no URL for primary ${primaryId.id}").flatMap { _ =>
+            val shortPolls = Math.max(4, polls / 8)
+            propose(replicaUrls, initiator, v, proposal) match
+              case Left(_) =>
+                pollCert(replicaUrls, proposal, shortPolls, pollSleepMs, authorities, proposal.replicaSet) match
+                  case Right(c) => Right(c)
+                  case Left(_) =>
+                    kickViewChange(replicaUrls, v, initiator, proposal, shortPolls, backoffMs, authorities).flatMap { nextV =>
+                      attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
+                    }
+              case Right(()) =>
+                pollCert(replicaUrls, proposal, polls, pollSleepMs, authorities, proposal.replicaSet) match
+                  case Right(c) => Right(c)
+                  case Left(_) =>
+                    kickViewChange(replicaUrls, v, initiator, proposal, shortPolls, backoffMs, authorities).flatMap { nextV =>
+                      attempt(nextV, remaining - 1, Math.min(backoffMs * 2, 2000L))
+                    }
+          }
+        }
+    attempt(view, maxViews, Math.max(pollSleepMs, 50L))

@@ -11,12 +11,16 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
   *
   * Optional [[peersRoot]] enables `GET/POST /peers` discovery.
   * Optional [[bft]] enables `POST /bft/msg` for [[BftFinality]] replicas.
+  * Optional [[federation]] enables `POST /federation/msg` for
+  * [[FederationReplica]]s (PR33) — a distinct, parallel protocol surface
+  * from the bft endpoints above, since a process may serve both roles at once.
   */
 final class HttpNode(
     node: Node,
     authorities: Map[String, Vector[Byte]],
     peersRoot: Option[java.nio.file.Path] = None,
     bft: Option[BftReplica] = None,
+    federation: Option[FederationReplica] = None,
 ):
   private var server: HttpServer | Null = null
   private var executor: java.util.concurrent.ExecutorService | Null = null
@@ -124,6 +128,77 @@ final class HttpNode(
                   peersRoot.foreach { root =>
                     replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
                       out.foreach(m => BftFinality.postMsg(p.baseUrl, m))
+                    }
+                  }
+      )
+    }
+    federation.foreach { replica =>
+      def replicaPeers(root: java.nio.file.Path): List[PeerRegistry.Peer] =
+        PeerRegistry.load(root).toOption.toList.flatMap(_.replicas).filter { peer =>
+          replica.authorities.get(peer.name).contains(peer.publicKey.getOrElse(Vector.empty)) &&
+            PeerRegistry.Peer.verifyBinding(peer).isRight
+        }
+      s.createContext("/federation/msg", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)).flatMap(BftFinality.SignedMsg.fromCanon) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(sm) =>
+              replica.receive(sm) match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(out) =>
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                  peersRoot.foreach { root =>
+                    replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                      out.foreach(m => FederationFinality.postMsg(p.baseUrl, m))
+                    }
+                  }
+      )
+      s.createContext("/federation/propose", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)).flatMap(FederationFinality.FederationProposeRequest.fromCanon) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(req) =>
+              FederationFinality.verifyProposeRequest(
+                replica.authorities, req, replica.federationId, replica.setDigest) match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(()) =>
+                  // Every receiving replica learns the proposal's content
+                  // unconditionally — only the primary for `req.view` also
+                  // mints a PrePrepare via `propose`; a non-primary reply of
+                  // Left here (e.g. "not primary") is expected and not an error.
+                  replica.learnProposal(req.proposal)
+                  replica.propose(req.view, req.proposal) match
+                    case Left(_) => reply(ex, 200, Canon.encode(Canon.CList(Nil)))
+                    case Right(out) =>
+                      reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                      peersRoot.foreach { root =>
+                        replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                          out.foreach(m => FederationFinality.postMsg(p.baseUrl, m))
+                        }
+                      }
+      )
+      s.createContext("/federation/certs", ex =>
+        reply(ex, 200, Canon.encode(Canon.CList(replica.finalityCerts.map(_.canon)))))
+      s.createContext("/federation/status", ex =>
+        reply(ex, 200, Canon.encode(replica.viewStatus.canon)))
+      s.createContext("/federation/view-change", ex =>
+        if ex.getRequestMethod != "POST" then reply(ex, 405, "POST only".getBytes)
+        else
+          Canon.decode(readBody(ex)).flatMap(FederationFinality.FederationViewChangeRequest.fromCanon) match
+            case Left(e) => reply(ex, 400, e.getBytes)
+            case Right(req) =>
+              FederationFinality.verifyViewChangeRequest(
+                replica.authorities, req, replica.federationId, replica.setDigest).flatMap { _ =>
+                replica.requestViewChangeIfTimedOut(req.newView)
+              } match
+                case Left(e) => reply(ex, 400, e.getBytes)
+                case Right(out) =>
+                  reply(ex, 200, Canon.encode(Canon.CList(out.map(_.canon))))
+                  peersRoot.foreach { root =>
+                    replicaPeers(root).filterNot(_.name == replica.keypair.name).foreach { p =>
+                      out.foreach(m => FederationFinality.postMsg(p.baseUrl, m))
                     }
                   }
       )

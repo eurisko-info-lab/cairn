@@ -313,6 +313,7 @@ final class FederationReplica private (
   private var ioError: Option[String] = None
   private var lastViewChangeStartedAt: Long = 0L
   private var lastPrimaryActivityAt: Long = System.currentTimeMillis()
+  private var latestNewView: Option[Digest] = None
 
   certStore.foreach { path =>
     loadCerts(path) match
@@ -361,6 +362,14 @@ final class FederationReplica private (
   def finalityCerts: List[FederationFinality.FederationFinalityCertificate] = certificates
   def detectedEquivocations: List[EquivocationEvidence] = equivocations.toList
   def currentView: Int = state.view
+
+  /** Signed snapshot of this replica's current view + latest installed
+    * NewView digest — lets a client determine the cluster's actual view
+    * via quorum evidence (multiple signed statuses agreeing), never from
+    * HTTP fan-out response timing alone. Mirrors `BftReplica.viewStatus`.
+    */
+  def viewStatus: FederationFinality.FederationViewStatus =
+    FederationFinality.FederationViewStatus.sign(keypair, state.view, latestNewView, federationId, setDigest)
 
   private def refuseIfCorrupt[A](op: => Either[String, A]): Either[String, A] =
     ioError match
@@ -546,7 +555,9 @@ final class FederationReplica private (
               Right(out)
             case nv: Msg.NewView =>
               val (st2, out) = deliverNewView(state, nv, replicaIds)
-              if st2.view > state.view then lastPrimaryActivityAt = System.currentTimeMillis()
+              if st2.view > state.view then
+                lastPrimaryActivityAt = System.currentTimeMillis()
+                latestNewView = Some(Digest.of(BftFinality.msgCanon(nv)))
               state = st2
               Right(out)
         }

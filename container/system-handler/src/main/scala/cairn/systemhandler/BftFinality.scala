@@ -932,14 +932,18 @@ object BftFinality:
       }
     }
 
-  private val client = HttpClient.newBuilder()
+  // `private[systemhandler]`, not fully private: FederationFinality (PR33)
+  // reuses this exact HTTP transport for its own network agreement rather
+  // than duplicating client/timeout/error-handling logic — a safe widening,
+  // since nothing outside this package could call it either way.
+  private[systemhandler] val client = HttpClient.newBuilder()
     .connectTimeout(java.time.Duration.ofSeconds(2))
     .build()
 
   /** Per-request deadline for BFT HTTP RPCs (blackholed peers must fail closed). */
-  private val RpcTimeout: java.time.Duration = java.time.Duration.ofSeconds(3)
+  private[systemhandler] val RpcTimeout: java.time.Duration = java.time.Duration.ofSeconds(3)
 
-  private def httpPost(url: String, body: Array[Byte]): Either[String, Array[Byte]] =
+  private[systemhandler] def httpPost(url: String, body: Array[Byte]): Either[String, Array[Byte]] =
     try
       val resp = client.send(
         HttpRequest.newBuilder(URI.create(url))
@@ -952,7 +956,7 @@ object BftFinality:
       else Left(s"POST $url -> ${resp.statusCode()}: ${new String(resp.body())}")
     catch case e: Exception => Left(e.getMessage)
 
-  private def httpGet(url: String): Either[String, Array[Byte]] =
+  private[systemhandler] def httpGet(url: String): Either[String, Array[Byte]] =
     try
       val resp = client.send(
         HttpRequest.newBuilder(URI.create(url))
