@@ -40,7 +40,19 @@ class FederationCeremonySuite extends munit.FunSuite:
       trustManifest: NamespaceTrustManifest, commit: FederationCommit, owner: Keypair,
   )
 
-  private def buildNamespace(cas: DiskCas, name: String, changeSrc: String, epochDigest: Digest): NamespaceFixture =
+  /** `reuseTrust`, when supplied, carries the SAME namespace's governing
+    * trust manifest (and its owner signer) forward from a prior generation
+    * unchanged — this namespace's own commit still cites it, but no
+    * namespace-trust rotation happens in this generation. Without it, a
+    * fresh genesis manifest is minted (only valid for a namespace's FIRST
+    * generation — reusing this default for a namespace that already has an
+    * active manifest would be an unauthorized trust swap, exactly what
+    * VerifiedFederationTransition's amendment-policy check now rejects).
+    */
+  private def buildNamespace(
+      cas: DiskCas, name: String, changeSrc: String, epochDigest: Digest,
+      reuseTrust: Option[(NamespaceTrustManifest, Keypair)] = None,
+  ): NamespaceFixture =
     val change = parseChange(changeSrc)
     val (result, vcs) = Delta.apply(lang, m0, change).fold(e => fail(e), identity)
     val capabilities = LanguageCapabilities.standard(lang)
@@ -50,8 +62,10 @@ class FederationCeremonySuite extends munit.FunSuite:
     val grammar = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(lang.grammar))
     val appLanguage = ApplicationLanguage("stlc", lang.digest, grammar.digest, capabilities.descriptor.digest, Some(runtime.digest))
     val appManifest = ApplicationManifest(s"$name-app", machine.machine.digest, List(appLanguage), Nil)
-    val owner = Keypair.dev(s"$name-owner")
-    val trustManifest = NamespaceTrustManifest.of(name, List(owner.name -> owner.publicBytes)).fold(e => fail(e), identity)
+    val (trustManifest, owner) = reuseTrust.getOrElse {
+      val o = Keypair.dev(s"$name-owner")
+      (NamespaceTrustManifest.of(name, List(o.name -> o.publicBytes)).fold(e => fail(e), identity), o)
+    }
     val evidence = AcceptanceEvidence(lang.digest, m0.digest, Some(vcs.artifact.digest), result.digest,
       constitution.digest, "open", capabilities.changeModel.digest, constitution = Some(constitution.digest),
       runtime = Some(runtime.digest))
@@ -114,7 +128,11 @@ class FederationCeremonySuite extends munit.FunSuite:
     //    (org-a publishes a further change), each on its own coordinator
     //    instance sharing the same on-disk home/cas/node, then confirm
     //    recovery leaves state1 untouched. --
-    val nsA1 = buildNamespace(cas, "org-a", "{ add extra = true ; add second = false ; }", epoch1.digest)
+    // org-a's trust is carried forward unchanged from generation 1 — this
+    // generation only publishes new content, it does not rotate trust
+    // (that happens explicitly in Step 3 below).
+    val nsA1 = buildNamespace(cas, "org-a", "{ add extra = true ; add second = false ; }", epoch1.digest,
+      reuseTrust = Some(nsA0.trustManifest, nsA0.owner))
     val epoch2 = ReplicatedGcEpoch(2,
       Set(nsA1.graphDigest, nsA1.appDigest, nsA1.releaseDigest, nsB0.graphDigest, nsB0.appDigest, nsB0.releaseDigest),
       Some(epoch1.digest))

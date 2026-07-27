@@ -191,13 +191,50 @@ final class FederationTransactionCoordinator(
     Right(String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8).trim)
   catch case e: Exception => Left(Option(e.getMessage).getOrElse(e.getClass.getSimpleName))
 
+  /** Every namespace whose trust manifest changed (including newly
+    * appearing) plus, if it changed, the replica set — the digests
+    * [[VerifiedFederationTransition]] requires `transition.approvals` to
+    * list as this generation's explicit authority/replica-rotation
+    * constituents. Purely derived from `priorState`/`newState` content
+    * already resident in `cas`; the caller supplies nothing extra.
+    */
+  private val emptyNamespaceIndexDigest: Digest = NamespaceIndex(Map.empty).digest
+
+  /** A digest equal to the well-known empty `NamespaceIndex`'s own digest
+    * resolves to that empty index without a CAS lookup — content addressing
+    * means the digest already tells us what it would decode to. This covers
+    * `FederationState.genesis`, which names that digest without ever
+    * persisting the (trivial, always-empty) artifact itself.
+    */
+  private def decodeNamespaceIndex(digest: Digest, cas: Cas): Either[String, NamespaceIndex] =
+    if digest == emptyNamespaceIndexDigest then Right(NamespaceIndex(Map.empty))
+    else cas.getByDigest(digest).flatMap(NamespaceIndex.fromArtifact)
+
+  private def computeApprovals(priorState: FederationState, newState: FederationState, cas: Cas): Either[String, List[Digest]] =
+    for
+      priorNs <- decodeNamespaceIndex(priorState.namespaces, cas)
+      newNs <- decodeNamespaceIndex(newState.namespaces, cas)
+    yield
+      val nsRotations = newNs.manifests.toList.collect {
+        case (ns, d) if !priorNs.manifests.get(ns).contains(d) => d
+      }
+      val trustRotation = if priorState.trustRoots != newState.trustRoots then List(newState.trustRoots) else Nil
+      nsRotations ++ trustRotation
+
   def current: Either[String, Option[Digest]] =
-    if !Files.exists(visible) then Right(None) else read(visible).flatMap(Digest.parse).map(Some(_))
+    if !Files.exists(visible) then Right(None)
+    else read(visible).flatMap(Digest.parse).flatMap(d =>
+      node.cas.getByDigest(d).flatMap(FederationTransition.fromArtifact).map(t => Some(t.after)))
 
   /** `epoch` is the ledger height this generation is anchored at (shared
     * clock with `newState`'s own gcEpoch/namespace-trust activation
     * points); `priorState` is the exact predecessor the minted certificate
-    * must chain from.
+    * must chain from. Mints, verifies, and ledger-anchors (in the same
+    * block as `newState` itself) a [[FederationTransition]] binding this
+    * whole generation — the canonical, replayable history object (PR32) —
+    * though `publish`'s own return type stays the certificate/block pair
+    * callers already depend on; the transition becomes externally visible
+    * through `current`/`recover`/[[FederationHistory]].
     */
   def publish(
       transactions: List[FederationCommit],
@@ -214,32 +251,53 @@ final class FederationTransactionCoordinator(
       _ <- write(intent, s"staged:${newState.digest.hex}")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterStaged, (), "simulated crash after federation-state staged")
       _ <- ArtifactApplicationResolver(node.cas).install(newState.digest, source).map(_ => ())
+      // A shallow put, not a full install: `priorState`'s own bare artifact
+      // must be resolvable from `node.cas` for recovery to decode
+      // `transition.before` later, but its full closure need not be —
+      // genesis's own empty-index digests are never separately persisted
+      // anywhere (see VerifiedFederationTransition.decodeIndices), so a
+      // recursive install would fail on exactly that case.
+      _ = node.cas.put(priorState.artifact)
+      // Likewise shallow: a FederationCommit is referenced only through
+      // FederationTransition.transactions, never through FederationState's
+      // own dependency closure, so `install(newState.digest, ...)` above
+      // never reaches it — the ledger transactions below only publish its
+      // KEY, not its bytes. Recovery needs the bare artifact to decode it.
+      _ = transactions.foreach(c => node.cas.put(c.artifact))
       _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
       cert <- FederationFinality.agreeForFederationState(
         replicas, activeManifest, view = 0, stateDigest = newState.digest, epoch = epoch,
         previousState = priorState.digest, federationId = federationId)
       _ = node.cas.put(cert.artifact)
+      approvals <- computeApprovals(priorState, newState, source)
+      transition = FederationTransition(priorState.digest, transactions.map(_.digest), newState.digest, approvals, Some(cert.digest))
+      _ <- VerifiedFederationTransition.verify(transition, priorState, newState, transactions, cert, federationId, source)
+      _ = source.put(transition.artifact)
+      _ = node.cas.put(transition.artifact)
       _ <- write(intent, s"certified:${newState.digest.hex}:${cert.digest.hex}")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterCertified, (), "simulated crash after federation-state certified")
       block <- node.append(authority, authorities,
         authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes)) ::
         authority.signTx(Tx.PublishArtifact(newState.artifact.key)) ::
+        authority.signTx(Tx.PublishArtifact(transition.artifact.key)) ::
         authority.signTx(Tx.RecordCertificate(cert.digest, "federation-finality")) ::
         transactions.flatMap(c => List(
           authority.signTx(Tx.PublishArtifact(c.artifact.key)),
           authority.signTx(Tx.SetBranchHead(s"${c.namespace}/${c.branch}", c.artifact.key)))))
-      _ <- write(intent, s"ledgered:${newState.digest.hex}:${block.digest.hex}")
+      _ <- write(intent, s"ledgered:${transition.digest.hex}:${block.digest.hex}")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterLedgered, (), "simulated crash after federation-state ledgered")
-      _ <- write(visible, newState.digest.hex)
+      _ <- write(visible, transition.digest.hex)
       _ = Files.deleteIfExists(intent)
     yield (cert, block)
 
   /** Anything staged/proposed/certified but never ledgered is safely
     * abandoned (old state stands). Only a ledgered generation is completed
-    * — and only after re-verifying the certificate against the currently
-    * active replica-set manifest and cross-checking the ledger's own
-    * recorded state, never trusting the journal string alone.
+    * — and only after re-decoding and fully re-verifying the
+    * [[FederationTransition]] the journal names (never trusting the
+    * journal string, or even the bare state digest, alone), and
+    * cross-checking that BOTH the transition's and the resulting state's
+    * ledger keys are actually published.
     */
   def recover(authorities: Map[String, Vector[Byte]]): Either[String, Option[Digest]] =
     if !Files.exists(intent) then current
@@ -247,17 +305,27 @@ final class FederationTransactionCoordinator(
       case "ledgered" :: digest :: _ :: Nil =>
         val d = Digest(digest)
         for
-          artifact <- node.cas.getByDigest(d)
-          newState <- FederationState.fromArtifact(artifact)
-          _ <- verifyFederationState(newState, node.cas)
-          certArtifact <- node.cas.getByDigest(newState.trustRoots).orElse(Left("federation recovery: trust roots not resolvable"))
-          _ <- ReplicaSetManifest.fromCanon(certArtifact.body).left.map(_ => "federation recovery: trust roots do not decode")
+          transitionArtifact <- node.cas.getByDigest(d)
+          transition <- FederationTransition.fromArtifact(transitionArtifact)
+          beforeArtifact <- node.cas.getByDigest(transition.before)
+          before <- FederationState.fromArtifact(beforeArtifact)
+          afterArtifact <- node.cas.getByDigest(transition.after)
+          after <- FederationState.fromArtifact(afterArtifact)
+          _ <- verifyFederationState(after, node.cas)
+          commits <- transition.transactions.foldLeft[Either[String, List[FederationCommit]]](Right(Nil)) { (acc, cd) =>
+            for xs <- acc; a <- node.cas.getByDigest(cd); c <- FederationCommit.fromArtifact(a) yield xs :+ c
+          }
+          finalityDigest <- transition.finality.toRight("federation recovery: transition missing finality")
+          finalityArtifact <- node.cas.getByDigest(finalityDigest)
+          finality <- FederationFinality.FederationFinalityCertificate.fromCanon(finalityArtifact.body)
+          _ <- VerifiedFederationTransition.verify(transition, before, after, commits, finality, federationId, node.cas)
           state <- node.state(authorities)
-          _ <- Either.cond(state.published.contains(artifact.key.render), (),
+          _ <- Either.cond(state.published.contains(transitionArtifact.key.render) &&
+            state.published.contains(afterArtifact.key.render), (),
             "federation recovery cannot prove the ledger generation")
           _ <- write(visible, d.hex)
           _ = Files.deleteIfExists(intent)
-        yield Some(d)
+        yield Some(after.digest)
       case ("staged" | "proposed" | "certified") :: _ =>
         Files.deleteIfExists(intent); current
       case _ => Left("invalid federation-state recovery journal") }

@@ -27,14 +27,31 @@ final case class VerifiedFederationTransition private (
 
 object VerifiedFederationTransition:
 
+  private val emptyRepositoryIndexDigest: Digest = RepositoryIndex(Map.empty).digest
+  private val emptyApplicationIndexDigest: Digest = ApplicationIndex(Map.empty).digest
+  private val emptyNamespaceIndexDigest: Digest = NamespaceIndex(Map.empty).digest
+
+  /** [[cairn.core.FederationState.genesis]] names the empty-map index
+    * digests directly without ever persisting those (trivial, always-empty)
+    * artifacts anywhere — a genuinely genesis-only gap, since every
+    * non-genesis index is content that some prior publish actually put into
+    * CAS. A digest that equals the well-known empty index's own digest can
+    * be resolved to that empty index without a CAS lookup: content
+    * addressing means the digest already tells us what it would decode to,
+    * so this is a recognized reproducible value, not an assumption about
+    * unknown content. Any other missing digest still fails normally.
+    */
   private def decodeIndices(state: FederationState, cas: Cas): Either[String, (RepositoryIndex, ApplicationIndex, NamespaceIndex)] =
     for
-      repoArtifact <- cas.getByDigest(state.repository)
-      repo <- RepositoryIndex.fromArtifact(repoArtifact)
-      appArtifact <- cas.getByDigest(state.applications)
-      app <- ApplicationIndex.fromArtifact(appArtifact)
-      nsArtifact <- cas.getByDigest(state.namespaces)
-      ns <- NamespaceIndex.fromArtifact(nsArtifact)
+      repo <-
+        if state.repository == emptyRepositoryIndexDigest then Right(RepositoryIndex(Map.empty))
+        else cas.getByDigest(state.repository).flatMap(RepositoryIndex.fromArtifact)
+      app <-
+        if state.applications == emptyApplicationIndexDigest then Right(ApplicationIndex(Map.empty))
+        else cas.getByDigest(state.applications).flatMap(ApplicationIndex.fromArtifact)
+      ns <-
+        if state.namespaces == emptyNamespaceIndexDigest then Right(NamespaceIndex(Map.empty))
+        else cas.getByDigest(state.namespaces).flatMap(NamespaceIndex.fromArtifact)
     yield (repo, app, ns)
 
   /** A changed entry must trace to exactly one commit for that namespace
