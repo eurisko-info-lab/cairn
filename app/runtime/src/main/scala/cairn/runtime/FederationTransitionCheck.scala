@@ -149,25 +149,27 @@ object VerifiedFederationTransition:
           "federation transition: gcEpoch does not hash-link back to its predecessor")
       yield ()
 
-  /** `federationId` is the fixed chain identity (external context, not
-    * itself part of [[FederationState]]); `activeManifest` is decoded from
-    * `after.trustRoots`, not `before` — confirmed against
-    * `FederationCeremonySuite`'s replica-set-rotation generation, where the
-    * minted certificate's `replicaSet` names the SUCCESSOR manifest: the
-    * incoming quorum immediately certifies the block that installs it. Every
-    * non-rotating generation has `before.trustRoots == after.trustRoots`, so
-    * only a rotation discriminates between the two choices, and `after` is
-    * the one that matches real certificates.
+  /** Everything [[verify]] checks EXCEPT the finality certificate's binding
+    * — digest/shape bindings, no dangling/duplicate constituents, exact
+    * per-namespace index diffs, namespace-trust/replica-set amendment
+    * policy, GC-epoch monotonicity, and an exact `transition.approvals`
+    * closure. Exposed separately (PR33) because a network replica must
+    * verify a PROPOSED transition BEFORE voting — before any finality
+    * certificate for it exists to check against (the certificate's own
+    * digest isn't even determined until enough replicas have signed
+    * Commits for it, which can't happen before at least a quorum has
+    * already verified and voted) — so [[FederationReplicaVerification]]
+    * calls this directly, then separately confirms `transition.finality`
+    * once the real certificate exists (mirroring `verify`'s own check),
+    * rather than needing a certificate that cannot exist yet.
     */
-  def verify(
+  def verifyStructural(
       transition: FederationTransition,
       before: FederationState,
       after: FederationState,
       commits: List[FederationCommit],
-      finality: FederationFinality.FederationFinalityCertificate,
-      federationId: Digest,
       cas: Cas,
-  ): Either[String, VerifiedFederationTransition] =
+  ): Either[String, Unit] =
     def noDupes(label: String, ds: List[Digest]): Either[String, Unit] =
       Either.cond(ds.distinct.length == ds.length, (), s"federation transition: duplicate $label entries")
 
@@ -180,12 +182,6 @@ object VerifiedFederationTransition:
       _ <- noDupes("approvals", transition.approvals)
       _ <- Either.cond(transition.transactions.toSet == commits.map(_.digest).toSet, (),
         "federation transition: transition.transactions does not match supplied commits")
-      _ <- Either.cond(transition.finality.contains(finality.digest), (),
-        "federation transition: transition.finality does not cite the supplied certificate")
-      trustArtifact <- cas.getByDigest(after.trustRoots)
-      activeManifest <- ReplicaSetManifest.fromCanon(trustArtifact.body)
-      _ <- FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(
-        finality, activeManifest, federationId, before.digest, after.digest)
       _ <- Either.cond(commits.map(_.namespace).distinct.length == commits.length, (),
         "federation transition: two commits in the same transition target the same namespace")
       commitsByNamespace = commits.map(c => c.namespace -> c).toMap
@@ -206,4 +202,33 @@ object VerifiedFederationTransition:
       _ <- diffGcEpoch(before.gcEpoch, after.gcEpoch, cas)
       _ <- Either.cond(transition.approvals.toSet == (nsApprovals ++ rsApprovals), (),
         "federation transition: approvals does not equal exactly the namespace-trust/replica-set rotations this generation performs")
+    yield ()
+
+  /** `federationId` is the fixed chain identity (external context, not
+    * itself part of [[FederationState]]); `activeManifest` is decoded from
+    * `after.trustRoots`, not `before` — confirmed against
+    * `FederationCeremonySuite`'s replica-set-rotation generation, where the
+    * minted certificate's `replicaSet` names the SUCCESSOR manifest: the
+    * incoming quorum immediately certifies the block that installs it. Every
+    * non-rotating generation has `before.trustRoots == after.trustRoots`, so
+    * only a rotation discriminates between the two choices, and `after` is
+    * the one that matches real certificates.
+    */
+  def verify(
+      transition: FederationTransition,
+      before: FederationState,
+      after: FederationState,
+      commits: List[FederationCommit],
+      finality: FederationFinality.FederationFinalityCertificate,
+      federationId: Digest,
+      cas: Cas,
+  ): Either[String, VerifiedFederationTransition] =
+    for
+      _ <- verifyStructural(transition, before, after, commits, cas)
+      _ <- Either.cond(transition.finality.contains(finality.digest), (),
+        "federation transition: transition.finality does not cite the supplied certificate")
+      trustArtifact <- cas.getByDigest(after.trustRoots)
+      activeManifest <- ReplicaSetManifest.fromCanon(trustArtifact.body)
+      _ <- FederationFinality.FederationFinalityCertificate.verifyAgainstFederationHistory(
+        finality, activeManifest, federationId, before.digest, after.digest)
     yield VerifiedFederationTransition(transition, before, after, commits, finality)

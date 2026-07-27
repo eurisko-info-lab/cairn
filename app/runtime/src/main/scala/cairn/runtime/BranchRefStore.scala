@@ -294,17 +294,26 @@ final class BranchRefStore(cas: Cas, refsDir: Path, ctx: EffectContext):
         acceptanceDigest, context.artifact.digest)
     yield (replay, context, certified)
 
+  /** Re-certifies an EXPLICIT repository from CAS roots — not necessarily
+    * this store's own currently ref-tracked one. The building block
+    * [[verifyNativeRepository]] uses for its local view; also what a
+    * federation replica uses (PR33) to independently re-certify a
+    * namespace's PROPOSED repository digest before voting on it, where
+    * there is no "current branch" to read from `refsDir` at all — only a
+    * digest named by the proposal.
+    */
+  def verifyNativeRepositoryAt(repository: NativeRepository, application: ResolvedApplication): Either[String, Digest] =
+    repository.verifyFromRoots { causal =>
+      certifyIncoming(causal, application, Map.empty, repository).left.map {
+        case CertificationFailure.Incomplete(missing) =>
+          s"repository change ${causal.id.short} is incomplete: ${missing.map(_.short).toList.sorted.mkString(",")}"
+        case CertificationFailure.Invalid(message) => message
+      }.map(_ => ()) }
+
   /** Re-certify every resident graph node from CAS roots. Pending nodes are
     * intentionally excluded until their artifact/causal requirements arrive. */
-  def verifyNativeRepository(application: ResolvedApplication): Either[String, Digest] = for
-    repository <- nativeRepository
-    digest <- repository.verifyFromRoots { causal =>
-        certifyIncoming(causal, application, Map.empty, repository).left.map {
-          case CertificationFailure.Incomplete(missing) =>
-            s"repository change ${causal.id.short} is incomplete: ${missing.map(_.short).toList.sorted.mkString(",")}"
-          case CertificationFailure.Invalid(message) => message
-        }.map(_ => ()) }
-  yield digest
+  def verifyNativeRepository(application: ResolvedApplication): Either[String, Digest] =
+    nativeRepository.flatMap(verifyNativeRepositoryAt(_, application))
 
   private[runtime] def recordNativeConflict(
       target: String, branches: List[String], conflict: cairn.core.Merge.Conflict,
