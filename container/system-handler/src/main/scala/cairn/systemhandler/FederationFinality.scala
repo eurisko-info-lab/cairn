@@ -517,6 +517,42 @@ object FederationFinality:
   def fetchViewStatus(baseUrl: String): Either[String, FederationViewStatus] =
     BftFinality.httpGet(s"$baseUrl/federation/status").flatMap(body => Canon.decode(body).flatMap(FederationViewStatus.fromCanon))
 
+  /** Unlike [[BftFinality.fanoutQuorum]] (which returns — and CANCELS every
+    * still-pending request — the instant `q` requests succeed), this waits
+    * out each request's own share of the timeout regardless of how many
+    * others already finished. Only appropriate where every recipient
+    * actually needs the payload delivered, not merely "some quorum agrees
+    * something happened": cancelling delivery to an arbitrary subset is
+    * fine for a view-change vote (that's a quorum decision), but wrong for
+    * fanning out a proposal's content — if the unlucky cancelled replica
+    * happens to be the one about to become primary, NOBODY ends up knowing
+    * the proposal and the round hangs to a timeout for no protocol reason.
+    */
+  private def fanoutAll(
+      replicaUrls: Map[String, String], post: (String, String) => Either[String, Unit], timeoutMs: Long = 3000L,
+  ): Either[String, Unit] =
+    val n = replicaUrls.size
+    if !BftQuorum.validReplicaCount(n) then Left(s"federation: n=$n is not a valid 3f+1 size")
+    else
+      val q = quorumSize(n)
+      val exec = java.util.concurrent.Executors.newFixedThreadPool(math.min(n, 8).max(1))
+      try
+        val futs = replicaUrls.toList.map { (name, url) =>
+          java.util.concurrent.CompletableFuture.supplyAsync(() => name -> post(name, url), exec)
+        }
+        val deadline = System.nanoTime() + timeoutMs * 1000000L
+        val results = futs.map { f =>
+          val remainingMs = math.max(1L, (deadline - System.nanoTime()) / 1000000L)
+          try Some(f.get(remainingMs, java.util.concurrent.TimeUnit.MILLISECONDS))
+          catch case _: Exception => None
+        }
+        val ok = results.count(_.exists(_._2.isRight))
+        if ok >= q then Right(())
+        else
+          val errs = results.collect { case Some((name, Left(e))) => s"$name: $e" }
+          Left(s"federation: propose fan-out reached $ok/$n (need $q): ${errs.mkString("; ")}")
+      finally exec.shutdownNow()
+
   /** Fans the propose request out to EVERY replica URL, not just the
     * primary's — the request body carries the full [[FederationProposal]],
     * and every receiving replica's `/federation/propose` handler calls
@@ -529,7 +565,7 @@ object FederationFinality:
   def propose(replicaUrls: Map[String, String], initiator: Signer, view: Int, proposal: FederationProposal): Either[String, Unit] =
     val req = FederationProposeRequest.sign(initiator, view, proposal)
     val body = Canon.encode(req.canon)
-    BftFinality.fanoutQuorum(replicaUrls, { (name, url) => BftFinality.httpPost(s"$url/federation/propose", body).map(_ => ()) })
+    fanoutAll(replicaUrls, { (name, url) => BftFinality.httpPost(s"$url/federation/propose", body).map(_ => ()) })
 
   def requestNetworkViewChange(
       replicaUrls: Map[String, String], newView: Int, initiator: Signer, federationId: Digest, replicaSet: Digest,

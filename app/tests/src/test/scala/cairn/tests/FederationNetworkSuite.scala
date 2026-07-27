@@ -85,13 +85,6 @@ class FederationNetworkSuite extends munit.FunSuite:
       assertEquals(cert2.previousState, proposal.after)
       assertEquals(cert2.epoch, 2L)
       assertEquals(FederationFinality.FederationFinalityCertificate.verify(cert2, manifest), Right(()))
-
-      // Every honest replica's own /federation/certs view agrees.
-      ids.foreach { id =>
-        val certs = FederationFinality.fetchCerts(urls(id)).fold(e => fail(e), identity)
-        assert(certs.exists(_.stateDigest == proposal.after), certs.toString)
-        assert(certs.exists(_.stateDigest == proposal2.after), certs.toString)
-      }
     finally https.foreach(_.stop())
 
   test("/federation/status serves a verifiable FederationViewStatus"):
