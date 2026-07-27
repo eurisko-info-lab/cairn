@@ -1938,6 +1938,16 @@ final class BftReplica private (
   /** Signed PrePrepare seals keyed by (view, seq, valueDigestHex). */
   private val prePrepareSeals =
     scala.collection.mutable.Map.empty[(Int, Int, String), (ReplicaId, Vector[Byte])]
+  /** PR31: first-class evidence for a `PrePrepare` conflicting with an
+    * already-prepared value at the same (view, seq) — see the conflict
+    * branch in `step` below. Audit-only: does not change `receive`'s
+    * existing `Either[String, List[SignedMsg]]` contract or behavior for
+    * any caller; nothing here rejects a message that would otherwise be
+    * accepted.
+    */
+  private val equivocations = scala.collection.mutable.ListBuffer.empty[EquivocationEvidence]
+  def detectedEquivocations: List[EquivocationEvidence] = equivocations.toList
+
   /** Sealed ViewChange envelopes keyed by (newView, replicaId). */
   private val viewChangeEvidence =
     scala.collection.mutable.Map.empty[(Int, String), ViewChangeEvidence]
@@ -2401,6 +2411,19 @@ final class BftReplica private (
                 case Right(blockDig) =>
                   preparedLock(state, seq, state.view) match
                     case Some(locked) if locked != value.digest =>
+                      // Best-effort: reconstruct the ORIGINAL PrePrepare that
+                      // established `locked` (its seal from prePrepareSeals,
+                      // its full value bytes from this slot's recorded
+                      // PrePrepare) and package both signed proposals as
+                      // evidence. Never lets an evidence-construction failure
+                      // change the conflict rejection below.
+                      for
+                        originalPp <- state.slots.get((state.view, seq)).flatMap(_.prePrepare)
+                        (originalFrom, originalSeal) <- prePrepareSeals.get((state.view, seq, locked.hex))
+                      yield
+                        val original = SignedMsg(originalPp, originalFrom, originalSeal, setDigest, chainId)
+                        EquivocationEvidence.detect(original, sm, authorities, setDigest, chainId)
+                          .foreach(ev => equivocations += ev)
                       Left(s"bft: PrePrepare conflicts with prepared lock ${locked.short}")
                     case _ =>
                       (node, ledgerAuth.nonEmpty) match
