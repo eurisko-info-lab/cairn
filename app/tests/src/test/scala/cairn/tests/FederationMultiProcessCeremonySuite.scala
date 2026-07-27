@@ -156,7 +156,7 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       val verify: FederationReplica.VerifyProposal = (proposerId, prop, cache) =>
         FederationReplicaVerification.verifyWithCache(proposerId, prop, nodes(id).cas, cache)
       val federation = FederationReplica.certified(
-        replicas.find(_.name == id).get, manifest, federationId, verify,
+        replicas.find(_.name == id).get, manifest, federationId, verify, genesisState.digest,
         certStore = Some(home.resolve("federation-certs.canon")),
         stateStore = Some(home.resolve("federation-state.canon")),
         nsCacheStore = Some(home.resolve("federation-ns-cache.canon")))
@@ -407,7 +407,7 @@ class FederationMultiProcessCeremonySuite extends munit.FunSuite:
       val verify: FederationReplica.VerifyProposal = (proposerId, prop, cache) =>
         FederationReplicaVerification.verifyWithCache(proposerId, prop, nodes(id).cas, cache)
       val federation = FederationReplica.certified(
-        replicas.find(_.name == id).get, manifest, federationId, verify,
+        replicas.find(_.name == id).get, manifest, federationId, verify, genesisState.digest,
         certStore = Some(home.resolve("federation-certs.canon")),
         stateStore = Some(home.resolve("federation-state.canon")),
         nsCacheStore = Some(home.resolve("federation-ns-cache.canon")))

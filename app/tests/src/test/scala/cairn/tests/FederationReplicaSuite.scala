@@ -24,6 +24,10 @@ class FederationReplicaSuite extends munit.FunSuite:
       epoch = epoch,
       replicaSet = manifest.replicaSetDigest)
 
+  // Matches `sampleProposal(1L).before` — the cursor genesis state most
+  // tests' first (epoch=1) proposal must extend.
+  private val genesisState = Digest.of(Canon.CStr("before-1"))
+
   private def buildReplicas(
       verify: FederationReplica.VerifyProposal = alwaysVerified,
       stateStores: Map[String, java.nio.file.Path] = Map.empty,
@@ -31,7 +35,8 @@ class FederationReplicaSuite extends munit.FunSuite:
   ): Map[String, FederationReplica] =
     replicas.map { k =>
       k.name -> FederationReplica.certified(
-        k, manifest, federationId, verify, stateStore = stateStores.get(k.name), certStore = certStores.get(k.name))
+        k, manifest, federationId, verify, genesisState,
+        stateStore = stateStores.get(k.name), certStore = certStores.get(k.name))
         .fold(e => fail(e), identity)
     }.toMap
 
@@ -63,15 +68,15 @@ class FederationReplicaSuite extends munit.FunSuite:
 
   test("certified rejects a keypair not in the replica-set manifest"):
     val outsider = Keypair.dev("not-in-set")
-    assert(FederationReplica.certified(outsider, manifest, federationId, alwaysVerified).isLeft)
+    assert(FederationReplica.certified(outsider, manifest, federationId, alwaysVerified, genesisState).isLeft)
 
   test("certified rejects a keypair whose public key does not match the manifest entry"):
     val impostor = Keypair.dev(replicas.head.name)
-    assert(FederationReplica.certified(impostor, manifest, federationId, alwaysVerified).isLeft)
+    assert(FederationReplica.certified(impostor, manifest, federationId, alwaysVerified, genesisState).isLeft)
 
   test("certified rejects an unsealed manifest"):
     val unsealed = manifest.copy(seals = Nil)
-    assert(FederationReplica.certified(replicas.head, unsealed, federationId, alwaysVerified).isLeft)
+    assert(FederationReplica.certified(replicas.head, unsealed, federationId, alwaysVerified, genesisState).isLeft)
 
   test("four replicas reach quorum and every honest replica independently mints a matching certificate"):
     val nodes = buildReplicas()
@@ -89,6 +94,30 @@ class FederationReplicaSuite extends munit.FunSuite:
       assertEquals(cert.federationId, federationId)
       assertEquals(FederationFinality.FederationFinalityCertificate.verify(cert, manifest), Right(()))
     }
+
+  test("a replica's finalized cursor advances after minting, and a second round must extend it"):
+    val nodes = buildReplicas()
+    val proposal1 = sampleProposal(epoch = 1L)
+    dispatch(nodes, proposal1, nodes(replicas.head.name).propose(view = 0, proposal1).fold(e => fail(e), identity))
+    nodes.values.foreach { r =>
+      assertEquals(r.finalizedCursor, FederationReplica.FinalizedFederationCursor(proposal1.after, Some(proposal1.transition), 1L))
+    }
+    val proposal2 = sampleProposal(epoch = 2L).copy(before = proposal1.after)
+    dispatch(nodes, proposal2, nodes(replicas.head.name).propose(view = 0, proposal2).fold(e => fail(e), identity))
+    nodes.values.foreach { r =>
+      assertEquals(r.finalizedCursor, FederationReplica.FinalizedFederationCursor(proposal2.after, Some(proposal2.transition), 2L))
+    }
+
+  test("a proposal branching from a stale before is refused before verification, not silently dropped"):
+    val nodes = buildReplicas()
+    val proposal1 = sampleProposal(epoch = 1L)
+    dispatch(nodes, proposal1, nodes(replicas.head.name).propose(view = 0, proposal1).fold(e => fail(e), identity))
+    // Forks from genesis again instead of extending proposal1.after — every
+    // replica has already moved its cursor past this.
+    val forked = sampleProposal(epoch = 2L)
+    val result = nodes(replicas.head.name).propose(view = 0, forked)
+    assert(result.isLeft)
+    assert(result.left.exists(_.contains("does not extend finalized cursor")), result.toString)
 
   test("only the designated primary for the current view may propose"):
     val nodes = buildReplicas()
@@ -132,10 +161,12 @@ class FederationReplicaSuite extends munit.FunSuite:
       c.copy(commits = c.commits.sortBy(_._1.id))
     val preRestart = nodes.map((name, r) => name -> r.finalityCerts.map(normalized))
 
+    val preRestartCursor = nodes.map((name, r) => name -> r.finalizedCursor)
     val restarted = buildReplicas(stateStores = stateStores, certStores = certStores)
     restarted.foreach { (name, r) =>
       assertEquals(r.finalityCerts.map(normalized), preRestart(name), s"replica ${r.id.id} did not restore its certificate")
       assertEquals(r.currentView, 0)
+      assertEquals(r.finalizedCursor, preRestartCursor(name), s"replica ${r.id.id} did not restore its finalized cursor")
     }
 
   test("identity mismatch on restore (wrong federationId) fails closed"):
@@ -148,7 +179,7 @@ class FederationReplicaSuite extends munit.FunSuite:
 
     val otherFederationId = Digest.of(Canon.CStr("some-other-federation"))
     val reloaded = FederationReplica.certified(
-      replicas.head, manifest, otherFederationId, alwaysVerified,
+      replicas.head, manifest, otherFederationId, alwaysVerified, genesisState,
       stateStore = Some(statePath), certStore = Some(certPath)).fold(e => fail(e), identity)
     // Fails closed: any subsequent operation refuses, since the restored
     // state's federationId doesn't match this replica's own.
@@ -164,7 +195,7 @@ class FederationReplicaSuite extends munit.FunSuite:
     java.nio.file.Files.write(blocker, Array[Byte](1, 2, 3))
     val bogusStatePath = blocker.resolve("state.canon")
     val r = FederationReplica.certified(
-      replicas.head, manifest, federationId, alwaysVerified, stateStore = Some(bogusStatePath)
+      replicas.head, manifest, federationId, alwaysVerified, genesisState, stateStore = Some(bogusStatePath)
     ).fold(e => fail(e), identity)
     // First call attempts to persist and fails (the path itself is a directory).
     val first = r.propose(0, sampleProposal(1L))

@@ -50,6 +50,7 @@ class FederationNetworkSuite extends munit.FunSuite:
         val home = homes(id)
         val federation = FederationReplica.certified(
           replicas.find(_.name == id).get, manifest, federationId, alwaysVerified,
+          genesisState = Digest.of(Canon.CStr("before-1")),
           certStore = Some(home.resolve("federation-certs.canon")),
           stateStore = Some(home.resolve("federation-state.canon")))
           .fold(e => fail(e), identity)
@@ -180,6 +181,7 @@ class FederationNetworkSuite extends munit.FunSuite:
           (proposerId, prop, cache) => FederationReplicaVerification.verifyWithCache(proposerId, prop, nodes(id).cas, cache)
         val federation = FederationReplica.certified(
           replicas.find(_.name == id).get, manifest, federationId, verify,
+          genesisState = proposal.before,
           certStore = Some(home.resolve("federation-certs.canon")),
           stateStore = Some(home.resolve("federation-state.canon")))
           .fold(e => fail(e), identity)
@@ -220,7 +222,8 @@ class FederationNetworkSuite extends munit.FunSuite:
     val federationId = Digest.of(Canon.CStr("federation-network-status-federation"))
     val home = java.nio.file.Files.createTempDirectory("cairn-federation-net-status")
     val node = Node(home.resolve("node"), ledgerCtx)
-    val federation = FederationReplica.certified(replicas.head, manifest, federationId, alwaysVerified)
+    val federation = FederationReplica.certified(
+      replicas.head, manifest, federationId, alwaysVerified, genesisState = Digest.of(Canon.CStr("genesis")))
       .fold(e => fail(e), identity)
     val http = HttpNode(node, ledgerAuth, federation = Some(federation))
     try

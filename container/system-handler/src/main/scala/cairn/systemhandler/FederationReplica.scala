@@ -51,6 +51,49 @@ object FederationReplica:
     case MissingClosure(digests: Set[Digest])
     case Rejected(reason: String)
 
+  /** PR33.1 slice 2: durable record of the last generation THIS replica has
+    * itself finalized (either by helping mint the certificate, or by
+    * adopting one late — see `adoptCertificate`). A replica votes for a
+    * proposal only when it genuinely extends this cursor (`proposal.before
+    * == cursor.state && proposal.epoch > cursor.epoch`) — otherwise it is a
+    * fork relative to what this replica already knows was finalized, and
+    * must be refused before publication rather than merely caught later by
+    * history replay. `transition` is carried for callers that need it
+    * (e.g. a future audit trail); only `state`/`epoch` participate in the
+    * extension check itself. Persisted fail-closed alongside `state` (not
+    * best-effort like `NamespaceCertCache`): silently reverting to an
+    * earlier cursor after a lost/corrupted read would let this replica
+    * vote for a proposal that forks from a generation it already finalized.
+    */
+  final case class FinalizedFederationCursor(state: Digest, transition: Option[Digest], epoch: Long):
+    def extendedBy(proposal: FederationFinality.FederationProposal): Boolean =
+      proposal.before == state && proposal.epoch > epoch
+
+    /** Never regresses: `None` if `cert` doesn't itself represent forward
+      * progress from this cursor — the caller (`mintCertificateIfReady`/
+      * `adoptCertificate`) simply keeps the existing cursor in that case.
+      */
+    def advancedBy(cert: FederationFinality.FederationFinalityCertificate): Option[FinalizedFederationCursor] =
+      Option.when(cert.epoch > epoch)(FinalizedFederationCursor(cert.stateDigest, Some(cert.transition), cert.epoch))
+
+    def canon: Canon = Canon.CTag("federation-finalized-cursor", Canon.cmap(
+      "state" -> Canon.CStr(state.hex),
+      "transition" -> transition.fold(Canon.CTag("none", Canon.CInt(0)))(t => Canon.CTag("some", Canon.CStr(t.hex))),
+      "epoch" -> Canon.CInt(epoch)))
+
+  object FinalizedFederationCursor:
+    def genesis(state: Digest): FinalizedFederationCursor = FinalizedFederationCursor(state, None, 0L)
+    def fromCanon(c: Canon): Either[String, FinalizedFederationCursor] =
+      c match
+        case Canon.CTag("federation-finalized-cursor", m) =>
+          try
+            val transition = m.field("transition") match
+              case Canon.CTag("some", Canon.CStr(hex)) => Some(Digest(hex))
+              case _                                   => None
+            Right(FinalizedFederationCursor(Digest(m.field("state").asStr), transition, m.field("epoch").asInt))
+          catch case e: CodecError => Left(e.getMessage)
+        case other => Left(s"not a federation-finalized-cursor: $other")
+
   /** PR33 slice 7: durable record of which namespaces this replica has
     * independently deep-certified, and whether it has ever completed the
     * join-time bootstrap (certifying every namespace live at the time,
@@ -176,6 +219,7 @@ object FederationReplica:
       prepareSeals: Map[(Int, Int, String, String), Vector[Byte]],
       prePrepareSeals: Map[(Int, Int, String), (ReplicaId, Vector[Byte], Value)],
       viewChangeEvidence: List[ViewChangeEvidence],
+      cursor: FinalizedFederationCursor,
   ): Canon =
     val slots = state.slots.toList.map { case ((view, seq), slot) =>
       Canon.cmap(
@@ -207,7 +251,8 @@ object FederationReplica:
         Canon.cmap("seq" -> Canon.CInt(seq), "preparedView" -> Canon.CInt(lock.preparedView),
           "digest" -> Canon.CStr(lock.valueDigest.hex),
           "value" -> lock.value.fold(Canon.CTag("none", Canon.CInt(0)))(v => Canon.CTag("some", Canon.CBytes(v.bytes))),
-          "proof" -> preparedCanon(lock.proof.toList)) })))
+          "proof" -> preparedCanon(lock.proof.toList)) }),
+      "cursor" -> cursor.canon))
 
   private final case class DecodedState(
       state: ReplicaState, replicaSet: Digest, federationId: Digest,
@@ -215,6 +260,7 @@ object FederationReplica:
       prepareSeals: Map[(Int, Int, String, String), Vector[Byte]],
       prePrepareSeals: Map[(Int, Int, String), (ReplicaId, Vector[Byte], Value)],
       viewChangeEvidence: List[ViewChangeEvidence],
+      cursor: FinalizedFederationCursor,
   )
 
   private def decodeState(c: Canon): Either[String, DecodedState] =
@@ -269,9 +315,10 @@ object FederationReplica:
             val proof = parsePrepared(row.field("proof")).headOption
             row.field("seq").asInt.toInt -> PreparedLock(row.field("preparedView").asInt.toInt, Digest(row.field("digest").asStr), value, proof)
           }.toMap
+          val cursor = FinalizedFederationCursor.fromCanon(m.field("cursor")).fold(e => throw CodecError(e), identity)
           Right(DecodedState(
             ReplicaState(id, n, faulty = false, view = view, slots = slots, viewChanges = viewChanges, locks = locks),
-            replicaSet, federationId, commitSeals, prepareSeals, prePrepareSeals, evidence))
+            replicaSet, federationId, commitSeals, prepareSeals, prePrepareSeals, evidence, cursor))
         catch case e: CodecError => Left(e.getMessage)
       case other => Left(s"not federation-replica-state: $other")
 
@@ -296,6 +343,7 @@ object FederationReplica:
       manifest: ReplicaSetManifest,
       federationId: Digest,
       verify: VerifyProposal,
+      genesisState: Digest,
       resolveUrl: ReplicaId => Option[String] = _ => None,
       stateStore: Option[Path] = None,
       certStore: Option[Path] = None,
@@ -306,7 +354,7 @@ object FederationReplica:
       expected <- manifest.authorities.get(keypair.name).toRight(s"federation: replica '${keypair.name}' not in replica-set manifest")
       _ <- Either.cond(expected == keypair.publicBytes, (),
         s"federation: local key for '${keypair.name}' does not match replica-set manifest")
-    yield new FederationReplica(keypair, manifest, federationId, verify, resolveUrl, stateStore, certStore, nsCacheStore)
+    yield new FederationReplica(keypair, manifest, federationId, verify, genesisState, resolveUrl, stateStore, certStore, nsCacheStore)
 
 /** See [[FederationReplica$]] (companion) for the rationale. Constructed
   * only via [[FederationReplica.certified]].
@@ -316,6 +364,7 @@ final class FederationReplica private (
     private val manifest: ReplicaSetManifest,
     val federationId: Digest,
     private val verifyProposal: FederationReplica.VerifyProposal,
+    genesisState: Digest,
     private val resolveUrl: BftQuorum.ReplicaId => Option[String],
     stateStore: Option[Path],
     certStore: Option[Path],
@@ -357,6 +406,7 @@ final class FederationReplica private (
   private var lastPrimaryActivityAt: Long = System.currentTimeMillis()
   private var latestNewView: Option[Digest] = None
   private var nsCache: FederationReplica.NamespaceCertCache = FederationReplica.NamespaceCertCache.empty
+  private var cursor: FinalizedFederationCursor = FinalizedFederationCursor.genesis(genesisState)
 
   certStore.foreach { path =>
     loadCerts(path) match
@@ -376,6 +426,7 @@ final class FederationReplica private (
           prepareSeals ++= decoded.prepareSeals
           prePrepareSeals ++= decoded.prePrepareSeals
           decoded.viewChangeEvidence.foreach(ev => viewChangeEvidence((ev.vc.newView, ev.vc.from.id)) = ev)
+          cursor = decoded.cursor
         case Right(decoded) =>
           ioError = Some(
             s"federation-state identity mismatch: file has ${decoded.state.id.id}/n=${decoded.state.n}, " +
@@ -426,6 +477,7 @@ final class FederationReplica private (
   def finalityCerts: List[FederationFinality.FederationFinalityCertificate] = certificates
   def detectedEquivocations: List[EquivocationEvidence] = equivocations.toList
   def currentView: Int = state.view
+  def finalizedCursor: FinalizedFederationCursor = cursor
 
   /** Signed snapshot of this replica's current view + latest installed
     * NewView digest — lets a client determine the cluster's actual view
@@ -444,7 +496,7 @@ final class FederationReplica private (
     stateStore match
       case None => Right(())
       case Some(path) =>
-        val c = encodeState(state, setDigest, federationId, commitSeals.toMap, prepareSeals.toMap, prePrepareSeals.toMap, viewChangeEvidence.values.toList)
+        val c = encodeState(state, setDigest, federationId, commitSeals.toMap, prepareSeals.toMap, prePrepareSeals.toMap, viewChangeEvidence.values.toList, cursor)
         DurableIo.writeConsensus(path, Canon.encode(c)) match
           case Left(e) => ioError = Some(e); Left(e)
           case Right(()) => Right(())
@@ -494,6 +546,7 @@ final class FederationReplica private (
               proposal.after, view, seq, commits, setDigest, proposal.epoch, proposal.before, proposal.federationId)
             if FederationFinality.FederationFinalityCertificate.verify(cert, manifest).isRight then
               certificates = certificates :+ cert
+              cursor.advancedBy(cert).foreach(next => cursor = next)
 
   /** Primary-only: propose a [[FederationFinality.FederationProposal]] for
     * agreement at `view`. `seq` is `proposal.epoch` (the shared clock
@@ -559,6 +612,7 @@ final class FederationReplica private (
       val priorPp = prePrepareSeals.toMap
       val priorVc = viewChangeEvidence.toMap
       val priorCerts = certificates
+      val priorCursor = cursor
       def rollback(): Unit =
         state = priorState
         commitSeals.clear(); commitSeals ++= priorCommit
@@ -566,6 +620,7 @@ final class FederationReplica private (
         prePrepareSeals.clear(); prePrepareSeals ++= priorPp
         viewChangeEvidence.clear(); viewChangeEvidence ++= priorVc
         certificates = priorCerts
+        cursor = priorCursor
 
       /** Real, potentially expensive: PR30 deep re-certification pays real
         * CPU work (ΔL replay, access-trace recomputation, constitution
@@ -587,6 +642,9 @@ final class FederationReplica private (
               s"federation: PrePrepare from ${pp.from.id} is not the designated primary for view ${pp.view}")
             proposal <- knownProposals.get(proposalDigest)
               .toRight(s"$missingClosurePrefix${proposalDigest.hex}")
+            _ <- Either.cond(cursor.extendedBy(proposal), (),
+              s"federation: proposal does not extend finalized cursor (cursor state=${cursor.state.short} epoch=${cursor.epoch}, " +
+                s"proposal before=${proposal.before.short} epoch=${proposal.epoch})")
             _ <-
               val (outcome, updatedCache) = verifyProposal(pp.from, proposal, nsCache)
               if updatedCache != nsCache then
