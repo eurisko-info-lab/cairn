@@ -14,8 +14,11 @@ import cairn.systemhandler.{Ed25519, FederationFinality}
   * exact before/after pair, exact per-namespace index diffs (each changed
   * entry traces to exactly one authorizing commit, every untouched entry is
   * byte-identical), namespace-trust and replica-set amendment policy
-  * (whether or not a commit also touches that namespace), and GC-epoch
-  * monotonicity/hash-linkage.
+  * (whether or not a commit also touches that namespace), GC-epoch
+  * monotonicity/hash-linkage, and an EXACT `transition.approvals` closure —
+  * equal to, not merely a superset of, the namespace-trust/replica-set
+  * rotations this generation actually performs, so an unrelated or
+  * unresolved extra digest is rejected rather than silently accepted.
   */
 final case class VerifiedFederationTransition private (
     transition: FederationTransition,
@@ -81,9 +84,11 @@ object VerifiedFederationTransition:
     * pure authority-rotation transition) — unlike repository/application
     * entries, so this is checked independently of `diffCommitBackedIndex`.
     * Every rotation must satisfy [[NamespaceTrustManifest.allowsTransition]]
-    * against its own predecessor, and its new manifest digest must be
-    * listed in `transition.approvals` — the explicit "authority rotation is
-    * a transition constituent" record.
+    * against its own predecessor. Returns the set of new manifest digests
+    * this generation rotates — `verify` requires `transition.approvals` to
+    * equal EXACTLY the union of this and [[diffReplicaSet]]'s result, not
+    * merely contain it, so an unrelated or unresolved extra digest in
+    * `approvals` is rejected rather than silently accepted.
     *
     * No `minActivation` high-water is enforced here: a rotation is
     * self-activating within the very generation that installs it (confirmed
@@ -93,12 +98,11 @@ object VerifiedFederationTransition:
     * check is the monotonicity guard that applies here.
     */
   private def diffNamespaceTrust(
-      before: Map[String, Digest], after: Map[String, Digest],
-      approvals: List[Digest], cas: Cas,
-  ): Either[String, Unit] =
-    (before.keySet ++ after.keySet).toList.foldLeft[Either[String, Unit]](Right(())) { (acc, ns) =>
-      acc.flatMap { _ =>
-        if before.get(ns) == after.get(ns) then Right(())
+      before: Map[String, Digest], after: Map[String, Digest], cas: Cas,
+  ): Either[String, Set[Digest]] =
+    (before.keySet ++ after.keySet).toList.foldLeft[Either[String, Set[Digest]]](Right(Set.empty)) { (acc, ns) =>
+      acc.flatMap { xs =>
+        if before.get(ns) == after.get(ns) then Right(xs)
         else
           for
             live <- before.get(ns) match
@@ -108,19 +112,15 @@ object VerifiedFederationTransition:
             newArtifact <- cas.getByDigest(newDigest)
             proposed <- NamespaceTrustManifest.fromArtifact(newArtifact)
             _ <- NamespaceTrustManifest.allowsTransition(proposed, live, before.get(ns), Ed25519.verify)
-            _ <- Either.cond(approvals.contains(newDigest), (),
-              s"federation transition: namespace-trust rotation for '$ns' is not listed in transition.approvals")
-          yield ()
+          yield xs + newDigest
       }
     }
 
   /** Symmetric to [[diffNamespaceTrust]], for the single federation-wide
-    * replica set.
+    * replica set — returns its rotated manifest digest, if any.
     */
-  private def diffReplicaSet(
-      before: Digest, after: Digest, approvals: List[Digest], cas: Cas,
-  ): Either[String, Unit] =
-    if before == after then Right(())
+  private def diffReplicaSet(before: Digest, after: Digest, cas: Cas): Either[String, Set[Digest]] =
+    if before == after then Right(Set.empty)
     else
       for
         liveArtifact <- cas.getByDigest(before)
@@ -128,9 +128,7 @@ object VerifiedFederationTransition:
         newArtifact <- cas.getByDigest(after)
         proposed <- ReplicaSetManifest.fromCanon(newArtifact.body)
         _ <- ReplicaSetManifest.allowsTransition(proposed, Some(live), Some(before), Ed25519.verify)
-        _ <- Either.cond(approvals.contains(after), (),
-          "federation transition: replica-set rotation is not listed in transition.approvals")
-      yield ()
+      yield Set(after)
 
   /** GC advancement as an explicit, checked transition constituent: if the
     * epoch actually changed, it must strictly increase and hash-link back
@@ -203,7 +201,9 @@ object VerifiedFederationTransition:
             s"federation transition: commit for namespace '${c.namespace}' does not cite its own governing trust manifest")
         }
       }
-      _ <- diffNamespaceTrust(nsBefore.manifests, nsAfter.manifests, transition.approvals, cas)
-      _ <- diffReplicaSet(before.trustRoots, after.trustRoots, transition.approvals, cas)
+      nsApprovals <- diffNamespaceTrust(nsBefore.manifests, nsAfter.manifests, cas)
+      rsApprovals <- diffReplicaSet(before.trustRoots, after.trustRoots, cas)
       _ <- diffGcEpoch(before.gcEpoch, after.gcEpoch, cas)
+      _ <- Either.cond(transition.approvals.toSet == (nsApprovals ++ rsApprovals), (),
+        "federation transition: approvals does not equal exactly the namespace-trust/replica-set rotations this generation performs")
     yield VerifiedFederationTransition(transition, before, after, commits, finality)

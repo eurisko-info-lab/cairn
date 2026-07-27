@@ -189,6 +189,26 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
       .fold(e => fail(e), identity)
     assertEquals(verified.after, after)
 
+  test("verify rejects an otherwise-correct rotation whose approvals also list an unrelated extra digest"):
+    val newOwner = Keypair.dev("org-a-owner-2b")
+    val draft = NamespaceTrustManifest.of("org-a", List(newOwner.name -> newOwner.publicBytes),
+      replaces = Some(trustManifest.digest), activationEpoch = 1L).fold(e => fail(e), identity)
+    val payload = Canon.encode(draft.bodyCanon)
+    val rotated = draft.copy(predecessorApprovals = List(owner.name -> owner.sign(payload)))
+    val (cas, before, after) = rotationFixture(trustManifest.digest, rotated.digest, replicaSet, replicaSet)
+    cas.put(trustManifest.artifact); cas.put(rotated.artifact)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = after.digest, epoch = 1L,
+      previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
+    // The rotation itself is correctly approved and listed — but an extra,
+    // unrelated digest (not backing any actual rotation) is also present.
+    // A "contains" check would wrongly accept this; approvals must equal
+    // the expected set exactly.
+    val extraneous = Digest.of(Canon.CStr("unrelated-extra-approval"))
+    val transition = FederationTransition(before.digest, Nil, after.digest, List(rotated.digest, extraneous), Some(cert.digest))
+    val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
+    assert(result.left.exists(_.contains("approvals does not equal exactly")), result.toString)
+
   test("verify rejects a namespace-trust rotation missing predecessor majority approval"):
     val newOwner = Keypair.dev("org-a-owner-3")
     val rotated = NamespaceTrustManifest.of("org-a", List(newOwner.name -> newOwner.publicBytes),
@@ -215,7 +235,7 @@ class FederationTransitionCheckSuite extends munit.FunSuite:
       previousState = before.digest, federationId = federationId).fold(e => fail(e), identity)
     val transition = FederationTransition(before.digest, Nil, after.digest, Nil, Some(cert.digest))
     val result = VerifiedFederationTransition.verify(transition, before, after, Nil, cert, federationId, cas)
-    assert(result.left.exists(_.contains("not listed in transition.approvals")), result.toString)
+    assert(result.left.exists(_.contains("approvals does not equal exactly")), result.toString)
 
   test("verify accepts a replica-set rotation with predecessor quorum and a listed approval"):
     val successorReplicas = replicas.take(3) ++ List(Keypair.dev("r4"))

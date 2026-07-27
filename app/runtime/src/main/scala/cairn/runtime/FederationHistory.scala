@@ -43,11 +43,23 @@ object FederationHistory:
       published.contains(transitionDigest) && published.contains(stateDigest)
     }
 
-  /** Re-verifies a single transition by digest, independent of full replay —
-    * the `audit transition <digest>` primitive.
+  /** Re-verifies a single transition by digest AND confirms it is actually
+    * ledger-published — that it and its resulting state were co-anchored in
+    * a real block on `node`, not merely a well-formed artifact sitting in
+    * `cas`. This is the `audit transition <digest>` primitive: an audit
+    * that skipped the ledger check would accept content nobody ever
+    * finalized, which defeats the point of auditing a *published*
+    * transition rather than an arbitrary one. (`node` was already a
+    * parameter before this fix but unused for exactly this property —
+    * see the naming, which now says what it checks.)
     */
-  def auditTransition(node: Node, cas: Cas, digest: Digest, federationId: Digest): Either[String, VerifiedFederationTransition] =
-    decodeAndVerify(digest, federationId, cas)
+  def auditPublishedTransition(node: Node, cas: Cas, digest: Digest, federationId: Digest): Either[String, VerifiedFederationTransition] =
+    for
+      blocks <- node.blocks
+      verified <- decodeAndVerify(digest, federationId, cas)
+      _ <- Either.cond(blockPublishesBoth(blocks, digest, verified.transition.after), (),
+        s"federation history: transition ${digest.short} and its resulting state were not co-published in one block")
+    yield verified
 
   /** Folds every ledger-anchored transition, in the ledger's own order,
     * starting from `genesisState`: decodes and fully re-verifies each one

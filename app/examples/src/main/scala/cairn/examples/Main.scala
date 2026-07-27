@@ -48,7 +48,7 @@ import java.nio.file.Path
         val audited = for
           digest <- Digest.parse(digestText)
           federationId <- node.chainDigests.headOption.toRight("federation audit-transition: empty ledger, no chain identity")
-          verified <- FederationHistory.auditTransition(node, node.cas, digest, federationId)
+          verified <- FederationHistory.auditPublishedTransition(node, node.cas, digest, federationId)
         yield verified
         audited match
           case Right(verified) =>

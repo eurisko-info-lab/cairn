@@ -4,7 +4,7 @@ import cairn.kernel.*
 import cairn.core.*
 import cairn.runtime.*
 import cairn.examples.stlc.Stlc
-import cairn.systemhandler.{BftFinality, DiskCas, Keypair, Node}
+import cairn.systemhandler.{BftFinality, DiskCas, FederationFinality, Keypair, Node}
 import java.nio.file.Files
 
 /** PR32 slice 7: [[FederationHistory]] — replaying the ledger's own ordered
@@ -105,15 +105,39 @@ class FederationHistorySuite extends munit.FunSuite:
     val result = FederationHistory.replayFromGenesis(node, node.cas, wrongGenesis, federationId)
     assert(result.left.exists(_.contains("does not chain from")), result.toString)
 
-  test("auditTransition independently re-verifies a single transition by digest"):
+  test("auditPublishedTransition independently re-verifies a single transition by digest"):
     val (_, node, federationId, genesisState, state1, state2, _) = twoGenerationFixture()
     val digests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
     assertEquals(digests.length, 2)
-    val secondVerified = FederationHistory.auditTransition(node, node.cas, digests(1), federationId).fold(e => fail(e), identity)
+    val secondVerified = FederationHistory.auditPublishedTransition(node, node.cas, digests(1), federationId).fold(e => fail(e), identity)
     assertEquals(secondVerified.before.digest, state1.digest)
     assertEquals(secondVerified.after.digest, state2.digest)
 
-  test("auditTransition rejects an unknown digest"):
+  test("auditPublishedTransition rejects an unknown digest"):
     val (_, node, federationId, genesisState, state1, state2, _) = twoGenerationFixture()
-    val result = FederationHistory.auditTransition(node, node.cas, Digest.of(Canon.CStr("not-a-real-transition")), federationId)
+    val result = FederationHistory.auditPublishedTransition(node, node.cas, Digest.of(Canon.CStr("not-a-real-transition")), federationId)
     assert(result.isLeft, result.toString)
+
+  test("auditPublishedTransition rejects a well-formed transition that was never actually ledger-anchored"):
+    val (_, node, federationId, genesisState, state1, state2, _) = twoGenerationFixture()
+    // A structurally valid, fully self-consistent transition (decode +
+    // VerifiedFederationTransition.verify would both accept it — a genuine
+    // no-op generation, unchanged indices, matching certificate) but never
+    // published in any block on this node's ledger — must still be rejected.
+    val ledger = Digest.of(Canon.CStr("unpublished-ledger-stand-in"))
+    val gcEpoch = ReplicatedGcEpoch(0, Set.empty, None)
+    val repoIndex = RepositoryIndex(Map.empty)
+    val appIndex = ApplicationIndex(Map.empty)
+    val nsIndex = NamespaceIndex(Map.empty)
+    val replicaSet = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val stray = FederationState(ledger, repoIndex.digest, appIndex.digest, nsIndex.digest, replicaSet.digest, gcEpoch.digest)
+    List(gcEpoch.artifact, repoIndex.artifact, appIndex.artifact, nsIndex.artifact, replicaSet.artifact, stray.artifact)
+      .foreach(node.cas.put)
+    val cert = FederationFinality.agreeForFederationState(
+      replicas, replicaSet, view = 0, stateDigest = stray.digest, epoch = 1L,
+      previousState = stray.digest, federationId = federationId).fold(e => fail(e), identity)
+    node.cas.put(cert.artifact)
+    val unpublished = FederationTransition(stray.digest, Nil, stray.digest, Nil, Some(cert.digest))
+    node.cas.put(unpublished.artifact)
+    val result = FederationHistory.auditPublishedTransition(node, node.cas, unpublished.digest, federationId)
+    assert(result.left.exists(_.contains("were not co-published")), result.toString)
