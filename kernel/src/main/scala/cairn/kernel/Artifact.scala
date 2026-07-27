@@ -91,6 +91,7 @@ enum ArtifactKind(val name: String):
   case ApplicationIndex extends ArtifactKind("application-index")
   case NamespaceIndex extends ArtifactKind("namespace-index")
   case EquivocationEvidence extends ArtifactKind("equivocation-evidence")
+  case FederationProposal extends ArtifactKind("federation-proposal")
 
 object ArtifactKind:
   def parse(s: String): Either[String, ArtifactKind] =

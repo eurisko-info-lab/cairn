@@ -29,6 +29,61 @@ object FederationFinality:
   def valueOfState(stateDigest: Digest): Value =
     Value(stateDigest.hex.getBytes(StandardCharsets.US_ASCII).toVector)
 
+  /** PR33: the network-agreement analogue of a proposed block — everything
+    * a `FederationReplica` needs to independently locate and verify a
+    * candidate generation, content-addressed so a replica missing any of
+    * it can fetch exactly the referenced digests (`transition`/`before`/
+    * `after`) from the proposer over `/blob/<hex>`, the same generic path
+    * used for every other artifact closure. `transition` is the
+    * `cairn.core.FederationTransition` digest binding this whole
+    * generation (PR32); `before`/`after` are its `cairn.core.FederationState`
+    * endpoints, named directly here (rather than requiring a replica to
+    * decode `transition` first) so a replica can check `before`/`epoch`
+    * against its own running state before paying the cost of fetching and
+    * verifying `transition` itself.
+    */
+  final case class FederationProposal(
+      federationId: Digest,
+      transition: Digest,
+      before: Digest,
+      after: Digest,
+      epoch: Long,
+      replicaSet: Digest,
+  ):
+    def canon: Canon = Canon.CTag("federation-proposal-v1", Canon.cmap(
+      "federationId" -> Canon.CStr(federationId.hex),
+      "transition" -> Canon.CStr(transition.hex),
+      "before" -> Canon.CStr(before.hex),
+      "after" -> Canon.CStr(after.hex),
+      "epoch" -> Canon.CInt(epoch),
+      "replicaSet" -> Canon.CStr(replicaSet.hex)))
+    def artifact: Artifact = Artifact(ArtifactKind.FederationProposal, canon)
+    def digest: Digest = artifact.digest
+
+  object FederationProposal:
+    def fromArtifact(artifact: Artifact): Either[String, FederationProposal] =
+      if artifact.kind != ArtifactKind.FederationProposal then Left("artifact is not a federation proposal")
+      else artifact.body match
+        case Canon.CTag("federation-proposal-v1", c) =>
+          try Right(FederationProposal(
+            Digest(c.field("federationId").asStr), Digest(c.field("transition").asStr),
+            Digest(c.field("before").asStr), Digest(c.field("after").asStr),
+            c.field("epoch").asInt, Digest(c.field("replicaSet").asStr)))
+          catch case e: Exception => Left(s"invalid federation proposal: ${e.getMessage}")
+        case _ => Left("expected federation-proposal-v1 body")
+
+  /** The PrePrepare/Commit value a `FederationReplica` actually agrees over
+    * — the proposal's OWN digest, not the bare state digest `valueOfState`
+    * encodes for the local-orchestration path. Committing to the whole
+    * proposal (not just `after`) means a replica's vote is bound to the
+    * exact `transition`/`epoch`/`replicaSet` it verified, not merely the
+    * resulting state — two different proposals could coincidentally name
+    * the same `after` (e.g. a retried epoch) without being the same
+    * verified generation.
+    */
+  def valueOfProposal(proposal: FederationProposal): Value =
+    Value(proposal.digest.hex.getBytes(StandardCharsets.US_ASCII).toVector)
+
   /** Quorum certificate over a `cairn.core.FederationState` digest.
     * `epoch` is the ledger height this generation is anchored at (the same
     * shared clock [[ReplicaSetManifest]] activation heights and
