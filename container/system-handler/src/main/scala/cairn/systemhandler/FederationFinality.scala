@@ -157,14 +157,22 @@ object FederationFinality:
     * epoch/predecessor" variant, not [[BftFinality.agreeForSealedBlock]]'s
     * "rediscover from chain" variant — a federation state isn't
     * independently on-chain to rediscover; the caller always already knows
-    * `epoch`/`previousState` because it just assembled the state). Builds
-    * its own ad hoc [[ReplicaSetManifest]] from `replicas` via
-    * [[BftFinality.sealReplicaSet]], exactly like `agreeLocalProven` does —
-    * production callers with an already-established replica set pass that
-    * set's own `replicas` list.
+    * `epoch`/`previousState` because it just assembled the state).
+    *
+    * Takes the active [[ReplicaSetManifest]] EXPLICITLY rather than
+    * building a bare one ad hoc from `replicas` (an earlier draft did this
+    * via [[BftFinality.sealReplicaSet]], matching `agreeLocalProven`'s own
+    * lab-fixture convenience — but that silently ignores any amendment
+    * metadata (`replaces`/`activationHeight`/`predecessorApprovals`) on the
+    * REAL active manifest, minting a certificate whose `replicaSet` digest
+    * then mismatches the manifest everything else — `FederationState.
+    * trustRoots`, `NamespaceTrustManifest`-style rotation — actually uses.
+    * Caught by the PR31 exit ceremony's successor-replica-set-activation
+    * step, where the active manifest is never the bare genesis shape).
     */
   def agreeForFederationState(
       replicas: List[Keypair],
+      manifest: ReplicaSetManifest,
       view: Int,
       stateDigest: Digest,
       epoch: Long,
@@ -174,16 +182,18 @@ object FederationFinality:
   ): Either[String, FederationFinalityCertificate] =
     val ids = replicas.map(_.name)
     for
+      _ <- Either.cond(manifest.ids.toSet == ids.toSet, (),
+        "federation finality: manifest membership does not match the supplied replicas")
       primaryId <- BftFinality.designatedPrimary(ids, view)
       primary <- replicas.find(_.name == primaryId.id).toRight(s"federation finality: missing primary ${primaryId.id}")
-      cert <- runAgreement(replicas, primary, view, 0, stateDigest, epoch, previousState, federationId, maxRounds)
+      cert <- runAgreement(replicas, manifest, primary, view, stateDigest, epoch, previousState, federationId, maxRounds)
     yield cert
 
   private def runAgreement(
       replicas: List[Keypair],
+      manifest: ReplicaSetManifest,
       primary: Keypair,
       view: Int,
-      seqUnused: Int,
       stateDigest: Digest,
       epoch: Long,
       previousState: Digest,
@@ -192,9 +202,9 @@ object FederationFinality:
   ): Either[String, FederationFinalityCertificate] =
     val seq = epoch.toInt
     val ids = replicas.map(k => ReplicaId(k.name))
-    BftFinality.sealReplicaSet(replicas).flatMap { manifest =>
-      val auth = manifest.authorities
-      val setDig = manifest.replicaSetDigest
+    val auth = manifest.authorities
+    val setDig = manifest.replicaSetDigest
+    locally {
       val value = valueOfState(stateDigest)
       val primaryId = ReplicaId(primary.name)
       var states: Map[ReplicaId, ReplicaState] =

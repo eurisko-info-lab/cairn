@@ -217,7 +217,7 @@ final class FederationTransactionCoordinator(
       _ <- write(intent, s"proposed:${newState.digest.hex}:$epoch")
       _ <- Either.cond(crash != FederationTransactionPhase.AfterProposed, (), "simulated crash after federation-state proposed")
       cert <- FederationFinality.agreeForFederationState(
-        replicas, view = 0, stateDigest = newState.digest, epoch = epoch,
+        replicas, activeManifest, view = 0, stateDigest = newState.digest, epoch = epoch,
         previousState = priorState.digest, federationId = federationId)
       _ = node.cas.put(cert.artifact)
       _ <- write(intent, s"certified:${newState.digest.hex}:${cert.digest.hex}")

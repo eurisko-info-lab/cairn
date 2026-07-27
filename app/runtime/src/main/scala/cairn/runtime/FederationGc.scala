@@ -62,6 +62,18 @@ object FederationGc:
     * local mark/sweep. A locally-computed-but-not-yet-finalized epoch (e.g.
     * one built via [[computeFederationGcRoots]] mid-transaction, before
     * quorum agreement) must never reach [[CasAdminEffects.gc]] directly.
+    *
+    * The swept root set is `epoch.roots` UNIONED with the full transitive
+    * closure of `latestFinalized` itself (`ArtifactApplicationResolver.audit`).
+    * `epoch.roots` is deliberately unable to name its own generation's
+    * bookkeeping artifacts (the state, its indices, and the epoch artifact
+    * itself) — a generation's epoch is computed before it or its state
+    * exist, the same way a git commit can't embed its own hash — so without
+    * this union, the very act of finalizing a new generation would make
+    * that generation's own wrapper artifacts immediately unreachable to the
+    * next reclaim. `epoch.roots` remains the authority for what OLDER,
+    * otherwise-unreachable content survives; this audit is what guarantees
+    * the CURRENT, just-finalized state is always live regardless.
     */
   def reclaimAgainstFinalizedEpoch(
       casRoot: Path,
@@ -79,5 +91,6 @@ object FederationGc:
         "federation gc: certificate does not finalize the candidate epoch's state")
       epochArtifact <- cas.getByDigest(latestFinalized.gcEpoch)
       epoch <- ReplicatedGcEpoch.fromArtifact(epochArtifact)
-      report <- CasAdminEffects.gc(casRoot, epoch.roots, ctx).left.map(casErr)
+      currentClosure <- ArtifactApplicationResolver(cas).audit(latestFinalized.digest)
+      report <- CasAdminEffects.gc(casRoot, epoch.roots ++ currentClosure, ctx).left.map(casErr)
     yield report

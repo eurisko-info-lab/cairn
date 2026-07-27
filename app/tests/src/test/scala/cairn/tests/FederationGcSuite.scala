@@ -90,12 +90,21 @@ class FederationGcSuite extends munit.FunSuite:
     val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val federationId = Digest.of(Canon.CStr("federation-gc-test"))
+    // reclaimAgainstFinalizedEpoch always audits the full closure of the
+    // state it finalizes (see its own doc comment), so every field must be a
+    // real, decodable artifact — not a bare placeholder digest.
+    val ledgerStandIn = Artifact(ArtifactKind.Block, Canon.CStr("ledger-stand-in"))
+    val repoIndex = RepositoryIndex(Map.empty)
+    val appIndex = ApplicationIndex(Map.empty)
+    val nsIndex = NamespaceIndex(Map.empty)
+    List(ledgerStandIn, repoIndex.artifact, appIndex.artifact, nsIndex.artifact, manifest.artifact).foreach(cas.put)
     val state = FederationState(
-      ledger = Digest.of(Canon.CStr("ledger")), repository = Digest.of(Canon.CStr("repository")),
-      applications = Digest.of(Canon.CStr("applications")), namespaces = Digest.of(Canon.CStr("namespaces")),
+      ledger = ledgerStandIn.digest, repository = repoIndex.digest,
+      applications = appIndex.digest, namespaces = nsIndex.digest,
       trustRoots = manifest.digest, gcEpoch = epoch.digest)
+    cas.put(state.artifact)
     val cert = FederationFinality.agreeForFederationState(
-      replicas, view = 0, stateDigest = state.digest, epoch = 1L,
+      replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
 
     val report = FederationGc.reclaimAgainstFinalizedEpoch(
@@ -116,7 +125,7 @@ class FederationGcSuite extends munit.FunSuite:
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val differentState = state.copy(ledger = Digest.of(Canon.CStr("different-ledger")))
     val certForDifferentState = FederationFinality.agreeForFederationState(
-      replicas, view = 0, stateDigest = differentState.digest, epoch = 1L,
+      replicas, manifest, view = 0, stateDigest = differentState.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
     val rejected = FederationGc.reclaimAgainstFinalizedEpoch(
       dir.resolve("cas"), state, cas, certForDifferentState, manifest, federationId, casCtx)
@@ -133,7 +142,7 @@ class FederationGcSuite extends munit.FunSuite:
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
       Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val cert = FederationFinality.agreeForFederationState(
-      replicas, view = 0, stateDigest = state.digest, epoch = 1L,
+      replicas, manifest, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
     val wrongFederation = Digest.of(Canon.CStr("some-other-federation"))
     val rejected = FederationGc.reclaimAgainstFinalizedEpoch(
