@@ -11,6 +11,56 @@ enum FederationCrashPoint:
 
 final case class FederationPublication(commit: FederationCommit, block: Block)
 
+/** PR31's atomic-visibility invariant, generalized from [[AtomicFederation.verify]]
+  * (one namespace) to a complete [[FederationState]] (every namespace): a
+  * node must never expose a new branch, release, or ledger head unless it
+  * possesses and has certified the complete corresponding repository,
+  * runtime, machine, evidence, and application closure — for ALL six
+  * `FederationState` roots, not just the one namespace/branch being updated.
+  *
+  * Composes exactly the functions the invariant names: [[NativeRepository.
+  * verifyFromRoots]] per namespace (repository closure — "certified" here
+  * means each resident change's acceptance-evidence artifact genuinely
+  * decodes as [[AcceptanceEvidence]], the same depth [[AtomicFederation.verify]]
+  * already checks; full ΔL re-replay already happened once at PR30
+  * ingestion time and is not re-run on every visibility check), and
+  * [[ArtifactApplicationResolver.audit]]/`.resolve` (application/machine
+  * closure, and — via the full walk from `state.digest` — every other root
+  * transitively).
+  */
+def verifyFederationState(state: FederationState, cas: Cas): Either[String, Set[Digest]] =
+  def certifyStructurally(c: CausalChange): Either[String, Unit] =
+    c.acceptanceEvidence match
+      case None => Right(())
+      case Some(d) => cas.getByDigest(d).flatMap(a =>
+        Either.cond(a.kind == ArtifactKind.AcceptanceEvidence, (), s"federation state: evidence ${d.short} has wrong kind"))
+  for
+    _ <- cas.getByDigest(state.ledger)
+    repoIndexArtifact <- cas.getByDigest(state.repository)
+    repoIndex <- RepositoryIndex.fromArtifact(repoIndexArtifact)
+    _ <- repoIndex.namespaces.toList.foldLeft[Either[String, Unit]](Right(())) { case (acc, (ns, d)) =>
+      acc.flatMap(_ => cas.getByDigest(d).flatMap(NativeRepository.fromArtifact).flatMap { repo =>
+        repo.verifyFromRoots(certifyStructurally).left.map(e => s"federation state: namespace '$ns' repository: $e").map(_ => ())
+      })
+    }
+    appIndexArtifact <- cas.getByDigest(state.applications)
+    appIndex <- ApplicationIndex.fromArtifact(appIndexArtifact)
+    _ <- appIndex.releases.toList.foldLeft[Either[String, Unit]](Right(())) { case (acc, (ns, d)) =>
+      acc.flatMap(_ => ArtifactApplicationResolver(cas).resolve(d).left.map(e => s"federation state: namespace '$ns' application: $e").map(_ => ()))
+    }
+    nsIndexArtifact <- cas.getByDigest(state.namespaces)
+    nsIndex <- NamespaceIndex.fromArtifact(nsIndexArtifact)
+    _ <- nsIndex.manifests.toList.foldLeft[Either[String, Unit]](Right(())) { case (acc, (ns, d)) =>
+      acc.flatMap(_ => cas.getByDigest(d).flatMap(NamespaceTrustManifest.fromArtifact)
+        .left.map(e => s"federation state: namespace '$ns' trust manifest: $e").map(_ => ()))
+    }
+    trustArtifact <- cas.getByDigest(state.trustRoots)
+    _ <- ReplicaSetManifest.fromCanon(trustArtifact.body).left.map(e => s"federation state: trust roots: $e")
+    epochArtifact <- cas.getByDigest(state.gcEpoch)
+    _ <- ReplicatedGcEpoch.fromArtifact(epochArtifact)
+    closure <- ArtifactApplicationResolver(cas).audit(state.digest)
+  yield closure
+
 /** Recoverable bridge between content closure and one ledger generation.
   * The ledger points at the federation commit, never at a branch module whose
   * repository/runtime/application roots could be published separately. */

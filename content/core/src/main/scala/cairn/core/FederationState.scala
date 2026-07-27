@@ -21,7 +21,13 @@ final case class FederationState(
     applications: Digest,
     /** [[NamespaceIndex]] digest: namespace -> active [[NamespaceTrustManifest]] digest. */
     namespaces: Digest,
-    /** Active replica-set manifest digest (`ReplicaSetManifest.replicaSetDigest`) — who runs consensus. */
+    /** Active `ReplicaSetManifest`'s own ARTIFACT digest (`.digest`, not
+      * `.replicaSetDigest` — the latter is a body-only matching key used to
+      * compare quorum membership, e.g. inside `FinalityCertificate`/
+      * `FederationFinalityCertificate`, and is never itself a CAS key).
+      * Content-addressable like every other `FederationState` field, so the
+      * atomic-visibility gate can decode it directly via `cas.getByDigest`.
+      */
     trustRoots: Digest,
     /** [[ReplicatedGcEpoch]] digest: the retention generation safe to reclaim against. */
     gcEpoch: Digest,

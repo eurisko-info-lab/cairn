@@ -93,7 +93,7 @@ class FederationGcSuite extends munit.FunSuite:
     val state = FederationState(
       ledger = Digest.of(Canon.CStr("ledger")), repository = Digest.of(Canon.CStr("repository")),
       applications = Digest.of(Canon.CStr("applications")), namespaces = Digest.of(Canon.CStr("namespaces")),
-      trustRoots = manifest.replicaSetDigest, gcEpoch = epoch.digest)
+      trustRoots = manifest.digest, gcEpoch = epoch.digest)
     val cert = FederationFinality.agreeForFederationState(
       replicas, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
@@ -113,7 +113,7 @@ class FederationGcSuite extends munit.FunSuite:
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val federationId = Digest.of(Canon.CStr("federation-gc-test-2"))
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
-      Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.replicaSetDigest, epoch.digest)
+      Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val differentState = state.copy(ledger = Digest.of(Canon.CStr("different-ledger")))
     val certForDifferentState = FederationFinality.agreeForFederationState(
       replicas, view = 0, stateDigest = differentState.digest, epoch = 1L,
@@ -131,7 +131,7 @@ class FederationGcSuite extends munit.FunSuite:
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val federationId = Digest.of(Canon.CStr("federation-gc-test-3"))
     val state = FederationState(Digest.of(Canon.CStr("l")), Digest.of(Canon.CStr("r")),
-      Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.replicaSetDigest, epoch.digest)
+      Digest.of(Canon.CStr("a")), Digest.of(Canon.CStr("n")), manifest.digest, epoch.digest)
     val cert = FederationFinality.agreeForFederationState(
       replicas, view = 0, stateDigest = state.digest, epoch = 1L,
       previousState = Digest.of(Canon.CStr("genesis")), federationId = federationId).fold(e => fail(e), identity)
