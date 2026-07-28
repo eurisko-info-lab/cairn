@@ -67,6 +67,10 @@ selection points:
 - machine digest,
 - acceptance-constitution digest.
 
+And it now freezes one governed reconstruction policy choice:
+
+- replay max-steps profile used for promoted `G1` replay evidence.
+
 ## Conformance procedure
 
 Run these checks from repository root:

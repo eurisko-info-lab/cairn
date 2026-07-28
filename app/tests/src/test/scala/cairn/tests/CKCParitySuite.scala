@@ -79,6 +79,7 @@ class CKCParitySuite extends munit.FunSuite:
 
   private final case class PromotedFoundation(
       kernelId: String,
+      replayMaxSteps: Long,
       predecessorPackage: Digest,
       successorPackage: Digest,
       governedDelta: Digest,
@@ -96,6 +97,7 @@ class CKCParitySuite extends munit.FunSuite:
   ):
     def canon: Canon = Canon.CTag("pr34-foundation-handoff-v1", Canon.cmap(
       "kernelId" -> Canon.CStr(kernelId),
+      "replayMaxSteps" -> Canon.CInt(replayMaxSteps),
       "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
       "successorPackage" -> Canon.CStr(successorPackage.hex),
       "governedDelta" -> Canon.CStr(governedDelta.hex),
@@ -250,10 +252,12 @@ class CKCParitySuite extends munit.FunSuite:
       CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
     val resolveG1 = CKC.derive(scalaConstitution, scalaBudget,
       CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG1))
-    val replayG1 = CKC.derive(scalaConstitution, scalaBudget,
+    val replayBudget = CKC.Budget(maxSteps = scalaBudget.maxSteps)
+    val replayG1 = CKC.derive(scalaConstitution, replayBudget,
       CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState))
     PromotedFoundation(
       kernelId = scalaConstitution.kernelId,
+      replayMaxSteps = replayBudget.maxSteps,
       predecessorPackage = replayFixture.resolveDigestG0,
       successorPackage = replayFixture.resolveDigestG1,
       governedDelta = replayFixture.governedDeltaG0ToG1,
@@ -555,8 +559,9 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "07d898b146f64a0ab1081b02b85e3ff127756dfa234ed6fb363e88feac0155d0"
+    val expectedFoundationDigest = "a85d853cae4c5c95621811bf8c2d0cf8e4694a360b7aa5a9eef25fe584026532"
     assertEquals(a.kernelId, b.kernelId)
+    assertEquals(a.replayMaxSteps, b.replayMaxSteps)
     assertEquals(a.predecessorPackage, b.predecessorPackage)
     assertEquals(a.successorPackage, b.successorPackage)
     assertEquals(a.governedDelta, b.governedDelta)
@@ -589,7 +594,8 @@ class CKCParitySuite extends munit.FunSuite:
     val (rustReplayKind, rustReplayEvidence) =
       rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString,
         "--federation-id", replayFixture.federationId.hex,
-        "--genesis-state", replayFixture.genesisState.hex))
+        "--genesis-state", replayFixture.genesisState.hex,
+        "--max-steps", promoted.replayMaxSteps.toString))
 
     assertEquals(rustResolveG1Kind, "valid")
     assertEquals(rustReplayKind, "valid")
