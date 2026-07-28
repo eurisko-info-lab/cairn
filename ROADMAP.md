@@ -300,6 +300,12 @@ canonical bytes rather than comparing recorded outcome digests, producing its
 own `VerifiedFederation`. This is also where PR29's conformance evidence
 becomes real independent execution rather than recorded matching digests.
 
+Implementation has begun under `verifier/` as an independent Rust crate with
+canonical decode, CAS digest checks, replica-set seal verification,
+certificate/proposal binding verification, and ledger-anchored federation
+history replay verification; deeper full-runtime semantic replay extends from
+that foundation.
+
 #### PR35 — Retention constitutions and semantic archives
 
 PR32 preserves a thin transition/state metadata spine forever while letting

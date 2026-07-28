@@ -17,6 +17,21 @@ CI runs on JDK 17 and 21. It also checks the standalone jar, distribution smoke,
 multi-host replica ceremony, golden digests, MVP/MAX transcripts, and language
 source synchronization.
 
+## Rust verifier (PR34 foundation)
+
+The independent verifier lives in [verifier/README.md](../verifier/README.md).
+Build and run it with Cargo:
+
+```bash
+cd verifier
+cargo check
+cargo run -- --help
+```
+
+Current commands verify federation certificate/proposal binding and replay
+ledger-anchored federation transition history directly from on-disk `Node`
+state (`chain` + `objects/`).
+
 ## Where code belongs
 
 | Change | Primary location |
