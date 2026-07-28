@@ -183,5 +183,7 @@ Required contents:
       pair used by Rust/Lean CLI parity checks.
 - [x] Current parity fixture rebuild is deterministic within-suite (`G0`,
       `G1`, federation, genesis), enabling repeatable staircase gating.
+- [x] Fixture identity key material is now generated deterministically by name
+      in `CKCParitySuite`, reducing cross-run drift in successor-world scaffolds.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.
