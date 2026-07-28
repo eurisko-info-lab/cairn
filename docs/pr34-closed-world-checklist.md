@@ -186,5 +186,7 @@ Required contents:
 - [x] Fixture identity key material is pinned as explicit encoded bytes in
       `CKCParitySuite` (not provider-generated), giving cross-environment
       reproducibility for `G0`/`G1` fixture derivation.
+- [x] Fixture outputs (`federationId`, `genesisState`, `G0`, `G1`) are pinned
+      to explicit golden digests in `CKCParitySuite` and fail closed on drift.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.

@@ -420,10 +420,18 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 staircase fixture digests are reproducible"):
     val a = buildFixture()
     val b = buildFixture()
+    val expectedFederationId = "4e9330155c00de9d5122866d30002185726acc4a64aa28953bb6d47f53afdd96"
+    val expectedGenesisState = "2572d018e52b0027127b2299fece3bb58390d450f982e8647e604819479dfb28"
+    val expectedResolveG0 = "81b66603400140329bd60ad0f8e3d3b815b24068021e0118d1bda3fe8d1c3581"
+    val expectedResolveG1 = "6707bb0a84b82cc04f088faecb297435d10d5aff9226c7aff6a27c7de154de5e"
     assertEquals(a.federationId, b.federationId)
     assertEquals(a.genesisState, b.genesisState)
     assertEquals(a.resolveDigestG0, b.resolveDigestG0)
     assertEquals(a.resolveDigestG1, b.resolveDigestG1)
+    assertEquals(a.federationId.hex, expectedFederationId)
+    assertEquals(a.genesisState.hex, expectedGenesisState)
+    assertEquals(a.resolveDigestG0.hex, expectedResolveG0)
+    assertEquals(a.resolveDigestG1.hex, expectedResolveG1)
 
   test("PR34 fixture uses pinned key material"):
     val authorityAgain = pinnedKeypair(
