@@ -215,3 +215,6 @@ Required contents:
 - [x] Foundation handoff (`Meaning_n -> Foundation_{n+1}`) now has a first
       concrete promoted step artifact set in `CKCParitySuite` with a pinned
       canonical handoff digest.
+- [x] Promoted handoff slab now directly drives staircase successor validation
+      in `CKCParitySuite` (Scala staircase + Rust CLI checks consume promoted
+      predecessor/successor/delta fields via execution context).

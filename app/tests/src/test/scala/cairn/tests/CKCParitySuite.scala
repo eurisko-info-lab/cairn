@@ -712,3 +712,50 @@ class CKCParitySuite extends munit.FunSuite:
       "--manifest", promoted.governedDeltaManifestDigest.hex,
     ))
     assertEquals(rustKind, "valid")
+
+  test("PR34 promoted slab drives staircase successor validation"):
+    assume(cargoAvailable, "cargo not on PATH")
+
+    val exec = buildPromotedFoundationExecutionContext()
+    val promoted = exec.promoted
+
+    val node = Node(exec.nodeRoot, EffectContexts.forLedger())
+    val verified = FederationHistory
+      .auditPublishedTransition(node, node.cas, promoted.governedDelta, promoted.federationId)
+      .fold(e => fail(e), identity)
+
+    assertEquals(verified.transition.before, promoted.predecessorPackage)
+    assertEquals(verified.transition.after, promoted.successorPackage)
+    assertEquals(verified.transition.finality, Some(promoted.governedDeltaFinalityCertDigest))
+
+    val g0Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
+      graphPackage = promoted.predecessorPackage,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(promoted.predecessorPackage),
+      evidence = Some(promoted.resolveEvidenceG0),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
+      graphPackage = promoted.successorPackage,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(promoted.successorPackage),
+      evidence = Some(promoted.resolveEvidenceG1),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = promoted.predecessorPackage,
+      successorPackage = promoted.successorPackage,
+      upgradeDelta = promoted.governedDelta,
+    )
+
+    assert(Pr34Staircase.validateTwoStep(g0Env, g1Env, link).isRight)
+
+    val (rustStaircaseKind, _) = rust(Seq(
+      "staircase-check",
+      "--g0", promoted.predecessorPackage.hex,
+      "--g1", promoted.successorPackage.hex,
+      "--delta", promoted.governedDelta.hex,
+    ))
+    assertEquals(rustStaircaseKind, "valid")
