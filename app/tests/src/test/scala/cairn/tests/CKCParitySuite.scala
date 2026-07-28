@@ -217,6 +217,7 @@ class CKCParitySuite extends munit.FunSuite:
 
     val validResolveG1 = scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG1))
     assertEquals(classifyScala(validResolveG1), "valid")
+    assertNotEquals(replayFixture.resolveDigestG0, replayFixture.resolveDigestG1)
     val (rustResolveG1Kind, rustResolveG1Evidence) = rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigestG1.hex))
     val (leanResolveG1Kind, leanResolveG1Evidence) = lean(Seq("resolve", replayFixture.casRoot.toString, replayFixture.resolveDigestG1.hex))
     assertEquals(rustResolveG1Kind, "valid")
