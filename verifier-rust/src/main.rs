@@ -3,6 +3,7 @@ mod cas;
 mod ckc;
 mod digest;
 mod model;
+mod pr34;
 mod verify;
 
 use anyhow::Result;
