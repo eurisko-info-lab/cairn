@@ -73,3 +73,58 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
       ),
     ))
     assert(Pr34VerdictEnvelope.fromCanon(bad).isLeft)
+
+  test("interop maps CKC valid replay into verdict envelope"):
+    val constitution = CKC.KernelConstitution("ckc-v0")
+    val graphPackage = dig("graph-package")
+    val replay = CKC.Value.ReplayedState(CKC.HistoryReport(
+      verifiedTransitions = 2,
+      finalState = dig("final-state"),
+      finalEpoch = 2L,
+    ))
+    val result = CKC.KernelResult.Valid(replay, dig("proof-evidence"))
+    val env = Pr34EnvelopeInterop.fromCkc(
+      constitution,
+      graphPackage,
+      result,
+      Pr34ResourceUse(steps = 10, bytesRead = 500, wallMicros = 1000),
+    )
+
+    assertEquals(env.verdictClass, Pr34VerdictClass.Valid)
+    assertEquals(env.state, Some(dig("final-state")))
+    assertEquals(env.evidence, Some(dig("proof-evidence")))
+    assertEquals(env.graphPackage, graphPackage)
+
+  test("interop maps CKC non-valid verdict classes"):
+    val constitution = CKC.KernelConstitution("ckc-v0")
+    val graphPackage = dig("graph-package")
+
+    val invalidEnv = Pr34EnvelopeInterop.fromCkc(
+      constitution,
+      graphPackage,
+      CKC.KernelResult.Invalid("boom"),
+      Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    assertEquals(invalidEnv.verdictClass, Pr34VerdictClass.Invalid)
+    assertEquals(invalidEnv.state, None)
+    assertEquals(invalidEnv.evidence, None)
+
+    val missingEnv = Pr34EnvelopeInterop.fromCkc(
+      constitution,
+      graphPackage,
+      CKC.KernelResult.Missing(List(dig("x"))),
+      Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    assertEquals(missingEnv.verdictClass, Pr34VerdictClass.Missing)
+    assertEquals(missingEnv.state, None)
+    assertEquals(missingEnv.evidence, None)
+
+    val exhaustedEnv = Pr34EnvelopeInterop.fromCkc(
+      constitution,
+      graphPackage,
+      CKC.KernelResult.Exhausted("max_steps"),
+      Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    assertEquals(exhaustedEnv.verdictClass, Pr34VerdictClass.Exhausted)
+    assertEquals(exhaustedEnv.state, None)
+    assertEquals(exhaustedEnv.evidence, None)

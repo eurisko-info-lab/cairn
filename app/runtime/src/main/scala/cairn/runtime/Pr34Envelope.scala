@@ -134,3 +134,40 @@ object Pr34VerdictEnvelope:
           resourceUse = resourceUse,
         )
       case _ => Left("expected pr34-verdict-envelope-v1 body")
+
+object Pr34EnvelopeInterop:
+  private def verdictClassOf(result: CKC.KernelResult): Pr34VerdictClass =
+    result match
+      case CKC.KernelResult.Valid(_, _) => Pr34VerdictClass.Valid
+      case CKC.KernelResult.Invalid(_) => Pr34VerdictClass.Invalid
+      case CKC.KernelResult.Missing(_) => Pr34VerdictClass.Missing
+      case CKC.KernelResult.Exhausted(_) => Pr34VerdictClass.Exhausted
+
+  private def stateOf(result: CKC.KernelResult): Option[Digest] =
+    result match
+      case CKC.KernelResult.Valid(CKC.Value.ReplayedState(report), _) => Some(report.finalState)
+      case _ => None
+
+  private def evidenceOf(result: CKC.KernelResult): Option[Digest] =
+    result match
+      case CKC.KernelResult.Valid(_, evidence) => Some(evidence)
+      case _ => None
+
+  /** Bridge current CKC output into the canonical PR34 verdict envelope.
+    *
+    * `graphPackage` must be the digest of `Pr34GraphPackage.canon`.
+    */
+  def fromCkc(
+      constitution: CKC.KernelConstitution,
+      graphPackage: Digest,
+      result: CKC.KernelResult,
+      resourceUse: Pr34ResourceUse,
+  ): Pr34VerdictEnvelope =
+    Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr(constitution.kernelId)),
+      graphPackage = graphPackage,
+      verdictClass = verdictClassOf(result),
+      state = stateOf(result),
+      evidence = evidenceOf(result),
+      resourceUse = resourceUse,
+    )
