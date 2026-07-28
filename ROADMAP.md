@@ -94,6 +94,40 @@ remaining gaps.
 | PR37 | Cairn 1.0 protocol and security freeze | ⬜ |
 | PR38 | Fidelity and computational depth | ⬜ |
 
+### Staircase induction target after PR34
+
+The long-run objective is not one isolated summit artifact. It is the first
+load-bearing stair: one completed semantic world that can serve as the
+constituted foundation for building its successor.
+
+In shorthand:
+
+- `Sigma_n ; K_n |- G_n => S_n`
+- `S_n` is then promoted into the premises for constructing `G_{n+1}` under
+  `K_{n+1}`.
+- The transition must be governed and replayable, not circular self-assertion:
+  `K_n |- Upgrade(K_n, delta_n) => K_{n+1}`.
+
+Operationally this means each successful step must do both:
+
+1. independently reconstruct the current world (`G_n => S_n`), and
+2. produce and validate a successor (`G_{n+1} => S_{n+1}`) whose artifacts can
+   become the next foundation.
+
+The recurring circuit is:
+
+- `Package_n -> Change_n -> Accept_n -> Federate_n -> Archive_n -> Reconstruct_n -> Foundation_{n+1}`
+
+After PR34's first load-bearing closure, follow this repeating discipline:
+
+1. Freeze the current step.
+2. Re-express one remaining trusted host choice as constituted artifacts.
+3. Define/extend the change language for that choice.
+4. Construct and finalize the successor.
+5. Reconstruct the successor independently (Scala + Rust; Lean where applicable).
+6. Promote the successor as the next foundation.
+7. Remove the corresponding obsolete scaffolding from the prior layer.
+
 #### PR26 — Runtime constitution closure
 
 Introduce one digest-bound runtime selection:

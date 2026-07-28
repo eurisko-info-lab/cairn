@@ -14,6 +14,8 @@ PR34 closes when all are true:
    package to reconstruction.
 3. one validated successor world produced from a constituted change of that
       first world and independently reconstructed to the same result.
+4. the reconstructed successor world is promoted as the constituted
+      foundation for constructing the next world.
 
 This does not require uniqueness among all conceivable valid histories.
 Authority comes from finality selection plus replay determinism.
@@ -33,6 +35,9 @@ Canonical wire schema for the current scaffold:
 4. Staircase successor closure
       - `G0` reconstructs to `S0`, a constituted change yields `G1`, and `G1`
         reconstructs independently to `S1` with matching canonical verdicts.
+5. Inductive foundation handoff
+                  - `Meaning_n` is not just replayed; it is promoted to
+                        `Foundation_{n+1}` with explicit compatibility evidence.
 
 ## Phase checklist (A-G)
 
@@ -98,11 +103,21 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 ### H. Staircase successor closure
 
-- [~] Define one constituted upgrade/change from the first minimal world
+- [x] Define one constituted upgrade/change from the first minimal world
       (`delta0 : G0 -> G1`) under accepted/finalized governance.
-- [~] Require both Scala and Rust to reconstruct `G1` to the same canonical
+- [x] Require both Scala and Rust to reconstruct `G1` to the same canonical
       verdict/state as a second-generation gate.
 - [ ] Record `G0 -> G1` as a permanent conformance fixture and tutorial step.
+
+### I. Foundation handoff discipline
+
+- [ ] Freeze `Cairn_n` step artifacts and canonical verdicts before upgrades.
+- [ ] Represent remaining trusted host choices as constituted artifacts.
+- [ ] Define/extend change languages for those newly constituted choices.
+- [ ] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
+- [ ] Reconstruct `G_{n+1}` independently in Scala and Rust.
+- [ ] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
+- [ ] Remove obsolete scaffolding from `Cairn_n` after promotion.
 
 ## Minimal world fixture
 
@@ -144,6 +159,8 @@ Required contents:
 14. Minimal world fixture publication and golden integration.
 15. CI gates for full corpus.
 16. Successor-world gate (`G0 -> G1`) in parity corpus and release checks.
+17. Promote first load-bearing step into documented `Foundation_{n+1}` inputs.
+18. Remove one trusted host decision by re-expressing it as governed artifacts.
 
 ## Non-goals until closure
 
@@ -192,3 +209,7 @@ Required contents:
       also pinned to golden digests in `CKCParitySuite`.
 - [x] Successor-world fixture (`G1`) is validated as an independent
       reconstruction gate with governed finalized delta.
+- [~] Successor-world tutorial/conformance publication still to be written as
+      a permanent `G0 -> G1` fixture walkthrough.
+- [ ] Foundation handoff (`Meaning_n -> Foundation_{n+1}`) is specified here,
+      but still needs first concrete promoted step artifact set.
