@@ -145,6 +145,10 @@ Required contents:
       round-trip tests (`Pr34GraphPackage`, `Pr34VerdictEnvelope`).
 - [x] CKC-to-PR34 verdict interop mapping exists for all verdict classes,
       including replay-state projection and evidence threading.
+- [x] Rust scaffold codecs for package/verdict envelopes are present and
+      enforced by `cargo test` in CI.
+- [x] Lean scaffold schema module for package/verdict envelopes compiles via
+      `lake build` and is imported in `VerifierLean`.
 - [~] Loader authority contraction in progress; continue pushing semantics into
       derivation boundary with typed missing/exhausted coverage.
 - [ ] Full minimal-world fixture still to be assembled and frozen.
