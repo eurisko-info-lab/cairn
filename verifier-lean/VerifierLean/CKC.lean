@@ -702,6 +702,31 @@ def verifyCertSignaturesIO (cert : CertView) (manifest : ManifestView) : IO (Exc
                     pure ()
           pure (.ok ())
 
+def checkCommandAvailableIO (cmd : String) (args : Array String := #[]) : IO (Except String Unit) := do
+  try
+    let out ← IO.Process.output {
+      cmd := cmd
+      args := args
+      stdin := .null
+      stderr := .piped
+      stdout := .piped
+    }
+    if out.exitCode == 0 then
+      pure (.ok ())
+    else
+      pure (.error s!"runtime dependency '{cmd}' is unavailable (exit code {out.exitCode})")
+  catch e =>
+    pure (.error s!"runtime dependency '{cmd}' is unavailable: {e.toString}")
+
+def verifyRuntimeDependenciesIO : IO (Except String Unit) := do
+  match ← checkCommandAvailableIO "sha256sum" #[] with
+  | .error e =>
+      pure (.error e)
+  | .ok _ =>
+      match ← checkCommandAvailableIO "openssl" #["version"] with
+      | .error e => pure (.error e)
+      | .ok _ => pure (.ok ())
+
 inductive ChainTx where
   | publishArtifact (kind : String) (valueHash : Digest)
   | recordCertificate (cert : Digest) (method : String)
@@ -901,6 +926,11 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
               .other a.kind
           pure (mkValid query (.artifact { digest := digest, kind := k }))
   | .verifyCertBinding casRoot cert proposal manifest =>
+      match ← verifyRuntimeDependenciesIO with
+      | .error e =>
+        return KernelResult.invalid e
+      | .ok _ => pure ()
+
       let root := System.FilePath.mk casRoot
       let mut missing : List Digest := []
 
@@ -976,6 +1006,11 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
         | _, _, .error e =>
             pure (KernelResult.invalid e)
   | .replayHistory nodeRoot federationId genesisState =>
+      match ← verifyRuntimeDependenciesIO with
+      | .error e =>
+        return KernelResult.invalid e
+      | .ok _ => pure ()
+
       match ← readChainDigests nodeRoot with
       | .error e =>
           pure (classifyError e)

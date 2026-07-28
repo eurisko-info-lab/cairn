@@ -55,5 +55,7 @@ lake exe verifier-lean replay-history /path/to/node-root <federation-id> <genesi
   threshold on certificate commits. It also checks manifest digest binding
   (`cert.replicaSet` must equal SHA-256 of the manifest body encoding),
   verifies manifest seals, and verifies per-commit BFT Ed25519 seals.
+- Runtime preflight: verification commands fail fast with clear diagnostics if
+  required host tools are unavailable (`sha256sum`, `openssl`).
 - Current limitation: signature checks currently shell out to `openssl`
   instead of using an in-process Lean crypto implementation.
