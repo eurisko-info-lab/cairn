@@ -1032,6 +1032,29 @@ def ofKernelResult : KernelResult → Verdict Value
 def hasArtifact (Sigma : Context) (d : Digest) : Bool :=
   (Sigma.artifacts.get? d).isSome
 
+def missingApplyChange (Sigma : Context) (L : LanguageRef) (stateDigest changeDigest : Digest) : List Digest :=
+  [L.digest, L.machine.digest, stateDigest, changeDigest]
+    |>.filter (fun d => !(hasArtifact Sigma d))
+    |>.eraseDups
+
+def missingAccept
+    (Sigma : Context)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest) : List Digest :=
+  [rho.digest, authority, claim, proof]
+    |>.filter (fun d => !(hasArtifact Sigma d))
+    |>.eraseDups
+
+def freeChangeWitnessDigest (K : KernelConstitution) (L : LanguageRef) (deltaDigest : Digest) : Digest :=
+  s!"free-change-witness({K.kernelId},{L.digest},{deltaDigest})"
+
+def missingFreeChange (Sigma : Context) (K : KernelConstitution) (L : LanguageRef) : List Digest :=
+  let w := FreeChange K L
+  let witnessDigest := freeChangeWitnessDigest K L w.result.digest
+  [L.digest, L.machine.digest, w.result.digest, witnessDigest]
+    |>.filter (fun d => !(hasArtifact Sigma d))
+    |>.eraseDups
+
 def hasArtifactKind (Sigma : Context) (d : Digest) (expected : String) : Bool :=
   match Sigma.artifacts.get? d with
   | some a =>
@@ -1089,8 +1112,7 @@ def deriveApplyChange
     (L : LanguageRef)
     (stateDigest : Digest)
     (changeDigest : Digest) : Verdict (Digest × TransitionEvidence) :=
-  let needed := [L.digest, L.machine.digest, stateDigest, changeDigest]
-  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  let missing := missingApplyChange Sigma L stateDigest changeDigest
   if !missing.isEmpty then
     .missing missing
   else if B.maxSteps == 0 then
@@ -1130,9 +1152,8 @@ def deriveFreeChangeLanguage
     (B : Budget)
     (L : LanguageRef) : Verdict (Digest × FreeChangeEvidence) :=
   let w := FreeChange K L
-  let witnessDigest := s!"free-change-witness({K.kernelId},{L.digest},{w.result.digest})"
-  let needed := [L.digest, L.machine.digest, w.result.digest, witnessDigest]
-  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  let witnessDigest := freeChangeWitnessDigest K L w.result.digest
+  let missing := missingFreeChange Sigma K L
   if !missing.isEmpty then
     .missing missing
   else if B.maxSteps == 0 then
@@ -1203,14 +1224,24 @@ theorem applyChange_semantic_determinism
   cases h
   exact ⟨rfl, rfl, rfl⟩
 
+theorem applyChange_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef)
+    (s d : Digest)
+  (hMissing : missingApplyChange Sigma L s d = []) :
+    deriveApplyChange Sigma K { maxSteps := 0 } L s d =
+      .exhausted "max_steps 0: applyChange unavailable" := by
+  unfold deriveApplyChange
+  simp [hMissing]
+
 def deriveAccept
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
     (rho : AcceptanceConstitutionRef)
     (authority claim proof : Digest) : Verdict (Digest × AcceptanceEvidence) :=
-  let needed := [rho.digest, authority, claim, proof]
-  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  let missing := missingAccept Sigma rho authority claim proof
   if !missing.isEmpty then
     .missing missing
   else if B.maxSteps == 0 then
@@ -1254,6 +1285,27 @@ theorem accept_semantic_determinism
     h1.symm.trans h2
   cases h
   exact ⟨rfl, rfl, rfl⟩
+
+theorem accept_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest)
+  (hMissing : missingAccept Sigma rho authority claim proof = []) :
+    deriveAccept Sigma K { maxSteps := 0 } rho authority claim proof =
+      .exhausted "max_steps 0: accept unavailable" := by
+  unfold deriveAccept
+  simp [hMissing]
+
+theorem freeChange_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef)
+    (hMissing : missingFreeChange Sigma K L = []) :
+    deriveFreeChangeLanguage Sigma K { maxSteps := 0 } L =
+      .exhausted "max_steps 0: freeChange unavailable" := by
+  unfold deriveFreeChangeLanguage
+  simp [hMissing]
 
 /-- Unified executable CKC judgment facade over all specialized judgment forms. -/
 def deriveJudgment
@@ -1404,6 +1456,35 @@ theorem deriveJudgment_accept_semantic_determinism
     h1.symm.trans h2
   cases h
   exact ⟨rfl, rfl⟩
+
+theorem deriveJudgment_apply_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef)
+    (s d : Digest)
+    (hMissing : missingApplyChange Sigma L s d = []) :
+    deriveJudgment Sigma K { maxSteps := 0 } (.applyChange L s d) =
+      .exhausted "max_steps 0: applyChange unavailable" := by
+  simp [deriveJudgment, deriveApplyChange, hMissing]
+
+theorem deriveJudgment_accept_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest)
+    (hMissing : missingAccept Sigma rho authority claim proof = []) :
+    deriveJudgment Sigma K { maxSteps := 0 } (.accept rho authority claim proof) =
+      .exhausted "max_steps 0: accept unavailable" := by
+  simp [deriveJudgment, deriveAccept, hMissing]
+
+theorem deriveJudgment_freeChange_exhausted_when_zero_budget
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef)
+    (hMissing : missingFreeChange Sigma K L = []) :
+    deriveJudgment Sigma K { maxSteps := 0 } (.freeChangeLanguage L) =
+      .exhausted "max_steps 0: freeChange unavailable" := by
+  simp [deriveJudgment, deriveFreeChangeLanguage, hMissing]
 
 theorem judgment_result_deterministic
     (Sigma : Context)
