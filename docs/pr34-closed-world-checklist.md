@@ -16,6 +16,9 @@ PR34 closes when both are true:
 This does not require uniqueness among all conceivable valid histories.
 Authority comes from finality selection plus replay determinism.
 
+Canonical wire schema for the current scaffold:
+[docs/pr34-envelope-schema.md](pr34-envelope-schema.md).
+
 ## Core obligations
 
 1. Replay determinism on fixed finalized history

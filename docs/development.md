@@ -40,6 +40,8 @@ proof and acceptance evaluation, native repository replay, proposal/certificate
 verification, federation history reconstruction, and all four verdict classes.
 The execution checklist and commit-slice plan are tracked in
 [docs/pr34-closed-world-checklist.md](pr34-closed-world-checklist.md).
+The canonical wire schema for the current package/verdict scaffold is in
+[docs/pr34-envelope-schema.md](pr34-envelope-schema.md).
 
 ## Lean verifier (PR34 companion)
 
