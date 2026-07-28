@@ -145,6 +145,12 @@ class CKCParitySuite extends munit.FunSuite:
     ))
     def digest: Digest = Digest.of(canon)
 
+  private final case class PromotedFoundationExecutionContext(
+      casRoot: Path,
+      nodeRoot: Path,
+      promoted: PromotedFoundation,
+  )
+
   private def buildFixture(): Fixture =
     val dir = Files.createTempDirectory("cairn-ckc-parity")
     val cas = DiskCas(dir.resolve("cas"))
@@ -284,8 +290,7 @@ class CKCParitySuite extends munit.FunSuite:
       cert2 = cert2,
     )
 
-  private def buildPromotedFoundation(): PromotedFoundation =
-    val replayFixture = buildFixture()
+  private def promotedFoundationFromFixture(replayFixture: Fixture): PromotedFoundation =
     val certFixture = buildCertFixture()
     val resolveG0 = CKC.derive(scalaConstitution, scalaBudget,
       CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
@@ -326,6 +331,15 @@ class CKCParitySuite extends munit.FunSuite:
       resolveEvidenceG1 = validEvidence(resolveG1),
       replayEvidenceG1 = validEvidence(replayG1),
     )
+
+  private def buildPromotedFoundation(): PromotedFoundation =
+    val replayFixture = buildFixture()
+    promotedFoundationFromFixture(replayFixture)
+
+  private def buildPromotedFoundationExecutionContext(): PromotedFoundationExecutionContext =
+    val replayFixture = buildFixture()
+    val promoted = promotedFoundationFromFixture(replayFixture)
+    PromotedFoundationExecutionContext(replayFixture.casRoot, replayFixture.nodeRoot, promoted)
 
   private def runCapture(cmd: Seq[String], cwd: Path): (Int, String) =
     val out = new StringBuilder
@@ -647,35 +661,43 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 promoted foundation reconstructs G1 independently in Scala and Rust"):
     assume(cargoAvailable, "cargo not on PATH")
 
-    val replayFixture = buildFixture()
-    val promoted = buildPromotedFoundation()
+    val exec = buildPromotedFoundationExecutionContext()
+    val promoted = exec.promoted
 
-    assertEquals(promoted.successorPackage, replayFixture.resolveDigestG1)
-    assertEquals(promoted.federationId, replayFixture.federationId)
-    assertEquals(promoted.genesisState, replayFixture.genesisState)
+    assertEquals(promoted.successorPackage, promoted.finalStateDigest)
 
     val (rustResolveG1Kind, rustResolveG1Evidence) =
-      rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigestG1.hex))
+      rust(Seq("resolve", "--cas", exec.casRoot.toString, "--digest", promoted.successorPackage.hex))
     val (rustReplayKind, rustReplayEvidence) =
-      rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString,
-        "--federation-id", replayFixture.federationId.hex,
-        "--genesis-state", replayFixture.genesisState.hex,
+      rust(Seq("verify-history", "--node-root", exec.nodeRoot.toString,
+        "--federation-id", promoted.federationId.hex,
+        "--genesis-state", promoted.genesisState.hex,
         "--max-steps", promoted.replayMaxSteps.toString))
+
+    val scalaReplay = CKC.derive(
+      scalaConstitution,
+      CKC.Budget(maxSteps = promoted.replayMaxSteps),
+      CKC.Query.ReplayHistory(exec.nodeRoot.toString, promoted.federationId, promoted.genesisState),
+    )
+    val report = replayReport(scalaReplay)
 
     assertEquals(rustResolveG1Kind, "valid")
     assertEquals(rustReplayKind, "valid")
     assertEquals(rustResolveG1Evidence, Some(promoted.resolveEvidenceG1.hex))
     assertEquals(rustReplayEvidence, Some(promoted.replayEvidenceG1.hex))
+    assertEquals(report.finalState, promoted.finalStateDigest)
+    assertEquals(report.finalEpoch, promoted.finalEpoch)
+    assertEquals(report.verifiedTransitions, promoted.verifiedTransitions)
 
   test("PR34 governed delta finalization binds in Scala and Rust"):
     assume(cargoAvailable, "cargo not on PATH")
 
-    val replayFixture = buildFixture()
-    val promoted = buildPromotedFoundation()
+    val exec = buildPromotedFoundationExecutionContext()
+    val promoted = exec.promoted
 
     val scalaCert = CKC.derive(scalaConstitution, scalaBudget,
       CKC.Query.VerifyCertBinding(
-        replayFixture.casRoot.toString,
+        exec.casRoot.toString,
         promoted.governedDeltaFinalityCertDigest,
         promoted.governedDeltaProposalDigest,
         promoted.governedDeltaManifestDigest,
@@ -684,7 +706,7 @@ class CKCParitySuite extends munit.FunSuite:
 
     val (rustKind, _) = rust(Seq(
       "verify-cert",
-      "--cas", replayFixture.casRoot.toString,
+      "--cas", exec.casRoot.toString,
       "--cert", promoted.governedDeltaFinalityCertDigest.hex,
       "--proposal", promoted.governedDeltaProposalDigest.hex,
       "--manifest", promoted.governedDeltaManifestDigest.hex,
