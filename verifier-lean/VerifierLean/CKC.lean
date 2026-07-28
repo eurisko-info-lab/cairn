@@ -25,6 +25,7 @@ structure CertificateProjection where
   deriving Repr, BEq, DecidableEq
 
 structure Transition where
+  transitionDigest : Digest
   before : Digest
   after : Digest
   cert : Digest
@@ -152,6 +153,14 @@ def empty : Context where
   history := []
 
 end Context
+
+structure ReplayBundle where
+  closure : List Digest
+  context : Context
+  history : List Transition
+
+def addUniqueDigest (xs : List Digest) (d : Digest) : List Digest :=
+  if xs.contains d then xs else xs.concat d
 
 def isHexChar (c : Char) : Bool :=
   c.isDigit || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')
@@ -1554,7 +1563,7 @@ def contextForVerifyCert
     history := []
   }
 
-def contextForReplayHistory (transitions : List Transition) : Context :=
+def replayBundleForHistory (transitions : List Transition) : ReplayBundle :=
   let (artifacts, certs) :=
     transitions.foldl
       (fun acc t =>
@@ -1572,16 +1581,33 @@ def contextForReplayHistory (transitions : List Transition) : Context :=
           }
         (as', cs'))
       ((∅ : Std.HashMap Digest Artifact), (∅ : Std.HashMap Digest CertificateProjection))
+  let closure :=
+    transitions.foldl
+      (fun acc t =>
+        addUniqueDigest
+          (addUniqueDigest
+            (addUniqueDigest
+              (addUniqueDigest
+                (addUniqueDigest (addUniqueDigest acc t.transitionDigest) t.before)
+                t.after)
+              t.cert)
+            t.proposal)
+          t.manifest)
+      []
   {
-    artifacts := artifacts
-    certs := certs
+    closure := closure
+    context := {
+      artifacts := artifacts
+      certs := certs
+      history := transitions
+    }
     history := transitions
   }
 
-def loadReplayHistoryContextIO
+def loadReplayHistoryBundleIO
     (nodeRoot : String)
     (federationId : Digest)
-    (genesisState : Digest) : IO (Except KernelResult Context) := do
+    (genesisState : Digest) : IO (Except KernelResult ReplayBundle) := do
   match ← readChainDigests nodeRoot with
   | .error e =>
       pure (.error (classifyError e))
@@ -1758,6 +1784,7 @@ def loadReplayHistoryContextIO
             expectedBefore := transition.after
             lastEpoch := epochNat
             transitions := transitions.concat {
+              transitionDigest := transitionDigest
               before := transition.before
               after := transition.after
               cert := certDigest
@@ -1767,7 +1794,7 @@ def loadReplayHistoryContextIO
               epoch := epochNat
             }
 
-      return .ok (contextForReplayHistory transitions)
+      return .ok (replayBundleForHistory transitions)
 
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
   match query with
@@ -1868,9 +1895,9 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
       | .error e =>
         return KernelResult.invalid e
       | .ok _ => pure ()
-      match ← loadReplayHistoryContextIO nodeRoot federationId genesisState with
+      match ← loadReplayHistoryBundleIO nodeRoot federationId genesisState with
       | .error r => pure r
-      | .ok ctx => pure (derive ctx constitution budget (toSemanticQuery query))
+      | .ok bundle => pure (derive bundle.context constitution budget (toSemanticQuery query))
 
 def KernelResult.isValid : KernelResult → Bool
   | .valid _ _ => true
@@ -1894,6 +1921,7 @@ def demoContext : Context :=
       epoch := 1
     })
   let history := [{
+    transitionDigest := "transition-1"
     before := "genesis"
     after := afterDigest
     cert := certDigest

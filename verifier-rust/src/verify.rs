@@ -21,6 +21,7 @@ pub struct HistoryReport {
 
 #[derive(Clone, Debug)]
 pub struct VerifiedTransition {
+    pub transition: Digest,
     pub before: Digest,
     pub after: Digest,
     pub cert: Digest,
@@ -335,6 +336,7 @@ pub fn build_verified_history_context_with_limit(
         expected_before = transition.after;
         let _ = as_i64_usize(cert.epoch, "epoch")?;
         verified.push(VerifiedTransition {
+            transition: *td,
             before: transition.before,
             after: transition.after,
             cert: cert_digest,

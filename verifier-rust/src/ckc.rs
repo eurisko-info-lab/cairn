@@ -73,6 +73,7 @@ pub struct CertificateProjection {
 
 #[derive(Clone, Debug)]
 pub struct Transition {
+    pub transition: Digest,
     pub before: Digest,
     pub after: Digest,
     pub cert: Digest,
@@ -207,6 +208,9 @@ fn classify_error(error: String) -> KernelResult {
 fn missing_closure_for_history(ctx: &Context) -> BTreeSet<Digest> {
     let mut missing = BTreeSet::new();
     for t in &ctx.history {
+        if !ctx.artifact_closure.contains(&t.transition) {
+            missing.insert(t.transition);
+        }
         if !ctx.certs.contains_key(&t.cert) {
             missing.insert(t.cert);
         }
@@ -365,6 +369,7 @@ fn load_context_for_verify_cert(
     let mut ctx = Context::default();
     ctx.artifact_closure.insert(proposal);
     ctx.artifact_closure.insert(manifest);
+    ctx.artifact_closure.insert(cert);
     ctx.certs.insert(
         cert,
         CertificateProjection {
@@ -390,6 +395,10 @@ fn load_context_for_replay(
 
     let mut ctx = Context::default();
     for t in loaded.transitions {
+        ctx.artifact_closure.insert(t.transition);
+        ctx.artifact_closure.insert(t.before);
+        ctx.artifact_closure.insert(t.after);
+        ctx.artifact_closure.insert(t.cert);
         ctx.artifact_closure.insert(t.proposal);
         ctx.artifact_closure.insert(t.manifest);
         ctx.certs.insert(
@@ -400,6 +409,7 @@ fn load_context_for_replay(
             },
         );
         ctx.history.push(Transition {
+            transition: t.transition,
             before: t.before,
             after: t.after,
             cert: t.cert,
