@@ -395,4 +395,72 @@ mod tests {
         };
         assert!(validate_two_step(&g0, &g1, &link).is_err());
     }
+
+    #[test]
+    fn staircase_validator_rejects_predecessor_mismatch() {
+        let g0 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k0"),
+            graph_package: d("g0"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s0")),
+            evidence: Some(d("e0")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let g1 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k1"),
+            graph_package: d("g1"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s1")),
+            evidence: Some(d("e1")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let link = Pr34SuccessorLink {
+            predecessor_package: d("other-g0"),
+            successor_package: d("g1"),
+            upgrade_delta: d("delta"),
+        };
+        assert!(validate_two_step(&g0, &g1, &link).is_err());
+    }
+
+    #[test]
+    fn staircase_validator_rejects_equal_predecessor_successor_packages() {
+        let g0 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k0"),
+            graph_package: d("g0"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s0")),
+            evidence: Some(d("e0")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let g1 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k1"),
+            graph_package: d("g0"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s1")),
+            evidence: Some(d("e1")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let link = Pr34SuccessorLink {
+            predecessor_package: d("g0"),
+            successor_package: d("g0"),
+            upgrade_delta: d("delta"),
+        };
+        assert!(validate_two_step(&g0, &g1, &link).is_err());
+    }
 }
