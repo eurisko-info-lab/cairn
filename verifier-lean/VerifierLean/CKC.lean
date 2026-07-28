@@ -155,6 +155,20 @@ def canonKind : Canon → String
   | .map _ => "map"
   | .tag _ _ => "tag"
 
+  partial def canonToStableString : Canon → String
+    | .int n => s!"I({n})"
+    | .str s => s!"S({s})"
+    | .bytes bs => s!"B({bs.size})"
+    | .list xs =>
+      let body := String.intercalate "," (xs.map canonToStableString)
+      s!"L[{body}]"
+    | .map kvs =>
+      let sorted := kvs.mergeSort (fun a b => a.fst < b.fst)
+      let body := String.intercalate "," (sorted.map (fun kv => s!"{kv.fst}:{canonToStableString kv.snd}"))
+      "M{" ++ body ++ "}"
+    | .tag tag v =>
+      s!"T({tag},{canonToStableString v})"
+
 def readU8 (bs : ByteArray) (i : Nat) : Except String (UInt8 × Nat) :=
   if _h : i < bs.size then
     .ok (bs.get! i, i + 1)
@@ -391,7 +405,7 @@ def parseCertView (a : ParsedArtifact) : Except String CertView := do
 structure ManifestView where
   authorities : List String
   seals : List String
-  deriving Repr
+  body : Canon
 
 def parseManifestView (a : ParsedArtifact) : Except String ManifestView := do
   if a.kind != "certificate" then
@@ -412,7 +426,7 @@ def parseManifestView (a : ParsedArtifact) : Except String ManifestView := do
         xs.mapM (fun row => do
           canonAsStr (← canonField row "id"))
     | _ => .error "replica-set-manifest.seals must be list"
-  pure { authorities := authorities, seals := seals }
+  pure { authorities := authorities, seals := seals, body := body }
 
 def validReplicaCount (n : Nat) : Bool :=
   n == 1 || (n >= 4 && (n - 1) % 3 == 0)
@@ -453,6 +467,41 @@ def verifyCertQuorum (cert : CertView) (manifest : ManifestView) : Except String
       .error s!"federation finality: {distinct.length} distinct commits < quorum {quorumSize n}"
     else
       pure ()
+
+def encodeCanon (c : Canon) : ByteArray :=
+  -- NOTE: stable textual fallback encoding.
+  -- Full binary-canonical byte parity can replace this once native encoder lands.
+  (canonToStableString c).toUTF8
+
+def sha256HexOfBytes (bytes : ByteArray) : IO (Except String Digest) := do
+  let tmpPath := System.FilePath.mk "/tmp" / s!"cairn-lean-hash-{bytes.size}.bin"
+  IO.FS.writeBinFile tmpPath bytes
+  let out ← IO.Process.output {
+    cmd := "sha256sum"
+    args := #[tmpPath.toString]
+    stdin := .null
+    stderr := .piped
+    stdout := .piped
+  }
+  if out.exitCode != 0 then
+    pure (.error s!"sha256sum failed: {(out.stderr.trimAscii).toString}")
+  else
+    let token := ((out.stdout.trimAscii).toString).splitOn " " |>.headD ""
+    if isDigest token then
+      pure (.ok token)
+    else
+      pure (.error s!"sha256sum output did not contain digest: {(out.stdout.trimAscii).toString}")
+
+def verifyManifestDigestBindingIO (cert : CertView) (manifest : ManifestView) : IO (Except String Unit) := do
+  let bodyBytes := encodeCanon manifest.body
+  match ← sha256HexOfBytes bodyBytes with
+  | .error e =>
+      pure (.error e)
+  | .ok computed =>
+      if cert.replicaSet == computed then
+        pure (.ok ())
+      else
+        pure (.error s!"federation finality: replicaSet {cert.replicaSet} != expected {computed}")
 
 inductive ChainTx where
   | publishArtifact (kind : String) (valueHash : Digest)
@@ -693,6 +742,10 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
               | _, .error e =>
                 pure (KernelResult.invalid e)
               | .ok _, .ok _ =>
+                match ← verifyManifestDigestBindingIO certView manifestView with
+                | .error e =>
+                  pure (KernelResult.invalid e)
+                | .ok _ =>
                 if certView.proposal != proposal then
                   pure (KernelResult.invalid s!"certificate names proposal {certView.proposal}, not {proposal}")
                 else if certView.transition != proposalView.transition then
@@ -863,7 +916,10 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                           return KernelResult.invalid e
                       | _, .error e =>
                           return KernelResult.invalid e
-                      | .ok _, .ok _ => pure ()
+                        | .ok _, .ok _ =>
+                          match ← verifyManifestDigestBindingIO certView manifestView with
+                          | .error e => return KernelResult.invalid e
+                          | .ok _ => pure ()
 
                       if certView.transition != proposalView.transition then
                         return KernelResult.invalid "certificate transition projection does not match proposal"
