@@ -6,10 +6,22 @@ import cairn.kernel.*
 import cairn.runtime.*
 import cairn.systemhandler.{BftFinality, DiskCas, FederationFinality, Keypair, Node}
 import java.nio.file.{Files, Path}
+import java.nio.charset.StandardCharsets
+import java.security.{KeyPairGenerator, MessageDigest, SecureRandom}
+import java.security.spec.NamedParameterSpec
 import scala.sys.process.{Process, ProcessLogger}
 
 class CKCParitySuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
+
+  private def deterministicKeypair(name: String): Keypair =
+    val seed = MessageDigest.getInstance("SHA-256").digest(name.getBytes(StandardCharsets.UTF_8))
+    val rng = SecureRandom.getInstance("SHA1PRNG")
+    rng.setSeed(seed)
+    val kpg = KeyPairGenerator.getInstance("Ed25519")
+    kpg.initialize(NamedParameterSpec("Ed25519"), rng)
+    val kp = kpg.generateKeyPair()
+    Keypair(name, kp.getPublic, kp.getPrivate)
 
   private val repoRoot: Path = Path.of("").toAbsolutePath.normalize
   private val rustManifest: Path = repoRoot.resolve("verifier-rust/Cargo.toml")
@@ -17,9 +29,9 @@ class CKCParitySuite extends munit.FunSuite:
 
   private val scalaConstitution = CKC.KernelConstitution()
   private val scalaBudget = CKC.Budget()
-  private val fixtureAuthority = Keypair.dev("ckc-parity-authority")
-  private val fixtureReplicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
-  private val fixtureOwner = Keypair.dev("org-a-owner-ckc")
+  private val fixtureAuthority = deterministicKeypair("ckc-parity-authority")
+  private val fixtureReplicas = List("r0", "r1", "r2", "r3").map(deterministicKeypair)
+  private val fixtureOwner = deterministicKeypair("org-a-owner-ckc")
 
   private final case class Fixture(
       casRoot: Path,
@@ -388,3 +400,9 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.genesisState, b.genesisState)
     assertEquals(a.resolveDigestG0, b.resolveDigestG0)
     assertEquals(a.resolveDigestG1, b.resolveDigestG1)
+
+  test("PR34 fixture deterministic keypair helper is stable by name"):
+    val a = deterministicKeypair("pr34-deterministic-key")
+    val b = deterministicKeypair("pr34-deterministic-key")
+    assertEquals(a.publicBytes, b.publicBytes)
+    assertEquals(a.privateBytes, b.privateBytes)
