@@ -83,6 +83,10 @@ Current scaffold uses a dedicated successor-link object:
 	- `successorPackage: string` (digest hex)
 	- `upgradeDelta: string` (digest hex)
 
+Storage wrapper:
+
+- stored as `Artifact(kind = Trace, body = canon)`
+
 Current validator shape (`validateTwoStep` / `validate_two_step` /
 `Pr34StaircaseValidateTwoStep`) checks:
 
