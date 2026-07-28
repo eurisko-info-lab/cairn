@@ -23,7 +23,8 @@ class CKCParitySuite extends munit.FunSuite:
       nodeRoot: Path,
       federationId: Digest,
       genesisState: Digest,
-      resolveDigest: Digest,
+      resolveDigestG0: Digest,
+      resolveDigestG1: Digest,
   )
 
   private final case class CertFixture(
@@ -104,8 +105,8 @@ class CKCParitySuite extends munit.FunSuite:
       cas.put(cert.artifact)
       (cert, newState, epoch)
 
-    val (cert1, state1, epoch1) = buildGeneration("{ add extra = true ; }", genesisEpoch, 1L, baseGenesisState)
-    val (cert2, _, _) = buildGeneration("{ add extra = true ; add second = false ; }", epoch1, 2L, state1)
+    val (_, state1, epoch1) = buildGeneration("{ add extra = true ; }", genesisEpoch, 1L, baseGenesisState)
+    val (_, state2, _) = buildGeneration("{ add extra = true ; add second = false ; }", epoch1, 2L, state1)
 
     val replayGenesisState =
       val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
@@ -118,7 +119,8 @@ class CKCParitySuite extends munit.FunSuite:
       nodeRoot = dir.resolve("ledger"),
       federationId = federationId,
       genesisState = replayGenesisState,
-      resolveDigest = state1.digest,
+      resolveDigestG0 = state1.digest,
+      resolveDigestG1 = state2.digest,
     )
 
   private def buildCertFixture(): CertFixture =
@@ -204,14 +206,23 @@ class CKCParitySuite extends munit.FunSuite:
     def scalaRun(query: CKC.Query, budget: CKC.Budget = scalaBudget): CKC.KernelResult =
       CKC.derive(scalaConstitution, budget, query)
 
-    val validResolve = scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigest))
-    assertEquals(classifyScala(validResolve), "valid")
-    val (rustResolveKind, rustResolveEvidence) = rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigest.hex))
-    val (leanResolveKind, leanResolveEvidence) = lean(Seq("resolve", replayFixture.casRoot.toString, replayFixture.resolveDigest.hex))
-    assertEquals(rustResolveKind, "valid")
-    assertEquals(leanResolveKind, "valid")
-    assertEquals(scalaResolve(validResolve), rustResolveEvidence)
-    assertEquals(leanResolveEvidence, scalaResolve(validResolve))
+    val validResolveG0 = scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
+    assertEquals(classifyScala(validResolveG0), "valid")
+    val (rustResolveG0Kind, rustResolveG0Evidence) = rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigestG0.hex))
+    val (leanResolveG0Kind, leanResolveG0Evidence) = lean(Seq("resolve", replayFixture.casRoot.toString, replayFixture.resolveDigestG0.hex))
+    assertEquals(rustResolveG0Kind, "valid")
+    assertEquals(leanResolveG0Kind, "valid")
+    assertEquals(scalaResolve(validResolveG0), rustResolveG0Evidence)
+    assertEquals(leanResolveG0Evidence, scalaResolve(validResolveG0))
+
+    val validResolveG1 = scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG1))
+    assertEquals(classifyScala(validResolveG1), "valid")
+    val (rustResolveG1Kind, rustResolveG1Evidence) = rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigestG1.hex))
+    val (leanResolveG1Kind, leanResolveG1Evidence) = lean(Seq("resolve", replayFixture.casRoot.toString, replayFixture.resolveDigestG1.hex))
+    assertEquals(rustResolveG1Kind, "valid")
+    assertEquals(leanResolveG1Kind, "valid")
+    assertEquals(scalaResolve(validResolveG1), rustResolveG1Evidence)
+    assertEquals(leanResolveG1Evidence, scalaResolve(validResolveG1))
 
     val missingDigest = Digest.of(Canon.CStr("ckc-parity-missing-resolve"))
     assertEquals(classifyScala(scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, missingDigest))), "missing")
