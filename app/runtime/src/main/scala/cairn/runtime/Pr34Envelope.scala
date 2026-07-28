@@ -181,3 +181,60 @@ object Pr34EnvelopeInterop:
       evidence = evidenceOf(result),
       resourceUse = resourceUse,
     )
+
+/** Minimal staircase link: one constituted upgrade from G0 to G1.
+  *
+  * This is a scaffold object for the first load-bearing successor step.
+  */
+final case class Pr34SuccessorLink(
+    predecessorPackage: Digest,
+    successorPackage: Digest,
+    upgradeDelta: Digest,
+):
+  def canon: Canon = Canon.CTag("pr34-successor-link-v1", Canon.cmap(
+    "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
+    "successorPackage" -> Canon.CStr(successorPackage.hex),
+    "upgradeDelta" -> Canon.CStr(upgradeDelta.hex),
+  ))
+
+object Pr34SuccessorLink:
+  def fromCanon(c: Canon): Either[String, Pr34SuccessorLink] =
+    c match
+      case Canon.CTag("pr34-successor-link-v1", body) =>
+        try Right(Pr34SuccessorLink(
+          predecessorPackage = Digest(body.field("predecessorPackage").asStr),
+          successorPackage = Digest(body.field("successorPackage").asStr),
+          upgradeDelta = Digest(body.field("upgradeDelta").asStr),
+        ))
+        catch case e: Exception => Left(s"invalid pr34 successor link: ${e.getMessage}")
+      case _ => Left("expected pr34-successor-link-v1 body")
+
+object Pr34Staircase:
+  /** Validate the first load-bearing stair over two independently reconstructed worlds.
+    *
+    * This checks structure only; deeper semantic checks are added in later slices.
+    */
+  def validateTwoStep(
+      g0: Pr34VerdictEnvelope,
+      g1: Pr34VerdictEnvelope,
+      link: Pr34SuccessorLink,
+  ): Either[String, Unit] =
+    if g0.verdictClass != Pr34VerdictClass.Valid then
+      Left("g0 verdict is not valid")
+    else if g1.verdictClass != Pr34VerdictClass.Valid then
+      Left("g1 verdict is not valid")
+    else if g0.graphPackage != link.predecessorPackage then
+      Left("g0 package does not match successor link predecessor")
+    else if g1.graphPackage != link.successorPackage then
+      Left("g1 package does not match successor link successor")
+    else if g0.state.isEmpty then
+      Left("g0 valid verdict is missing state")
+    else if g1.state.isEmpty then
+      Left("g1 valid verdict is missing state")
+    else if g0.evidence.isEmpty then
+      Left("g0 valid verdict is missing evidence")
+    else if g1.evidence.isEmpty then
+      Left("g1 valid verdict is missing evidence")
+    else if link.predecessorPackage == link.successorPackage then
+      Left("successor package must differ from predecessor package")
+    else Right(())

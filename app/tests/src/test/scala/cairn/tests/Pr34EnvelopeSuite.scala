@@ -158,3 +158,60 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
     assertEquals(exhaustedEnv.verdictClass, Pr34VerdictClass.Exhausted)
     assertEquals(exhaustedEnv.state, None)
     assertEquals(exhaustedEnv.evidence, None)
+
+  test("pr34 successor link canon round-trips"):
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("g0"),
+      successorPackage = dig("g1"),
+      upgradeDelta = dig("delta"),
+    )
+    val round = Pr34SuccessorLink.fromCanon(link.canon).fold(e => fail(e), identity)
+    assertEquals(round, link)
+
+  test("staircase validator accepts valid g0->g1 chain"):
+    val g0 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k0"),
+      graphPackage = dig("g0"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s0")),
+      evidence = Some(dig("e0")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k1"),
+      graphPackage = dig("g1"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s1")),
+      evidence = Some(dig("e1")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("g0"),
+      successorPackage = dig("g1"),
+      upgradeDelta = dig("delta"),
+    )
+    assert(Pr34Staircase.validateTwoStep(g0, g1, link).isRight)
+
+  test("staircase validator rejects invalid successor mapping"):
+    val g0 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k0"),
+      graphPackage = dig("g0"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s0")),
+      evidence = Some(dig("e0")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k1"),
+      graphPackage = dig("g1"),
+      verdictClass = Pr34VerdictClass.Invalid,
+      state = None,
+      evidence = None,
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("g0"),
+      successorPackage = dig("g1"),
+      upgradeDelta = dig("delta"),
+    )
+    assert(Pr34Staircase.validateTwoStep(g0, g1, link).isLeft)
