@@ -188,5 +188,7 @@ Required contents:
       reproducibility for `G0`/`G1` fixture derivation.
 - [x] Fixture outputs (`federationId`, `genesisState`, `G0`, `G1`) are pinned
       to explicit golden digests in `CKCParitySuite` and fail closed on drift.
+- [x] Cert-binding fixture outputs (`replica manifest`, `cert1`, `cert2`) are
+      also pinned to golden digests in `CKCParitySuite`.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.

@@ -165,7 +165,7 @@ class CKCParitySuite extends munit.FunSuite:
   private def buildCertFixture(): CertFixture =
     val dir = Files.createTempDirectory("cairn-ckc-cert")
     val cas = DiskCas(dir.resolve("cas"))
-    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val replicas = fixtureReplicas
     val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
     val federationId = Digest.of(Canon.CStr("ckc-parity-cert-federation"))
     val previousState = Digest.of(Canon.CStr("ckc-parity-cert-previous-state"))
@@ -441,3 +441,16 @@ class CKCParitySuite extends munit.FunSuite:
     )
     assertEquals(authorityAgain.publicBytes, fixtureAuthority.publicBytes)
     assertEquals(authorityAgain.privateBytes, fixtureAuthority.privateBytes)
+
+  test("PR34 cert fixture digests are reproducible"):
+    val a = buildCertFixture()
+    val b = buildCertFixture()
+    val expectedManifest = "6757960c891274d6fdc025a4eba54d3e9fb711e80048b747700e1ade201c3626"
+    val expectedCert1 = "59792e4bb96b2f34ad88e85f09d0fbefd9cb3780d9b3fd1800bdaa021fa713c8"
+    val expectedCert2 = "0ec2e8c9342407b83a1837c3d7a9d3b57fa35e6b1f9bd45e2453f697a495065b"
+    assertEquals(a.manifestDigest, b.manifestDigest)
+    assertEquals(a.cert1.digest, b.cert1.digest)
+    assertEquals(a.cert2.digest, b.cert2.digest)
+    assertEquals(a.manifestDigest.hex, expectedManifest)
+    assertEquals(a.cert1.digest.hex, expectedCert1)
+    assertEquals(a.cert2.digest.hex, expectedCert2)
