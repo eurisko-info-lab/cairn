@@ -15,6 +15,23 @@ Current capabilities:
   - cert/proposal/manifest consistency per generation
   - expected federation id and genesis state pin
 
+## CKC architecture (PR34 center)
+
+The verifier now centers on a single executable judgment interface in
+[verifier/src/ckc.rs](src/ckc.rs):
+
+- Query: what to derive (`Resolve`, `VerifyCertBinding`, `ReplayHistory`)
+- Derive: one deterministic engine `derive(constitution, budget, query)`
+- KernelResult: one result algebra (`Valid`, `Invalid`, `Missing`, `Exhausted`)
+
+This maps operational commands to one conceptual relation:
+
+- Resolve digest under immutable closure
+- Verify certificate/proposal binding
+- Replay federation history to a unique final state
+
+CLI commands are now thin facades over that same derivation engine.
+
 ## Build
 
 ```bash

@@ -204,10 +204,11 @@ fn collect_federation_artifacts_from_chain(chain: &[Block]) -> (Vec<Digest>, BTr
     (transitions, recorded_certs)
 }
 
-pub fn verify_history_command(
+pub fn verify_history_command_with_limit(
     node_root: &str,
     expected_federation_id: Digest,
     expected_genesis_state: Digest,
+    max_steps: Option<usize>,
 ) -> Result<HistoryReport> {
     let root = Path::new(node_root);
     let cas = DiskCas::new(root);
@@ -231,6 +232,15 @@ pub fn verify_history_command(
     let (transition_digests, recorded_certs) = collect_federation_artifacts_from_chain(&chain);
     if transition_digests.is_empty() {
         bail!("no federation transitions published on chain");
+    }
+    if let Some(limit) = max_steps {
+        if transition_digests.len() > limit {
+            bail!(
+                "kernel exhausted: max_steps {} exceeded by {} transitions",
+                limit,
+                transition_digests.len()
+            );
+        }
     }
 
     let mut expected_before = expected_genesis_state;
