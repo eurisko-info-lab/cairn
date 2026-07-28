@@ -1,6 +1,6 @@
 # Cairn Verifier (Rust)
 
-`verifier/` is an independent Rust implementation of core PR34 federation checks.
+`verifier-rust/` is an independent Rust implementation of core PR34 federation checks.
 
 Current capabilities:
 
@@ -18,7 +18,7 @@ Current capabilities:
 ## CKC architecture (PR34 center)
 
 The verifier now centers on a single executable judgment interface in
-[verifier/src/ckc.rs](src/ckc.rs):
+[verifier-rust/src/ckc.rs](src/ckc.rs):
 
 - Query: what to derive (`Resolve`, `VerifyCertBinding`, `ReplayHistory`)
 - Derive: one deterministic engine `derive(constitution, budget, query)`
@@ -35,7 +35,7 @@ CLI commands are now thin facades over that same derivation engine.
 ## Build
 
 ```bash
-cd verifier
+cd verifier-rust
 cargo check
 cargo run -- --help
 ```
