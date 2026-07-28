@@ -175,5 +175,7 @@ Required contents:
       predecessor-link mismatch rejection.
 - [x] Staircase parity gate enforces malformed-digest rejection parity across
       Rust and Lean (base args and link-override args).
+- [x] CKC parity fixture now asserts independent resolve parity for both
+      first-generation (`G0`) and second-generation (`G1`) state digests.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.
