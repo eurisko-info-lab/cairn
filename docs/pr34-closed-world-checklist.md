@@ -222,3 +222,5 @@ Required contents:
       slab-driven checks while preserving Rust/Lean malformed-link parity.
 - [~] Standalone successor-world fixture audit path has been consolidated into
       promoted-slab staircase gates to reduce duplicate scaffold assertions.
+- [x] Slab-driven staircase assertions are now unified under one authoritative
+      cross-implementation gate in `CKCParitySuite`.

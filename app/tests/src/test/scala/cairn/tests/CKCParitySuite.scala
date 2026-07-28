@@ -463,7 +463,7 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString, "--federation-id", Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, "--genesis-state", replayFixture.genesisState.hex))._1, "invalid")
     assertEquals(lean(Seq("replay-history", replayFixture.nodeRoot.toString, Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, replayFixture.genesisState.hex))._1, "invalid")
 
-  test("PR34 staircase parity from promoted slab: Rust and Lean agree on successor-link validation"):
+  test("PR34 promoted slab drives staircase successor validation across Scala, Rust, and Lean"):
     assume(cargoAvailable, "cargo not on PATH")
     assume(leanAvailable, "lake not on PATH")
 
@@ -472,6 +472,38 @@ class CKCParitySuite extends munit.FunSuite:
     val g0 = promoted.predecessorPackage
     val g1 = promoted.successorPackage
     val delta = promoted.governedDelta
+
+    val node = Node(exec.nodeRoot, EffectContexts.forLedger())
+    val verified = FederationHistory
+      .auditPublishedTransition(node, node.cas, promoted.governedDelta, promoted.federationId)
+      .fold(e => fail(e), identity)
+
+    assertEquals(verified.transition.before, promoted.predecessorPackage)
+    assertEquals(verified.transition.after, promoted.successorPackage)
+    assertEquals(verified.transition.finality, Some(promoted.governedDeltaFinalityCertDigest))
+
+    val g0Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
+      graphPackage = promoted.predecessorPackage,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(promoted.predecessorPackage),
+      evidence = Some(promoted.resolveEvidenceG0),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
+      graphPackage = promoted.successorPackage,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(promoted.successorPackage),
+      evidence = Some(promoted.resolveEvidenceG1),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = promoted.predecessorPackage,
+      successorPackage = promoted.successorPackage,
+      upgradeDelta = promoted.governedDelta,
+    )
+    assert(Pr34Staircase.validateTwoStep(g0Env, g1Env, link).isRight)
 
     val rustValid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g1.hex, "--delta", delta.hex))._1
     val leanValid = lean(Seq("staircase-check", g0.hex, g1.hex, delta.hex))._1
@@ -648,49 +680,3 @@ class CKCParitySuite extends munit.FunSuite:
     ))
     assertEquals(rustKind, "valid")
 
-  test("PR34 promoted slab drives staircase successor validation"):
-    assume(cargoAvailable, "cargo not on PATH")
-
-    val exec = buildPromotedFoundationExecutionContext()
-    val promoted = exec.promoted
-
-    val node = Node(exec.nodeRoot, EffectContexts.forLedger())
-    val verified = FederationHistory
-      .auditPublishedTransition(node, node.cas, promoted.governedDelta, promoted.federationId)
-      .fold(e => fail(e), identity)
-
-    assertEquals(verified.transition.before, promoted.predecessorPackage)
-    assertEquals(verified.transition.after, promoted.successorPackage)
-    assertEquals(verified.transition.finality, Some(promoted.governedDeltaFinalityCertDigest))
-
-    val g0Env = Pr34VerdictEnvelope(
-      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
-      graphPackage = promoted.predecessorPackage,
-      verdictClass = Pr34VerdictClass.Valid,
-      state = Some(promoted.predecessorPackage),
-      evidence = Some(promoted.resolveEvidenceG0),
-      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
-    )
-    val g1Env = Pr34VerdictEnvelope(
-      kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
-      graphPackage = promoted.successorPackage,
-      verdictClass = Pr34VerdictClass.Valid,
-      state = Some(promoted.successorPackage),
-      evidence = Some(promoted.resolveEvidenceG1),
-      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
-    )
-    val link = Pr34SuccessorLink(
-      predecessorPackage = promoted.predecessorPackage,
-      successorPackage = promoted.successorPackage,
-      upgradeDelta = promoted.governedDelta,
-    )
-
-    assert(Pr34Staircase.validateTwoStep(g0Env, g1Env, link).isRight)
-
-    val (rustStaircaseKind, _) = rust(Seq(
-      "staircase-check",
-      "--g0", promoted.predecessorPackage.hex,
-      "--g1", promoted.successorPackage.hex,
-      "--delta", promoted.governedDelta.hex,
-    ))
-    assertEquals(rustStaircaseKind, "valid")
