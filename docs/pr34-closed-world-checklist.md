@@ -230,3 +230,6 @@ Required contents:
 - [x] Synthetic cert-fixture parity vectors were removed; cert-binding parity
       now runs against governed fixture cert/proposal digests from the
       promoted slab path.
+- [x] Standalone pinned-key fixture test was folded into staircase fixture
+      reproducibility so identity pinning and digest stability are enforced by
+      one gate.

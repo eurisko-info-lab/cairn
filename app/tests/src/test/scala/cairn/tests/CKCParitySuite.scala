@@ -624,8 +624,8 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.resolveDigestG0.hex, expectedResolveG0)
     assertEquals(a.resolveDigestG1.hex, expectedResolveG1)
     assertEquals(a.governedDeltaG0ToG1.hex, expectedGovernedDelta)
-
-  test("PR34 fixture uses pinned key material"):
+    // Keep key-material pinning coupled to fixture determinism so one gate
+    // covers both digest and identity stability.
     val authorityAgain = pinnedKeypair(
       name = "ckc-parity-authority",
       publicHex = "302a300506032b6570032100a87d85722941aae3b82028cb38ed20702b1922292049b16a8c57d0ed2316e6c1",
