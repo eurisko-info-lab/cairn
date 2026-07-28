@@ -22,6 +22,7 @@ private def usage : String :=
         , "  verify-cert <cas-root> <cert> <proposal> <manifest>"
         , "  replay-history <node-root> <federation-id> <genesis-state>"
         , "  staircase-check <g0-package> <g1-package> <upgrade-delta>"
+        , "  staircase-check <g0-package> <g1-package> <upgrade-delta> <link-predecessor> <link-successor>"
     , ""
     , "Options:"
         , "  --max-steps <n>    replay budget for replay-history (default 100000)"
@@ -82,6 +83,38 @@ def main (args : List String) : IO UInt32 := do
                 {
                     predecessorPackage := g0
                     successorPackage := g1
+                    upgradeDelta := delta
+                }
+            match Pr34StaircaseValidateTwoStep g0Env g1Env link with
+            | .ok _ =>
+                    IO.println s!"valid: staircase successor validated g0={g0} g1={g1} delta={delta}"
+                    pure 0
+            | .error e =>
+                    IO.println s!"invalid: {e}"
+                    pure 0
+    | ["staircase-check", g0, g1, delta, linkPredecessor, linkSuccessor] =>
+            let g0Env : Pr34VerdictEnvelope :=
+                {
+                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000a00"
+                    graphPackage := g0
+                    verdictClass := .valid
+                    state := some "0000000000000000000000000000000000000000000000000000000000000a01"
+                    evidence := some "0000000000000000000000000000000000000000000000000000000000000a02"
+                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                }
+            let g1Env : Pr34VerdictEnvelope :=
+                {
+                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000b00"
+                    graphPackage := g1
+                    verdictClass := .valid
+                    state := some "0000000000000000000000000000000000000000000000000000000000000b01"
+                    evidence := some "0000000000000000000000000000000000000000000000000000000000000b02"
+                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                }
+            let link : Pr34SuccessorLink :=
+                {
+                    predecessorPackage := linkPredecessor
+                    successorPackage := linkSuccessor
                     upgradeDelta := delta
                 }
             match Pr34StaircaseValidateTwoStep g0Env g1Env link with

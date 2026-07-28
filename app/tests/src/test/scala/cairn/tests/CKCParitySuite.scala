@@ -267,3 +267,22 @@ class CKCParitySuite extends munit.FunSuite:
     val leanInvalid = lean(Seq("staircase-check", g0.hex, g0.hex, delta.hex))._1
     assertEquals(rustInvalid, "invalid")
     assertEquals(leanInvalid, "invalid")
+
+    val badPredecessor = Digest.of(Canon.CStr("pr34-stair-bad-predecessor"))
+    val rustMismatch = rust(Seq(
+      "staircase-check",
+      "--g0", g0.hex,
+      "--g1", g1.hex,
+      "--delta", delta.hex,
+      "--link-predecessor", badPredecessor.hex,
+    ))._1
+    val leanMismatch = lean(Seq(
+      "staircase-check",
+      g0.hex,
+      g1.hex,
+      delta.hex,
+      badPredecessor.hex,
+      g1.hex,
+    ))._1
+    assertEquals(rustMismatch, "invalid")
+    assertEquals(leanMismatch, "invalid")

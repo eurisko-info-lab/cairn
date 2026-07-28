@@ -71,6 +71,12 @@ enum Command {
         /// Upgrade delta digest linking g0 -> g1
         #[arg(long)]
         delta: String,
+        /// Optional predecessor digest to embed in successor-link (defaults to g0)
+        #[arg(long)]
+        link_predecessor: Option<String>,
+        /// Optional successor digest to embed in successor-link (defaults to g1)
+        #[arg(long)]
+        link_successor: Option<String>,
     },
 }
 
@@ -182,10 +188,24 @@ fn main() -> Result<()> {
             );
             render_result(result)?;
         }
-        Command::StaircaseCheck { g0, g1, delta } => {
+        Command::StaircaseCheck {
+            g0,
+            g1,
+            delta,
+            link_predecessor,
+            link_successor,
+        } => {
             let g0 = parse_digest(&g0, "g0")?;
             let g1 = parse_digest(&g1, "g1")?;
             let delta = parse_digest(&delta, "delta")?;
+            let link_predecessor = match link_predecessor {
+                Some(s) => parse_digest(&s, "link_predecessor")?,
+                None => g0,
+            };
+            let link_successor = match link_successor {
+                Some(s) => parse_digest(&s, "link_successor")?,
+                None => g1,
+            };
             let g0_env = pr34::Pr34VerdictEnvelope {
                 kernel_constitution: Digest::of_bytes(b"pr34-k0"),
                 graph_package: g0,
@@ -211,8 +231,8 @@ fn main() -> Result<()> {
                 },
             };
             let link = pr34::Pr34SuccessorLink {
-                predecessor_package: g0,
-                successor_package: g1,
+                predecessor_package: link_predecessor,
+                successor_package: link_successor,
                 upgrade_delta: delta,
             };
             pr34::validate_two_step(&g0_env, &g1_env, &link)?;
