@@ -1023,6 +1023,84 @@ theorem valid_deterministic
   cases hr
   exact ⟨rfl, rfl⟩
 
+def ofKernelResult : KernelResult → Verdict Value
+  | .valid value evidence => .valid value evidence
+  | .invalid error => .invalid error
+  | .missing closure => .missing closure
+  | .exhausted limit => .exhausted limit
+
+def hasArtifact (Sigma : Context) (d : Digest) : Bool :=
+  (Sigma.artifacts.get? d).isSome
+
+/-- Unified executable CKC judgment facade over all specialized judgment forms. -/
+def deriveJudgment
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (j : Judgment) : Verdict Value :=
+  match j with
+  | .resolve d =>
+      ofKernelResult (derive Sigma K B (.resolve "" d))
+  | .replayHistory federationId genesisState =>
+      ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState))
+  | .languageAt L =>
+      let needed := [L.digest, L.machine.digest]
+      let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+      if !missing.isEmpty then
+        .missing missing
+      else
+        .valid (.artifact { digest := L.digest, kind := .other "language" }) s!"language@{K.kernelId}:{L.digest}"
+  | .freeChangeLanguage L =>
+      let w := FreeChange K L
+      let needed := [L.digest, L.machine.digest]
+      let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+      if !missing.isEmpty then
+        .missing missing
+      else
+        .valid (.artifact { digest := w.result.digest, kind := .other "delta-language" })
+          s!"freeChange@{K.kernelId}:{w.result.digest}"
+  | .applyChange _ _ _ =>
+      .invalid "applyChange judgment not yet wired to machine execution"
+  | .accept _ _ _ _ =>
+      .invalid "accept judgment not yet wired to constitution evaluator"
+
+def DerivesJudgment
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (j : Judgment)
+    (r : Verdict Value) : Prop :=
+  deriveJudgment Sigma K B j = r
+
+theorem deriveJudgment_resolve_corresponds
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (d : Digest) :
+    deriveJudgment Sigma K B (.resolve d) = ofKernelResult (derive Sigma K B (.resolve "" d)) := by
+  rfl
+
+theorem deriveJudgment_replay_corresponds
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (federationId genesisState : Digest) :
+    deriveJudgment Sigma K B (.replayHistory federationId genesisState) =
+      ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState)) := by
+  rfl
+
+theorem judgment_result_deterministic
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (j : Judgment)
+    (r1 r2 : Verdict Value)
+    (h1 : DerivesJudgment Sigma K B j r1)
+    (h2 : DerivesJudgment Sigma K B j r2) :
+    r1 = r2 := by
+  unfold DerivesJudgment at h1 h2
+  exact h1.symm.trans h2
+
 end CKC
 
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
