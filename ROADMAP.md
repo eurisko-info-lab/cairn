@@ -266,11 +266,28 @@ re-proven a second time over this transport — they already run against the
 identical, transport-agnostic core logic via `FederationReplicaSuite`'s
 in-memory delivery and `FederationCeremonySuite`'s local-orchestration path.
 
-Known follow-up (not this PR's scope): `FederationReplica` has no
-certificate-adoption path analogous to `BftFinality`'s own follower-adoption
-machinery, so a replica whose vote arrives after the rest of the cluster
-already exchanged commits among themselves never independently reconstructs
-a certificate for that round — real work for PR34 or a PR33 addendum.
+#### PR33.1 — Consensus-binding closure for federation finality
+
+Closed the consensus-binding gap left after PR33 by ensuring every consumer of
+federation certificates treats unsigned projections as untrusted until they are
+bound back to the signed proposal digest and independently verified:
+
+- Added shared cert/proposal verification (`verifyCertificateForProposal`) that
+  validates quorum seals for the signed proposal digest and checks every
+  projection (`transition`, `stateDigest`, `previousState`, `epoch`,
+  `replicaSet`, `federationId`) against that proposal.
+- Routed mint/poll/adopt/transition-replay/history/GC paths through that shared
+  verifier so no path consumes raw certificate projections after only digest
+  quorum verification.
+- Added autonomous network-driven follower catch-up (`FederationSync`) for
+  certificate adoption: discover next finalized certificate after the local
+  cursor, fetch exact proposal by `certificate.proposal`, fetch missing CAS
+  closure, adopt, and repeat until caught up.
+- Wired adoption sync into real runtime paths: explicit node sync entrypoint,
+  `/federation/msg` behind-cursor retry path, and periodic `GossipDaemon`
+  ticks.
+- Completed truth-sync for proposal identity over HTTP (`/federation/proposal`
+  keyed by proposal digest, not state digest) and hardened fetch integrity.
 
 #### PR34 — Independent full-state verifier
 

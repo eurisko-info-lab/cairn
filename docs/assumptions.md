@@ -91,11 +91,16 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
    `FederationFinality` certifies a semantic `FederationState` digest, not
    just a sealed block — with authenticated namespace/replica-set trust
    rotation and equivocation evidence. Open-membership / public-ledger BFT
-   remains out. PR33 (done) replaced local orchestration with a real network
-   protocol — `FederationReplica` + `HttpNode`'s `/federation/*` endpoints —
-   where each process holds exactly one private key; the old one-process
-   orchestration survives only as `agreeForFederationStateLocalTestOnly`,
-   explicitly never production's own path.
+    remains out. PR33 (done) replaced local orchestration with a real network
+    protocol — `FederationReplica` + `HttpNode`'s `/federation/*` endpoints —
+    where each process holds exactly one private key; the old one-process
+    orchestration survives only as `agreeForFederationStateLocalTestOnly`,
+    explicitly never production's own path. PR33.1 (done) closed the
+    cert/proposal binding gap by routing mint/poll/adopt/history/GC through a
+    shared verifier that checks all certificate projections against the signed
+    proposal, and added autonomous follower catch-up (`FederationSync`) so
+    behind replicas adopt finalized generations by pulling certs/proposals and
+    missing closure from peers.
 10. **Ports**: Scala runs under scala-cli when present; Haskell (runghc) and
     Rust (cargo) run when their toolchains are present, else assume-skip; Lean
     Rosetta skeletons are golden-checked. All four pass whole-file byte
@@ -139,7 +144,10 @@ see [docs/architecture.md](architecture.md) for the current state each refers to
     equivocation evidence); it did not address peer discovery beyond that
     configured model. PR33 (done) delivered real multi-process replica
     execution — each replica an independent process/`FederationReplica`
-    reachable only over HTTP, never holding another's private key.
+    reachable only over HTTP, never holding another's private key. PR33.1
+    then added periodic and event-driven finalized-certificate adoption for
+    lagging replicas, making catch-up a first-class runtime behavior rather
+    than a manual/operator path.
 15. **Runtime selection is one constitution.** `DomainRuntime` binds the exact
     language, complete capability bundle, and acceptance constitution. Governed
     tips, evidence, manifests, conflicts, migrations, and application startup
