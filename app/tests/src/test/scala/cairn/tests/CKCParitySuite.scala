@@ -273,6 +273,29 @@ class CKCParitySuite extends munit.FunSuite:
     val g1 = replayFixture.resolveDigestG1
     val delta = Digest.of(Canon.CStr("pr34-stair-delta"))
 
+    val g0Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr("pr34-k0")),
+      graphPackage = g0,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(g0),
+      evidence = Some(Digest.of(Canon.CStr("pr34-e0"))),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1Env = Pr34VerdictEnvelope(
+      kernelConstitution = Digest.of(Canon.CStr("pr34-k1")),
+      graphPackage = g1,
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(g1),
+      evidence = Some(Digest.of(Canon.CStr("pr34-e1"))),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = g0,
+      successorPackage = g1,
+      upgradeDelta = delta,
+    )
+    assert(Pr34Staircase.validateTwoStep(g0Env, g1Env, link).isRight)
+
     val rustValid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g1.hex, "--delta", delta.hex))._1
     val leanValid = lean(Seq("staircase-check", g0.hex, g1.hex, delta.hex))._1
     assertEquals(rustValid, "valid")
