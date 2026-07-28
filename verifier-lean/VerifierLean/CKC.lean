@@ -1359,6 +1359,52 @@ theorem deriveJudgment_apply_corresponds
         | .exhausted u => .exhausted u := by
       rfl
 
+theorem deriveJudgment_language_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (v1 v2 : Value)
+    (w1 w2 : Digest)
+    (h1 : deriveJudgment Sigma K B (.languageAt L) = .valid v1 w1)
+    (h2 : deriveJudgment Sigma K B (.languageAt L) = .valid v2 w2) :
+    v1 = v2 ∧ w1 = w2 := by
+  have h : (.valid v1 w1 : Verdict Value) = .valid v2 w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl⟩
+
+theorem deriveJudgment_freeChange_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (v1 v2 : Value)
+    (w1 w2 : Digest)
+    (h1 : deriveJudgment Sigma K B (.freeChangeLanguage L) = .valid v1 w1)
+    (h2 : deriveJudgment Sigma K B (.freeChangeLanguage L) = .valid v2 w2) :
+    v1 = v2 ∧ w1 = w2 := by
+  have h : (.valid v1 w1 : Verdict Value) = .valid v2 w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl⟩
+
+theorem deriveJudgment_accept_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest)
+    (v1 v2 : Value)
+    (w1 w2 : Digest)
+    (h1 : deriveJudgment Sigma K B (.accept rho authority claim proof) = .valid v1 w1)
+    (h2 : deriveJudgment Sigma K B (.accept rho authority claim proof) = .valid v2 w2) :
+    v1 = v2 ∧ w1 = w2 := by
+  have h : (.valid v1 w1 : Verdict Value) = .valid v2 w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl⟩
+
 theorem judgment_result_deterministic
     (Sigma : Context)
     (K : KernelConstitution)
