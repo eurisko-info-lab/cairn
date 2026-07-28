@@ -1074,6 +1074,14 @@ structure AcceptanceEvidence where
   resourceUse : Nat
   deriving Repr, BEq, DecidableEq
 
+structure FreeChangeEvidence where
+  sourceLanguageDigest : Digest
+  sourceMachineDigest : Digest
+  deltaLanguageDigest : Digest
+  witnessDigest : Digest
+  resourceUse : Nat
+  deriving Repr, BEq, DecidableEq
+
 def deriveApplyChange
     (Sigma : Context)
     (K : KernelConstitution)
@@ -1115,6 +1123,38 @@ def deriveLanguageAt
     | none, none =>
         .valid (.artifact { digest := L.digest, kind := .other "language" })
           s!"language@{K.kernelId}:{L.digest}"
+
+def deriveFreeChangeLanguage
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef) : Verdict (Digest × FreeChangeEvidence) :=
+  let w := FreeChange K L
+  let witnessDigest := s!"free-change-witness({K.kernelId},{L.digest},{w.result.digest})"
+  let needed := [L.digest, L.machine.digest, w.result.digest, witnessDigest]
+  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  if !missing.isEmpty then
+    .missing missing
+  else if B.maxSteps == 0 then
+    .exhausted "max_steps 0: freeChange unavailable"
+  else
+    match requireArtifactKind Sigma L.machine.digest "generic-machine" "language machine",
+          requireArtifactKind Sigma L.digest "language" "language artifact",
+          requireArtifactKind Sigma w.result.digest "delta-language" "delta language artifact",
+          requireArtifactKind Sigma witnessDigest "free-change-witness" "free-change witness artifact" with
+    | some e, _, _, _ => .invalid e
+    | _, some e, _, _ => .invalid e
+    | _, _, some e, _ => .invalid e
+    | _, _, _, some e => .invalid e
+    | none, none, none, none =>
+        let ev : FreeChangeEvidence := {
+          sourceLanguageDigest := L.digest
+          sourceMachineDigest := L.machine.digest
+          deltaLanguageDigest := w.result.digest
+          witnessDigest := witnessDigest
+          resourceUse := 1
+        }
+        .valid (w.result.digest, ev) s!"freeChange@{K.kernelId}:{w.result.digest}"
 
 theorem applyChange_semantic_determinism
     (Sigma : Context)
@@ -1199,14 +1239,12 @@ def deriveJudgment
   | .languageAt L =>
       deriveLanguageAt Sigma K L
   | .freeChangeLanguage L =>
-      let w := FreeChange K L
-      let needed := [L.digest, L.machine.digest]
-      let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
-      if !missing.isEmpty then
-        .missing missing
-      else
-        .valid (.artifact { digest := w.result.digest, kind := .other "delta-language" })
-          s!"freeChange@{K.kernelId}:{w.result.digest}"
+      match deriveFreeChangeLanguage Sigma K B L with
+      | .valid (deltaDigest, _) witness =>
+          .valid (.artifact { digest := deltaDigest, kind := .other "delta-language" }) witness
+      | .invalid e => .invalid e
+      | .missing m => .missing m
+      | .exhausted u => .exhausted u
   | .applyChange L stateDigest changeDigest =>
       match deriveApplyChange Sigma K B L stateDigest changeDigest with
       | .valid (out, _) witness =>
@@ -1261,6 +1299,20 @@ theorem deriveJudgment_apply_corresponds
       | .missing m => .missing m
       | .exhausted u => .exhausted u := by
   rfl
+
+    theorem deriveJudgment_freeChange_corresponds
+      (Sigma : Context)
+      (K : KernelConstitution)
+      (B : Budget)
+      (L : LanguageRef) :
+      deriveJudgment Sigma K B (.freeChangeLanguage L) =
+        match deriveFreeChangeLanguage Sigma K B L with
+        | .valid (deltaDigest, _) witness =>
+          .valid (.artifact { digest := deltaDigest, kind := .other "delta-language" }) witness
+        | .invalid e => .invalid e
+        | .missing m => .missing m
+        | .exhausted u => .exhausted u := by
+      rfl
 
     theorem deriveJudgment_accept_corresponds
       (Sigma : Context)
