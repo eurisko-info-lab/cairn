@@ -74,6 +74,28 @@ class CKCParitySuite extends munit.FunSuite:
       cert2: FederationFinality.FederationFinalityCertificate,
   )
 
+  private final case class PromotedFoundation(
+      predecessorPackage: Digest,
+      successorPackage: Digest,
+      governedDelta: Digest,
+      federationId: Digest,
+      genesisState: Digest,
+      manifestDigest: Digest,
+      cert1Digest: Digest,
+      cert2Digest: Digest,
+  ):
+    def canon: Canon = Canon.CTag("pr34-foundation-handoff-v1", Canon.cmap(
+      "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
+      "successorPackage" -> Canon.CStr(successorPackage.hex),
+      "governedDelta" -> Canon.CStr(governedDelta.hex),
+      "federationId" -> Canon.CStr(federationId.hex),
+      "genesisState" -> Canon.CStr(genesisState.hex),
+      "manifestDigest" -> Canon.CStr(manifestDigest.hex),
+      "cert1Digest" -> Canon.CStr(cert1Digest.hex),
+      "cert2Digest" -> Canon.CStr(cert2Digest.hex),
+    ))
+    def digest: Digest = Digest.of(canon)
+
   private def buildFixture(): Fixture =
     val dir = Files.createTempDirectory("cairn-ckc-parity")
     val cas = DiskCas(dir.resolve("cas"))
@@ -199,6 +221,20 @@ class CKCParitySuite extends munit.FunSuite:
       manifestDigest = manifest.digest,
       cert1 = cert1,
       cert2 = cert2,
+    )
+
+  private def buildPromotedFoundation(): PromotedFoundation =
+    val replayFixture = buildFixture()
+    val certFixture = buildCertFixture()
+    PromotedFoundation(
+      predecessorPackage = replayFixture.resolveDigestG0,
+      successorPackage = replayFixture.resolveDigestG1,
+      governedDelta = replayFixture.governedDeltaG0ToG1,
+      federationId = replayFixture.federationId,
+      genesisState = replayFixture.genesisState,
+      manifestDigest = certFixture.manifestDigest,
+      cert1Digest = certFixture.cert1.digest,
+      cert2Digest = certFixture.cert2.digest,
     )
 
   private def runCapture(cmd: Seq[String], cwd: Path): (Int, String) =
@@ -445,14 +481,17 @@ class CKCParitySuite extends munit.FunSuite:
     val expectedGenesisState = "2572d018e52b0027127b2299fece3bb58390d450f982e8647e604819479dfb28"
     val expectedResolveG0 = "81b66603400140329bd60ad0f8e3d3b815b24068021e0118d1bda3fe8d1c3581"
     val expectedResolveG1 = "6707bb0a84b82cc04f088faecb297435d10d5aff9226c7aff6a27c7de154de5e"
+    val expectedGovernedDelta = "8bd4708267492fb9b45ae6e49a658bd779e5373fa031066339f62e62ed491280"
     assertEquals(a.federationId, b.federationId)
     assertEquals(a.genesisState, b.genesisState)
     assertEquals(a.resolveDigestG0, b.resolveDigestG0)
     assertEquals(a.resolveDigestG1, b.resolveDigestG1)
+    assertEquals(a.governedDeltaG0ToG1, b.governedDeltaG0ToG1)
     assertEquals(a.federationId.hex, expectedFederationId)
     assertEquals(a.genesisState.hex, expectedGenesisState)
     assertEquals(a.resolveDigestG0.hex, expectedResolveG0)
     assertEquals(a.resolveDigestG1.hex, expectedResolveG1)
+    assertEquals(a.governedDeltaG0ToG1.hex, expectedGovernedDelta)
 
   test("PR34 fixture uses pinned key material"):
     val authorityAgain = pinnedKeypair(
@@ -475,3 +514,18 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.manifestDigest.hex, expectedManifest)
     assertEquals(a.cert1.digest.hex, expectedCert1)
     assertEquals(a.cert2.digest.hex, expectedCert2)
+
+  test("PR34 first promoted foundation artifact set is reproducible"):
+    val a = buildPromotedFoundation()
+    val b = buildPromotedFoundation()
+    val expectedFoundationDigest = "29ca79030b6bc8e18defaf31e1485922c4cafc8f40de942c77cc1a67914fc2cc"
+    assertEquals(a.predecessorPackage, b.predecessorPackage)
+    assertEquals(a.successorPackage, b.successorPackage)
+    assertEquals(a.governedDelta, b.governedDelta)
+    assertEquals(a.federationId, b.federationId)
+    assertEquals(a.genesisState, b.genesisState)
+    assertEquals(a.manifestDigest, b.manifestDigest)
+    assertEquals(a.cert1Digest, b.cert1Digest)
+    assertEquals(a.cert2Digest, b.cert2Digest)
+    assertEquals(a.digest, b.digest)
+    assertEquals(a.digest.hex, expectedFoundationDigest)

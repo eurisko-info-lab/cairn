@@ -212,5 +212,6 @@ Required contents:
       reconstruction gate with governed finalized delta.
 - [x] Successor-world tutorial/conformance publication is now documented as a
       permanent `G0 -> G1` fixture walkthrough.
-- [ ] Foundation handoff (`Meaning_n -> Foundation_{n+1}`) is specified here,
-      but still needs first concrete promoted step artifact set.
+- [x] Foundation handoff (`Meaning_n -> Foundation_{n+1}`) now has a first
+      concrete promoted step artifact set in `CKCParitySuite` with a pinned
+      canonical handoff digest.

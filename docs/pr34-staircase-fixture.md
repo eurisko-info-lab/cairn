@@ -50,6 +50,10 @@ The parity suite fails closed if any of these drift:
 - cert2 digest:
   `0ec2e8c9342407b83a1837c3d7a9d3b57fa35e6b1f9bd45e2453f697a495065b`
 
+Promoted foundation handoff digest (`pr34-foundation-handoff-v1`):
+
+- `29ca79030b6bc8e18defaf31e1485922c4cafc8f40de942c77cc1a67914fc2cc`
+
 ## Conformance procedure
 
 Run these checks from repository root:
@@ -79,6 +83,8 @@ The CKC parity suite includes all required staircase assertions:
 - malformed digest rejection parity,
 - deterministic G0/G1 fixture digest freeze,
 - deterministic cert fixture digest freeze,
+- deterministic governed `delta0` digest freeze,
+- deterministic promoted-foundation handoff digest freeze,
 - independent audit of the governed `G0 -> G1` transition.
 
 ## Failure interpretation
