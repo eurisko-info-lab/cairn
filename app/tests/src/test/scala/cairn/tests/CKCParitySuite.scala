@@ -78,12 +78,6 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest: Digest,
   )
 
-  private final case class TransitionFinalitySnapshot(
-      manifestDigest: Digest,
-      cert1: FederationFinality.FederationFinalityCertificate,
-      cert2: FederationFinality.FederationFinalityCertificate,
-  )
-
   private final case class PromotedFoundation(
       kernelId: String,
       replayMaxSteps: Long,
@@ -106,9 +100,6 @@ class CKCParitySuite extends munit.FunSuite:
       finalStateDigest: Digest,
       finalEpoch: Long,
       verifiedTransitions: Int,
-      manifestDigest: Digest,
-      cert1Digest: Digest,
-      cert2Digest: Digest,
       resolveEvidenceG0: Digest,
       resolveEvidenceG1: Digest,
       replayEvidenceG1: Digest,
@@ -135,9 +126,6 @@ class CKCParitySuite extends munit.FunSuite:
       "finalStateDigest" -> Canon.CStr(finalStateDigest.hex),
       "finalEpoch" -> Canon.CInt(finalEpoch),
       "verifiedTransitions" -> Canon.CInt(verifiedTransitions),
-      "manifestDigest" -> Canon.CStr(manifestDigest.hex),
-      "cert1Digest" -> Canon.CStr(cert1Digest.hex),
-      "cert2Digest" -> Canon.CStr(cert2Digest.hex),
       "resolveEvidenceG0" -> Canon.CStr(resolveEvidenceG0.hex),
       "resolveEvidenceG1" -> Canon.CStr(resolveEvidenceG1.hex),
       "replayEvidenceG1" -> Canon.CStr(replayEvidenceG1.hex),
@@ -262,37 +250,7 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest = constitution.digest,
     )
 
-  private def transitionFinalitySnapshot(nodeRoot: Path): TransitionFinalitySnapshot =
-    val node = Node(nodeRoot, EffectContexts.forLedger())
-    val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
-    if transitionDigests.length < 2 then fail(s"expected at least two finalized transitions, got ${transitionDigests.length}")
-
-    val firstTransitionArtifact = node.cas.getByDigest(transitionDigests.head).fold(e => fail(e), identity)
-    val secondTransitionArtifact = node.cas.getByDigest(transitionDigests(1)).fold(e => fail(e), identity)
-    val firstTransition = FederationTransition.fromArtifact(firstTransitionArtifact).fold(e => fail(e), identity)
-    val secondTransition = FederationTransition.fromArtifact(secondTransitionArtifact).fold(e => fail(e), identity)
-    val firstCertDigest = firstTransition.finality.getOrElse(fail("expected first transition to be finalized"))
-    val secondCertDigest = secondTransition.finality.getOrElse(fail("expected second transition to be finalized"))
-
-    val firstCertArtifact = node.cas.getByDigest(firstCertDigest).fold(e => fail(e), identity)
-    val secondCertArtifact = node.cas.getByDigest(secondCertDigest).fold(e => fail(e), identity)
-    val cert1 = FederationFinality.FederationFinalityCertificate.fromCanon(firstCertArtifact.body).fold(e => fail(e), identity)
-    val cert2 = FederationFinality.FederationFinalityCertificate.fromCanon(secondCertArtifact.body).fold(e => fail(e), identity)
-
-    val proposal1Artifact = node.cas.getByDigest(cert1.proposal).fold(e => fail(e), identity)
-    val proposal2Artifact = node.cas.getByDigest(cert2.proposal).fold(e => fail(e), identity)
-    val proposal1 = FederationFinality.FederationProposal.fromArtifact(proposal1Artifact).fold(e => fail(e), identity)
-    val proposal2 = FederationFinality.FederationProposal.fromArtifact(proposal2Artifact).fold(e => fail(e), identity)
-    assertEquals(proposal1.replicaSet, proposal2.replicaSet)
-
-    TransitionFinalitySnapshot(
-      manifestDigest = proposal1.replicaSet,
-      cert1 = cert1,
-      cert2 = cert2,
-    )
-
   private def promotedFoundationFromFixture(replayFixture: Fixture): PromotedFoundation =
-    val finality = transitionFinalitySnapshot(replayFixture.nodeRoot)
     val resolveG0 = CKC.derive(scalaConstitution, scalaBudget,
       CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
     val resolveG1 = CKC.derive(scalaConstitution, scalaBudget,
@@ -322,12 +280,9 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest = replayFixture.acceptanceDigest,
       federationId = replayFixture.federationId,
       genesisState = replayFixture.genesisState,
-      manifestDigest = finality.manifestDigest,
       finalStateDigest = replayReportValue.finalState,
       finalEpoch = replayReportValue.finalEpoch,
       verifiedTransitions = replayReportValue.verifiedTransitions,
-      cert1Digest = finality.cert1.digest,
-      cert2Digest = finality.cert2.digest,
       resolveEvidenceG0 = validEvidence(resolveG0),
       resolveEvidenceG1 = validEvidence(resolveG1),
       replayEvidenceG1 = validEvidence(replayG1),
@@ -402,7 +357,6 @@ class CKCParitySuite extends munit.FunSuite:
     assume(leanAvailable, "lake not on PATH")
 
     val replayFixture = buildFixture()
-    val finality = transitionFinalitySnapshot(replayFixture.nodeRoot)
     def scalaRun(query: CKC.Query, budget: CKC.Budget = scalaBudget): CKC.KernelResult =
       CKC.derive(scalaConstitution, budget, query)
 
@@ -637,7 +591,7 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "e1b82fdcf82e88d1da66fe8060750874896609f9c4c4666fbde03f263b9b2875"
+    val expectedFoundationDigest = "7b5fcce194de59531b74cb000106cbfaa60e979a93925eb449f3ea81420a220c"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.replayMaxSteps, b.replayMaxSteps)
     assertEquals(a.languageDigest, b.languageDigest)
@@ -656,9 +610,6 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.acceptanceDigest, b.acceptanceDigest)
     assertEquals(a.federationId, b.federationId)
     assertEquals(a.genesisState, b.genesisState)
-    assertEquals(a.manifestDigest, b.manifestDigest)
-    assertEquals(a.cert1Digest, b.cert1Digest)
-    assertEquals(a.cert2Digest, b.cert2Digest)
     assertEquals(a.resolveEvidenceG0, b.resolveEvidenceG0)
     assertEquals(a.resolveEvidenceG1, b.resolveEvidenceG1)
     assertEquals(a.replayEvidenceG1, b.replayEvidenceG1)

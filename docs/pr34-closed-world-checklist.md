@@ -233,3 +233,6 @@ Required contents:
 - [x] Standalone pinned-key fixture test was folded into staircase fixture
       reproducibility so identity pinning and digest stability are enforced by
       one gate.
+- [x] Redundant promoted-payload finality snapshot fields
+      (`manifestDigest`, `cert1Digest`, `cert2Digest`) were removed after
+      slab gates stopped consuming them.
