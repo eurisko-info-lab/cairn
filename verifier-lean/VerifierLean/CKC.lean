@@ -544,24 +544,40 @@ mutual
         appendBytes head (encodeMapEntries rest)
 end
 
+def hashBytes64 (bs : ByteArray) : UInt64 :=
+  let prime : UInt64 := 1099511628211
+  let offset : UInt64 := 14695981039346656037
+  bs.foldl (fun h b => (h ^^^ UInt64.ofNat b.toNat) * prime) offset
+
+def tmpPathFor (pfx : String) (payload : ByteArray) (ext : String) : System.FilePath :=
+  System.FilePath.mk "/tmp" / s!"{pfx}-{payload.size}-{toString (hashBytes64 payload)}.{ext}"
+
 def sha256HexOfBytes (bytes : ByteArray) : IO (Except String Digest) := do
-  let tmpPath := System.FilePath.mk "/tmp" / s!"cairn-lean-hash-{bytes.size}.bin"
-  IO.FS.writeBinFile tmpPath bytes
-  let out ← IO.Process.output {
-    cmd := "sha256sum"
-    args := #[tmpPath.toString]
-    stdin := .null
-    stderr := .piped
-    stdout := .piped
-  }
-  if out.exitCode != 0 then
-    pure (.error s!"sha256sum failed: {(out.stderr.trimAscii).toString}")
-  else
-    let token := ((out.stdout.trimAscii).toString).splitOn " " |>.headD ""
-    if isDigest token then
-      pure (.ok token)
+  let tmpPath := tmpPathFor "cairn-lean-hash" bytes "bin"
+  try
+    IO.FS.writeBinFile tmpPath bytes
+    let out ← IO.Process.output {
+      cmd := "sha256sum"
+      args := #[tmpPath.toString]
+      stdin := .null
+      stderr := .piped
+      stdout := .piped
+    }
+    if out.exitCode != 0 then
+      pure (.error s!"sha256sum failed: {(out.stderr.trimAscii).toString}")
     else
-      pure (.error s!"sha256sum output did not contain digest: {(out.stdout.trimAscii).toString}")
+      let token := ((out.stdout.trimAscii).toString).splitOn " " |>.headD ""
+      if isDigest token then
+        pure (.ok token)
+      else
+        pure (.error s!"sha256sum output did not contain digest: {(out.stdout.trimAscii).toString}")
+  catch e =>
+    pure (.error s!"sha256sum invocation failed: {e.toString}")
+  finally
+    try
+      IO.FS.removeFile tmpPath
+    catch _ =>
+      pure ()
 
 def verifyManifestDigestBindingIO (cert : CertView) (manifest : ManifestView) : IO (Except String Unit) := do
   let bodyBytes := encodeCanon manifest.body
@@ -585,27 +601,42 @@ def verifyEd25519WithOpenSSL (publicKey32 payload signature64 : ByteArray) : IO 
     pure (.ok false)
   else
     let keyDer := appendBytes ed25519SpkiPrefix publicKey32
-    let base := s!"cairn-lean-ed25519-{payload.size}-{signature64.size}"
-    let keyPath := System.FilePath.mk "/tmp" / s!"{base}.pub.der"
-    let msgPath := System.FilePath.mk "/tmp" / s!"{base}.msg.bin"
-    let sigPath := System.FilePath.mk "/tmp" / s!"{base}.sig.bin"
-    IO.FS.writeBinFile keyPath keyDer
-    IO.FS.writeBinFile msgPath payload
-    IO.FS.writeBinFile sigPath signature64
-    let out ← IO.Process.output {
-      cmd := "openssl"
-      args := #[
-        "pkeyutl", "-verify", "-pubin", "-inkey", keyPath.toString, "-keyform", "DER",
-        "-rawin", "-in", msgPath.toString, "-sigfile", sigPath.toString
-      ]
-      stdin := .null
-      stderr := .piped
-      stdout := .piped
-    }
-    if out.exitCode == 0 then
-      pure (.ok true)
-    else
-      pure (.ok false)
+    let keyPath := tmpPathFor "cairn-lean-ed25519-key" keyDer "pub.der"
+    let msgPath := tmpPathFor "cairn-lean-ed25519-msg" payload "msg.bin"
+    let sigPath := tmpPathFor "cairn-lean-ed25519-sig" signature64 "sig.bin"
+    try
+      IO.FS.writeBinFile keyPath keyDer
+      IO.FS.writeBinFile msgPath payload
+      IO.FS.writeBinFile sigPath signature64
+      let out ← IO.Process.output {
+        cmd := "openssl"
+        args := #[
+          "pkeyutl", "-verify", "-pubin", "-inkey", keyPath.toString, "-keyform", "DER",
+          "-rawin", "-in", msgPath.toString, "-sigfile", sigPath.toString
+        ]
+        stdin := .null
+        stderr := .piped
+        stdout := .piped
+      }
+      if out.exitCode == 0 then
+        pure (.ok true)
+      else
+        pure (.ok false)
+    catch e =>
+      pure (.error s!"openssl invocation failed: {e.toString}")
+    finally
+      try
+        IO.FS.removeFile keyPath
+      catch _ =>
+        pure ()
+      try
+        IO.FS.removeFile msgPath
+      catch _ =>
+        pure ()
+      try
+        IO.FS.removeFile sigPath
+      catch _ =>
+        pure ()
 
 def proposalValueDigestBytes (proposalDigest : Digest) : ByteArray :=
   encodeCanon (.bytes proposalDigest.toUTF8)
