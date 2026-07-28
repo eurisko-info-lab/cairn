@@ -248,7 +248,9 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustReplayEvidence, scalaResolve(validReplay))
     assertEquals(leanReplayEvidence, scalaResolve(validReplay))
     validReplay match
-      case CKC.KernelResult.Valid(CKC.Value.ReplayedState(report), _) => assertEquals(report.finalEpoch, 2L)
+      case CKC.KernelResult.Valid(CKC.Value.ReplayedState(report), _) =>
+        assertEquals(report.finalEpoch, 2L)
+        assertEquals(report.finalState, replayFixture.resolveDigestG1)
       case other => fail(s"expected replay state, got $other")
 
     val exhaustedReplay = scalaRun(CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState), CKC.Budget(maxSteps = 0))
