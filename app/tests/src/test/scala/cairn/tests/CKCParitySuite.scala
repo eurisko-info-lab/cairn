@@ -6,22 +6,17 @@ import cairn.kernel.*
 import cairn.runtime.*
 import cairn.systemhandler.{BftFinality, DiskCas, FederationFinality, Keypair, Node}
 import java.nio.file.{Files, Path}
-import java.nio.charset.StandardCharsets
-import java.security.{KeyPairGenerator, MessageDigest, SecureRandom}
-import java.security.spec.NamedParameterSpec
 import scala.sys.process.{Process, ProcessLogger}
 
 class CKCParitySuite extends munit.FunSuite:
   override def munitTimeout = scala.concurrent.duration.Duration(120, "s")
 
-  private def deterministicKeypair(name: String): Keypair =
-    val seed = MessageDigest.getInstance("SHA-256").digest(name.getBytes(StandardCharsets.UTF_8))
-    val rng = SecureRandom.getInstance("SHA1PRNG")
-    rng.setSeed(seed)
-    val kpg = KeyPairGenerator.getInstance("Ed25519")
-    kpg.initialize(NamedParameterSpec("Ed25519"), rng)
-    val kp = kpg.generateKeyPair()
-    Keypair(name, kp.getPublic, kp.getPrivate)
+  private def hexToBytes(hex: String): Vector[Byte] =
+    if hex.length % 2 != 0 then fail(s"invalid hex length: ${hex.length}")
+    hex.grouped(2).toVector.map(h => Integer.parseInt(h, 16).toByte)
+
+  private def pinnedKeypair(name: String, publicHex: String, privateHex: String): Keypair =
+    Keypair.fromEncoded(name, hexToBytes(publicHex), hexToBytes(privateHex))
 
   private val repoRoot: Path = Path.of("").toAbsolutePath.normalize
   private val rustManifest: Path = repoRoot.resolve("verifier-rust/Cargo.toml")
@@ -29,9 +24,38 @@ class CKCParitySuite extends munit.FunSuite:
 
   private val scalaConstitution = CKC.KernelConstitution()
   private val scalaBudget = CKC.Budget()
-  private val fixtureAuthority = deterministicKeypair("ckc-parity-authority")
-  private val fixtureReplicas = List("r0", "r1", "r2", "r3").map(deterministicKeypair)
-  private val fixtureOwner = deterministicKeypair("org-a-owner-ckc")
+  private val fixtureAuthority = pinnedKeypair(
+    name = "ckc-parity-authority",
+    publicHex = "302a300506032b6570032100a87d85722941aae3b82028cb38ed20702b1922292049b16a8c57d0ed2316e6c1",
+    privateHex = "302e020100300506032b657004220420c24fec16782cc229f3f0d2b2b3c440d8527b7718e48734338444db1851e98c4b",
+  )
+  private val fixtureReplicas = List(
+    pinnedKeypair(
+      name = "r0",
+      publicHex = "302a300506032b6570032100d2a2d19c55dd11dea2b7f6e4aebae459f94a863d4eb8f058f33fb8c737586109",
+      privateHex = "302e020100300506032b657004220420f3eb189e11702901f5be61b194e7da39eb5fbd593c97f42180149ad3860c9afa",
+    ),
+    pinnedKeypair(
+      name = "r1",
+      publicHex = "302a300506032b6570032100d070cd4acbf54b9128d93be53b217f1559e860c8bd65b852dcb488cb5b332279",
+      privateHex = "302e020100300506032b657004220420801a621b495fef4acf156fb9367fb65172d735caba22f116c4fa84880c67dd77",
+    ),
+    pinnedKeypair(
+      name = "r2",
+      publicHex = "302a300506032b65700321009811558e9769e23c13aea290d68d4a6e6b9e5fc8fb4ccce37eef242452c338bb",
+      privateHex = "302e020100300506032b6570042204209e13c3e970da4ca0a6621b7e2d4d3e79c0325730967cc6d7f18ff3df9b91271e",
+    ),
+    pinnedKeypair(
+      name = "r3",
+      publicHex = "302a300506032b6570032100ad5935d267ea6d1c52f539ec225a96eab971bf4d802377518764f328221103b6",
+      privateHex = "302e020100300506032b657004220420fd57d833ec02aac4897728a6224ab8d51c96ba5eb3bc76eace6fd81a84398eaf",
+    ),
+  )
+  private val fixtureOwner = pinnedKeypair(
+    name = "org-a-owner-ckc",
+    publicHex = "302a300506032b6570032100b5140a1f1c7db623289dfdf720dcc8446a10b7ce1d0002bf630c63e9f61fd7cf",
+    privateHex = "302e020100300506032b6570042204205fddc0e71b0bbba105079f2ee4ef30bade5c6a2572618215cb5c23c356864196",
+  )
 
   private final case class Fixture(
       casRoot: Path,
@@ -401,8 +425,11 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.resolveDigestG0, b.resolveDigestG0)
     assertEquals(a.resolveDigestG1, b.resolveDigestG1)
 
-  test("PR34 fixture deterministic keypair helper is stable by name"):
-    val a = deterministicKeypair("pr34-deterministic-key")
-    val b = deterministicKeypair("pr34-deterministic-key")
-    assertEquals(a.publicBytes, b.publicBytes)
-    assertEquals(a.privateBytes, b.privateBytes)
+  test("PR34 fixture uses pinned key material"):
+    val authorityAgain = pinnedKeypair(
+      name = "ckc-parity-authority",
+      publicHex = "302a300506032b6570032100a87d85722941aae3b82028cb38ed20702b1922292049b16a8c57d0ed2316e6c1",
+      privateHex = "302e020100300506032b657004220420c24fec16782cc229f3f0d2b2b3c440d8527b7718e48734338444db1851e98c4b",
+    )
+    assertEquals(authorityAgain.publicBytes, fixtureAuthority.publicBytes)
+    assertEquals(authorityAgain.privateBytes, fixtureAuthority.privateBytes)
