@@ -60,6 +60,13 @@ This promoted handoff digest includes frozen canonical verdict evidence for:
 - resolve(`G1`), and
 - replay-history(`G0 -> G1`) under the fixture constitution.
 
+It also includes governed artifact choices that were previously implicit host
+selection points:
+
+- runtime digest,
+- machine digest,
+- acceptance-constitution digest.
+
 ## Conformance procedure
 
 Run these checks from repository root:

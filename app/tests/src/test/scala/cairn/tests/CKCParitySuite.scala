@@ -65,6 +65,9 @@ class CKCParitySuite extends munit.FunSuite:
       resolveDigestG0: Digest,
       resolveDigestG1: Digest,
       governedDeltaG0ToG1: Digest,
+      runtimeDigest: Digest,
+      machineDigest: Digest,
+      acceptanceDigest: Digest,
   )
 
   private final case class CertFixture(
@@ -79,6 +82,9 @@ class CKCParitySuite extends munit.FunSuite:
       predecessorPackage: Digest,
       successorPackage: Digest,
       governedDelta: Digest,
+      runtimeDigest: Digest,
+      machineDigest: Digest,
+      acceptanceDigest: Digest,
       federationId: Digest,
       genesisState: Digest,
       manifestDigest: Digest,
@@ -93,6 +99,9 @@ class CKCParitySuite extends munit.FunSuite:
       "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
       "successorPackage" -> Canon.CStr(successorPackage.hex),
       "governedDelta" -> Canon.CStr(governedDelta.hex),
+      "runtimeDigest" -> Canon.CStr(runtimeDigest.hex),
+      "machineDigest" -> Canon.CStr(machineDigest.hex),
+      "acceptanceDigest" -> Canon.CStr(acceptanceDigest.hex),
       "federationId" -> Canon.CStr(federationId.hex),
       "genesisState" -> Canon.CStr(genesisState.hex),
       "manifestDigest" -> Canon.CStr(manifestDigest.hex),
@@ -202,6 +211,9 @@ class CKCParitySuite extends munit.FunSuite:
       resolveDigestG0 = state1.digest,
       resolveDigestG1 = state2.digest,
       governedDeltaG0ToG1 = governedDeltaG0ToG1,
+      runtimeDigest = runtime.digest,
+      machineDigest = machine.machine.digest,
+      acceptanceDigest = constitution.digest,
     )
 
   private def buildCertFixture(): CertFixture =
@@ -245,6 +257,9 @@ class CKCParitySuite extends munit.FunSuite:
       predecessorPackage = replayFixture.resolveDigestG0,
       successorPackage = replayFixture.resolveDigestG1,
       governedDelta = replayFixture.governedDeltaG0ToG1,
+      runtimeDigest = replayFixture.runtimeDigest,
+      machineDigest = replayFixture.machineDigest,
+      acceptanceDigest = replayFixture.acceptanceDigest,
       federationId = replayFixture.federationId,
       genesisState = replayFixture.genesisState,
       manifestDigest = certFixture.manifestDigest,
@@ -540,11 +555,14 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "d10ce80d56289df0c2e032aa8362cc137960122da99848cef2b1c94145672242"
+    val expectedFoundationDigest = "07d898b146f64a0ab1081b02b85e3ff127756dfa234ed6fb363e88feac0155d0"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.predecessorPackage, b.predecessorPackage)
     assertEquals(a.successorPackage, b.successorPackage)
     assertEquals(a.governedDelta, b.governedDelta)
+    assertEquals(a.runtimeDigest, b.runtimeDigest)
+    assertEquals(a.machineDigest, b.machineDigest)
+    assertEquals(a.acceptanceDigest, b.acceptanceDigest)
     assertEquals(a.federationId, b.federationId)
     assertEquals(a.genesisState, b.genesisState)
     assertEquals(a.manifestDigest, b.manifestDigest)
