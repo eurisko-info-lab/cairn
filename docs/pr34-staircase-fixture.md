@@ -63,6 +63,8 @@ This promoted handoff digest includes frozen canonical verdict evidence for:
 It also includes governed artifact choices that were previously implicit host
 selection points:
 
+- language digest,
+- grammar digest,
 - runtime digest,
 - machine digest,
 - acceptance-constitution digest.

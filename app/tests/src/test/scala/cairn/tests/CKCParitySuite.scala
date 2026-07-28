@@ -62,6 +62,11 @@ class CKCParitySuite extends munit.FunSuite:
       nodeRoot: Path,
       federationId: Digest,
       genesisState: Digest,
+      languageDigest: Digest,
+      grammarDigest: Digest,
+      authorityName: String,
+      replicaSetDigest: Digest,
+      releaseDigest: Digest,
       resolveDigestG0: Digest,
       resolveDigestG1: Digest,
       governedDeltaG0ToG1: Digest,
@@ -80,6 +85,11 @@ class CKCParitySuite extends munit.FunSuite:
   private final case class PromotedFoundation(
       kernelId: String,
       replayMaxSteps: Long,
+      languageDigest: Digest,
+      grammarDigest: Digest,
+      authorityName: String,
+      replicaSetDigest: Digest,
+      releaseDigest: Digest,
       predecessorPackage: Digest,
       successorPackage: Digest,
       governedDelta: Digest,
@@ -98,6 +108,11 @@ class CKCParitySuite extends munit.FunSuite:
     def canon: Canon = Canon.CTag("pr34-foundation-handoff-v1", Canon.cmap(
       "kernelId" -> Canon.CStr(kernelId),
       "replayMaxSteps" -> Canon.CInt(replayMaxSteps),
+      "languageDigest" -> Canon.CStr(languageDigest.hex),
+      "grammarDigest" -> Canon.CStr(grammarDigest.hex),
+      "authorityName" -> Canon.CStr(authorityName),
+      "replicaSetDigest" -> Canon.CStr(replicaSetDigest.hex),
+      "releaseDigest" -> Canon.CStr(releaseDigest.hex),
       "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
       "successorPackage" -> Canon.CStr(successorPackage.hex),
       "governedDelta" -> Canon.CStr(governedDelta.hex),
@@ -210,6 +225,11 @@ class CKCParitySuite extends munit.FunSuite:
       nodeRoot = dir.resolve("ledger"),
       federationId = federationId,
       genesisState = replayGenesisState,
+      languageDigest = lang.digest,
+      grammarDigest = grammar.digest,
+      authorityName = authority.name,
+      replicaSetDigest = replicaSet.digest,
+      releaseDigest = release.digest,
       resolveDigestG0 = state1.digest,
       resolveDigestG1 = state2.digest,
       governedDeltaG0ToG1 = governedDeltaG0ToG1,
@@ -258,6 +278,11 @@ class CKCParitySuite extends munit.FunSuite:
     PromotedFoundation(
       kernelId = scalaConstitution.kernelId,
       replayMaxSteps = replayBudget.maxSteps,
+      languageDigest = replayFixture.languageDigest,
+      grammarDigest = replayFixture.grammarDigest,
+      authorityName = replayFixture.authorityName,
+      replicaSetDigest = replayFixture.replicaSetDigest,
+      releaseDigest = replayFixture.releaseDigest,
       predecessorPackage = replayFixture.resolveDigestG0,
       successorPackage = replayFixture.resolveDigestG1,
       governedDelta = replayFixture.governedDeltaG0ToG1,
@@ -559,9 +584,14 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "a85d853cae4c5c95621811bf8c2d0cf8e4694a360b7aa5a9eef25fe584026532"
+    val expectedFoundationDigest = "ac246b2e3ee2a3e704cc02d4b01e6d41cf70295f31f569f118016ab4849bd3f4"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.replayMaxSteps, b.replayMaxSteps)
+    assertEquals(a.languageDigest, b.languageDigest)
+    assertEquals(a.grammarDigest, b.grammarDigest)
+    assertEquals(a.authorityName, b.authorityName)
+    assertEquals(a.replicaSetDigest, b.replicaSetDigest)
+    assertEquals(a.releaseDigest, b.releaseDigest)
     assertEquals(a.predecessorPackage, b.predecessorPackage)
     assertEquals(a.successorPackage, b.successorPackage)
     assertEquals(a.governedDelta, b.governedDelta)
