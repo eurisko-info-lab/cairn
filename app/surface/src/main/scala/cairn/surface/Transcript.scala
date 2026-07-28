@@ -3,6 +3,7 @@ import cairn.runtime.EffectContexts
 
 import cairn.kernel.*
 import cairn.core.*
+import cairn.runtime.{ApplicationHardeningAuditor, ArtifactApplicationResolver, CKC}
 import cairn.systemhandler.{
   BftCeremony, BftFinality, BftReplica, CasEffects, DiskCas, EffectContext, Filesystem, Gossip,
   GossipDaemon, HttpGossip, HttpNode, HttpSync, Keypair, Keystore, Node, PeerRegistry, Provenance,
@@ -591,6 +592,80 @@ object Cli:
           }.map(_.render)
       case List("languages") =>
         Right(packs.toList.sortBy(_._1).map((n, l) => s"$n ${l.digest.hex}").mkString("\n"))
+      case List("verify-application", rootText, casRootText) =>
+        for
+          root <- Digest.parse(rootText)
+          app <- ArtifactApplicationResolver(DiskCas(Path.of(casRootText))).resolve(root)
+        yield s"verified application ${app.manifest.name} root=${app.root.hex} languages=${app.languages.size} entries=${app.entries.size} closure=${app.installed.size}"
+      case List("verify-foundation", rootText, casRootText) =>
+        for
+          root <- Digest.parse(rootText)
+          local = DiskCas(Path.of(casRootText))
+          resolver = ArtifactApplicationResolver(local)
+          report <- ApplicationHardeningAuditor(local, resolver).audit(root)
+        yield s"verified foundation root=${report.root.hex} application=${report.application} closure=${report.closure.size} evidence=${report.trustedClosure.checkedEvidence.size}"
+      case List("derive", "resolve", casRootText, digestText) =>
+        for
+          digest <- Digest.parse(digestText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(),
+          CKC.Query.Resolve(casRootText, digest)))
+      case List("derive", "resolve", casRootText, digestText, budgetText) if budgetText.forall(_.isDigit) =>
+        for
+          digest <- Digest.parse(digestText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(maxSteps = budgetText.toLong),
+          CKC.Query.Resolve(casRootText, digest)))
+      case List("derive", "verify-cert-binding", casRootText, certText, proposalText, manifestText) =>
+        for
+          cert <- Digest.parse(certText)
+          proposal <- Digest.parse(proposalText)
+          manifest <- Digest.parse(manifestText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(),
+          CKC.Query.VerifyCertBinding(casRootText, cert, proposal, manifest)))
+      case List("derive", "verify-cert-binding", casRootText, certText, proposalText, manifestText, budgetText)
+          if budgetText.forall(_.isDigit) =>
+        for
+          cert <- Digest.parse(certText)
+          proposal <- Digest.parse(proposalText)
+          manifest <- Digest.parse(manifestText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(maxSteps = budgetText.toLong),
+          CKC.Query.VerifyCertBinding(casRootText, cert, proposal, manifest)))
+      case List("derive", "replay-history", nodeRootText, federationIdText, genesisStateText) =>
+        for
+          federationId <- Digest.parse(federationIdText)
+          genesisState <- Digest.parse(genesisStateText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(),
+          CKC.Query.ReplayHistory(nodeRootText, federationId, genesisState)))
+      case List("derive", "replay-history", nodeRootText, federationIdText, genesisStateText, budgetText)
+          if budgetText.forall(_.isDigit) =>
+        for
+          federationId <- Digest.parse(federationIdText)
+          genesisState <- Digest.parse(genesisStateText)
+        yield renderDeriveResult(CKC.derive(
+          CKC.KernelConstitution(),
+          CKC.Budget(maxSteps = budgetText.toLong),
+          CKC.Query.ReplayHistory(nodeRootText, federationId, genesisState)))
+      case "derive" :: _ =>
+        Left("usage: cairn derive [resolve <cas-root> <digest> [max-steps]|verify-cert-binding <cas-root> <cert> <proposal> <manifest> [max-steps]|replay-history <node-root> <federation-id> <genesis-state> [max-steps]]")
+      case List("export-closure", rootText, sourceCasText, targetCasText) =>
+        for
+          root <- Digest.parse(rootText)
+          copied <- ArtifactApplicationResolver(DiskCas(Path.of(targetCasText))).install(root, DiskCas(Path.of(sourceCasText)))
+        yield s"exported closure root=${root.hex} artifacts=${copied.size} from=${Path.of(sourceCasText).toAbsolutePath.normalize} to=${Path.of(targetCasText).toAbsolutePath.normalize}"
+      case List("import-closure", rootText, sourceCasText, targetCasText) =>
+        for
+          root <- Digest.parse(rootText)
+          copied <- ArtifactApplicationResolver(DiskCas(Path.of(targetCasText))).install(root, DiskCas(Path.of(sourceCasText)))
+        yield s"imported closure root=${root.hex} artifacts=${copied.size} from=${Path.of(sourceCasText).toAbsolutePath.normalize} to=${Path.of(targetCasText).toAbsolutePath.normalize}"
       case "repo" :: rest =>
         // Semantic repository surface: Branches + SemanticRepository spine.
         val refs = home.resolve("refs")
@@ -796,10 +871,25 @@ object Cli:
         Porcelain.dispatch(porcelainCmd :: rest, home, packLoader, ledgerCtx)
       case _ =>
         Left(
-          "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|repo|" +
+          "usage: cairn [home|hash|put|get|canon|transcript|why|capabilities|languages|verify-application|verify-foundation|derive|export-closure|import-closure|repo|" +
             "serve|pull|fetch-hash|peer|gossip|bft|smoke|" +
             "chain|auth|branch|domain|compose|catalog|workflow|recover|replay|tx|light|porcelain|" +
             "repl|lsp|ui] <arg>")
+
+  private def renderDeriveResult(result: CKC.KernelResult): String = result match
+    case CKC.KernelResult.Valid(value, evidence) =>
+      val valueSummary = value match
+        case CKC.Value.ArtifactValue(artifact) => s"artifact:${artifact.digest.hex}"
+        case CKC.Value.CertBinding(cert, proposal, manifest) =>
+          s"cert-binding:${cert.hex}:${proposal.hex}:${manifest.hex}"
+        case CKC.Value.ReplayedState(report) =>
+          s"replayed-state:${report.finalState.hex}:${report.finalEpoch}:${report.verifiedTransitions}"
+      s"valid evidence=${evidence.hex} value=$valueSummary"
+    case CKC.KernelResult.Invalid(error) => s"invalid error=$error"
+    case CKC.KernelResult.Missing(closure) =>
+      if closure.isEmpty then "missing closure=[]"
+      else s"missing closure=${closure.map(_.hex).mkString(",")}" 
+    case CKC.KernelResult.Exhausted(limit) => s"exhausted limit=$limit"
 
   private def defaultAuthorities(home: Path): Either[String, Map[String, Vector[Byte]]] =
     keystoreLoadOrCreate(home, "dev-authority").map(kp => Map(kp.name -> kp.publicBytes))
