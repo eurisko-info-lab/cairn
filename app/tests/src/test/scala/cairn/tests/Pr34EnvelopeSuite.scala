@@ -168,6 +168,14 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
     val round = Pr34SuccessorLink.fromCanon(link.canon).fold(e => fail(e), identity)
     assertEquals(round, link)
 
+  test("pr34 successor link rejects malformed digest fields"):
+    val bad = Canon.CTag("pr34-successor-link-v1", Canon.cmap(
+      "predecessorPackage" -> Canon.CStr("not-a-digest"),
+      "successorPackage" -> Canon.CStr(dig("g1").hex),
+      "upgradeDelta" -> Canon.CStr(dig("delta").hex),
+    ))
+    assert(Pr34SuccessorLink.fromCanon(bad).isLeft)
+
   test("staircase validator accepts valid g0->g1 chain"):
     val g0 = Pr34VerdictEnvelope(
       kernelConstitution = dig("k0"),
