@@ -215,3 +215,51 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
       upgradeDelta = dig("delta"),
     )
     assert(Pr34Staircase.validateTwoStep(g0, g1, link).isLeft)
+
+  test("staircase validator rejects predecessor mismatch"):
+    val g0 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k0"),
+      graphPackage = dig("g0"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s0")),
+      evidence = Some(dig("e0")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k1"),
+      graphPackage = dig("g1"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s1")),
+      evidence = Some(dig("e1")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("wrong-g0"),
+      successorPackage = dig("g1"),
+      upgradeDelta = dig("delta"),
+    )
+    assert(Pr34Staircase.validateTwoStep(g0, g1, link).isLeft)
+
+  test("staircase validator rejects equal predecessor and successor packages"):
+    val g0 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k0"),
+      graphPackage = dig("g0"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s0")),
+      evidence = Some(dig("e0")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val g1 = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k1"),
+      graphPackage = dig("g0"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("s1")),
+      evidence = Some(dig("e1")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
+    )
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("g0"),
+      successorPackage = dig("g0"),
+      upgradeDelta = dig("delta"),
+    )
+    assert(Pr34Staircase.validateTwoStep(g0, g1, link).isLeft)
