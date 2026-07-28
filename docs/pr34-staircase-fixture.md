@@ -52,7 +52,13 @@ The parity suite fails closed if any of these drift:
 
 Promoted foundation handoff digest (`pr34-foundation-handoff-v1`):
 
-- `29ca79030b6bc8e18defaf31e1485922c4cafc8f40de942c77cc1a67914fc2cc`
+- `d10ce80d56289df0c2e032aa8362cc137960122da99848cef2b1c94145672242`
+
+This promoted handoff digest includes frozen canonical verdict evidence for:
+
+- resolve(`G0`),
+- resolve(`G1`), and
+- replay-history(`G0 -> G1`) under the fixture constitution.
 
 ## Conformance procedure
 

@@ -75,6 +75,7 @@ class CKCParitySuite extends munit.FunSuite:
   )
 
   private final case class PromotedFoundation(
+      kernelId: String,
       predecessorPackage: Digest,
       successorPackage: Digest,
       governedDelta: Digest,
@@ -83,8 +84,12 @@ class CKCParitySuite extends munit.FunSuite:
       manifestDigest: Digest,
       cert1Digest: Digest,
       cert2Digest: Digest,
+      resolveEvidenceG0: Digest,
+      resolveEvidenceG1: Digest,
+      replayEvidenceG1: Digest,
   ):
     def canon: Canon = Canon.CTag("pr34-foundation-handoff-v1", Canon.cmap(
+      "kernelId" -> Canon.CStr(kernelId),
       "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
       "successorPackage" -> Canon.CStr(successorPackage.hex),
       "governedDelta" -> Canon.CStr(governedDelta.hex),
@@ -93,6 +98,9 @@ class CKCParitySuite extends munit.FunSuite:
       "manifestDigest" -> Canon.CStr(manifestDigest.hex),
       "cert1Digest" -> Canon.CStr(cert1Digest.hex),
       "cert2Digest" -> Canon.CStr(cert2Digest.hex),
+      "resolveEvidenceG0" -> Canon.CStr(resolveEvidenceG0.hex),
+      "resolveEvidenceG1" -> Canon.CStr(resolveEvidenceG1.hex),
+      "replayEvidenceG1" -> Canon.CStr(replayEvidenceG1.hex),
     ))
     def digest: Digest = Digest.of(canon)
 
@@ -226,7 +234,14 @@ class CKCParitySuite extends munit.FunSuite:
   private def buildPromotedFoundation(): PromotedFoundation =
     val replayFixture = buildFixture()
     val certFixture = buildCertFixture()
+    val resolveG0 = CKC.derive(scalaConstitution, scalaBudget,
+      CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
+    val resolveG1 = CKC.derive(scalaConstitution, scalaBudget,
+      CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG1))
+    val replayG1 = CKC.derive(scalaConstitution, scalaBudget,
+      CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState))
     PromotedFoundation(
+      kernelId = scalaConstitution.kernelId,
       predecessorPackage = replayFixture.resolveDigestG0,
       successorPackage = replayFixture.resolveDigestG1,
       governedDelta = replayFixture.governedDeltaG0ToG1,
@@ -235,6 +250,9 @@ class CKCParitySuite extends munit.FunSuite:
       manifestDigest = certFixture.manifestDigest,
       cert1Digest = certFixture.cert1.digest,
       cert2Digest = certFixture.cert2.digest,
+      resolveEvidenceG0 = validEvidence(resolveG0),
+      resolveEvidenceG1 = validEvidence(resolveG1),
+      replayEvidenceG1 = validEvidence(replayG1),
     )
 
   private def runCapture(cmd: Seq[String], cwd: Path): (Int, String) =
@@ -283,6 +301,10 @@ class CKCParitySuite extends munit.FunSuite:
   private def scalaResolve(result: CKC.KernelResult): Option[String] = result match
     case CKC.KernelResult.Valid(_, evidence) => Some(evidence.hex)
     case _ => None
+
+  private def validEvidence(result: CKC.KernelResult): Digest = result match
+    case CKC.KernelResult.Valid(_, evidence) => evidence
+    case other => fail(s"expected valid result with evidence, got $other")
 
   test("PR34 parity: real corpus agrees on resolve, cert binding, replay, and verdict classes"):
     assume(cargoAvailable, "cargo not on PATH")
@@ -518,7 +540,8 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "29ca79030b6bc8e18defaf31e1485922c4cafc8f40de942c77cc1a67914fc2cc"
+    val expectedFoundationDigest = "d10ce80d56289df0c2e032aa8362cc137960122da99848cef2b1c94145672242"
+    assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.predecessorPackage, b.predecessorPackage)
     assertEquals(a.successorPackage, b.successorPackage)
     assertEquals(a.governedDelta, b.governedDelta)
@@ -527,5 +550,8 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.manifestDigest, b.manifestDigest)
     assertEquals(a.cert1Digest, b.cert1Digest)
     assertEquals(a.cert2Digest, b.cert2Digest)
+    assertEquals(a.resolveEvidenceG0, b.resolveEvidenceG0)
+    assertEquals(a.resolveEvidenceG1, b.resolveEvidenceG1)
+    assertEquals(a.replayEvidenceG1, b.replayEvidenceG1)
     assertEquals(a.digest, b.digest)
     assertEquals(a.digest.hex, expectedFoundationDigest)

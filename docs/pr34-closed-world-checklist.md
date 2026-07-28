@@ -112,7 +112,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 ### I. Foundation handoff discipline
 
-- [ ] Freeze `Cairn_n` step artifacts and canonical verdicts before upgrades.
+- [x] Freeze `Cairn_n` step artifacts and canonical verdicts before upgrades.
 - [ ] Represent remaining trusted host choices as constituted artifacts.
 - [ ] Define/extend change languages for those newly constituted choices.
 - [ ] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
