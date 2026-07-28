@@ -27,6 +27,7 @@ final case class Pr34GraphPackage(
     "evidenceClosure" -> Canon.CStr(evidenceClosure.hex),
   ))
 
+  def artifact: Artifact = Artifact(ArtifactKind.Trace, canon)
   def digest: Digest = Digest.of(canon)
 
 object Pr34GraphPackage:
@@ -45,6 +46,10 @@ object Pr34GraphPackage:
         ))
         catch case e: Exception => Left(s"invalid pr34 graph package: ${e.getMessage}")
       case _ => Left("expected pr34-graph-package-v1 body")
+
+  def fromArtifact(a: Artifact): Either[String, Pr34GraphPackage] =
+    if a.kind != ArtifactKind.Trace then Left("expected trace artifact for pr34 graph package")
+    else fromCanon(a.body)
 
 enum Pr34VerdictClass:
   case Valid
@@ -108,6 +113,7 @@ final case class Pr34VerdictEnvelope(
     "resourceUse" -> resourceUse.canon,
   ))
 
+  def artifact: Artifact = Artifact(ArtifactKind.Trace, canon)
   def digest: Digest = Digest.of(canon)
 
 object Pr34VerdictEnvelope:
@@ -134,6 +140,10 @@ object Pr34VerdictEnvelope:
           resourceUse = resourceUse,
         )
       case _ => Left("expected pr34-verdict-envelope-v1 body")
+
+  def fromArtifact(a: Artifact): Either[String, Pr34VerdictEnvelope] =
+    if a.kind != ArtifactKind.Trace then Left("expected trace artifact for pr34 verdict envelope")
+    else fromCanon(a.body)
 
 object Pr34EnvelopeInterop:
   private def verdictClassOf(result: CKC.KernelResult): Pr34VerdictClass =

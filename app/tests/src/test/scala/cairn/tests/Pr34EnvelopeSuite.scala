@@ -74,6 +74,36 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
     ))
     assert(Pr34VerdictEnvelope.fromCanon(bad).isLeft)
 
+  test("pr34 graph package artifact round-trips and enforces kind"):
+    val g = Pr34GraphPackage(
+      kernelConstitution = dig("k"),
+      artifactClosure = dig("sigma"),
+      machineClosure = dig("m"),
+      runtimeClosure = dig("r"),
+      acceptanceClosure = dig("rho"),
+      repositoryRoot = dig("repo"),
+      finalizedHistory = dig("h"),
+      evidenceClosure = dig("eta"),
+    )
+    val round = Pr34GraphPackage.fromArtifact(g.artifact).fold(e => fail(e), identity)
+    assertEquals(round, g)
+    val wrongKind = Artifact(ArtifactKind.Term, g.canon)
+    assert(Pr34GraphPackage.fromArtifact(wrongKind).isLeft)
+
+  test("pr34 verdict envelope artifact round-trips and enforces kind"):
+    val v = Pr34VerdictEnvelope(
+      kernelConstitution = dig("k"),
+      graphPackage = dig("g"),
+      verdictClass = Pr34VerdictClass.Valid,
+      state = Some(dig("state")),
+      evidence = Some(dig("evidence")),
+      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 2, wallMicros = 3),
+    )
+    val round = Pr34VerdictEnvelope.fromArtifact(v.artifact).fold(e => fail(e), identity)
+    assertEquals(round, v)
+    val wrongKind = Artifact(ArtifactKind.Term, v.canon)
+    assert(Pr34VerdictEnvelope.fromArtifact(wrongKind).isLeft)
+
   test("interop maps CKC valid replay into verdict envelope"):
     val constitution = CKC.KernelConstitution("ckc-v0")
     val graphPackage = dig("graph-package")
