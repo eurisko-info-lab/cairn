@@ -179,5 +179,7 @@ Required contents:
       first-generation (`G0`) and second-generation (`G1`) state digests.
 - [x] Staircase CLI parity checks now run against real fixture-derived `G0` and
       `G1` digests (not synthetic placeholders).
+- [x] Scala staircase validator now runs on the same real fixture `G0 -> G1`
+      pair used by Rust/Lean CLI parity checks.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.
