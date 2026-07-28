@@ -41,5 +41,10 @@ lake exe verifier-lean replay-history /path/to/node-root <federation-id> <genesi
 - Current state: executable CKC foundation with deterministic evidence hashing,
   cert-binding checks, and replay checks against real node paths (`chain` and
   `objects/`) using closure existence/anchoring checks.
+- Strictness upgrade: `verify-cert` now decodes canonical artifact bytes and
+  enforces certificate/proposal projection consistency (`transition`, `state`,
+  `previousState`, `epoch`, `replicaSet`, `federationId`) plus manifest-tag
+  validation.
 - Current limitation: Lean implementation does not yet decode canonical artifact
-  bodies like `verifier-rust/`; deep semantic projection checks are the next step.
+  bodies for full replay parity with `verifier-rust/` (for example full block /
+  transition traversal and finality-anchor replay checks).

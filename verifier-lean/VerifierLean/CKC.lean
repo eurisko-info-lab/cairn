@@ -8,6 +8,7 @@ inductive ArtifactKind where
   | proposal
   | certificate
   | replicaManifest
+  | other (name : String)
   deriving Repr, BEq, DecidableEq
 
 structure Artifact where
@@ -100,6 +101,15 @@ def extractHex64Tokens (text : String) : List Digest :=
       ([], "")
   (flush tokens tail).eraseDups
 
+def isDigest (s : String) : Bool :=
+  s.length == 64 && s.toList.all isHexChar
+
+def requireDigest (label : String) (s : String) : Except String Digest :=
+  if isDigest s then
+    .ok s
+  else
+    .error s!"{label} is not a 64-hex digest: {s}"
+
 def casPath (root : System.FilePath) (digest : Digest) : Except String System.FilePath := do
   if digest.length != 64 then
     throw s!"invalid digest length for '{digest}'"
@@ -127,6 +137,250 @@ def readChainDigests (nodeRoot : String) : IO (Except String (List Digest)) := d
       pure (.error "empty chain")
     else
       pure (.ok ds)
+
+inductive Canon where
+  | int (value : Int)
+  | str (value : String)
+  | bytes (value : ByteArray)
+  | list (value : List Canon)
+  | map (value : List (String × Canon))
+  | tag (name : String) (value : Canon)
+  deriving BEq
+
+def canonKind : Canon → String
+  | .int _ => "int"
+  | .str _ => "str"
+  | .bytes _ => "bytes"
+  | .list _ => "list"
+  | .map _ => "map"
+  | .tag _ _ => "tag"
+
+def readU8 (bs : ByteArray) (i : Nat) : Except String (UInt8 × Nat) :=
+  if _h : i < bs.size then
+    .ok (bs.get! i, i + 1)
+  else
+    .error s!"canon decode at {i}: eof"
+
+def readN (bs : ByteArray) (i n : Nat) : Except String (ByteArray × Nat) :=
+  if i + n <= bs.size then
+    .ok (bs.extract i (i + n), i + n)
+  else
+    .error s!"canon decode at {i}: eof"
+
+def readI32BE (bs : ByteArray) (i : Nat) : Except String (Int × Nat) := do
+  let (chunk, j) <- readN bs i 4
+  let u : Nat :=
+    (((chunk.get! 0).toNat <<< 24) ||| ((chunk.get! 1).toNat <<< 16) |||
+      ((chunk.get! 2).toNat <<< 8) ||| (chunk.get! 3).toNat)
+  let signed : Int :=
+    if u <= 2147483647 then
+      Int.ofNat u
+    else
+      Int.ofNat u - Int.ofNat 4294967296
+  pure (signed, j)
+
+def readI64BE (bs : ByteArray) (i : Nat) : Except String (Int × Nat) := do
+  let (chunk, j) <- readN bs i 8
+  let u : Nat :=
+    (((chunk.get! 0).toNat <<< 56) ||| ((chunk.get! 1).toNat <<< 48) |||
+      ((chunk.get! 2).toNat <<< 40) ||| ((chunk.get! 3).toNat <<< 32) |||
+      ((chunk.get! 4).toNat <<< 24) ||| ((chunk.get! 5).toNat <<< 16) |||
+      ((chunk.get! 6).toNat <<< 8) ||| (chunk.get! 7).toNat)
+  let signed : Int :=
+    if u <= 9223372036854775807 then
+      Int.ofNat u
+    else
+      Int.ofNat u - Int.ofNat 18446744073709551616
+  pure (signed, j)
+
+def readCount (bs : ByteArray) (i : Nat) (label : String) : Except String (Nat × Nat) := do
+  let (n, j) <- readI32BE bs i
+  if n < 0 then
+    .error s!"canon decode at {i}: negative {label} count"
+  else
+    pure (Int.toNat n, j)
+
+def readUtf8 (bs : ByteArray) (i : Nat) : Except String (String × Nat) := do
+  let (n, j) <- readCount bs i "string"
+  let (chunk, k) <- readN bs j n
+  match String.fromUTF8? chunk with
+  | some s => pure (s, k)
+  | none => .error s!"canon decode at {j}: invalid UTF-8 in string"
+
+partial def decodeCanonAt (bs : ByteArray) (i depth : Nat) : Except String (Canon × Nat) := do
+  if depth > 256 then
+    .error s!"canon decode at {i}: nesting depth exceeds 256"
+  let (tagByte, j) <- readU8 bs i
+  match tagByte.toNat with
+  | 73 =>
+      let (v, k) <- readI64BE bs j
+      pure (.int v, k)
+  | 83 =>
+      let (s, k) <- readUtf8 bs j
+      pure (.str s, k)
+  | 66 =>
+      let (n, k0) <- readCount bs j "bytes"
+      let (b, k) <- readN bs k0 n
+      pure (.bytes b, k)
+  | 76 =>
+      let (n, k0) <- readCount bs j "list"
+      let rec loopList (remaining : Nat) (k : Nat) (acc : List Canon) : Except String (List Canon × Nat) := do
+        if remaining == 0 then
+          pure (acc.reverse, k)
+        else
+          let (x, k2) <- decodeCanonAt bs k (depth + 1)
+          loopList (remaining - 1) k2 (x :: acc)
+      let (xs, k) <- loopList n k0 []
+      pure (.list xs, k)
+  | 77 =>
+      let (n, k0) <- readCount bs j "map"
+      let rec loopMap (remaining : Nat) (k : Nat) (prev : Option String)
+          (acc : List (String × Canon)) : Except String (List (String × Canon) × Nat) := do
+        if remaining == 0 then
+          pure (acc.reverse, k)
+        else
+          let (key, k1) <- readUtf8 bs k
+          match prev with
+          | some p =>
+              if !(p < key) then
+                .error s!"canon decode at {k}: map entries not in canonical sorted order"
+              else
+                pure ()
+          | none => pure ()
+          let (value, k2) <- decodeCanonAt bs k1 (depth + 1)
+          loopMap (remaining - 1) k2 (some key) ((key, value) :: acc)
+      let (es, k) <- loopMap n k0 none []
+      pure (.map es, k)
+  | 84 =>
+      let (name, k1) <- readUtf8 bs j
+      let (value, k2) <- decodeCanonAt bs k1 (depth + 1)
+      pure (.tag name value, k2)
+  | other =>
+      .error s!"canon decode at {i}: unknown tag byte {other}"
+
+def decodeCanon (bs : ByteArray) : Except String Canon := do
+  let (c, i) <- decodeCanonAt bs 0 0
+  if i != bs.size then
+    .error s!"canon decode at {i}: trailing bytes after canon value"
+  else
+    pure c
+
+def canonAsMap (c : Canon) : Except String (List (String × Canon)) :=
+  match c with
+  | .map es => .ok es
+  | _ => .error s!"expected map, got {canonKind c}"
+
+def canonField (c : Canon) (key : String) : Except String Canon := do
+  let es <- canonAsMap c
+  match es.find? (fun (k, _) => k == key) with
+  | some (_, v) => .ok v
+  | none => .error s!"missing field '{key}'"
+
+def canonAsStr (c : Canon) : Except String String :=
+  match c with
+  | .str s => .ok s
+  | _ => .error s!"expected string, got {canonKind c}"
+
+def canonAsInt (c : Canon) : Except String Int :=
+  match c with
+  | .int n => .ok n
+  | _ => .error s!"expected int, got {canonKind c}"
+
+def canonExpectTag (c : Canon) (name : String) : Except String Canon :=
+  match c with
+  | .tag actual value =>
+      if actual == name then
+        .ok value
+      else
+        .error s!"expected tag '{name}', got '{actual}'"
+  | _ => .error s!"expected tagged value '{name}', got {canonKind c}"
+
+structure ParsedArtifact where
+  kind : String
+  body : Canon
+
+def decodeArtifact (bs : ByteArray) : Except String ParsedArtifact := do
+  let root <- decodeCanon bs
+  let kind <- canonAsStr (← canonField root "kind")
+  let body <- canonField root "body"
+  pure { kind := kind, body := body }
+
+def readArtifactFromCas (root : System.FilePath) (digest : Digest) : IO (Except String ParsedArtifact) := do
+  match casPath root digest with
+  | .error e =>
+      pure (.error e)
+  | .ok p =>
+      let present ← p.pathExists
+      if !present then
+        pure (.error s!"artifact not in CAS: {digest}")
+      else
+        let bytes ← IO.FS.readBinFile p
+        pure (decodeArtifact bytes)
+
+structure ProposalView where
+  federationId : Digest
+  transition : Digest
+  before : Digest
+  after : Digest
+  epoch : Int
+  replicaSet : Digest
+  deriving Repr
+
+def parseProposalView (a : ParsedArtifact) : Except String ProposalView := do
+  if a.kind != "federation-proposal" then
+    .error "artifact is not a federation proposal"
+  let body <- canonExpectTag a.body "federation-proposal-v1"
+  let federationId <- requireDigest "proposal.federationId" (← canonAsStr (← canonField body "federationId"))
+  let transition <- requireDigest "proposal.transition" (← canonAsStr (← canonField body "transition"))
+  let before <- requireDigest "proposal.before" (← canonAsStr (← canonField body "before"))
+  let after <- requireDigest "proposal.after" (← canonAsStr (← canonField body "after"))
+  let epoch <- canonAsInt (← canonField body "epoch")
+  let replicaSet <- requireDigest "proposal.replicaSet" (← canonAsStr (← canonField body "replicaSet"))
+  pure {
+    federationId := federationId
+    transition := transition
+    before := before
+    after := after
+    epoch := epoch
+    replicaSet := replicaSet
+  }
+
+structure CertView where
+  proposal : Digest
+  transition : Digest
+  state : Digest
+  previousState : Digest
+  federationId : Digest
+  epoch : Int
+  replicaSet : Digest
+  deriving Repr
+
+def parseCertView (a : ParsedArtifact) : Except String CertView := do
+  if a.kind != "certificate" then
+    .error "artifact is not a certificate"
+  let body <- canonExpectTag a.body "federation-finality"
+  let proposal <- requireDigest "certificate.proposal" (← canonAsStr (← canonField body "proposal"))
+  let transition <- requireDigest "certificate.transition" (← canonAsStr (← canonField body "transition"))
+  let state <- requireDigest "certificate.state" (← canonAsStr (← canonField body "state"))
+  let previousState <- requireDigest "certificate.previousState" (← canonAsStr (← canonField body "previousState"))
+  let federationId <- requireDigest "certificate.federationId" (← canonAsStr (← canonField body "federationId"))
+  let epoch <- canonAsInt (← canonField body "epoch")
+  let replicaSet <- requireDigest "certificate.replicaSet" (← canonAsStr (← canonField body "replicaSet"))
+  pure {
+    proposal := proposal
+    transition := transition
+    state := state
+    previousState := previousState
+    federationId := federationId
+    epoch := epoch
+    replicaSet := replicaSet
+  }
+
+def parseManifestTag (a : ParsedArtifact) : Except String Unit := do
+  if a.kind != "certificate" then
+    .error "manifest artifact is not a certificate"
+  let _ <- canonExpectTag a.body "replica-set-manifest"
+  pure ()
 
 def reprStr {α : Type} [Repr α] (x : α) : String :=
   toString (repr x)
@@ -230,13 +484,23 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
   match query with
   | .resolve casRoot digest =>
       let root := System.FilePath.mk casRoot
-      match ← checkDigestExists root digest with
+      match ← readArtifactFromCas root digest with
       | .error e =>
-          pure (KernelResult.invalid e)
-      | .ok true =>
-          pure (mkValid query (.artifact { digest := digest, kind := .proposal }))
-      | .ok false =>
-          pure (KernelResult.missing [digest])
+          if e.startsWith "artifact not in CAS:" then
+            pure (KernelResult.missing [digest])
+          else
+            pure (KernelResult.invalid e)
+      | .ok a =>
+          let k : ArtifactKind :=
+            if a.kind == "federation-proposal" then
+              .proposal
+            else if a.kind == "certificate" then
+              .certificate
+            else if a.kind == "replica-set-manifest" then
+              .replicaManifest
+            else
+              .other a.kind
+          pure (mkValid query (.artifact { digest := digest, kind := k }))
   | .verifyCertBinding casRoot cert proposal manifest =>
       let root := System.FilePath.mk casRoot
       let mut missing : List Digest := []
@@ -268,7 +532,38 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
       if !missing.isEmpty then
         pure (KernelResult.missing missing.eraseDups)
       else
-        pure (mkValid query (.certBinding cert proposal manifest))
+        match (← readArtifactFromCas root cert), (← readArtifactFromCas root proposal), (← readArtifactFromCas root manifest) with
+        | .ok certArtifact, .ok proposalArtifact, .ok manifestArtifact =>
+            match parseCertView certArtifact, parseProposalView proposalArtifact, parseManifestTag manifestArtifact with
+            | .ok certView, .ok proposalView, .ok _ =>
+                if certView.proposal != proposal then
+                  pure (KernelResult.invalid s!"certificate names proposal {certView.proposal}, not {proposal}")
+                else if certView.transition != proposalView.transition then
+                  pure (KernelResult.invalid "certificate transition projection does not match proposal")
+                else if certView.state != proposalView.after then
+                  pure (KernelResult.invalid "certificate state projection does not match proposal.after")
+                else if certView.previousState != proposalView.before then
+                  pure (KernelResult.invalid "certificate previousState projection does not match proposal.before")
+                else if certView.epoch != proposalView.epoch then
+                  pure (KernelResult.invalid "certificate epoch projection does not match proposal")
+                else if certView.replicaSet != proposalView.replicaSet then
+                  pure (KernelResult.invalid "certificate replicaSet projection does not match proposal")
+                else if certView.federationId != proposalView.federationId then
+                  pure (KernelResult.invalid "certificate federationId projection does not match proposal")
+                else
+                  pure (mkValid query (.certBinding cert proposal manifest))
+            | .error e, _, _ =>
+                pure (KernelResult.invalid e)
+            | _, .error e, _ =>
+                pure (KernelResult.invalid e)
+            | _, _, .error e =>
+                pure (KernelResult.invalid e)
+        | .error e, _, _ =>
+            pure (KernelResult.invalid e)
+        | _, .error e, _ =>
+            pure (KernelResult.invalid e)
+        | _, _, .error e =>
+            pure (KernelResult.invalid e)
   | .replayHistory nodeRoot _federationId genesisState =>
       match ← readChainDigests nodeRoot with
       | .error e =>
