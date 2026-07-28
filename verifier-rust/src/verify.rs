@@ -12,6 +12,10 @@ use crate::model::{
     FederationTransition, ReplicaSetManifest, Tx,
 };
 
+const ED25519_SPKI_PREFIX: &[u8] = &[
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
+
 #[derive(Clone, Debug)]
 pub struct HistoryReport {
     pub verified_transitions: usize,
@@ -43,11 +47,19 @@ fn read_artifact(cas: &DiskCas, digest: Digest) -> Result<Artifact> {
 }
 
 fn verify_ed25519(pk: &[u8], payload: &[u8], seal: &[u8]) -> Result<bool> {
-    if pk.len() != 32 || seal.len() != 64 {
+    let pk_bytes = if pk.len() == 32 {
+        pk.to_vec()
+    } else if pk.len() == ED25519_SPKI_PREFIX.len() + 32 && pk.starts_with(ED25519_SPKI_PREFIX) {
+        pk[ED25519_SPKI_PREFIX.len()..].to_vec()
+    } else {
+        return Ok(false);
+    };
+
+    if seal.len() != 64 {
         return Ok(false);
     }
     let mut pk_arr = [0u8; 32];
-    pk_arr.copy_from_slice(pk);
+    pk_arr.copy_from_slice(&pk_bytes);
     let mut sig_arr = [0u8; 64];
     sig_arr.copy_from_slice(seal);
     let vk = VerifyingKey::from_bytes(&pk_arr)?;
@@ -305,13 +317,26 @@ pub fn build_verified_history_context_with_limit(
 
         verify_cert_for_proposal(&cert, &proposal, &manifest)?;
 
-        if proposal.transition != *td {
+        let voted_transition_artifact = read_artifact(&cas, proposal.transition)?;
+        let voted_transition = FederationTransition::from_artifact(&voted_transition_artifact)?;
+        if voted_transition.before != transition.before
+            || voted_transition.transactions != transition.transactions
+            || voted_transition.after != transition.after
+            || voted_transition.approvals != transition.approvals
+        {
             bail!(
                 "federation history: proposal {} transition does not match published transition {}",
                 cert.proposal.short(),
                 td.short()
             );
         }
+        if voted_transition.finality.is_some() {
+            bail!(
+                "federation history: proposal {} transition must be the pre-cert transition",
+                cert.proposal.short()
+            );
+        }
+
         if proposal.before != transition.before || proposal.after != transition.after {
             bail!(
                 "federation history: proposal {} before/after does not match transition {}",

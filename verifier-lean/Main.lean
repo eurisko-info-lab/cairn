@@ -22,13 +22,27 @@ private def usage : String :=
         , "  verify-cert <cas-root> <cert> <proposal> <manifest>"
         , "  replay-history <node-root> <federation-id> <genesis-state>"
     , ""
+    , "Options:"
+        , "  --max-steps <n>    replay budget for replay-history (default 100000)"
+    , ""
         , "Note: this Lean verifier checks real on-disk node paths (`chain` + `objects/`)."
     ]
 
+private def parseMaxSteps : List String → Except String (Budget × List String)
+  | "--max-steps" :: n :: rest =>
+      match n.toNat? with
+      | some steps => .ok ({ maxSteps := steps }, rest)
+      | none => .error s!"invalid --max-steps value: {n}"
+  | args => .ok ({}, args)
+
 def main (args : List String) : IO UInt32 := do
   let constitution : KernelConstitution := {}
-  let budget : Budget := {}
-  match args with
+  match parseMaxSteps args with
+  | .error e =>
+      IO.eprintln e
+      pure 1
+  | .ok (budget, argv) =>
+  match argv with
   | ["--help"] =>
       IO.println usage
       pure 0

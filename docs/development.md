@@ -32,6 +32,12 @@ Current commands verify federation certificate/proposal binding and replay
 ledger-anchored federation transition history directly from on-disk `Node`
 state (`chain` + `objects/`).
 
+PR34's completion bar is stricter than the current foundation: the Scala, Rust,
+and Lean CKC façades must agree on a real corpus spanning canonical resolution,
+closure traversal, free-change witness validation, real change application,
+proof and acceptance evaluation, native repository replay, proposal/certificate
+verification, federation history reconstruction, and all four verdict classes.
+
 ## Lean verifier (PR34 companion)
 
 A second independent verifier implementation lives in `verifier-lean/`.

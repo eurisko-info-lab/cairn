@@ -671,22 +671,15 @@ def verifyManifestDigestBindingIO (cert : CertView) (manifest : ManifestView) : 
       else
         pure (.error s!"federation finality: replicaSet {cert.replicaSet} != expected {computed}")
 
-def natsToBytes (xs : List Nat) : ByteArray :=
-  xs.foldl (fun acc n => acc.push (UInt8.ofNat n)) ByteArray.empty
-
-def ed25519SpkiPrefix : ByteArray :=
-  natsToBytes [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]
-
-def verifyEd25519WithOpenSSL (publicKey32 payload signature64 : ByteArray) : IO (Except String Bool) := do
-  if publicKey32.size != 32 || signature64.size != 64 then
+def verifyEd25519WithOpenSSL (publicKey payload signature64 : ByteArray) : IO (Except String Bool) := do
+  if signature64.size != 64 then
     pure (.ok false)
   else
-    let keyDer := appendBytes ed25519SpkiPrefix publicKey32
-    let keyPath := tmpPathFor "cairn-lean-ed25519-key" keyDer "pub.der"
+    let keyPath := tmpPathFor "cairn-lean-ed25519-key" publicKey "pub.der"
     let msgPath := tmpPathFor "cairn-lean-ed25519-msg" payload "msg.bin"
     let sigPath := tmpPathFor "cairn-lean-ed25519-sig" signature64 "sig.bin"
     try
-      IO.FS.writeBinFile keyPath keyDer
+      IO.FS.writeBinFile keyPath publicKey
       IO.FS.writeBinFile msgPath payload
       IO.FS.writeBinFile sigPath signature64
       let out ← IO.Process.output {
@@ -848,7 +841,9 @@ def parseBlockView (a : ParsedArtifact) : Except String BlockView := do
 
 structure TransitionView where
   before : Digest
+  transactions : List Digest
   after : Digest
+  approvals : List Digest
   finality : Option Digest
   deriving Repr
 
@@ -857,7 +852,19 @@ def parseTransitionView (a : ParsedArtifact) : Except String TransitionView := d
     .error "artifact is not a federation transition"
   let body <- canonExpectTag a.body "federation-transition-v1"
   let before <- requireDigest "transition.before" (← canonAsStr (← canonField body "before"))
+  let transactionsCanon <- canonField body "transactions"
+  let transactions <-
+    match transactionsCanon with
+    | .list xs => xs.mapM (fun x => do
+        requireDigest "transition.transaction" (← canonAsStr x))
+    | _ => .error "transition.transactions must be list"
   let after <- requireDigest "transition.after" (← canonAsStr (← canonField body "after"))
+  let approvalsCanon <- canonField body "approvals"
+  let approvals <-
+    match approvalsCanon with
+    | .list xs => xs.mapM (fun x => do
+        requireDigest "transition.approval" (← canonAsStr x))
+    | _ => .error "transition.approvals must be list"
   let finalityCanon <- canonField body "finality"
   let finality <-
     match finalityCanon with
@@ -868,7 +875,7 @@ def parseTransitionView (a : ParsedArtifact) : Except String TransitionView := d
         else
           pure none
     | _ => pure none
-  pure { before := before, after := after, finality := finality }
+  pure { before := before, transactions := transactions, after := after, approvals := approvals, finality := finality }
 
 structure FederationStateView where
   trustRoots : Digest
@@ -1703,6 +1710,28 @@ def loadReplayHistoryBundleIO
           | .ok v => pure v
           | .error e => return .error (KernelResult.invalid e)
 
+        let votedTransitionArtifact <-
+          match ← readArtifactFromCas root proposalView.transition with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [proposalView.transition])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let votedTransition <-
+          match parseTransitionView votedTransitionArtifact with
+          | .ok v => pure v
+          | .error e => return .error (KernelResult.invalid e)
+
+        if votedTransition.before != transition.before
+            || votedTransition.transactions != transition.transactions
+            || votedTransition.after != transition.after
+            || votedTransition.approvals != transition.approvals then
+          return .error (KernelResult.invalid s!"federation history: proposal {certView.proposal} transition does not match published transition {transitionDigest}")
+        else if votedTransition.finality.isSome then
+          return .error (KernelResult.invalid s!"federation history: proposal {certView.proposal} transition must be the pre-cert transition")
+
         let beforeStateArtifact <-
           match ← readArtifactFromCas root transition.before with
           | .error e =>
@@ -1766,8 +1795,6 @@ def loadReplayHistoryBundleIO
           return .error (KernelResult.invalid "certificate replicaSet projection does not match proposal")
         else if certView.federationId != proposalView.federationId then
           return .error (KernelResult.invalid "certificate federationId projection does not match proposal")
-        else if proposalView.transition != transitionDigest then
-          return .error (KernelResult.invalid s!"federation history: proposal transition does not match published transition {transitionDigest}")
         else if proposalView.before != transition.before || proposalView.after != transition.after then
           return .error (KernelResult.invalid s!"federation history: proposal before/after does not match transition {transitionDigest}")
         else if certView.state != transition.after then

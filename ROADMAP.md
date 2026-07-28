@@ -307,6 +307,14 @@ history replay verification; deeper full-runtime semantic replay extends from
 that foundation. A companion Lean implementation in `verifier-lean/` mirrors
 the same CKC judgment structure for independent executable checking.
 
+PR34 is complete only when `ScalaCKC(Σ, K, q) = RustCKC(Σ, K, q) = LeanCKC(Σ, K, q)`
+over a real corpus that covers canonical resolution, language and machine
+closure, free-change witness validation, real change application, proof and
+acceptance evaluation, native repository replay, proposal and certificate
+verification, federation history reconstruction, and all four verdict classes.
+The current foundation covers federation semantics and the shared CKC shape,
+but the full cross-implementation identity corpus still needs to be widened.
+
 #### PR35 — Retention constitutions and semantic archives
 
 PR32 preserves a thin transition/state metadata spine forever while letting

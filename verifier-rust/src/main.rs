@@ -55,6 +55,9 @@ enum Command {
         /// Expected genesis federation-state digest
         #[arg(long)]
         genesis_state: String,
+        /// Maximum replay steps before the verifier reports exhaustion
+        #[arg(long, default_value_t = 100_000)]
+        max_steps: usize,
     },
 }
 
@@ -151,12 +154,13 @@ fn main() -> Result<()> {
             node_root,
             federation_id,
             genesis_state,
+            max_steps,
         } => {
             let federation_id = parse_digest(&federation_id, "federation_id")?;
             let genesis_state = parse_digest(&genesis_state, "genesis_state")?;
             let result = derive(
                 &constitution,
-                budget,
+                Budget { max_steps },
                 Query::ReplayHistory {
                     node_root,
                     federation_id,

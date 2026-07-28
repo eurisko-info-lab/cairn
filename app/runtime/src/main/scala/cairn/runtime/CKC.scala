@@ -13,7 +13,7 @@ import java.nio.file.Path
   * stack.
   */
 object CKC:
-  final case class KernelConstitution(kernelId: String = "ckc-v1")
+  final case class KernelConstitution(kernelId: String = "ckc-v0")
   final case class Budget(maxSteps: Long = 100000L)
 
   enum Query:

@@ -198,7 +198,7 @@ fn classify_error(error: String) -> KernelResult {
             }
         }
     }
-    if !closure.is_empty() && error.contains("not in CAS") {
+    if error.contains("not in CAS") {
         return KernelResult::Missing { closure };
     }
 
