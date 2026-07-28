@@ -64,6 +64,7 @@ class CKCParitySuite extends munit.FunSuite:
       genesisState: Digest,
       resolveDigestG0: Digest,
       resolveDigestG1: Digest,
+      governedDeltaG0ToG1: Digest,
   )
 
   private final case class CertFixture(
@@ -149,9 +150,19 @@ class CKCParitySuite extends munit.FunSuite:
 
     val replayGenesisState =
       val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
+      if transitionDigests.length < 2 then fail(s"expected at least two finalized transitions, got ${transitionDigests.length}")
       val firstTransitionArtifact = cas.getByDigest(transitionDigests.head).fold(e => fail(e), identity)
       val firstTransition = FederationTransition.fromArtifact(firstTransitionArtifact).fold(e => fail(e), identity)
       firstTransition.before
+
+    val governedDeltaG0ToG1 =
+      val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
+      val secondTransitionDigest = transitionDigests(1)
+      val secondTransitionArtifact = cas.getByDigest(secondTransitionDigest).fold(e => fail(e), identity)
+      val secondTransition = FederationTransition.fromArtifact(secondTransitionArtifact).fold(e => fail(e), identity)
+      assertEquals(secondTransition.before, state1.digest)
+      assertEquals(secondTransition.after, state2.digest)
+      secondTransitionDigest
 
     Fixture(
       casRoot = dir.resolve("cas"),
@@ -160,6 +171,7 @@ class CKCParitySuite extends munit.FunSuite:
       genesisState = replayGenesisState,
       resolveDigestG0 = state1.digest,
       resolveDigestG1 = state2.digest,
+      governedDeltaG0ToG1 = governedDeltaG0ToG1,
     )
 
   private def buildCertFixture(): CertFixture =
@@ -310,7 +322,7 @@ class CKCParitySuite extends munit.FunSuite:
     val replayFixture = buildFixture()
     val g0 = replayFixture.resolveDigestG0
     val g1 = replayFixture.resolveDigestG1
-    val delta = Digest.of(Canon.CStr("pr34-stair-delta"))
+    val delta = replayFixture.governedDeltaG0ToG1
 
     val g0Env = Pr34VerdictEnvelope(
       kernelConstitution = Digest.of(Canon.CStr("pr34-k0")),
@@ -416,6 +428,15 @@ class CKCParitySuite extends munit.FunSuite:
     ))._1
     assertEquals(rustMalformedOverride, "invalid")
     assertEquals(leanMalformedOverride, "invalid")
+
+  test("PR34 successor world fixture is independently auditable"):
+    val replayFixture = buildFixture()
+    val node = Node(replayFixture.nodeRoot, EffectContexts.forLedger())
+    val verified = FederationHistory
+      .auditPublishedTransition(node, node.cas, replayFixture.governedDeltaG0ToG1, replayFixture.federationId)
+      .fold(e => fail(e), identity)
+    assertEquals(verified.transition.before, replayFixture.resolveDigestG0)
+    assertEquals(verified.transition.after, replayFixture.resolveDigestG1)
 
   test("PR34 staircase fixture digests are reproducible"):
     val a = buildFixture()
