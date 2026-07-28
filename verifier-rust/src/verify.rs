@@ -19,6 +19,22 @@ pub struct HistoryReport {
     pub final_epoch: i64,
 }
 
+#[derive(Clone, Debug)]
+pub struct VerifiedTransition {
+    pub before: Digest,
+    pub after: Digest,
+    pub cert: Digest,
+    pub proposal: Digest,
+    pub manifest: Digest,
+    pub federation_id: Digest,
+    pub epoch: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct VerifiedHistoryContext {
+    pub transitions: Vec<VerifiedTransition>,
+}
+
 fn read_artifact(cas: &DiskCas, digest: Digest) -> Result<Artifact> {
     let bs = cas.read_blob(digest)?;
     let a = Artifact::decode(&bs)?;
@@ -204,12 +220,12 @@ fn collect_federation_artifacts_from_chain(chain: &[Block]) -> (Vec<Digest>, BTr
     (transitions, recorded_certs)
 }
 
-pub fn verify_history_command_with_limit(
+pub fn build_verified_history_context_with_limit(
     node_root: &str,
     expected_federation_id: Digest,
     expected_genesis_state: Digest,
     max_steps: Option<usize>,
-) -> Result<HistoryReport> {
+) -> Result<VerifiedHistoryContext> {
     let root = Path::new(node_root);
     let cas = DiskCas::new(root);
 
@@ -244,8 +260,7 @@ pub fn verify_history_command_with_limit(
     }
 
     let mut expected_before = expected_genesis_state;
-    let mut last_state = expected_genesis_state;
-    let mut last_epoch = 0i64;
+    let mut verified = Vec::with_capacity(transition_digests.len());
 
     for td in &transition_digests {
         let transition_artifact = read_artifact(&cas, *td)?;
@@ -318,14 +333,19 @@ pub fn verify_history_command_with_limit(
         }
 
         expected_before = transition.after;
-        last_state = transition.after;
-        last_epoch = cert.epoch;
-        let _ = as_i64_usize(last_epoch, "epoch")?;
+        let _ = as_i64_usize(cert.epoch, "epoch")?;
+        verified.push(VerifiedTransition {
+            before: transition.before,
+            after: transition.after,
+            cert: cert_digest,
+            proposal: cert.proposal,
+            manifest: before_state.trust_roots,
+            federation_id: cert.federation_id,
+            epoch: cert.epoch,
+        });
     }
 
-    Ok(HistoryReport {
-        verified_transitions: transition_digests.len(),
-        final_state: last_state,
-        final_epoch: last_epoch,
+    Ok(VerifiedHistoryContext {
+        transitions: verified,
     })
 }

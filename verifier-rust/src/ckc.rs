@@ -1,11 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 
 use crate::cas::DiskCas;
 use crate::canon::Canon;
 use crate::digest::Digest;
-use crate::model::Artifact;
+use crate::model::{Artifact, FederationFinalityCertificate};
 use crate::verify::{self, HistoryReport};
 
 #[derive(Clone, Debug)]
@@ -52,6 +52,45 @@ pub enum Query {
 }
 
 #[derive(Clone, Debug)]
+pub enum SemanticQuery {
+    Resolve { digest: Digest },
+    VerifyCertBinding {
+        cert: Digest,
+        proposal: Digest,
+        manifest: Digest,
+    },
+    ReplayHistory {
+        federation_id: Digest,
+        genesis_state: Digest,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct CertificateProjection {
+    pub proposal: Digest,
+    pub manifest: Digest,
+}
+
+#[derive(Clone, Debug)]
+pub struct Transition {
+    pub before: Digest,
+    pub after: Digest,
+    pub cert: Digest,
+    pub proposal: Digest,
+    pub manifest: Digest,
+    pub federation_id: Digest,
+    pub epoch: i64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Context {
+    pub resolved_artifacts: BTreeMap<Digest, Artifact>,
+    pub artifact_closure: BTreeSet<Digest>,
+    pub certs: BTreeMap<Digest, CertificateProjection>,
+    pub history: Vec<Transition>,
+}
+
+#[derive(Clone, Debug)]
 pub enum Value {
     Artifact(Artifact),
     CertBinding {
@@ -70,17 +109,16 @@ pub enum KernelResult {
     Exhausted { limit: String },
 }
 
-fn evidence_of(constitution: &KernelConstitution, query: &Query, value: &Value) -> Digest {
+fn evidence_of(constitution: &KernelConstitution, query: &SemanticQuery, value: &Value) -> Digest {
     let qcanon = match query {
-        Query::Resolve { digest, .. } => Canon::Tag(
+        SemanticQuery::Resolve { digest } => Canon::Tag(
             "resolve".to_owned(),
             Box::new(Canon::Str(digest.hex())),
         ),
-        Query::VerifyCertBinding {
+        SemanticQuery::VerifyCertBinding {
             cert,
             proposal,
             manifest,
-            ..
         } => Canon::Tag(
             "verify-cert-binding".to_owned(),
             Box::new(Canon::Map(vec![
@@ -89,10 +127,9 @@ fn evidence_of(constitution: &KernelConstitution, query: &Query, value: &Value) 
                 ("manifest".to_owned(), Canon::Str(manifest.hex())),
             ])),
         ),
-        Query::ReplayHistory {
+        SemanticQuery::ReplayHistory {
             federation_id,
             genesis_state,
-            ..
         } => Canon::Tag(
             "replay-history".to_owned(),
             Box::new(Canon::Map(vec![
@@ -167,44 +204,251 @@ fn classify_error(error: String) -> KernelResult {
     KernelResult::Invalid { error }
 }
 
-pub fn derive(constitution: &KernelConstitution, budget: Budget, query: Query) -> KernelResult {
-    let evaluated: Result<Value> = match &query {
-        Query::Resolve { cas_root, digest } => {
-            let cas = DiskCas::new(cas_root);
-            cas.read_blob(*digest)
-                .and_then(|bs| Artifact::decode(&bs))
-                .map(Value::Artifact)
+fn missing_closure_for_history(ctx: &Context) -> BTreeSet<Digest> {
+    let mut missing = BTreeSet::new();
+    for t in &ctx.history {
+        if !ctx.certs.contains_key(&t.cert) {
+            missing.insert(t.cert);
         }
-        Query::VerifyCertBinding {
-            cas_root,
-            cert,
-            proposal,
-            manifest,
-        } => verify::verify_cert_command(cas_root, *cert, *proposal, *manifest).map(|_| {
-            Value::CertBinding {
-                cert: *cert,
-                proposal: *proposal,
-                manifest: *manifest,
+        if !ctx.artifact_closure.contains(&t.proposal) {
+            missing.insert(t.proposal);
+        }
+        if !ctx.artifact_closure.contains(&t.manifest) {
+            missing.insert(t.manifest);
+        }
+    }
+    missing
+}
+
+fn replay_transitions(
+    federation_id: Digest,
+    state: Digest,
+    last_epoch: i64,
+    xs: &[Transition],
+) -> Result<(Digest, i64, usize)> {
+    if xs.is_empty() {
+        return Ok((state, last_epoch, 0));
+    }
+
+    let t = &xs[0];
+    if t.federation_id != federation_id {
+        anyhow::bail!("federation id mismatch at epoch {}", t.epoch);
+    }
+    if t.before != state {
+        anyhow::bail!(
+            "transition chain break: expected before={}, got {}",
+            state.hex(),
+            t.before.hex()
+        );
+    }
+    if t.epoch < last_epoch {
+        anyhow::bail!("epoch regression: {} < {}", t.epoch, last_epoch);
+    }
+
+    let (final_state, final_epoch, n) = replay_transitions(federation_id, t.after, t.epoch, &xs[1..])?;
+    Ok((final_state, final_epoch, n + 1))
+}
+
+pub fn derive_semantic(
+    ctx: &Context,
+    constitution: &KernelConstitution,
+    budget: Budget,
+    query: SemanticQuery,
+) -> KernelResult {
+    let evaluated: Result<Value> = (|| {
+        match query {
+            SemanticQuery::Resolve { digest } => match ctx.resolved_artifacts.get(&digest) {
+                Some(artifact) => Ok(Value::Artifact(artifact.clone())),
+                None => Err(anyhow::anyhow!("artifact not in CAS: {}", digest.hex())),
+            },
+            SemanticQuery::VerifyCertBinding {
+                cert,
+                proposal,
+                manifest,
+            } => {
+                let mut missing = BTreeSet::new();
+                if !ctx.certs.contains_key(&cert) {
+                    missing.insert(cert);
+                }
+                if !ctx.artifact_closure.contains(&proposal) {
+                    missing.insert(proposal);
+                }
+                if !ctx.artifact_closure.contains(&manifest) {
+                    missing.insert(manifest);
+                }
+                if !missing.is_empty() {
+                    anyhow::bail!("artifact not in CAS: {:?}", missing);
+                }
+
+                let cp = ctx
+                    .certs
+                    .get(&cert)
+                    .ok_or_else(|| anyhow::anyhow!("certificate not in CAS: {}", cert.hex()))?;
+
+                if cp.proposal != proposal {
+                    anyhow::bail!("certificate/proposal mismatch");
+                }
+                if cp.manifest != manifest {
+                    anyhow::bail!("certificate/manifest mismatch");
+                }
+
+                Ok(Value::CertBinding {
+                    cert,
+                    proposal,
+                    manifest,
+                })
             }
-        }),
-        Query::ReplayHistory {
-            node_root,
-            federation_id,
-            genesis_state,
-        } => verify::verify_history_command_with_limit(
-            node_root,
-            *federation_id,
-            *genesis_state,
-            Some(budget.max_steps),
-        )
-        .map(Value::ReplayedState),
-    };
+            SemanticQuery::ReplayHistory {
+                federation_id,
+                genesis_state,
+            } => {
+                if ctx.history.len() > budget.max_steps {
+                    anyhow::bail!(
+                        "kernel exhausted: max_steps {} exceeded by {} transitions",
+                        budget.max_steps,
+                        ctx.history.len()
+                    );
+                }
+                if ctx.history.is_empty() {
+                    anyhow::bail!("no federation transitions published on chain");
+                }
+
+                let miss = missing_closure_for_history(ctx);
+                if !miss.is_empty() {
+                    anyhow::bail!("artifact not in CAS: {:?}", miss);
+                }
+
+                let (final_state, final_epoch, verified_transitions) =
+                    replay_transitions(federation_id, genesis_state, 0, &ctx.history)?;
+                Ok(Value::ReplayedState(HistoryReport {
+                    verified_transitions,
+                    final_state,
+                    final_epoch,
+                }))
+            }
+        }
+    })();
 
     match evaluated {
         Ok(value) => {
             let evidence = evidence_of(constitution, &query, &value);
             KernelResult::Valid { value, evidence }
         }
+        Err(e) => classify_error(e.to_string()),
+    }
+}
+
+fn load_context_for_resolve(cas_root: &str, digest: Digest) -> Result<Context> {
+    let cas = DiskCas::new(cas_root);
+    let artifact = cas
+        .read_blob(digest)
+        .and_then(|bs| Artifact::decode(&bs))?;
+
+    let mut ctx = Context::default();
+    ctx.resolved_artifacts.insert(digest, artifact);
+    ctx.artifact_closure.insert(digest);
+    Ok(ctx)
+}
+
+fn load_context_for_verify_cert(
+    cas_root: &str,
+    cert: Digest,
+    proposal: Digest,
+    manifest: Digest,
+) -> Result<Context> {
+    verify::verify_cert_command(cas_root, cert, proposal, manifest)?;
+
+    let cas = DiskCas::new(cas_root);
+    let cert_artifact = cas.read_blob(cert).and_then(|bs| Artifact::decode(&bs))?;
+    let cert_view = FederationFinalityCertificate::from_artifact(&cert_artifact)?;
+
+    let mut ctx = Context::default();
+    ctx.artifact_closure.insert(proposal);
+    ctx.artifact_closure.insert(manifest);
+    ctx.certs.insert(
+        cert,
+        CertificateProjection {
+            proposal: cert_view.proposal,
+            manifest,
+        },
+    );
+    Ok(ctx)
+}
+
+fn load_context_for_replay(
+    node_root: &str,
+    federation_id: Digest,
+    genesis_state: Digest,
+    budget: Budget,
+) -> Result<Context> {
+    let loaded = verify::build_verified_history_context_with_limit(
+        node_root,
+        federation_id,
+        genesis_state,
+        Some(budget.max_steps),
+    )?;
+
+    let mut ctx = Context::default();
+    for t in loaded.transitions {
+        ctx.artifact_closure.insert(t.proposal);
+        ctx.artifact_closure.insert(t.manifest);
+        ctx.certs.insert(
+            t.cert,
+            CertificateProjection {
+                proposal: t.proposal,
+                manifest: t.manifest,
+            },
+        );
+        ctx.history.push(Transition {
+            before: t.before,
+            after: t.after,
+            cert: t.cert,
+            proposal: t.proposal,
+            manifest: t.manifest,
+            federation_id: t.federation_id,
+            epoch: t.epoch,
+        });
+    }
+    Ok(ctx)
+}
+
+pub fn derive(constitution: &KernelConstitution, budget: Budget, query: Query) -> KernelResult {
+    let loaded: Result<(Context, SemanticQuery)> = match query {
+        Query::Resolve { cas_root, digest } => {
+            load_context_for_resolve(&cas_root, digest).map(|ctx| (ctx, SemanticQuery::Resolve { digest }))
+        }
+        Query::VerifyCertBinding {
+            cas_root,
+            cert,
+            proposal,
+            manifest,
+        } => load_context_for_verify_cert(&cas_root, cert, proposal, manifest).map(|ctx| {
+            (
+                ctx,
+                SemanticQuery::VerifyCertBinding {
+                    cert,
+                    proposal,
+                    manifest,
+                },
+            )
+        }),
+        Query::ReplayHistory {
+            node_root,
+            federation_id,
+            genesis_state,
+        } => load_context_for_replay(&node_root, federation_id, genesis_state, budget).map(|ctx| {
+            (
+                ctx,
+                SemanticQuery::ReplayHistory {
+                    federation_id,
+                    genesis_state,
+                },
+            )
+        }),
+    };
+
+    match loaded {
+        Ok((ctx, semantic_query)) => derive_semantic(&ctx, constitution, budget, semantic_query),
         Err(e) => classify_error(e.to_string()),
     }
 }
@@ -225,8 +469,7 @@ mod tests {
     fn evidence_is_deterministic_for_same_inputs() {
         let k = KernelConstitution::default();
         let d = Digest::of_bytes(b"x");
-        let q = Query::VerifyCertBinding {
-            cas_root: "/tmp/any".to_owned(),
+        let q = SemanticQuery::VerifyCertBinding {
             cert: d,
             proposal: d,
             manifest: d,

@@ -54,6 +54,17 @@ inductive Query where
   | replayHistory (nodeRoot : String) (federationId : Digest) (genesisState : Digest)
   deriving Repr, BEq, DecidableEq
 
+inductive SemanticQuery where
+  | resolve (digest : Digest)
+  | verifyCertBinding (cert : Digest) (proposal : Digest) (manifest : Digest)
+  | replayHistory (federationId : Digest) (genesisState : Digest)
+  deriving Repr, BEq, DecidableEq
+
+def toSemanticQuery : Query → SemanticQuery
+  | .resolve _ digest => .resolve digest
+  | .verifyCertBinding _ cert proposal manifest => .verifyCertBinding cert proposal manifest
+  | .replayHistory _ federationId genesisState => .replayHistory federationId genesisState
+
 inductive Value where
   | artifact (a : Artifact)
   | certBinding (cert : Digest) (proposal : Digest) (manifest : Digest)
@@ -879,7 +890,7 @@ def fnv1a (s : String) : UInt64 :=
     (fun h b => (h ^^^ UInt64.ofNat b.toNat) * fnvPrime)
     fnvOffset
 
-def evidenceOf (constitution : KernelConstitution) (query : Query) (value : Value) : Digest :=
+def evidenceOf (constitution : KernelConstitution) (query : SemanticQuery) (value : Value) : Digest :=
   let payload :=
     constitution.kernelId ++ "|" ++ reprStr query ++ "|" ++ reprStr value
   toString (fnv1a payload)
@@ -917,14 +928,14 @@ def replayTransitions
         | .error e => .error e
         | .ok (finalState, finalEpoch, n) => .ok (finalState, finalEpoch, n + 1)
 
-def derive (ctx : Context) (constitution : KernelConstitution) (budget : Budget) (query : Query) : KernelResult :=
+def derive (ctx : Context) (constitution : KernelConstitution) (budget : Budget) (query : SemanticQuery) : KernelResult :=
   let evaluated : Except String Value :=
     match query with
-    | .resolve _ digest =>
+    | .resolve digest =>
         match ctx.artifacts.get? digest with
         | some artifact => .ok (.artifact artifact)
         | none => .error s!"artifact not in CAS: {digest}"
-    | .verifyCertBinding _ cert proposal manifest =>
+    | .verifyCertBinding cert proposal manifest =>
         let miss :=
           (if (ctx.certs.get? cert).isSome then [] else [cert]) ++
           (if (ctx.artifacts.get? proposal).isSome then [] else [proposal]) ++
@@ -941,7 +952,7 @@ def derive (ctx : Context) (constitution : KernelConstitution) (budget : Budget)
                 .error "certificate/manifest mismatch"
               else
                 .ok (.certBinding cert proposal manifest)
-    | .replayHistory _ federationId genesisState =>
+    | .replayHistory federationId genesisState =>
         if ctx.history.length > budget.maxSteps then
           .error s!"kernel exhausted: max_steps {budget.maxSteps} exceeded by {ctx.history.length} transitions"
         else if ctx.history.isEmpty then
@@ -971,7 +982,7 @@ def Derives
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
-    (q : Query)
+  (q : SemanticQuery)
     (r : KernelResult) : Prop :=
   derive Sigma K B q = r
 
@@ -980,7 +991,7 @@ def DerivesValue
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
-    (q : Query)
+  (q : SemanticQuery)
     (v : Value) : Prop :=
   ∃ evidence, Derives Sigma K B q (.valid v evidence)
 
@@ -989,7 +1000,7 @@ theorem kernelVerify_iff_derives
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
-    (q : Query)
+  (q : SemanticQuery)
     (r : KernelResult) :
     derive Sigma K B q = r ↔ Derives Sigma K B q r := by
   rfl
@@ -999,7 +1010,7 @@ theorem result_deterministic
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
-    (q : Query)
+    (q : SemanticQuery)
     (r1 r2 : KernelResult)
     (h1 : Derives Sigma K B q r1)
     (h2 : Derives Sigma K B q r2) :
@@ -1012,7 +1023,7 @@ theorem valid_deterministic
     (Sigma : Context)
     (K : KernelConstitution)
     (B : Budget)
-    (q : Query)
+    (q : SemanticQuery)
     (v1 v2 : Value)
     (e1 e2 : Digest)
     (h1 : Derives Sigma K B q (.valid v1 e1))
@@ -1315,9 +1326,9 @@ def deriveJudgment
     (j : Judgment) : Verdict Value :=
   match j with
   | .resolve d =>
-      ofKernelResult (derive Sigma K B (.resolve "" d))
+      ofKernelResult (derive Sigma K B (.resolve d))
   | .replayHistory federationId genesisState =>
-      ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState))
+      ofKernelResult (derive Sigma K B (.replayHistory federationId genesisState))
   | .languageAt L =>
       deriveLanguageAt Sigma K L
   | .freeChangeLanguage L =>
@@ -1355,7 +1366,7 @@ theorem deriveJudgment_resolve_corresponds
     (K : KernelConstitution)
     (B : Budget)
     (d : Digest) :
-    deriveJudgment Sigma K B (.resolve d) = ofKernelResult (derive Sigma K B (.resolve "" d)) := by
+    deriveJudgment Sigma K B (.resolve d) = ofKernelResult (derive Sigma K B (.resolve d)) := by
   rfl
 
 theorem deriveJudgment_replay_corresponds
@@ -1364,7 +1375,7 @@ theorem deriveJudgment_replay_corresponds
     (B : Budget)
     (federationId genesisState : Digest) :
     deriveJudgment Sigma K B (.replayHistory federationId genesisState) =
-      ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState)) := by
+      ofKernelResult (derive Sigma K B (.replayHistory federationId genesisState)) := by
   rfl
 
 theorem deriveJudgment_apply_corresponds
@@ -1543,8 +1554,222 @@ def contextForVerifyCert
     history := []
   }
 
+def contextForReplayHistory (transitions : List Transition) : Context :=
+  let (artifacts, certs) :=
+    transitions.foldl
+      (fun acc t =>
+        let (as, cs) := acc
+        let as' :=
+          (as.insert t.proposal { digest := t.proposal, kind := .proposal })
+            |>.insert t.manifest { digest := t.manifest, kind := .replicaManifest }
+        let cs' :=
+          cs.insert t.cert {
+            cert := t.cert
+            proposal := t.proposal
+            manifest := t.manifest
+            federationId := t.federationId
+            epoch := t.epoch
+          }
+        (as', cs'))
+      ((∅ : Std.HashMap Digest Artifact), (∅ : Std.HashMap Digest CertificateProjection))
+  {
+    artifacts := artifacts
+    certs := certs
+    history := transitions
+  }
+
+def loadReplayHistoryContextIO
+    (nodeRoot : String)
+    (federationId : Digest)
+    (genesisState : Digest) : IO (Except KernelResult Context) := do
+  match ← readChainDigests nodeRoot with
+  | .error e =>
+      pure (.error (classifyError e))
+  | .ok chainDigests =>
+      let root := System.FilePath.mk nodeRoot
+      let mut transitionDigests : List Digest := []
+      let mut recordedCerts : List Digest := []
+
+      for blockDigest in chainDigests do
+        match ← readArtifactFromCas root blockDigest with
+        | .error e =>
+            if isMissingCasError e then
+              return .error (KernelResult.missing [blockDigest])
+            else
+              return .error (KernelResult.invalid e)
+        | .ok blockArtifact =>
+            match parseBlockView blockArtifact with
+            | .error e =>
+                return .error (KernelResult.invalid e)
+            | .ok block =>
+                for tx in block.txs do
+                  match tx with
+                  | .publishArtifact kind valueHash =>
+                      if kind == "federation-transition" then
+                        transitionDigests := transitionDigests.concat valueHash
+                  | .recordCertificate cert method =>
+                      if method == "federation-finality" then
+                        recordedCerts := recordedCerts.concat cert
+                  | .other => pure ()
+
+      if transitionDigests.isEmpty then
+        return .error (KernelResult.invalid "no federation transitions published on chain")
+
+      let mut expectedBefore := genesisState
+      let mut lastEpoch : Nat := 0
+      let mut transitions : List Transition := []
+
+      for transitionDigest in transitionDigests do
+        let transitionArtifact <-
+          match ← readArtifactFromCas root transitionDigest with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [transitionDigest])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let transition <-
+          match parseTransitionView transitionArtifact with
+          | .error e =>
+              return .error (KernelResult.invalid e)
+          | .ok t => pure t
+
+        if transition.before != expectedBefore then
+          return .error (KernelResult.invalid s!"federation history: transition {transitionDigest} does not chain from {expectedBefore}")
+
+        let certDigest <-
+          match transition.finality with
+          | some d => pure d
+          | none => return .error (KernelResult.invalid s!"federation history: transition {transitionDigest} missing finality")
+
+        if !(containsDigest recordedCerts certDigest) then
+          return .error (KernelResult.invalid s!"federation history: certificate {certDigest} not anchored in ledger record-certificate txs")
+
+        let certArtifact <-
+          match ← readArtifactFromCas root certDigest with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [certDigest])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let certView <-
+          match parseCertView certArtifact with
+          | .ok v => pure v
+          | .error e => return .error (KernelResult.invalid e)
+
+        if certView.federationId != federationId then
+          return .error (KernelResult.invalid "federation finality: federation id mismatch")
+
+        let proposalArtifact <-
+          match ← readArtifactFromCas root certView.proposal with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [certView.proposal])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let proposalView <-
+          match parseProposalView proposalArtifact with
+          | .ok v => pure v
+          | .error e => return .error (KernelResult.invalid e)
+
+        let beforeStateArtifact <-
+          match ← readArtifactFromCas root transition.before with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [transition.before])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let beforeState <-
+          match parseFederationStateView beforeStateArtifact with
+          | .ok v => pure v
+          | .error e => return .error (KernelResult.invalid e)
+
+        let afterStateArtifact <-
+          match ← readArtifactFromCas root transition.after with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [transition.after])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        match parseFederationStateView afterStateArtifact with
+        | .error e => return .error (KernelResult.invalid e)
+        | .ok _ => pure ()
+
+        let manifestArtifact <-
+          match ← readArtifactFromCas root beforeState.trustRoots with
+          | .error e =>
+              if isMissingCasError e then
+                return .error (KernelResult.missing [beforeState.trustRoots])
+              else
+                return .error (KernelResult.invalid e)
+          | .ok a => pure a
+
+        let manifestView <-
+          match parseManifestView manifestArtifact with
+          | .error e => return .error (KernelResult.invalid e)
+          | .ok v => pure v
+
+        match ← verifyManifestSealsIO manifestView with
+        | .error e => return .error (KernelResult.invalid e)
+        | .ok _ =>
+            match ← verifyCertSignaturesIO certView manifestView with
+            | .error e => return .error (KernelResult.invalid e)
+            | .ok _ =>
+                match ← verifyManifestDigestBindingIO certView manifestView with
+                | .error e => return .error (KernelResult.invalid e)
+                | .ok _ => pure ()
+
+        if certView.transition != proposalView.transition then
+          return .error (KernelResult.invalid "certificate transition projection does not match proposal")
+        else if certView.state != proposalView.after then
+          return .error (KernelResult.invalid "certificate state projection does not match proposal.after")
+        else if certView.previousState != proposalView.before then
+          return .error (KernelResult.invalid "certificate previousState projection does not match proposal.before")
+        else if certView.epoch != proposalView.epoch then
+          return .error (KernelResult.invalid "certificate epoch projection does not match proposal")
+        else if certView.replicaSet != proposalView.replicaSet then
+          return .error (KernelResult.invalid "certificate replicaSet projection does not match proposal")
+        else if certView.federationId != proposalView.federationId then
+          return .error (KernelResult.invalid "certificate federationId projection does not match proposal")
+        else if proposalView.transition != transitionDigest then
+          return .error (KernelResult.invalid s!"federation history: proposal transition does not match published transition {transitionDigest}")
+        else if proposalView.before != transition.before || proposalView.after != transition.after then
+          return .error (KernelResult.invalid s!"federation history: proposal before/after does not match transition {transitionDigest}")
+        else if certView.state != transition.after then
+          return .error (KernelResult.invalid "federation finality: certificate subject is not transition.after")
+        else if certView.previousState != transition.before then
+          return .error (KernelResult.invalid "federation finality: certificate predecessor is not transition.before")
+        else if certView.epoch < 0 then
+          return .error (KernelResult.invalid "federation finality: epoch must be non-negative")
+        else
+          let epochNat := Int.toNat certView.epoch
+          if epochNat < lastEpoch then
+            return .error (KernelResult.invalid s!"epoch regression: {epochNat} < {lastEpoch}")
+          else
+            expectedBefore := transition.after
+            lastEpoch := epochNat
+            transitions := transitions.concat {
+              before := transition.before
+              after := transition.after
+              cert := certDigest
+              proposal := certView.proposal
+              manifest := beforeState.trustRoots
+              federationId := certView.federationId
+              epoch := epochNat
+            }
+
+      return .ok (contextForReplayHistory transitions)
+
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
-  let mkValid := fun (q : Query) (v : Value) => KernelResult.valid v (evidenceOf constitution q v)
   match query with
   | .resolve casRoot digest =>
       let root := System.FilePath.mk casRoot
@@ -1556,7 +1781,7 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
             pure (KernelResult.invalid e)
       | .ok a =>
           let ctx := contextForResolve digest a
-          pure (derive ctx constitution budget query)
+          pure (derive ctx constitution budget (toSemanticQuery query))
   | .verifyCertBinding casRoot cert proposal manifest =>
       match ← verifyRuntimeDependenciesIO with
       | .error e =>
@@ -1625,7 +1850,7 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                             pure (KernelResult.invalid "certificate federationId projection does not match proposal")
                           else
                             let ctx := contextForVerifyCert cert proposal manifest certView
-                            pure (derive ctx constitution budget query)
+                            pure (derive ctx constitution budget (toSemanticQuery query))
             | .error e, _, _ =>
                 pure (KernelResult.invalid e)
             | _, .error e, _ =>
@@ -1643,191 +1868,9 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
       | .error e =>
         return KernelResult.invalid e
       | .ok _ => pure ()
-
-      match ← readChainDigests nodeRoot with
-      | .error e =>
-          pure (classifyError e)
-      | .ok chainDigests =>
-          let root := System.FilePath.mk nodeRoot
-          let mut transitionDigests : List Digest := []
-          let mut recordedCerts : List Digest := []
-
-          for blockDigest in chainDigests do
-            match ← readArtifactFromCas root blockDigest with
-            | .error e =>
-                if isMissingCasError e then
-                  return KernelResult.missing [blockDigest]
-                else
-                  return KernelResult.invalid e
-            | .ok blockArtifact =>
-                match parseBlockView blockArtifact with
-                | .error e =>
-                    return KernelResult.invalid e
-                | .ok block =>
-                    for tx in block.txs do
-                      match tx with
-                      | .publishArtifact kind valueHash =>
-                          if kind == "federation-transition" then
-                            transitionDigests := transitionDigests.concat valueHash
-                      | .recordCertificate cert method =>
-                          if method == "federation-finality" then
-                            recordedCerts := recordedCerts.concat cert
-                      | .other => pure ()
-
-          if transitionDigests.isEmpty then
-            pure (KernelResult.invalid "no federation transitions published on chain")
-          else if transitionDigests.length > budget.maxSteps then
-            pure (KernelResult.exhausted s!"max_steps {budget.maxSteps} exceeded by {transitionDigests.length} transitions")
-          else
-            let mut expectedBefore := genesisState
-            let mut lastState := genesisState
-            let mut lastEpoch : Nat := 0
-
-            for transitionDigest in transitionDigests do
-              match ← readArtifactFromCas root transitionDigest with
-              | .error e =>
-                  if isMissingCasError e then
-                    return KernelResult.missing [transitionDigest]
-                  else
-                    return KernelResult.invalid e
-              | .ok transitionArtifact =>
-                  match parseTransitionView transitionArtifact with
-                  | .error e =>
-                      return KernelResult.invalid e
-                  | .ok transition =>
-                      if transition.before != expectedBefore then
-                        return KernelResult.invalid s!"federation history: transition {transitionDigest} does not chain from {expectedBefore}"
-
-                      let certDigest <-
-                        match transition.finality with
-                        | some d => pure d
-                        | none =>
-                            return KernelResult.invalid s!"federation history: transition {transitionDigest} missing finality"
-
-                      if !(containsDigest recordedCerts certDigest) then
-                        return KernelResult.invalid s!"federation history: certificate {certDigest} not anchored in ledger record-certificate txs"
-
-                      let certArtifact <-
-                        match ← readArtifactFromCas root certDigest with
-                        | .error e =>
-                            if isMissingCasError e then
-                              return KernelResult.missing [certDigest]
-                            else
-                              return KernelResult.invalid e
-                        | .ok a => pure a
-
-                      let certView <-
-                        match parseCertView certArtifact with
-                        | .ok v => pure v
-                        | .error e => return KernelResult.invalid e
-
-                      if certView.federationId != federationId then
-                        return KernelResult.invalid "federation finality: federation id mismatch"
-
-                      let proposalArtifact <-
-                        match ← readArtifactFromCas root certView.proposal with
-                        | .error e =>
-                            if isMissingCasError e then
-                              return KernelResult.missing [certView.proposal]
-                            else
-                              return KernelResult.invalid e
-                        | .ok a => pure a
-
-                      let proposalView <-
-                        match parseProposalView proposalArtifact with
-                        | .ok v => pure v
-                        | .error e => return KernelResult.invalid e
-
-                      let beforeStateArtifact <-
-                        match ← readArtifactFromCas root transition.before with
-                        | .error e =>
-                            if isMissingCasError e then
-                              return KernelResult.missing [transition.before]
-                            else
-                              return KernelResult.invalid e
-                        | .ok a => pure a
-
-                      let beforeState <-
-                        match parseFederationStateView beforeStateArtifact with
-                        | .ok v => pure v
-                        | .error e => return KernelResult.invalid e
-
-                      let afterStateArtifact <-
-                        match ← readArtifactFromCas root transition.after with
-                        | .error e =>
-                            if isMissingCasError e then
-                              return KernelResult.missing [transition.after]
-                            else
-                              return KernelResult.invalid e
-                        | .ok a => pure a
-
-                      match parseFederationStateView afterStateArtifact with
-                      | .error e =>
-                          return KernelResult.invalid e
-                      | .ok _ => pure ()
-
-                      let manifestArtifact <-
-                        match ← readArtifactFromCas root beforeState.trustRoots with
-                        | .error e =>
-                            if isMissingCasError e then
-                              return KernelResult.missing [beforeState.trustRoots]
-                            else
-                              return KernelResult.invalid e
-                        | .ok a => pure a
-
-                      let manifestView <-
-                        match parseManifestView manifestArtifact with
-                        | .error e => return KernelResult.invalid e
-                        | .ok v => pure v
-
-                      match ← verifyManifestSealsIO manifestView with
-                      | .error e =>
-                        return KernelResult.invalid e
-                      | .ok _ =>
-                        match ← verifyCertSignaturesIO certView manifestView with
-                        | .error e =>
-                          return KernelResult.invalid e
-                        | .ok _ =>
-                          match ← verifyManifestDigestBindingIO certView manifestView with
-                          | .error e => return KernelResult.invalid e
-                          | .ok _ => pure ()
-
-                      if certView.transition != proposalView.transition then
-                        return KernelResult.invalid "certificate transition projection does not match proposal"
-                      else if certView.state != proposalView.after then
-                        return KernelResult.invalid "certificate state projection does not match proposal.after"
-                      else if certView.previousState != proposalView.before then
-                        return KernelResult.invalid "certificate previousState projection does not match proposal.before"
-                      else if certView.epoch != proposalView.epoch then
-                        return KernelResult.invalid "certificate epoch projection does not match proposal"
-                      else if certView.replicaSet != proposalView.replicaSet then
-                        return KernelResult.invalid "certificate replicaSet projection does not match proposal"
-                      else if certView.federationId != proposalView.federationId then
-                        return KernelResult.invalid "certificate federationId projection does not match proposal"
-                      else if proposalView.transition != transitionDigest then
-                        return KernelResult.invalid s!"federation history: proposal transition does not match published transition {transitionDigest}"
-                      else if proposalView.before != transition.before || proposalView.after != transition.after then
-                        return KernelResult.invalid s!"federation history: proposal before/after does not match transition {transitionDigest}"
-                      else if certView.state != transition.after then
-                        return KernelResult.invalid "federation finality: certificate subject is not transition.after"
-                      else if certView.previousState != transition.before then
-                        return KernelResult.invalid "federation finality: certificate predecessor is not transition.before"
-                      else if certView.epoch < 0 then
-                        return KernelResult.invalid "federation finality: epoch must be non-negative"
-                      else
-                        let epochNat := Int.toNat certView.epoch
-                        if epochNat < lastEpoch then
-                          return KernelResult.invalid s!"epoch regression: {epochNat} < {lastEpoch}"
-                        else
-                          expectedBefore := transition.after
-                          lastState := transition.after
-                          lastEpoch := epochNat
-
-            pure (mkValid query (.replayedState {
-              verifiedTransitions := transitionDigests.length
-              finalState := lastState
-              finalEpoch := lastEpoch
-            }))
+      match ← loadReplayHistoryContextIO nodeRoot federationId genesisState with
+      | .error r => pure r
+      | .ok ctx => pure (derive ctx constitution budget (toSemanticQuery query))
 
 def KernelResult.isValid : KernelResult → Bool
   | .valid _ _ => true
