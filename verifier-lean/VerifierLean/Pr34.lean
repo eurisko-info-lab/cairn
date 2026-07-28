@@ -143,6 +143,55 @@ def Pr34VerdictEnvelope.fromCanon (c : Canon) : Except String Pr34VerdictEnvelop
     resourceUse := resourceUse
   }
 
+structure Pr34SuccessorLink where
+  predecessorPackage : Digest
+  successorPackage : Digest
+  upgradeDelta : Digest
+  deriving Repr, BEq, DecidableEq
+
+def Pr34SuccessorLink.canon (l : Pr34SuccessorLink) : Canon :=
+  .tag "pr34-successor-link-v1" (.map [
+    ("predecessorPackage", .str l.predecessorPackage),
+    ("successorPackage", .str l.successorPackage),
+    ("upgradeDelta", .str l.upgradeDelta)
+  ])
+
+def Pr34SuccessorLink.fromCanon (c : Canon) : Except String Pr34SuccessorLink := do
+  let body <- canonExpectTag c "pr34-successor-link-v1"
+  let predecessorPackage <- requireDigest "pr34.predecessorPackage" (← canonAsStr (← canonField body "predecessorPackage"))
+  let successorPackage <- requireDigest "pr34.successorPackage" (← canonAsStr (← canonField body "successorPackage"))
+  let upgradeDelta <- requireDigest "pr34.upgradeDelta" (← canonAsStr (← canonField body "upgradeDelta"))
+  pure {
+    predecessorPackage := predecessorPackage
+    successorPackage := successorPackage
+    upgradeDelta := upgradeDelta
+  }
+
+def Pr34StaircaseValidateTwoStep
+    (g0 : Pr34VerdictEnvelope)
+    (g1 : Pr34VerdictEnvelope)
+    (link : Pr34SuccessorLink) : Except String Unit := do
+  if g0.verdictClass != .valid then
+    .error "g0 verdict is not valid"
+  else if g1.verdictClass != .valid then
+    .error "g1 verdict is not valid"
+  else if g0.graphPackage != link.predecessorPackage then
+    .error "g0 package does not match successor link predecessor"
+  else if g1.graphPackage != link.successorPackage then
+    .error "g1 package does not match successor link successor"
+  else if g0.state.isNone then
+    .error "g0 valid verdict is missing state"
+  else if g1.state.isNone then
+    .error "g1 valid verdict is missing state"
+  else if g0.evidence.isNone then
+    .error "g0 valid verdict is missing evidence"
+  else if g1.evidence.isNone then
+    .error "g1 valid verdict is missing evidence"
+  else if link.predecessorPackage == link.successorPackage then
+    .error "successor package must differ from predecessor package"
+  else
+    .ok ()
+
 -- compile-time round-trip checks for the scaffold
 def demoPr34Graph : Pr34GraphPackage :=
   {
@@ -158,5 +207,36 @@ def demoPr34Graph : Pr34GraphPackage :=
 
 def demoPr34RoundTrip : Except String Pr34GraphPackage :=
   Pr34GraphPackage.fromCanon demoPr34Graph.canon
+
+def demoPr34Link : Pr34SuccessorLink :=
+  {
+    predecessorPackage := "0000000000000000000000000000000000000000000000000000000000000010"
+    successorPackage := "0000000000000000000000000000000000000000000000000000000000000011"
+    upgradeDelta := "0000000000000000000000000000000000000000000000000000000000000012"
+  }
+
+def demoPr34LinkRoundTrip : Except String Pr34SuccessorLink :=
+  Pr34SuccessorLink.fromCanon demoPr34Link.canon
+
+def demoPr34StaircaseOk : Except String Unit :=
+  let g0 : Pr34VerdictEnvelope :=
+    {
+      kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000100"
+      graphPackage := demoPr34Link.predecessorPackage
+      verdictClass := .valid
+      state := some "0000000000000000000000000000000000000000000000000000000000000101"
+      evidence := some "0000000000000000000000000000000000000000000000000000000000000102"
+      resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+    }
+  let g1 : Pr34VerdictEnvelope :=
+    {
+      kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000200"
+      graphPackage := demoPr34Link.successorPackage
+      verdictClass := .valid
+      state := some "0000000000000000000000000000000000000000000000000000000000000201"
+      evidence := some "0000000000000000000000000000000000000000000000000000000000000202"
+      resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+    }
+  Pr34StaircaseValidateTwoStep g0 g1 demoPr34Link
 
  end VerifierLean
