@@ -482,6 +482,28 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(verified.transition.after, promoted.successorPackage)
     assertEquals(verified.transition.finality, Some(promoted.governedDeltaFinalityCertDigest))
 
+    val transitionArtifact = node.cas.getByDigest(promoted.governedDelta).fold(e => fail(e), identity)
+    val transition = FederationTransition.fromArtifact(transitionArtifact).fold(e => fail(e), identity)
+    assertEquals(transition.transactions.length, 1)
+
+    val commitArtifact = node.cas.getByDigest(transition.transactions.head).fold(e => fail(e), identity)
+    val commit = FederationCommit.fromArtifact(commitArtifact).fold(e => fail(e), identity)
+    assertEquals(commit.runtime, promoted.runtimeDigest)
+
+    val evidenceArtifact = node.cas.getByDigest(commit.acceptanceEvidence).fold(e => fail(e), identity)
+    val evidence = AcceptanceEvidence.fromCanon(evidenceArtifact.body).fold(e => fail(e), identity)
+
+    val constitutionArtifact = node.cas.getByDigest(promoted.acceptanceDigest).fold(e => fail(e), identity)
+    val constitution = AcceptanceConstitution.fromArtifact(constitutionArtifact).fold(e => fail(e), identity)
+    val expectedChangeModel = LanguageCapabilities.standard(Stlc.language).changeModel.digest
+
+    assertEquals(constitution.changeModel, expectedChangeModel)
+    assertEquals(evidence.changeModel, constitution.changeModel)
+    assertEquals(evidence.constitution, Some(promoted.acceptanceDigest))
+    assertEquals(evidence.runtime, Some(promoted.runtimeDigest))
+    assertEquals(evidence.language, promoted.languageDigest)
+    assert(evidence.validatedChangeSet.nonEmpty)
+
     val g0Env = Pr34VerdictEnvelope(
       kernelConstitution = Digest.of(Canon.CStr(promoted.kernelId)),
       graphPackage = promoted.predecessorPackage,

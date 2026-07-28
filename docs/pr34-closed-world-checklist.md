@@ -114,7 +114,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 - [x] Freeze `Cairn_n` step artifacts and canonical verdicts before upgrades.
 - [x] Represent remaining trusted host choices as constituted artifacts.
-- [ ] Define/extend change languages for those newly constituted choices.
+- [x] Define/extend change languages for those newly constituted choices.
 - [x] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
 - [x] Reconstruct `G_{n+1}` independently in Scala and Rust.
 - [x] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
@@ -224,3 +224,6 @@ Required contents:
       promoted-slab staircase gates to reduce duplicate scaffold assertions.
 - [x] Slab-driven staircase assertions are now unified under one authoritative
       cross-implementation gate in `CKCParitySuite`.
+- [x] The unified slab staircase gate now decodes governed transition commit
+      evidence and asserts constitution-bound change-model identity
+      (`capabilities.changeModel == constitution.changeModel == evidence.changeModel`).
