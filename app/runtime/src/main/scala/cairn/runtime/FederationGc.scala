@@ -122,6 +122,42 @@ object FederationGc:
       }
     yield roots
 
+  /** PR35: full semantic-retention mode — retain complete closure for every
+    * historic generation endpoint (`before`/`after`) of every ledgered
+    * transition. Unlike [[permanentHistoryRoots]], this is intentionally a
+    * transitive closure walk and therefore expensive; use only when policy
+    * requires full re-executable semantic history.
+    */
+  def fullSemanticHistoryRoots(node: Node, cas: Cas): Either[String, Set[Digest]] =
+    for
+      digests <- orderedTransitionDigests(node)
+      roots <- digests.foldLeft[Either[String, Set[Digest]]](Right(Set.empty)) { (acc, td) =>
+        for
+          xs <- acc
+          transitionArtifact <- cas.getByDigest(td)
+          transition <- FederationTransition.fromArtifact(transitionArtifact)
+          beforeClosure <- ArtifactApplicationResolver(cas).audit(transition.before)
+          afterClosure <- ArtifactApplicationResolver(cas).audit(transition.after)
+        yield xs ++ beforeClosure ++ afterClosure
+      }
+    yield roots
+
+  /** PR35: checkpoint/archive retention mode — retain full closure only for
+    * the explicitly attested checkpoint states while still retaining the
+    * thin transition/state metadata spine for auditability.
+    */
+  def checkpointArchiveRoots(
+      node: Node,
+      cas: Cas,
+      checkpoints: Set[Digest],
+  ): Either[String, Set[Digest]] =
+    for
+      metadata <- permanentHistoryRoots(node, cas)
+      checkpointClosures <- checkpoints.foldLeft[Either[String, Set[Digest]]](Right(Set.empty)) { (acc, d) =>
+        for xs <- acc; closure <- ArtifactApplicationResolver(cas).audit(d) yield xs ++ closure
+      }
+    yield metadata ++ checkpointClosures
+
   /** Reclaim is only ever driven by the last epoch that survived BFT
     * finality, never by a node's transient local view: `certificate` must
     * independently verify against `activeManifest`, name exactly
@@ -152,6 +188,7 @@ object FederationGc:
       federationId: Digest,
       ctx: EffectContext,
       node: Node,
+      retention: FederationRetentionConstitution = FederationRetentionConstitution.transitionMetadataDefault,
   ): Either[String, CasAdmin.GcReport] =
     for
       _ <- Either.cond(certificate.federationId == federationId, (), "federation gc: certificate federation id mismatch")
@@ -168,6 +205,13 @@ object FederationGc:
       epochArtifact <- cas.getByDigest(latestFinalized.gcEpoch)
       epoch <- ReplicatedGcEpoch.fromArtifact(epochArtifact)
       currentClosure <- ArtifactApplicationResolver(cas).audit(latestFinalized.digest)
-      historyRoots <- permanentHistoryRoots(node, cas)
-      report <- CasAdminEffects.gc(casRoot, epoch.roots ++ currentClosure ++ historyRoots, ctx).left.map(casErr)
+      modeRoots <- retention.effectiveMode match
+        case FederationRetentionMode.CurrentStateOnly => Right(Set.empty[Digest])
+        case FederationRetentionMode.TransitionMetadataOnly => permanentHistoryRoots(node, cas)
+        case FederationRetentionMode.FullSemanticHistory => fullSemanticHistoryRoots(node, cas)
+        case FederationRetentionMode.CheckpointedArchive =>
+          retention.archiveAttestation match
+            case None => Left("federation gc: checkpointed-archive mode requires an archiveAttestation")
+            case Some(_) => checkpointArchiveRoots(node, cas, retention.checkpointStates)
+      report <- CasAdminEffects.gc(casRoot, epoch.roots ++ currentClosure ++ modeRoots, ctx).left.map(casErr)
     yield report

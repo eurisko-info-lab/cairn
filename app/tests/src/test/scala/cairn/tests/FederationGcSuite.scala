@@ -252,3 +252,78 @@ class FederationGcSuite extends munit.FunSuite:
     assert(cas.getByDigest(genesisState.digest).isRight, "genesis state must survive reclaim")
     assert(cas.getByDigest(state1.digest).isRight, "generation 1's own state must survive reclaim")
     assert(cas.getByDigest(repoIndex1.digest).isRight, "generation 1's own repository index must survive reclaim")
+
+  test("PR35 retention mode current-state-only allows prior transition metadata reclaim"):
+    val dir = Files.createTempDirectory("cairn-fedgc-pr35-current-only")
+    val cas = DiskCas(dir.resolve("cas"))
+    val authority = Keypair.dev("pr35-current-only-auth")
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
+    val ledgerAuth = Map(authority.name -> authority.publicBytes)
+    node.append(authority, ledgerAuth, List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))))
+      .fold(e => fail(e), identity)
+    val federationId = node.chainDigests.head
+
+    val epoch0 = ReplicatedGcEpoch(0, Set.empty, None)
+    val epoch1 = ReplicatedGcEpoch(1, Set.empty, Some(epoch0.digest))
+    val epoch2 = ReplicatedGcEpoch(2, Set.empty, Some(epoch1.digest))
+    List(epoch0.artifact, epoch1.artifact, epoch2.artifact, manifest.artifact).foreach(cas.put)
+    val ledgerStandIn = Artifact(ArtifactKind.Block, Canon.CStr("pr35-ledger"))
+    val emptyRepo = RepositoryIndex(Map.empty)
+    val emptyApps = ApplicationIndex(Map.empty)
+    val emptyNs = NamespaceIndex(Map.empty)
+    List(ledgerStandIn, emptyRepo.artifact, emptyApps.artifact, emptyNs.artifact).foreach(cas.put)
+    val s0 = FederationState.genesis(ledgerStandIn.digest, manifest.digest)
+    val s1 = s0.copy(gcEpoch = epoch1.digest)
+    val s2 = s1.copy(gcEpoch = epoch2.digest)
+    List(s0.artifact, s1.artifact, s2.artifact).foreach(cas.put)
+
+    val coord1 = FederationTransactionCoordinator(dir.resolve("home-pr35-1"), cas, node, Map.empty, manifest, federationId)
+    coord1.publishLocalTestOnly(replicas, Nil, s0, s1, epoch = 1L, authority, ledgerAuth).fold(e => fail(e), identity)
+    val coord2 = FederationTransactionCoordinator(dir.resolve("home-pr35-2"), cas, node, Map.empty, manifest, federationId)
+    val (cert2, _) = coord2.publishLocalTestOnly(replicas, Nil, s1, s2, epoch = 2L, authority, ledgerAuth).fold(e => fail(e), identity)
+
+    val transition1 = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity).head
+    val report = FederationGc.reclaimAgainstFinalizedEpoch(
+      dir.resolve("cas"), s2, cas, cert2, manifest, federationId, casCtx, node,
+      retention = FederationRetentionConstitution.currentStateOnly).fold(e => fail(e), identity)
+    assert(report.swept >= 1, report.toString)
+    assert(cas.getByDigest(transition1).isLeft,
+      "current-state-only policy may reclaim prior transition metadata")
+
+  test("PR35 checkpointed-archive retention requires an explicit archive attestation"):
+    val dir = Files.createTempDirectory("cairn-fedgc-pr35-checkpoint-requires-attestation")
+    val cas = DiskCas(dir.resolve("cas"))
+    val authority = Keypair.dev("pr35-checkpoint-auth")
+    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
+    val node = Node(dir.resolve("ledger"), EffectContexts.forLedger())
+    val ledgerAuth = Map(authority.name -> authority.publicBytes)
+    node.append(authority, ledgerAuth, List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))))
+      .fold(e => fail(e), identity)
+    val federationId = node.chainDigests.head
+
+    val epoch0 = ReplicatedGcEpoch(0, Set.empty, None)
+    val epoch1 = ReplicatedGcEpoch(1, Set.empty, Some(epoch0.digest))
+    List(epoch0.artifact, epoch1.artifact, manifest.artifact).foreach(cas.put)
+    val ledgerStandIn = Artifact(ArtifactKind.Block, Canon.CStr("pr35-ledger-checkpoint"))
+    val emptyRepo = RepositoryIndex(Map.empty)
+    val emptyApps = ApplicationIndex(Map.empty)
+    val emptyNs = NamespaceIndex(Map.empty)
+    List(ledgerStandIn, emptyRepo.artifact, emptyApps.artifact, emptyNs.artifact).foreach(cas.put)
+    val s0 = FederationState.genesis(ledgerStandIn.digest, manifest.digest)
+    val s1 = s0.copy(gcEpoch = epoch1.digest)
+    List(s0.artifact, s1.artifact).foreach(cas.put)
+
+    val coord = FederationTransactionCoordinator(dir.resolve("home-pr35-checkpoint"), cas, node, Map.empty, manifest, federationId)
+    val (cert1, _) = coord.publishLocalTestOnly(replicas, Nil, s0, s1, epoch = 1L, authority, ledgerAuth).fold(e => fail(e), identity)
+
+    val invalidCheckpointPolicy = FederationRetentionConstitution(
+      defaultMode = FederationRetentionMode.CheckpointedArchive,
+      checkpointStates = Set(s0.digest),
+      archiveAttestation = None)
+    val rejected = FederationGc.reclaimAgainstFinalizedEpoch(
+      dir.resolve("cas"), s1, cas, cert1, manifest, federationId, casCtx, node,
+      retention = invalidCheckpointPolicy)
+    assert(rejected.left.exists(_.contains("requires an archiveAttestation")), rejected.toString)
