@@ -305,3 +305,19 @@ class CKCParitySuite extends munit.FunSuite:
     ))._1
     assertEquals(rustSuccessorMismatch, "invalid")
     assertEquals(leanSuccessorMismatch, "invalid")
+
+    val malformedDigest = "not-a-64-hex-digest"
+    val rustMalformed = rust(Seq(
+      "staircase-check",
+      "--g0", malformedDigest,
+      "--g1", g1.hex,
+      "--delta", delta.hex,
+    ))._1
+    val leanMalformed = lean(Seq(
+      "staircase-check",
+      malformedDigest,
+      g1.hex,
+      delta.hex,
+    ))._1
+    assertEquals(rustMalformed, "invalid")
+    assertEquals(leanMalformed, "invalid")

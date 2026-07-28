@@ -37,6 +37,9 @@ private def parseMaxSteps : List String → Except String (Budget × List String
       | none => .error s!"invalid --max-steps value: {n}"
   | args => .ok ({}, args)
 
+private def parseDigestArg (name : String) (value : String) : Except String Digest :=
+    requireDigest name value
+
 def main (args : List String) : IO UInt32 := do
   let constitution : KernelConstitution := {}
   match parseMaxSteps args with
@@ -61,67 +64,98 @@ def main (args : List String) : IO UInt32 := do
       printResult (← deriveIO constitution budget (.replayHistory nodeRoot federationId genesisState))
       pure 0
     | ["staircase-check", g0, g1, delta] =>
-            let g0Env : Pr34VerdictEnvelope :=
-                {
-                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000a00"
-                    graphPackage := g0
-                    verdictClass := .valid
-                    state := some "0000000000000000000000000000000000000000000000000000000000000a01"
-                    evidence := some "0000000000000000000000000000000000000000000000000000000000000a02"
-                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
-                }
-            let g1Env : Pr34VerdictEnvelope :=
-                {
-                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000b00"
-                    graphPackage := g1
-                    verdictClass := .valid
-                    state := some "0000000000000000000000000000000000000000000000000000000000000b01"
-                    evidence := some "0000000000000000000000000000000000000000000000000000000000000b02"
-                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
-                }
-            let link : Pr34SuccessorLink :=
-                {
-                    predecessorPackage := g0
-                    successorPackage := g1
-                    upgradeDelta := delta
-                }
-            match Pr34StaircaseValidateTwoStep g0Env g1Env link with
-            | .ok _ =>
-                    IO.println s!"valid: staircase successor validated g0={g0} g1={g1} delta={delta}"
+            match parseDigestArg "g0" g0, parseDigestArg "g1" g1, parseDigestArg "delta" delta with
+            | .ok g0d, .ok g1d, .ok deltad =>
+                    let g0Env : Pr34VerdictEnvelope :=
+                        {
+                            kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000a00"
+                            graphPackage := g0d
+                            verdictClass := .valid
+                            state := some "0000000000000000000000000000000000000000000000000000000000000a01"
+                            evidence := some "0000000000000000000000000000000000000000000000000000000000000a02"
+                            resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                        }
+                    let g1Env : Pr34VerdictEnvelope :=
+                        {
+                            kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000b00"
+                            graphPackage := g1d
+                            verdictClass := .valid
+                            state := some "0000000000000000000000000000000000000000000000000000000000000b01"
+                            evidence := some "0000000000000000000000000000000000000000000000000000000000000b02"
+                            resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                        }
+                    let link : Pr34SuccessorLink :=
+                        {
+                            predecessorPackage := g0d
+                            successorPackage := g1d
+                            upgradeDelta := deltad
+                        }
+                    match Pr34StaircaseValidateTwoStep g0Env g1Env link with
+                    | .ok _ =>
+                            IO.println s!"valid: staircase successor validated g0={g0} g1={g1} delta={delta}"
+                            pure 0
+                    | .error e =>
+                            IO.println s!"invalid: {e}"
+                            pure 0
+            | .error e, _, _ =>
+                    IO.println s!"invalid: {e}"
                     pure 0
-            | .error e =>
+            | _, .error e, _ =>
+                    IO.println s!"invalid: {e}"
+                    pure 0
+            | _, _, .error e =>
                     IO.println s!"invalid: {e}"
                     pure 0
     | ["staircase-check", g0, g1, delta, linkPredecessor, linkSuccessor] =>
-            let g0Env : Pr34VerdictEnvelope :=
-                {
-                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000a00"
-                    graphPackage := g0
-                    verdictClass := .valid
-                    state := some "0000000000000000000000000000000000000000000000000000000000000a01"
-                    evidence := some "0000000000000000000000000000000000000000000000000000000000000a02"
-                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
-                }
-            let g1Env : Pr34VerdictEnvelope :=
-                {
-                    kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000b00"
-                    graphPackage := g1
-                    verdictClass := .valid
-                    state := some "0000000000000000000000000000000000000000000000000000000000000b01"
-                    evidence := some "0000000000000000000000000000000000000000000000000000000000000b02"
-                    resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
-                }
-            let link : Pr34SuccessorLink :=
-                {
-                    predecessorPackage := linkPredecessor
-                    successorPackage := linkSuccessor
-                    upgradeDelta := delta
-                }
-            match Pr34StaircaseValidateTwoStep g0Env g1Env link with
-            | .ok _ =>
-                    IO.println s!"valid: staircase successor validated g0={g0} g1={g1} delta={delta}"
+            match parseDigestArg "g0" g0, parseDigestArg "g1" g1,
+                    parseDigestArg "delta" delta,
+                    parseDigestArg "linkPredecessor" linkPredecessor,
+                    parseDigestArg "linkSuccessor" linkSuccessor with
+            | .ok g0d, .ok g1d, .ok deltad, .ok linkPredecessorD, .ok linkSuccessorD =>
+                    let g0Env : Pr34VerdictEnvelope :=
+                        {
+                            kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000a00"
+                            graphPackage := g0d
+                            verdictClass := .valid
+                            state := some "0000000000000000000000000000000000000000000000000000000000000a01"
+                            evidence := some "0000000000000000000000000000000000000000000000000000000000000a02"
+                            resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                        }
+                    let g1Env : Pr34VerdictEnvelope :=
+                        {
+                            kernelConstitution := "0000000000000000000000000000000000000000000000000000000000000b00"
+                            graphPackage := g1d
+                            verdictClass := .valid
+                            state := some "0000000000000000000000000000000000000000000000000000000000000b01"
+                            evidence := some "0000000000000000000000000000000000000000000000000000000000000b02"
+                            resourceUse := { steps := 1, bytesRead := 1, wallMicros := 1 }
+                        }
+                    let link : Pr34SuccessorLink :=
+                        {
+                            predecessorPackage := linkPredecessorD
+                            successorPackage := linkSuccessorD
+                            upgradeDelta := deltad
+                        }
+                    match Pr34StaircaseValidateTwoStep g0Env g1Env link with
+                    | .ok _ =>
+                            IO.println s!"valid: staircase successor validated g0={g0} g1={g1} delta={delta}"
+                            pure 0
+                    | .error e =>
+                            IO.println s!"invalid: {e}"
+                            pure 0
+            | .error e, _, _, _, _ =>
+                    IO.println s!"invalid: {e}"
                     pure 0
-            | .error e =>
+            | _, .error e, _, _, _ =>
+                    IO.println s!"invalid: {e}"
+                    pure 0
+            | _, _, .error e, _, _ =>
+                    IO.println s!"invalid: {e}"
+                    pure 0
+            | _, _, _, .error e, _ =>
+                    IO.println s!"invalid: {e}"
+                    pure 0
+            | _, _, _, _, .error e =>
                     IO.println s!"invalid: {e}"
                     pure 0
   | _ =>

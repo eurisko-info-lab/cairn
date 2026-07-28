@@ -171,6 +171,31 @@ def Pr34StaircaseValidateTwoStep
     (g0 : Pr34VerdictEnvelope)
     (g1 : Pr34VerdictEnvelope)
     (link : Pr34SuccessorLink) : Except String Unit := do
+  let _ <- requireDigest "pr34.g0.graphPackage" g0.graphPackage
+  let _ <- requireDigest "pr34.g1.graphPackage" g1.graphPackage
+  let _ <- requireDigest "pr34.link.predecessorPackage" link.predecessorPackage
+  let _ <- requireDigest "pr34.link.successorPackage" link.successorPackage
+  let _ <- requireDigest "pr34.link.upgradeDelta" link.upgradeDelta
+  match g0.state with
+  | some d =>
+      let _ <- requireDigest "pr34.g0.state" d
+      pure ()
+  | none => pure ()
+  match g1.state with
+  | some d =>
+      let _ <- requireDigest "pr34.g1.state" d
+      pure ()
+  | none => pure ()
+  match g0.evidence with
+  | some d =>
+      let _ <- requireDigest "pr34.g0.evidence" d
+      pure ()
+  | none => pure ()
+  match g1.evidence with
+  | some d =>
+      let _ <- requireDigest "pr34.g1.evidence" d
+      pure ()
+  | none => pure ()
   if g0.verdictClass != .valid then
     .error "g0 verdict is not valid"
   else if g1.verdictClass != .valid then
