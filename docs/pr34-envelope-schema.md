@@ -71,3 +71,19 @@ Current runtime bridge (`Pr34EnvelopeInterop.fromCkc`) maps:
 
 This bridge is intentionally narrow for the scaffold phase. Later slices expand
 state projection and cross-language envelope emission.
+
+## Staircase extension (planned)
+
+To support the first load-bearing successor step (`G0 -> G1`), the schema will
+grow generation-link fields in a backward-compatible version bump (for example,
+`pr34-graph-package-v2`), including:
+
+- `generation: int`
+- `predecessorPackage: option<digest>`
+- `upgradeDelta: option<digest>`
+
+The closure criterion is then:
+
+- independent reconstruction of `G0` to `S0`
+- governed/accepted/finalized transition to `G1`
+- independent reconstruction of `G1` to `S1` with matching canonical verdicts.

@@ -6,12 +6,14 @@ and commit slices.
 
 ## Completion shape
 
-PR34 closes when both are true:
+PR34 closes when all are true:
 
 1. one universal result: replay determinism/uniqueness for fixed canonical
    history and constitution;
 2. one substantial inhabited end-to-end world exercising the full path from
    package to reconstruction.
+3. one validated successor world produced from a constituted change of that
+      first world and independently reconstructed to the same result.
 
 This does not require uniqueness among all conceivable valid histories.
 Authority comes from finality selection plus replay determinism.
@@ -28,6 +30,9 @@ Canonical wire schema for the current scaffold:
      model.
 3. Independent canonical verdict identity
    - `Canon(ScalaCKC(B)) == Canon(RustCKC(B))` on shared canonical input `B`.
+4. Staircase successor closure
+      - `G0` reconstructs to `S0`, a constituted change yields `G1`, and `G1`
+        reconstructs independently to `S1` with matching canonical verdicts.
 
 ## Phase checklist (A-G)
 
@@ -91,6 +96,14 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 - [ ] Keep Lean as semantic/proof reference and executable companion; do not
       treat extraction alone as independence substitute.
 
+### H. Staircase successor closure
+
+- [ ] Define one constituted upgrade/change from the first minimal world
+      (`delta0 : G0 -> G1`) under accepted/finalized governance.
+- [ ] Require both Scala and Rust to reconstruct `G1` to the same canonical
+      verdict/state as a second-generation gate.
+- [ ] Record `G0 -> G1` as a permanent conformance fixture and tutorial step.
+
 ## Minimal world fixture
 
 Create one deliberately small but semantically complete fixture and use it as:
@@ -110,6 +123,8 @@ Required contents:
 5. two federation transitions with one finality certificate each;
 6. one retention constitution and retained closure;
 7. final reconstructed state and canonical verdicts.
+8. one successor-world delta that yields `G1` and reconstructs to `S1` in both
+      independent implementations.
 
 ## Commit-slice plan (target: 12-18)
 
@@ -128,6 +143,7 @@ Required contents:
 13. Lean theorem+example closure for replay determinism and finality safety.
 14. Minimal world fixture publication and golden integration.
 15. CI gates for full corpus.
+16. Successor-world gate (`G0 -> G1`) in parity corpus and release checks.
 
 ## Non-goals until closure
 
@@ -152,3 +168,5 @@ Required contents:
 - [~] Loader authority contraction in progress; continue pushing semantics into
       derivation boundary with typed missing/exhausted coverage.
 - [ ] Full minimal-world fixture still to be assembled and frozen.
+- [ ] Successor-world fixture (`G1`) still to be assembled and validated as
+      an independent reconstruction gate.

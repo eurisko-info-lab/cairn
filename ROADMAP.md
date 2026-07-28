@@ -314,7 +314,9 @@ PR34 is complete only when the package contains both (1) one universal
 determinism/uniqueness result for replay under a fixed canonical history and
 constitution, and (2) one substantial inhabited end-to-end world that exercises
 change, acceptance, repository replay, federation finality, retention, and
-reconstruction. This is intentionally stronger than a single successful run but
+reconstruction, and (3) one constituted successor world produced from that
+first world and independently reconstructed to the same canonical result. This
+is intentionally stronger than a single successful run but
 does not require uniqueness among all conceivable valid histories.
 
 The proof obligations are:
@@ -330,7 +332,8 @@ Lean defines and proves the semantic relation and safety properties; Scala is
 the production implementation; Rust is the independent executable
 interpretation used for reconstruction parity. The current foundation covers
 federation semantics and the shared CKC shape, but the full cross-implementation
-identity corpus still needs to be widened to that closed minimal world.
+identity corpus still needs to be widened to that closed minimal world and its
+first governed successor (`G0 -> G1`).
 
 #### PR35 — Retention constitutions and semantic archives
 
