@@ -249,3 +249,21 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(classifyScala(wrongReplay), "invalid")
     assertEquals(rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString, "--federation-id", Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, "--genesis-state", replayFixture.genesisState.hex))._1, "invalid")
     assertEquals(lean(Seq("replay-history", replayFixture.nodeRoot.toString, Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, replayFixture.genesisState.hex))._1, "invalid")
+
+  test("PR34 staircase scaffold parity: Rust and Lean agree on successor-link validation"):
+    assume(cargoAvailable, "cargo not on PATH")
+    assume(leanAvailable, "lake not on PATH")
+
+    val g0 = Digest.of(Canon.CStr("pr34-stair-g0"))
+    val g1 = Digest.of(Canon.CStr("pr34-stair-g1"))
+    val delta = Digest.of(Canon.CStr("pr34-stair-delta"))
+
+    val rustValid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g1.hex, "--delta", delta.hex))._1
+    val leanValid = lean(Seq("staircase-check", g0.hex, g1.hex, delta.hex))._1
+    assertEquals(rustValid, "valid")
+    assertEquals(leanValid, "valid")
+
+    val rustInvalid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g0.hex, "--delta", delta.hex))._1
+    val leanInvalid = lean(Seq("staircase-check", g0.hex, g0.hex, delta.hex))._1
+    assertEquals(rustInvalid, "invalid")
+    assertEquals(leanInvalid, "invalid")

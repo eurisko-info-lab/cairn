@@ -60,6 +60,18 @@ enum Command {
         #[arg(long, default_value_t = 100_000)]
         max_steps: usize,
     },
+    /// Validate a PR34 staircase successor link between two package generations
+    StaircaseCheck {
+        /// Predecessor graph-package digest (g0)
+        #[arg(long)]
+        g0: String,
+        /// Successor graph-package digest (g1)
+        #[arg(long)]
+        g1: String,
+        /// Upgrade delta digest linking g0 -> g1
+        #[arg(long)]
+        delta: String,
+    },
 }
 
 fn render_result(result: KernelResult) -> Result<()> {
@@ -169,6 +181,47 @@ fn main() -> Result<()> {
                 },
             );
             render_result(result)?;
+        }
+        Command::StaircaseCheck { g0, g1, delta } => {
+            let g0 = parse_digest(&g0, "g0")?;
+            let g1 = parse_digest(&g1, "g1")?;
+            let delta = parse_digest(&delta, "delta")?;
+            let g0_env = pr34::Pr34VerdictEnvelope {
+                kernel_constitution: Digest::of_bytes(b"pr34-k0"),
+                graph_package: g0,
+                verdict_class: pr34::Pr34VerdictClass::Valid,
+                state: Some(Digest::of_bytes(b"pr34-s0")),
+                evidence: Some(Digest::of_bytes(b"pr34-e0")),
+                resource_use: pr34::Pr34ResourceUse {
+                    steps: 1,
+                    bytes_read: 1,
+                    wall_micros: 1,
+                },
+            };
+            let g1_env = pr34::Pr34VerdictEnvelope {
+                kernel_constitution: Digest::of_bytes(b"pr34-k1"),
+                graph_package: g1,
+                verdict_class: pr34::Pr34VerdictClass::Valid,
+                state: Some(Digest::of_bytes(b"pr34-s1")),
+                evidence: Some(Digest::of_bytes(b"pr34-e1")),
+                resource_use: pr34::Pr34ResourceUse {
+                    steps: 1,
+                    bytes_read: 1,
+                    wall_micros: 1,
+                },
+            };
+            let link = pr34::Pr34SuccessorLink {
+                predecessor_package: g0,
+                successor_package: g1,
+                upgrade_delta: delta,
+            };
+            pr34::validate_two_step(&g0_env, &g1_env, &link)?;
+            println!(
+                "ok: staircase successor validated predecessor={} successor={} delta={}",
+                g0.hex(),
+                g1.hex(),
+                delta.hex()
+            );
         }
     }
     Ok(())
