@@ -329,6 +329,22 @@ mod tests {
     }
 
     #[test]
+    fn successor_link_rejects_malformed_digest_fields() {
+        let bad = Canon::Tag(
+            "pr34-successor-link-v1".to_owned(),
+            Box::new(Canon::Map(vec![
+                (
+                    "predecessorPackage".to_owned(),
+                    Canon::Str("not-a-digest".to_owned()),
+                ),
+                ("successorPackage".to_owned(), Canon::Str(d("g1").hex())),
+                ("upgradeDelta".to_owned(), Canon::Str(d("delta").hex())),
+            ])),
+        );
+        assert!(Pr34SuccessorLink::from_canon(&bad).is_err());
+    }
+
+    #[test]
     fn staircase_validator_accepts_valid_chain() {
         let g0 = Pr34VerdictEnvelope {
             kernel_constitution: d("k0"),
