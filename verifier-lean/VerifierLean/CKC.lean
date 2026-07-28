@@ -349,10 +349,12 @@ structure CertView where
   proposal : Digest
   transition : Digest
   state : Digest
+  seq : Int
   previousState : Digest
   federationId : Digest
   epoch : Int
   replicaSet : Digest
+  commits : List String
   deriving Repr
 
 def parseCertView (a : ParsedArtifact) : Except String CertView := do
@@ -362,25 +364,95 @@ def parseCertView (a : ParsedArtifact) : Except String CertView := do
   let proposal <- requireDigest "certificate.proposal" (← canonAsStr (← canonField body "proposal"))
   let transition <- requireDigest "certificate.transition" (← canonAsStr (← canonField body "transition"))
   let state <- requireDigest "certificate.state" (← canonAsStr (← canonField body "state"))
+  let seq <- canonAsInt (← canonField body "seq")
   let previousState <- requireDigest "certificate.previousState" (← canonAsStr (← canonField body "previousState"))
   let federationId <- requireDigest "certificate.federationId" (← canonAsStr (← canonField body "federationId"))
   let epoch <- canonAsInt (← canonField body "epoch")
   let replicaSet <- requireDigest "certificate.replicaSet" (← canonAsStr (← canonField body "replicaSet"))
+  let commitsCanon <- canonField body "commits"
+  let commits <-
+    match commitsCanon with
+    | .list xs =>
+        xs.mapM (fun row => do
+          canonAsStr (← canonField row "replica"))
+    | _ => .error "certificate.commits must be list"
   pure {
     proposal := proposal
     transition := transition
     state := state
+    seq := seq
     previousState := previousState
     federationId := federationId
     epoch := epoch
     replicaSet := replicaSet
+    commits := commits
   }
 
-def parseManifestTag (a : ParsedArtifact) : Except String Unit := do
+structure ManifestView where
+  authorities : List String
+  seals : List String
+  deriving Repr
+
+def parseManifestView (a : ParsedArtifact) : Except String ManifestView := do
   if a.kind != "certificate" then
     .error "manifest artifact is not a certificate"
-  let _ <- canonExpectTag a.body "replica-set-manifest"
-  pure ()
+  let outer <- canonExpectTag a.body "replica-set-manifest"
+  let body <- canonField outer "body"
+  let replicasCanon <- canonField body "replicas"
+  let authorities <-
+    match replicasCanon with
+    | .list xs =>
+        xs.mapM (fun row => do
+          canonAsStr (← canonField row "id"))
+    | _ => .error "replica-set-manifest.body.replicas must be list"
+  let sealsCanon <- canonField outer "seals"
+  let seals <-
+    match sealsCanon with
+    | .list xs =>
+        xs.mapM (fun row => do
+          canonAsStr (← canonField row "id"))
+    | _ => .error "replica-set-manifest.seals must be list"
+  pure { authorities := authorities, seals := seals }
+
+def validReplicaCount (n : Nat) : Bool :=
+  n == 1 || (n >= 4 && (n - 1) % 3 == 0)
+
+def quorumSize (n : Nat) : Nat :=
+  ((2 * n) / 3) + 1
+
+def verifyManifestCoverage (manifest : ManifestView) : Except String Unit := do
+  let authDistinct := manifest.authorities.eraseDups
+  let sealDistinct := manifest.seals.eraseDups
+  if authDistinct.isEmpty then
+    .error "replica-set: empty"
+  else if authDistinct.length != manifest.authorities.length then
+    .error "replica-set: duplicate authority ids"
+  else if sealDistinct.length != manifest.seals.length then
+    .error "replica-set: duplicate seal ids"
+  else
+    let missingAuth := authDistinct.filter (fun id => !(sealDistinct.contains id))
+    let extraSeals := sealDistinct.filter (fun id => !(authDistinct.contains id))
+    if !missingAuth.isEmpty || !extraSeals.isEmpty then
+      .error "replica-set: seal coverage incomplete"
+    else
+      pure ()
+
+def verifyCertQuorum (cert : CertView) (manifest : ManifestView) : Except String Unit := do
+  let n := manifest.authorities.length
+  if !validReplicaCount n then
+    .error s!"federation finality: n={n} is not a valid 3f+1 size"
+  else if cert.seq != cert.epoch then
+    .error s!"federation finality: certificate sequence {cert.seq} does not equal epoch {cert.epoch}"
+  else
+    let distinct := cert.commits.eraseDups
+    if distinct.length != cert.commits.length then
+      .error "federation finality: duplicate replica commits"
+    else if distinct.any (fun id => !(manifest.authorities.contains id)) then
+      .error "federation finality: unknown replica in commits"
+    else if distinct.length < quorumSize n then
+      .error s!"federation finality: {distinct.length} distinct commits < quorum {quorumSize n}"
+    else
+      pure ()
 
 inductive ChainTx where
   | publishArtifact (kind : String) (valueHash : Digest)
@@ -611,10 +683,16 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
       if !missing.isEmpty then
         pure (KernelResult.missing missing.eraseDups)
       else
-        match (← readArtifactFromCas root cert), (← readArtifactFromCas root proposal), (← readArtifactFromCas root manifest) with
+          match (← readArtifactFromCas root cert), (← readArtifactFromCas root proposal), (← readArtifactFromCas root manifest) with
         | .ok certArtifact, .ok proposalArtifact, .ok manifestArtifact =>
-            match parseCertView certArtifact, parseProposalView proposalArtifact, parseManifestTag manifestArtifact with
-            | .ok certView, .ok proposalView, .ok _ =>
+            match parseCertView certArtifact, parseProposalView proposalArtifact, parseManifestView manifestArtifact with
+            | .ok certView, .ok proposalView, .ok manifestView =>
+              match verifyManifestCoverage manifestView, verifyCertQuorum certView manifestView with
+              | .error e, _ =>
+                pure (KernelResult.invalid e)
+              | _, .error e =>
+                pure (KernelResult.invalid e)
+              | .ok _, .ok _ =>
                 if certView.proposal != proposal then
                   pure (KernelResult.invalid s!"certificate names proposal {certView.proposal}, not {proposal}")
                 else if certView.transition != proposalView.transition then
@@ -775,10 +853,17 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                               return KernelResult.invalid e
                         | .ok a => pure a
 
-                      match parseManifestTag manifestArtifact with
-                      | .error e =>
+                      let manifestView <-
+                        match parseManifestView manifestArtifact with
+                        | .error e => return KernelResult.invalid e
+                        | .ok v => pure v
+
+                      match verifyManifestCoverage manifestView, verifyCertQuorum certView manifestView with
+                      | .error e, _ =>
                           return KernelResult.invalid e
-                      | .ok _ => pure ()
+                      | _, .error e =>
+                          return KernelResult.invalid e
+                      | .ok _, .ok _ => pure ()
 
                       if certView.transition != proposalView.transition then
                         return KernelResult.invalid "certificate transition projection does not match proposal"
