@@ -170,5 +170,8 @@ Required contents:
 - [ ] Full minimal-world fixture still to be assembled and frozen.
 - [x] Staircase scaffold exists in Scala/Rust/Lean via
       `Pr34SuccessorLink` + two-step validator checks.
+- [x] Cross-language staircase parity checks run via verifier CLIs from
+      `CKCParitySuite`, covering valid links, equal-package rejection, and
+      predecessor-link mismatch rejection.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.
