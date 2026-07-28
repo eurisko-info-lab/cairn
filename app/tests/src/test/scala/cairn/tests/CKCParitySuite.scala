@@ -17,6 +17,9 @@ class CKCParitySuite extends munit.FunSuite:
 
   private val scalaConstitution = CKC.KernelConstitution()
   private val scalaBudget = CKC.Budget()
+  private val fixtureAuthority = Keypair.dev("ckc-parity-authority")
+  private val fixtureReplicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+  private val fixtureOwner = Keypair.dev("org-a-owner-ckc")
 
   private final case class Fixture(
       casRoot: Path,
@@ -42,8 +45,8 @@ class CKCParitySuite extends munit.FunSuite:
     val lang = Stlc.language
     val dl = Delta.deltaOf(lang).fold(e => fail(e.map(_.render).mkString), identity)
     val m0 = Module(List("a" -> Stlc.tru))
-    val authority = Keypair.dev("ckc-parity-authority")
-    val replicas = List("r0", "r1", "r2", "r3").map(Keypair.dev)
+    val authority = fixtureAuthority
+    val replicas = fixtureReplicas
     val authorities = Map(authority.name -> authority.publicBytes)
 
     node.append(authority, authorities, List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes))))
@@ -57,7 +60,7 @@ class CKCParitySuite extends munit.FunSuite:
     val grammar = Artifact(ArtifactKind.Grammar, GrammarSpec.toCanon(lang.grammar))
     val appLanguage = ApplicationLanguage("stlc", lang.digest, grammar.digest, capabilities.descriptor.digest, Some(runtime.digest))
     val appManifest = ApplicationManifest("org-a-app", machine.machine.digest, List(appLanguage), Nil)
-    val owner = Keypair.dev("org-a-owner-ckc")
+    val owner = fixtureOwner
     val trustManifest = NamespaceTrustManifest.of("org-a", List(owner.name -> owner.publicBytes)).fold(e => fail(e), identity)
     val release = EcosystemBundles.sign("org-a", SemanticVersion(1, 0, 0), appManifest.digest,
       EcosystemRootKind.Application, Nil, Nil, authority)
@@ -378,10 +381,10 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustMalformedOverride, "invalid")
     assertEquals(leanMalformedOverride, "invalid")
 
-  test("PR34 staircase fixture is not yet reproducible across rebuilds"):
+  test("PR34 staircase fixture digests are reproducible"):
     val a = buildFixture()
     val b = buildFixture()
-    assertNotEquals(a.federationId, b.federationId)
-    assertNotEquals(a.genesisState, b.genesisState)
-    assertNotEquals(a.resolveDigestG0, a.resolveDigestG1)
-    assertNotEquals(b.resolveDigestG0, b.resolveDigestG1)
+    assertEquals(a.federationId, b.federationId)
+    assertEquals(a.genesisState, b.genesisState)
+    assertEquals(a.resolveDigestG0, b.resolveDigestG0)
+    assertEquals(a.resolveDigestG1, b.resolveDigestG1)
