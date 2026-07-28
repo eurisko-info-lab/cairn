@@ -236,3 +236,5 @@ Required contents:
 - [x] Redundant promoted-payload finality snapshot fields
       (`manifestDigest`, `cert1Digest`, `cert2Digest`) were removed after
       slab gates stopped consuming them.
+- [x] Reproducibility assertions were consolidated to structural equality
+      checks (with normalized temp-path fields) plus golden digest pins.
