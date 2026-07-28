@@ -8,6 +8,7 @@ This guide is for changing Cairn itself. Read [Core concepts](concepts.md) and
 ```bash
 sbt -batch test
 sbt -batch "tests/testOnly cairn.tests.LanguageStudioSuite"
+sbt -batch "tests/testOnly cairn.tests.Pr34EnvelopeSuite"
 sbt -batch examples/assembly
 sbt -batch "examples/runMain cairn.examples.Main transcript transcripts/mvp.cairn"
 sbt -batch "examples/runMain cairn.examples.Bench"

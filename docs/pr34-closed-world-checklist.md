@@ -32,12 +32,12 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 ### A. Fix the semantic object
 
-- [ ] Freeze one canonical input object `G` with explicit fields for
+- [~] Freeze one canonical input object `G` with explicit fields for
       constitution, closure, machine/runtime selection, repository root,
       finalized history, and evidence closure.
 - [ ] Ensure authoritative validation APIs invoke one judgment center;
       loaders/projections remain non-authoritative.
-- [ ] Emit canonical package bytes `B = Canon(G)` with stable schema versioning.
+- [x] Emit canonical package bytes `B = Canon(G)` with stable schema versioning.
 
 ### B. Make change real
 
@@ -84,7 +84,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 - [~] Rust/Scala canonical verdict parity for current CKC corpus.
 - [ ] Extend corpus to full minimal world (change -> accept -> replay -> retain).
-- [ ] Bind verdict identity over `(K, G, S, evidence, resourceUse)`.
+- [~] Bind verdict identity over `(K, G, S, evidence, resourceUse)`.
 - [ ] Keep Lean as semantic/proof reference and executable companion; do not
       treat extraction alone as independence substitute.
 
@@ -138,6 +138,10 @@ Required contents:
 
 - [x] CKC parity suite exists and runs real corpus vectors.
 - [x] CI has dedicated CKC parity job provisioning Java, Rust, and Lean.
+- [x] Canonical PR34 package/verdict envelope schema exists with codec
+      round-trip tests (`Pr34GraphPackage`, `Pr34VerdictEnvelope`).
+- [x] CKC-to-PR34 verdict interop mapping exists for all verdict classes,
+      including replay-state projection and evidence threading.
 - [~] Loader authority contraction in progress; continue pushing semantics into
       derivation boundary with typed missing/exhausted coverage.
 - [ ] Full minimal-world fixture still to be assembled and frozen.
