@@ -38,6 +38,15 @@ A second independent verifier implementation lives in `verifier-lean/`.
 It mirrors the CKC-style judgment center (`derive`) in Lean for executable,
 typed reasoning over resolve, cert-binding, and history-replay judgments.
 
+Run cross-implementation verdict parity vectors (Rust vs Lean):
+
+```bash
+./scripts/verifier-parity.sh
+```
+
+The harness runs deterministic negative vectors and checks both verifiers
+classify each case into the same top-level verdict family.
+
 ## Where code belongs
 
 | Change | Primary location |
