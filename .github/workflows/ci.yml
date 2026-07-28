@@ -29,6 +29,8 @@ jobs:
           ~/.elan/bin/lake build
       - name: CKC three-way parity suite (Scala/Rust/Lean)
         run: sbt -batch "testOnly cairn.tests.CKCParitySuite"
+      - name: PR34 envelope scaffold suite
+        run: sbt -batch "tests/testOnly cairn.tests.Pr34EnvelopeSuite"
 
   verifier-parity:
     runs-on: ubuntu-latest
