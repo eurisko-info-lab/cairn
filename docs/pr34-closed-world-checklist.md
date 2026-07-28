@@ -206,8 +206,9 @@ Required contents:
       reproducibility for `G0`/`G1` fixture derivation.
 - [x] Fixture outputs (`federationId`, `genesisState`, `G0`, `G1`) are pinned
       to explicit golden digests in `CKCParitySuite` and fail closed on drift.
-- [x] Cert-binding fixture outputs (`replica manifest`, `cert1`, `cert2`) are
-      also pinned to golden digests in `CKCParitySuite`.
+- [x] Cert-binding parity now runs on governed fixture cert/proposal/manifest
+      tuples derived from the slab transition path (synthetic cert fixture
+      removed).
 - [x] Successor-world fixture (`G1`) is validated as an independent
       reconstruction gate with governed finalized delta.
 - [x] Successor-world tutorial/conformance publication is now documented as a
@@ -238,3 +239,6 @@ Required contents:
       slab gates stopped consuming them.
 - [x] Reproducibility assertions were consolidated to structural equality
       checks (with normalized temp-path fields) plus golden digest pins.
+- [x] External successor repository provisioned: `stratum` is available at
+      `https://github.com/eurisko-info-lab/stratum` as the next
+      Foundation_{n+2} execution target.
