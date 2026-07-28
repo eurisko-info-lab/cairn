@@ -27,6 +27,8 @@ jobs:
         run: |
           cd verifier-lean
           ~/.elan/bin/lake build
+      - name: Rust verifier unit tests
+        run: cargo test --manifest-path verifier-rust/Cargo.toml
       - name: CKC three-way parity suite (Scala/Rust/Lean)
         run: sbt -batch "testOnly cairn.tests.CKCParitySuite"
       - name: PR34 envelope scaffold suite
