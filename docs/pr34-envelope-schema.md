@@ -7,6 +7,7 @@ verdict envelope used by cross-implementation conformance.
 
 - Graph package tag: `pr34-graph-package-v1`
 - Verdict envelope tag: `pr34-verdict-envelope-v1`
+- Successor link tag: `pr34-successor-link-v1`
 
 ## Graph package (`Pr34GraphPackage`)
 
@@ -72,17 +73,35 @@ Current runtime bridge (`Pr34EnvelopeInterop.fromCkc`) maps:
 This bridge is intentionally narrow for the scaffold phase. Later slices expand
 state projection and cross-language envelope emission.
 
-## Staircase extension (planned)
+## Staircase scaffold (`Pr34SuccessorLink`)
 
-To support the first load-bearing successor step (`G0 -> G1`), the schema will
-grow generation-link fields in a backward-compatible version bump (for example,
-`pr34-graph-package-v2`), including:
+Current scaffold uses a dedicated successor-link object:
+
+- tag: `pr34-successor-link-v1`
+- body fields:
+	- `predecessorPackage: string` (digest hex)
+	- `successorPackage: string` (digest hex)
+	- `upgradeDelta: string` (digest hex)
+
+Current validator shape (`validateTwoStep` / `validate_two_step` /
+`Pr34StaircaseValidateTwoStep`) checks:
+
+- `g0` and `g1` verdict classes are `valid`
+- `g0.graphPackage == predecessorPackage`
+- `g1.graphPackage == successorPackage`
+- both verdicts carry state and evidence
+- predecessor/successor package digests are distinct
+
+## Staircase package-v2 extension (planned)
+
+After fixture hardening, generation-link data may move into a package version
+bump (for example, `pr34-graph-package-v2`) with:
 
 - `generation: int`
 - `predecessorPackage: option<digest>`
 - `upgradeDelta: option<digest>`
 
-The closure criterion is then:
+Closure criterion remains:
 
 - independent reconstruction of `G0` to `S0`
 - governed/accepted/finalized transition to `G1`

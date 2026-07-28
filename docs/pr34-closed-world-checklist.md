@@ -98,9 +98,9 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 
 ### H. Staircase successor closure
 
-- [ ] Define one constituted upgrade/change from the first minimal world
+- [~] Define one constituted upgrade/change from the first minimal world
       (`delta0 : G0 -> G1`) under accepted/finalized governance.
-- [ ] Require both Scala and Rust to reconstruct `G1` to the same canonical
+- [~] Require both Scala and Rust to reconstruct `G1` to the same canonical
       verdict/state as a second-generation gate.
 - [ ] Record `G0 -> G1` as a permanent conformance fixture and tutorial step.
 
@@ -168,5 +168,7 @@ Required contents:
 - [~] Loader authority contraction in progress; continue pushing semantics into
       derivation boundary with typed missing/exhausted coverage.
 - [ ] Full minimal-world fixture still to be assembled and frozen.
+- [x] Staircase scaffold exists in Scala/Rust/Lean via
+      `Pr34SuccessorLink` + two-step validator checks.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
-      an independent reconstruction gate.
+      an independent reconstruction gate with governed finalized delta.
