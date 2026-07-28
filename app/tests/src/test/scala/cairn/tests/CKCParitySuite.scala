@@ -267,8 +267,9 @@ class CKCParitySuite extends munit.FunSuite:
     assume(cargoAvailable, "cargo not on PATH")
     assume(leanAvailable, "lake not on PATH")
 
-    val g0 = Digest.of(Canon.CStr("pr34-stair-g0"))
-    val g1 = Digest.of(Canon.CStr("pr34-stair-g1"))
+    val replayFixture = buildFixture()
+    val g0 = replayFixture.resolveDigestG0
+    val g1 = replayFixture.resolveDigestG1
     val delta = Digest.of(Canon.CStr("pr34-stair-delta"))
 
     val rustValid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g1.hex, "--delta", delta.hex))._1
