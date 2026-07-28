@@ -176,6 +176,17 @@ class Pr34EnvelopeSuite extends munit.FunSuite:
     ))
     assert(Pr34SuccessorLink.fromCanon(bad).isLeft)
 
+  test("pr34 successor link artifact round-trips and enforces kind"):
+    val link = Pr34SuccessorLink(
+      predecessorPackage = dig("g0"),
+      successorPackage = dig("g1"),
+      upgradeDelta = dig("delta"),
+    )
+    val round = Pr34SuccessorLink.fromArtifact(link.artifact).fold(e => fail(e), identity)
+    assertEquals(round, link)
+    val wrongKind = Artifact(ArtifactKind.Term, link.canon)
+    assert(Pr34SuccessorLink.fromArtifact(wrongKind).isLeft)
+
   test("staircase validator accepts valid g0->g1 chain"):
     val g0 = Pr34VerdictEnvelope(
       kernelConstitution = dig("k0"),

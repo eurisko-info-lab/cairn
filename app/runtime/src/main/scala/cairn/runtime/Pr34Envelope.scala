@@ -197,6 +197,9 @@ final case class Pr34SuccessorLink(
     "upgradeDelta" -> Canon.CStr(upgradeDelta.hex),
   ))
 
+  def artifact: Artifact = Artifact(ArtifactKind.Trace, canon)
+  def digest: Digest = Digest.of(canon)
+
 object Pr34SuccessorLink:
   def fromCanon(c: Canon): Either[String, Pr34SuccessorLink] =
     c match
@@ -208,6 +211,10 @@ object Pr34SuccessorLink:
         ))
         catch case e: Exception => Left(s"invalid pr34 successor link: ${e.getMessage}")
       case _ => Left("expected pr34-successor-link-v1 body")
+
+  def fromArtifact(a: Artifact): Either[String, Pr34SuccessorLink] =
+    if a.kind != ArtifactKind.Trace then Left("expected trace artifact for pr34 successor link")
+    else fromCanon(a.body)
 
 object Pr34Staircase:
   /** Validate the first load-bearing stair over two independently reconstructed worlds.
