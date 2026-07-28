@@ -227,3 +227,6 @@ Required contents:
 - [x] The unified slab staircase gate now decodes governed transition commit
       evidence and asserts constitution-bound change-model identity
       (`capabilities.changeModel == constitution.changeModel == evidence.changeModel`).
+- [x] Synthetic cert-fixture parity vectors were removed; cert-binding parity
+      now runs against governed fixture cert/proposal digests from the
+      promoted slab path.

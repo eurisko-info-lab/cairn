@@ -70,16 +70,15 @@ class CKCParitySuite extends munit.FunSuite:
       resolveDigestG0: Digest,
       resolveDigestG1: Digest,
       governedDeltaG0ToG1: Digest,
-        governedDeltaFinalityCertDigest: Digest,
-        governedDeltaProposalDigest: Digest,
-        governedDeltaManifestDigest: Digest,
+      governedDeltaFinalityCertDigest: Digest,
+      governedDeltaProposalDigest: Digest,
+      governedDeltaManifestDigest: Digest,
       runtimeDigest: Digest,
       machineDigest: Digest,
       acceptanceDigest: Digest,
   )
 
-  private final case class CertFixture(
-      casRoot: Path,
+  private final case class TransitionFinalitySnapshot(
       manifestDigest: Digest,
       cert1: FederationFinality.FederationFinalityCertificate,
       cert2: FederationFinality.FederationFinalityCertificate,
@@ -263,35 +262,37 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest = constitution.digest,
     )
 
-  private def buildCertFixture(): CertFixture =
-    val dir = Files.createTempDirectory("cairn-ckc-cert")
-    val cas = DiskCas(dir.resolve("cas"))
-    val replicas = fixtureReplicas
-    val manifest = BftFinality.sealReplicaSet(replicas).fold(e => fail(e), identity)
-    val federationId = Digest.of(Canon.CStr("ckc-parity-cert-federation"))
-    val previousState = Digest.of(Canon.CStr("ckc-parity-cert-previous-state"))
-    val state1 = Digest.of(Canon.CStr("ckc-parity-cert-state-1"))
-    val state2 = Digest.of(Canon.CStr("ckc-parity-cert-state-2"))
-    val transition1 = Digest.of(Canon.CStr("ckc-parity-cert-transition-1"))
-    val transition2 = Digest.of(Canon.CStr("ckc-parity-cert-transition-2"))
+  private def transitionFinalitySnapshot(nodeRoot: Path): TransitionFinalitySnapshot =
+    val node = Node(nodeRoot, EffectContexts.forLedger())
+    val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
+    if transitionDigests.length < 2 then fail(s"expected at least two finalized transitions, got ${transitionDigests.length}")
 
-    val proposal1 = FederationFinality.FederationProposal(federationId, transition1, previousState, state1, 1L, manifest.replicaSetDigest)
-    val proposal2 = FederationFinality.FederationProposal(federationId, transition2, previousState, state2, 1L, manifest.replicaSetDigest)
-    val cert1 = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, manifest, view = 0, proposal1)
-      .fold(e => fail(e), identity)
-    val cert2 = FederationFinality.agreeForFederationStateLocalTestOnly(replicas, manifest, view = 0, proposal2)
-      .fold(e => fail(e), identity)
-    List(manifest.artifact, proposal1.artifact, proposal2.artifact, cert1.artifact, cert2.artifact).foreach(cas.put)
+    val firstTransitionArtifact = node.cas.getByDigest(transitionDigests.head).fold(e => fail(e), identity)
+    val secondTransitionArtifact = node.cas.getByDigest(transitionDigests(1)).fold(e => fail(e), identity)
+    val firstTransition = FederationTransition.fromArtifact(firstTransitionArtifact).fold(e => fail(e), identity)
+    val secondTransition = FederationTransition.fromArtifact(secondTransitionArtifact).fold(e => fail(e), identity)
+    val firstCertDigest = firstTransition.finality.getOrElse(fail("expected first transition to be finalized"))
+    val secondCertDigest = secondTransition.finality.getOrElse(fail("expected second transition to be finalized"))
 
-    CertFixture(
-      casRoot = dir.resolve("cas"),
-      manifestDigest = manifest.digest,
+    val firstCertArtifact = node.cas.getByDigest(firstCertDigest).fold(e => fail(e), identity)
+    val secondCertArtifact = node.cas.getByDigest(secondCertDigest).fold(e => fail(e), identity)
+    val cert1 = FederationFinality.FederationFinalityCertificate.fromCanon(firstCertArtifact.body).fold(e => fail(e), identity)
+    val cert2 = FederationFinality.FederationFinalityCertificate.fromCanon(secondCertArtifact.body).fold(e => fail(e), identity)
+
+    val proposal1Artifact = node.cas.getByDigest(cert1.proposal).fold(e => fail(e), identity)
+    val proposal2Artifact = node.cas.getByDigest(cert2.proposal).fold(e => fail(e), identity)
+    val proposal1 = FederationFinality.FederationProposal.fromArtifact(proposal1Artifact).fold(e => fail(e), identity)
+    val proposal2 = FederationFinality.FederationProposal.fromArtifact(proposal2Artifact).fold(e => fail(e), identity)
+    assertEquals(proposal1.replicaSet, proposal2.replicaSet)
+
+    TransitionFinalitySnapshot(
+      manifestDigest = proposal1.replicaSet,
       cert1 = cert1,
       cert2 = cert2,
     )
 
   private def promotedFoundationFromFixture(replayFixture: Fixture): PromotedFoundation =
-    val certFixture = buildCertFixture()
+    val finality = transitionFinalitySnapshot(replayFixture.nodeRoot)
     val resolveG0 = CKC.derive(scalaConstitution, scalaBudget,
       CKC.Query.Resolve(replayFixture.casRoot.toString, replayFixture.resolveDigestG0))
     val resolveG1 = CKC.derive(scalaConstitution, scalaBudget,
@@ -321,12 +322,12 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest = replayFixture.acceptanceDigest,
       federationId = replayFixture.federationId,
       genesisState = replayFixture.genesisState,
-      manifestDigest = certFixture.manifestDigest,
+      manifestDigest = finality.manifestDigest,
       finalStateDigest = replayReportValue.finalState,
       finalEpoch = replayReportValue.finalEpoch,
       verifiedTransitions = replayReportValue.verifiedTransitions,
-      cert1Digest = certFixture.cert1.digest,
-      cert2Digest = certFixture.cert2.digest,
+      cert1Digest = finality.cert1.digest,
+      cert2Digest = finality.cert2.digest,
       resolveEvidenceG0 = validEvidence(resolveG0),
       resolveEvidenceG1 = validEvidence(resolveG1),
       replayEvidenceG1 = validEvidence(replayG1),
@@ -401,7 +402,7 @@ class CKCParitySuite extends munit.FunSuite:
     assume(leanAvailable, "lake not on PATH")
 
     val replayFixture = buildFixture()
-    val certFixture = buildCertFixture()
+    val finality = transitionFinalitySnapshot(replayFixture.nodeRoot)
     def scalaRun(query: CKC.Query, budget: CKC.Budget = scalaBudget): CKC.KernelResult =
       CKC.derive(scalaConstitution, budget, query)
 
@@ -429,15 +430,45 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", missingDigest.hex))._1, "missing")
     assertEquals(lean(Seq("resolve", replayFixture.casRoot.toString, missingDigest.hex))._1, "missing")
 
-    val validCert = scalaRun(CKC.Query.VerifyCertBinding(certFixture.casRoot.toString, certFixture.cert1.digest, certFixture.cert1.proposal, certFixture.manifestDigest))
+    val validCert = scalaRun(CKC.Query.VerifyCertBinding(
+      replayFixture.casRoot.toString,
+      replayFixture.governedDeltaFinalityCertDigest,
+      replayFixture.governedDeltaProposalDigest,
+      replayFixture.governedDeltaManifestDigest,
+    ))
     assertEquals(classifyScala(validCert), "valid")
-    assertEquals(rust(Seq("verify-cert", "--cas", certFixture.casRoot.toString, "--cert", certFixture.cert1.digest.hex, "--proposal", certFixture.cert1.proposal.hex, "--manifest", certFixture.manifestDigest.hex))._1, "valid")
-    assertEquals(lean(Seq("verify-cert", certFixture.casRoot.toString, certFixture.cert1.digest.hex, certFixture.cert1.proposal.hex, certFixture.manifestDigest.hex))._1, "valid")
+    assertEquals(rust(Seq(
+      "verify-cert", "--cas", replayFixture.casRoot.toString,
+      "--cert", replayFixture.governedDeltaFinalityCertDigest.hex,
+      "--proposal", replayFixture.governedDeltaProposalDigest.hex,
+      "--manifest", replayFixture.governedDeltaManifestDigest.hex,
+    ))._1, "valid")
+    assertEquals(lean(Seq(
+      "verify-cert", replayFixture.casRoot.toString,
+      replayFixture.governedDeltaFinalityCertDigest.hex,
+      replayFixture.governedDeltaProposalDigest.hex,
+      replayFixture.governedDeltaManifestDigest.hex,
+    ))._1, "valid")
 
-    val invalidCert = scalaRun(CKC.Query.VerifyCertBinding(certFixture.casRoot.toString, certFixture.cert1.digest, certFixture.cert2.proposal, certFixture.manifestDigest))
+    val invalidCert = scalaRun(CKC.Query.VerifyCertBinding(
+      replayFixture.casRoot.toString,
+      replayFixture.governedDeltaFinalityCertDigest,
+      replayFixture.governedDeltaProposalDigest,
+      replayFixture.runtimeDigest,
+    ))
     assertEquals(classifyScala(invalidCert), "invalid")
-    assertEquals(rust(Seq("verify-cert", "--cas", certFixture.casRoot.toString, "--cert", certFixture.cert1.digest.hex, "--proposal", certFixture.cert2.proposal.hex, "--manifest", certFixture.manifestDigest.hex))._1, "invalid")
-    assertEquals(lean(Seq("verify-cert", certFixture.casRoot.toString, certFixture.cert1.digest.hex, certFixture.cert2.proposal.hex, certFixture.manifestDigest.hex))._1, "invalid")
+    assertEquals(rust(Seq(
+      "verify-cert", "--cas", replayFixture.casRoot.toString,
+      "--cert", replayFixture.governedDeltaFinalityCertDigest.hex,
+      "--proposal", replayFixture.governedDeltaProposalDigest.hex,
+      "--manifest", replayFixture.runtimeDigest.hex,
+    ))._1, "invalid")
+    assertEquals(lean(Seq(
+      "verify-cert", replayFixture.casRoot.toString,
+      replayFixture.governedDeltaFinalityCertDigest.hex,
+      replayFixture.governedDeltaProposalDigest.hex,
+      replayFixture.runtimeDigest.hex,
+    ))._1, "invalid")
 
     val validReplay = scalaRun(CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState))
     assertEquals(classifyScala(validReplay), "valid")
@@ -603,23 +634,10 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(authorityAgain.publicBytes, fixtureAuthority.publicBytes)
     assertEquals(authorityAgain.privateBytes, fixtureAuthority.privateBytes)
 
-  test("PR34 cert fixture digests are reproducible"):
-    val a = buildCertFixture()
-    val b = buildCertFixture()
-    val expectedManifest = "6757960c891274d6fdc025a4eba54d3e9fb711e80048b747700e1ade201c3626"
-    val expectedCert1 = "59792e4bb96b2f34ad88e85f09d0fbefd9cb3780d9b3fd1800bdaa021fa713c8"
-    val expectedCert2 = "0ec2e8c9342407b83a1837c3d7a9d3b57fa35e6b1f9bd45e2453f697a495065b"
-    assertEquals(a.manifestDigest, b.manifestDigest)
-    assertEquals(a.cert1.digest, b.cert1.digest)
-    assertEquals(a.cert2.digest, b.cert2.digest)
-    assertEquals(a.manifestDigest.hex, expectedManifest)
-    assertEquals(a.cert1.digest.hex, expectedCert1)
-    assertEquals(a.cert2.digest.hex, expectedCert2)
-
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "d291d540dabfed840c0d60afc0b255254f9cbdd436ccad7e0f20036211e0b1e7"
+    val expectedFoundationDigest = "e1b82fdcf82e88d1da66fe8060750874896609f9c4c4666fbde03f263b9b2875"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.replayMaxSteps, b.replayMaxSteps)
     assertEquals(a.languageDigest, b.languageDigest)
