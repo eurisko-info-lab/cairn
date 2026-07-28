@@ -19,11 +19,11 @@ source synchronization.
 
 ## Rust verifier (PR34 foundation)
 
-The independent verifier lives in [verifier/README.md](../verifier/README.md).
+The independent verifier lives in [verifier-rust/README.md](../verifier-rust/README.md).
 Build and run it with Cargo:
 
 ```bash
-cd verifier
+cd verifier-rust
 cargo check
 cargo run -- --help
 ```
@@ -31,6 +31,12 @@ cargo run -- --help
 Current commands verify federation certificate/proposal binding and replay
 ledger-anchored federation transition history directly from on-disk `Node`
 state (`chain` + `objects/`).
+
+## Lean verifier (PR34 companion)
+
+A second independent verifier implementation lives in `verifier-lean/`.
+It mirrors the CKC-style judgment center (`derive`) in Lean for executable,
+typed reasoning over resolve, cert-binding, and history-replay judgments.
 
 ## Where code belongs
 
