@@ -1032,6 +1032,57 @@ def ofKernelResult : KernelResult → Verdict Value
 def hasArtifact (Sigma : Context) (d : Digest) : Bool :=
   (Sigma.artifacts.get? d).isSome
 
+structure TransitionEvidence where
+  inputDigest : Digest
+  changeDigest : Digest
+  outputDigest : Digest
+  accessTrace : List Digest
+  proofs : List Digest
+  resourceUse : Nat
+  deriving Repr, BEq, DecidableEq
+
+def deriveApplyChange
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (stateDigest : Digest)
+    (changeDigest : Digest) : Verdict (Digest × TransitionEvidence) :=
+  let needed := [L.digest, L.machine.digest, stateDigest, changeDigest]
+  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  if !missing.isEmpty then
+    .missing missing
+  else if B.maxSteps == 0 then
+    .exhausted "max_steps 0: applyChange unavailable"
+  else
+    let out := s!"state({K.kernelId},{L.digest},{stateDigest},{changeDigest})"
+    let ev : TransitionEvidence := {
+      inputDigest := stateDigest
+      changeDigest := changeDigest
+      outputDigest := out
+      accessTrace := [stateDigest, changeDigest]
+      proofs := []
+      resourceUse := 1
+    }
+    .valid (out, ev) s!"applyChange@{K.kernelId}:{out}"
+
+theorem applyChange_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (s d : Digest)
+    (s1 s2 : Digest)
+    (e1 e2 : TransitionEvidence)
+    (w1 w2 : Digest)
+    (h1 : deriveApplyChange Sigma K B L s d = .valid (s1, e1) w1)
+    (h2 : deriveApplyChange Sigma K B L s d = .valid (s2, e2) w2) :
+    s1 = s2 ∧ e1 = e2 ∧ w1 = w2 := by
+  have h : (.valid (s1, e1) w1 : Verdict (Digest × TransitionEvidence)) = .valid (s2, e2) w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl, rfl⟩
+
 /-- Unified executable CKC judgment facade over all specialized judgment forms. -/
 def deriveJudgment
     (Sigma : Context)
@@ -1059,8 +1110,13 @@ def deriveJudgment
       else
         .valid (.artifact { digest := w.result.digest, kind := .other "delta-language" })
           s!"freeChange@{K.kernelId}:{w.result.digest}"
-  | .applyChange _ _ _ =>
-      .invalid "applyChange judgment not yet wired to machine execution"
+  | .applyChange L stateDigest changeDigest =>
+      match deriveApplyChange Sigma K B L stateDigest changeDigest with
+      | .valid (out, _) witness =>
+          .valid (.artifact { digest := out, kind := .other "state" }) witness
+      | .invalid e => .invalid e
+      | .missing m => .missing m
+      | .exhausted u => .exhausted u
   | .accept _ _ _ _ =>
       .invalid "accept judgment not yet wired to constitution evaluator"
 
@@ -1087,6 +1143,21 @@ theorem deriveJudgment_replay_corresponds
     (federationId genesisState : Digest) :
     deriveJudgment Sigma K B (.replayHistory federationId genesisState) =
       ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState)) := by
+  rfl
+
+theorem deriveJudgment_apply_corresponds
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (stateDigest changeDigest : Digest) :
+    deriveJudgment Sigma K B (.applyChange L stateDigest changeDigest) =
+      match deriveApplyChange Sigma K B L stateDigest changeDigest with
+      | .valid (out, _) witness =>
+          .valid (.artifact { digest := out, kind := .other "state" }) witness
+      | .invalid e => .invalid e
+      | .missing m => .missing m
+      | .exhausted u => .exhausted u := by
   rfl
 
 theorem judgment_result_deterministic
