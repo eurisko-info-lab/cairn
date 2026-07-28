@@ -53,6 +53,7 @@ lake exe verifier-lean replay-history /path/to/node-root <federation-id> <genesi
   (authorities vs seals), valid 3f+1 replica cardinality, distinct commit
   replicas, membership of commit replicas in authority ids, and quorum
   threshold on certificate commits. It also checks manifest digest binding
-  (`cert.replicaSet` must equal SHA-256 of the manifest body encoding).
-- Current limitation: signature verification parity with `verifier-rust/`
-  is still pending.
+  (`cert.replicaSet` must equal SHA-256 of the manifest body encoding),
+  verifies manifest seals, and verifies per-commit BFT Ed25519 seals.
+- Current limitation: signature checks currently shell out to `openssl`
+  instead of using an in-process Lean crypto implementation.

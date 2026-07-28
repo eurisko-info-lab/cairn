@@ -349,13 +349,18 @@ structure CertView where
   proposal : Digest
   transition : Digest
   state : Digest
+  view : Int
   seq : Int
   previousState : Digest
   federationId : Digest
   epoch : Int
   replicaSet : Digest
-  commits : List String
-  deriving Repr
+  commits : List (String × ByteArray)
+
+def canonAsBytes (c : Canon) : Except String ByteArray :=
+  match c with
+  | .bytes bs => .ok bs
+  | _ => .error s!"expected bytes, got {canonKind c}"
 
 def parseCertView (a : ParsedArtifact) : Except String CertView := do
   if a.kind != "certificate" then
@@ -364,6 +369,7 @@ def parseCertView (a : ParsedArtifact) : Except String CertView := do
   let proposal <- requireDigest "certificate.proposal" (← canonAsStr (← canonField body "proposal"))
   let transition <- requireDigest "certificate.transition" (← canonAsStr (← canonField body "transition"))
   let state <- requireDigest "certificate.state" (← canonAsStr (← canonField body "state"))
+  let view <- canonAsInt (← canonField body "view")
   let seq <- canonAsInt (← canonField body "seq")
   let previousState <- requireDigest "certificate.previousState" (← canonAsStr (← canonField body "previousState"))
   let federationId <- requireDigest "certificate.federationId" (← canonAsStr (← canonField body "federationId"))
@@ -374,12 +380,15 @@ def parseCertView (a : ParsedArtifact) : Except String CertView := do
     match commitsCanon with
     | .list xs =>
         xs.mapM (fun row => do
-          canonAsStr (← canonField row "replica"))
+          let replica <- canonAsStr (← canonField row "replica")
+          let sealBytes <- canonAsBytes (← canonField row "seal")
+          pure (replica, sealBytes))
     | _ => .error "certificate.commits must be list"
   pure {
     proposal := proposal
     transition := transition
     state := state
+    view := view
     seq := seq
     previousState := previousState
     federationId := federationId
@@ -389,8 +398,8 @@ def parseCertView (a : ParsedArtifact) : Except String CertView := do
   }
 
 structure ManifestView where
-  authorities : List String
-  seals : List String
+  authorities : List (String × ByteArray)
+  seals : List (String × ByteArray)
   body : Canon
 
 def parseManifestView (a : ParsedArtifact) : Except String ManifestView := do
@@ -403,14 +412,18 @@ def parseManifestView (a : ParsedArtifact) : Except String ManifestView := do
     match replicasCanon with
     | .list xs =>
         xs.mapM (fun row => do
-          canonAsStr (← canonField row "id"))
+          let id <- canonAsStr (← canonField row "id")
+          let publicKey <- canonAsBytes (← canonField row "publicKey")
+          pure (id, publicKey))
     | _ => .error "replica-set-manifest.body.replicas must be list"
   let sealsCanon <- canonField outer "seals"
   let seals <-
     match sealsCanon with
     | .list xs =>
         xs.mapM (fun row => do
-          canonAsStr (← canonField row "id"))
+          let id <- canonAsStr (← canonField row "id")
+          let sealBytes <- canonAsBytes (← canonField row "seal")
+          pure (id, sealBytes))
     | _ => .error "replica-set-manifest.seals must be list"
   pure { authorities := authorities, seals := seals, body := body }
 
@@ -421,13 +434,15 @@ def quorumSize (n : Nat) : Nat :=
   ((2 * n) / 3) + 1
 
 def verifyManifestCoverage (manifest : ManifestView) : Except String Unit := do
-  let authDistinct := manifest.authorities.eraseDups
-  let sealDistinct := manifest.seals.eraseDups
+  let authIds := manifest.authorities.map (fun x => x.fst)
+  let sealIds := manifest.seals.map (fun x => x.fst)
+  let authDistinct := authIds.eraseDups
+  let sealDistinct := sealIds.eraseDups
   if authDistinct.isEmpty then
     .error "replica-set: empty"
-  else if authDistinct.length != manifest.authorities.length then
+  else if authDistinct.length != authIds.length then
     .error "replica-set: duplicate authority ids"
-  else if sealDistinct.length != manifest.seals.length then
+  else if sealDistinct.length != sealIds.length then
     .error "replica-set: duplicate seal ids"
   else
     let missingAuth := authDistinct.filter (fun id => !(sealDistinct.contains id))
@@ -437,6 +452,11 @@ def verifyManifestCoverage (manifest : ManifestView) : Except String Unit := do
     else
       pure ()
 
+def findAuthorityPk (manifest : ManifestView) (id : String) : Option ByteArray :=
+  match manifest.authorities.find? (fun x => x.fst == id) with
+  | some (_, pk) => some pk
+  | none => none
+
 def verifyCertQuorum (cert : CertView) (manifest : ManifestView) : Except String Unit := do
   let n := manifest.authorities.length
   if !validReplicaCount n then
@@ -444,10 +464,12 @@ def verifyCertQuorum (cert : CertView) (manifest : ManifestView) : Except String
   else if cert.seq != cert.epoch then
     .error s!"federation finality: certificate sequence {cert.seq} does not equal epoch {cert.epoch}"
   else
-    let distinct := cert.commits.eraseDups
-    if distinct.length != cert.commits.length then
+    let commitIds := cert.commits.map (fun x => x.fst)
+    let distinct := commitIds.eraseDups
+    let authIds := manifest.authorities.map (fun x => x.fst)
+    if distinct.length != commitIds.length then
       .error "federation finality: duplicate replica commits"
-    else if distinct.any (fun id => !(manifest.authorities.contains id)) then
+    else if distinct.any (fun id => !(authIds.contains id)) then
       .error "federation finality: unknown replica in commits"
     else if distinct.length < quorumSize n then
       .error s!"federation finality: {distinct.length} distinct commits < quorum {quorumSize n}"
@@ -551,6 +573,103 @@ def verifyManifestDigestBindingIO (cert : CertView) (manifest : ManifestView) : 
         pure (.ok ())
       else
         pure (.error s!"federation finality: replicaSet {cert.replicaSet} != expected {computed}")
+
+def natsToBytes (xs : List Nat) : ByteArray :=
+  xs.foldl (fun acc n => acc.push (UInt8.ofNat n)) ByteArray.empty
+
+def ed25519SpkiPrefix : ByteArray :=
+  natsToBytes [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]
+
+def verifyEd25519WithOpenSSL (publicKey32 payload signature64 : ByteArray) : IO (Except String Bool) := do
+  if publicKey32.size != 32 || signature64.size != 64 then
+    pure (.ok false)
+  else
+    let keyDer := appendBytes ed25519SpkiPrefix publicKey32
+    let base := s!"cairn-lean-ed25519-{payload.size}-{signature64.size}"
+    let keyPath := System.FilePath.mk "/tmp" / s!"{base}.pub.der"
+    let msgPath := System.FilePath.mk "/tmp" / s!"{base}.msg.bin"
+    let sigPath := System.FilePath.mk "/tmp" / s!"{base}.sig.bin"
+    IO.FS.writeBinFile keyPath keyDer
+    IO.FS.writeBinFile msgPath payload
+    IO.FS.writeBinFile sigPath signature64
+    let out ← IO.Process.output {
+      cmd := "openssl"
+      args := #[
+        "pkeyutl", "-verify", "-pubin", "-inkey", keyPath.toString, "-keyform", "DER",
+        "-rawin", "-in", msgPath.toString, "-sigfile", sigPath.toString
+      ]
+      stdin := .null
+      stderr := .piped
+      stdout := .piped
+    }
+    if out.exitCode == 0 then
+      pure (.ok true)
+    else
+      pure (.ok false)
+
+def proposalValueDigestBytes (proposalDigest : Digest) : ByteArray :=
+  encodeCanon (.bytes proposalDigest.toUTF8)
+
+def buildSignedCommitPayload (cert : CertView) (replica : String) (valueDigest : Digest) : ByteArray :=
+  let msg : Canon :=
+    .tag "commit" (.map [
+      ("digest", .str valueDigest),
+      ("from", .str replica),
+      ("seq", .int cert.seq),
+      ("view", .int cert.view)
+    ])
+  let payload : Canon :=
+    .map [
+      ("chainId", .str cert.federationId),
+      ("domain", .str "cairn-bft-v1"),
+      ("msg", msg),
+      ("replicaSet", .str cert.replicaSet)
+    ]
+  encodeCanon payload
+
+def verifyManifestSealsIO (manifest : ManifestView) : IO (Except String Unit) := do
+  match verifyManifestCoverage manifest with
+  | .error e =>
+      pure (.error e)
+  | .ok _ =>
+      let bodyBytes := encodeCanon manifest.body
+      for (id, sealBytes) in manifest.seals do
+        match findAuthorityPk manifest id with
+        | none =>
+            return .error s!"replica-set: seal for unknown id '{id}'"
+        | some pk =>
+            match ← verifyEd25519WithOpenSSL pk bodyBytes sealBytes with
+            | .error e =>
+                return .error e
+            | .ok false =>
+                return .error s!"replica-set: bad seal from '{id}'"
+            | .ok true =>
+                pure ()
+      pure (.ok ())
+
+def verifyCertSignaturesIO (cert : CertView) (manifest : ManifestView) : IO (Except String Unit) := do
+  match verifyCertQuorum cert manifest with
+  | .error e =>
+      pure (.error e)
+  | .ok _ =>
+      match ← sha256HexOfBytes (proposalValueDigestBytes cert.proposal) with
+      | .error e =>
+          pure (.error e)
+      | .ok valueDigest =>
+          for (replica, sealBytes) in cert.commits do
+            match findAuthorityPk manifest replica with
+            | none =>
+                return .error s!"unknown replica {replica}"
+            | some pk =>
+                let payload := buildSignedCommitPayload cert replica valueDigest
+                match ← verifyEd25519WithOpenSSL pk payload sealBytes with
+                | .error e =>
+                    return .error e
+                | .ok false =>
+                    return .error s!"bad bft seal from {replica}"
+                | .ok true =>
+                    pure ()
+          pure (.ok ())
 
 inductive ChainTx where
   | publishArtifact (kind : String) (valueHash : Digest)
@@ -785,32 +904,34 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
         | .ok certArtifact, .ok proposalArtifact, .ok manifestArtifact =>
             match parseCertView certArtifact, parseProposalView proposalArtifact, parseManifestView manifestArtifact with
             | .ok certView, .ok proposalView, .ok manifestView =>
-              match verifyManifestCoverage manifestView, verifyCertQuorum certView manifestView with
-              | .error e, _ =>
-                pure (KernelResult.invalid e)
-              | _, .error e =>
-                pure (KernelResult.invalid e)
-              | .ok _, .ok _ =>
-                match ← verifyManifestDigestBindingIO certView manifestView with
-                | .error e =>
+              match ← verifyManifestSealsIO manifestView with
+              | .error e =>
                   pure (KernelResult.invalid e)
-                | .ok _ =>
-                if certView.proposal != proposal then
-                  pure (KernelResult.invalid s!"certificate names proposal {certView.proposal}, not {proposal}")
-                else if certView.transition != proposalView.transition then
-                  pure (KernelResult.invalid "certificate transition projection does not match proposal")
-                else if certView.state != proposalView.after then
-                  pure (KernelResult.invalid "certificate state projection does not match proposal.after")
-                else if certView.previousState != proposalView.before then
-                  pure (KernelResult.invalid "certificate previousState projection does not match proposal.before")
-                else if certView.epoch != proposalView.epoch then
-                  pure (KernelResult.invalid "certificate epoch projection does not match proposal")
-                else if certView.replicaSet != proposalView.replicaSet then
-                  pure (KernelResult.invalid "certificate replicaSet projection does not match proposal")
-                else if certView.federationId != proposalView.federationId then
-                  pure (KernelResult.invalid "certificate federationId projection does not match proposal")
-                else
-                  pure (mkValid query (.certBinding cert proposal manifest))
+              | .ok _ =>
+                  match ← verifyCertSignaturesIO certView manifestView with
+                  | .error e =>
+                      pure (KernelResult.invalid e)
+                  | .ok _ =>
+                      match ← verifyManifestDigestBindingIO certView manifestView with
+                      | .error e =>
+                          pure (KernelResult.invalid e)
+                      | .ok _ =>
+                          if certView.proposal != proposal then
+                            pure (KernelResult.invalid s!"certificate names proposal {certView.proposal}, not {proposal}")
+                          else if certView.transition != proposalView.transition then
+                            pure (KernelResult.invalid "certificate transition projection does not match proposal")
+                          else if certView.state != proposalView.after then
+                            pure (KernelResult.invalid "certificate state projection does not match proposal.after")
+                          else if certView.previousState != proposalView.before then
+                            pure (KernelResult.invalid "certificate previousState projection does not match proposal.before")
+                          else if certView.epoch != proposalView.epoch then
+                            pure (KernelResult.invalid "certificate epoch projection does not match proposal")
+                          else if certView.replicaSet != proposalView.replicaSet then
+                            pure (KernelResult.invalid "certificate replicaSet projection does not match proposal")
+                          else if certView.federationId != proposalView.federationId then
+                            pure (KernelResult.invalid "certificate federationId projection does not match proposal")
+                          else
+                            pure (mkValid query (.certBinding cert proposal manifest))
             | .error e, _, _ =>
                 pure (KernelResult.invalid e)
             | _, .error e, _ =>
@@ -960,12 +1081,14 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                         | .error e => return KernelResult.invalid e
                         | .ok v => pure v
 
-                      match verifyManifestCoverage manifestView, verifyCertQuorum certView manifestView with
-                      | .error e, _ =>
+                      match ← verifyManifestSealsIO manifestView with
+                      | .error e =>
+                        return KernelResult.invalid e
+                      | .ok _ =>
+                        match ← verifyCertSignaturesIO certView manifestView with
+                        | .error e =>
                           return KernelResult.invalid e
-                      | _, .error e =>
-                          return KernelResult.invalid e
-                        | .ok _, .ok _ =>
+                        | .ok _ =>
                           match ← verifyManifestDigestBindingIO certView manifestView with
                           | .error e => return KernelResult.invalid e
                           | .ok _ => pure ()
