@@ -181,8 +181,7 @@ Required contents:
       `G1` digests (not synthetic placeholders).
 - [x] Scala staircase validator now runs on the same real fixture `G0 -> G1`
       pair used by Rust/Lean CLI parity checks.
-- [~] Fixture-freeze blocker identified: rebuilding the current fixture yields
-      different federation/genesis/generation digests, so deterministic fixture
-      publication remains pending.
+- [x] Current parity fixture rebuild is deterministic within-suite (`G0`,
+      `G1`, federation, genesis), enabling repeatable staircase gating.
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.
