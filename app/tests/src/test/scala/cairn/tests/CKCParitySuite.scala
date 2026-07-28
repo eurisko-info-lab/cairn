@@ -377,3 +377,11 @@ class CKCParitySuite extends munit.FunSuite:
     ))._1
     assertEquals(rustMalformedOverride, "invalid")
     assertEquals(leanMalformedOverride, "invalid")
+
+  test("PR34 staircase fixture is not yet reproducible across rebuilds"):
+    val a = buildFixture()
+    val b = buildFixture()
+    assertNotEquals(a.federationId, b.federationId)
+    assertNotEquals(a.genesisState, b.genesisState)
+    assertNotEquals(a.resolveDigestG0, a.resolveDigestG1)
+    assertNotEquals(b.resolveDigestG0, b.resolveDigestG1)
