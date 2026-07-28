@@ -173,5 +173,7 @@ Required contents:
 - [x] Cross-language staircase parity checks run via verifier CLIs from
       `CKCParitySuite`, covering valid links, equal-package rejection, and
       predecessor-link mismatch rejection.
+- [x] Staircase parity gate enforces malformed-digest rejection parity across
+      Rust and Lean (base args and link-override args).
 - [ ] Successor-world fixture (`G1`) still to be assembled and validated as
       an independent reconstruction gate with governed finalized delta.

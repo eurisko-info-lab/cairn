@@ -91,6 +91,7 @@ Current validator shape (`validateTwoStep` / `validate_two_step` /
 - `g1.graphPackage == successorPackage`
 - both verdicts carry state and evidence
 - predecessor/successor package digests are distinct
+- all referenced digests are valid 64-hex values (including CLI inputs)
 
 ## Staircase package-v2 extension (planned)
 
