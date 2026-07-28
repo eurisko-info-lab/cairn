@@ -79,6 +79,12 @@ The promoted handoff also freezes the successor world's reconstructed state:
 - final epoch,
 - verified transition count.
 
+It also freezes the governed successor-finalization binding for `delta_n`:
+
+- governed finality certificate digest,
+- governed proposal digest,
+- governed manifest/replica-set digest.
+
 That means the next foundation step can consume the handoff payload directly
 instead of re-deriving the successor state from ambient host policy.
 

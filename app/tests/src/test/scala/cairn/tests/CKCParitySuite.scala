@@ -70,6 +70,9 @@ class CKCParitySuite extends munit.FunSuite:
       resolveDigestG0: Digest,
       resolveDigestG1: Digest,
       governedDeltaG0ToG1: Digest,
+        governedDeltaFinalityCertDigest: Digest,
+        governedDeltaProposalDigest: Digest,
+        governedDeltaManifestDigest: Digest,
       runtimeDigest: Digest,
       machineDigest: Digest,
       acceptanceDigest: Digest,
@@ -93,6 +96,9 @@ class CKCParitySuite extends munit.FunSuite:
       predecessorPackage: Digest,
       successorPackage: Digest,
       governedDelta: Digest,
+      governedDeltaFinalityCertDigest: Digest,
+      governedDeltaProposalDigest: Digest,
+      governedDeltaManifestDigest: Digest,
       runtimeDigest: Digest,
       machineDigest: Digest,
       acceptanceDigest: Digest,
@@ -119,6 +125,9 @@ class CKCParitySuite extends munit.FunSuite:
       "predecessorPackage" -> Canon.CStr(predecessorPackage.hex),
       "successorPackage" -> Canon.CStr(successorPackage.hex),
       "governedDelta" -> Canon.CStr(governedDelta.hex),
+      "governedDeltaFinalityCertDigest" -> Canon.CStr(governedDeltaFinalityCertDigest.hex),
+      "governedDeltaProposalDigest" -> Canon.CStr(governedDeltaProposalDigest.hex),
+      "governedDeltaManifestDigest" -> Canon.CStr(governedDeltaManifestDigest.hex),
       "runtimeDigest" -> Canon.CStr(runtimeDigest.hex),
       "machineDigest" -> Canon.CStr(machineDigest.hex),
       "acceptanceDigest" -> Canon.CStr(acceptanceDigest.hex),
@@ -208,7 +217,7 @@ class CKCParitySuite extends munit.FunSuite:
       (cert, newState, epoch)
 
     val (_, state1, epoch1) = buildGeneration("{ add extra = true ; }", genesisEpoch, 1L, baseGenesisState)
-    val (_, state2, _) = buildGeneration("{ add extra = true ; add second = false ; }", epoch1, 2L, state1)
+    val (cert2, state2, _) = buildGeneration("{ add extra = true ; add second = false ; }", epoch1, 2L, state1)
 
     val replayGenesisState =
       val transitionDigests = FederationGc.orderedTransitionDigests(node).fold(e => fail(e), identity)
@@ -224,6 +233,7 @@ class CKCParitySuite extends munit.FunSuite:
       val secondTransition = FederationTransition.fromArtifact(secondTransitionArtifact).fold(e => fail(e), identity)
       assertEquals(secondTransition.before, state1.digest)
       assertEquals(secondTransition.after, state2.digest)
+      assertEquals(secondTransition.finality, Some(cert2.digest))
       secondTransitionDigest
 
     Fixture(
@@ -239,6 +249,9 @@ class CKCParitySuite extends munit.FunSuite:
       resolveDigestG0 = state1.digest,
       resolveDigestG1 = state2.digest,
       governedDeltaG0ToG1 = governedDeltaG0ToG1,
+      governedDeltaFinalityCertDigest = cert2.digest,
+      governedDeltaProposalDigest = cert2.proposal,
+      governedDeltaManifestDigest = replicaSet.digest,
       runtimeDigest = runtime.digest,
       machineDigest = machine.machine.digest,
       acceptanceDigest = constitution.digest,
@@ -295,6 +308,9 @@ class CKCParitySuite extends munit.FunSuite:
       predecessorPackage = replayFixture.resolveDigestG0,
       successorPackage = replayFixture.resolveDigestG1,
       governedDelta = replayFixture.governedDeltaG0ToG1,
+      governedDeltaFinalityCertDigest = replayFixture.governedDeltaFinalityCertDigest,
+      governedDeltaProposalDigest = replayFixture.governedDeltaProposalDigest,
+      governedDeltaManifestDigest = replayFixture.governedDeltaManifestDigest,
       runtimeDigest = replayFixture.runtimeDigest,
       machineDigest = replayFixture.machineDigest,
       acceptanceDigest = replayFixture.acceptanceDigest,
@@ -600,7 +616,7 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "063114ddd638aa642ecb84eb8e674657253e9d688a63915900462266cfe051ba"
+    val expectedFoundationDigest = "d291d540dabfed840c0d60afc0b255254f9cbdd436ccad7e0f20036211e0b1e7"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.replayMaxSteps, b.replayMaxSteps)
     assertEquals(a.languageDigest, b.languageDigest)
@@ -611,6 +627,9 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.predecessorPackage, b.predecessorPackage)
     assertEquals(a.successorPackage, b.successorPackage)
     assertEquals(a.governedDelta, b.governedDelta)
+    assertEquals(a.governedDeltaFinalityCertDigest, b.governedDeltaFinalityCertDigest)
+    assertEquals(a.governedDeltaProposalDigest, b.governedDeltaProposalDigest)
+    assertEquals(a.governedDeltaManifestDigest, b.governedDeltaManifestDigest)
     assertEquals(a.runtimeDigest, b.runtimeDigest)
     assertEquals(a.machineDigest, b.machineDigest)
     assertEquals(a.acceptanceDigest, b.acceptanceDigest)
@@ -647,3 +666,27 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustReplayKind, "valid")
     assertEquals(rustResolveG1Evidence, Some(promoted.resolveEvidenceG1.hex))
     assertEquals(rustReplayEvidence, Some(promoted.replayEvidenceG1.hex))
+
+  test("PR34 governed delta finalization binds in Scala and Rust"):
+    assume(cargoAvailable, "cargo not on PATH")
+
+    val replayFixture = buildFixture()
+    val promoted = buildPromotedFoundation()
+
+    val scalaCert = CKC.derive(scalaConstitution, scalaBudget,
+      CKC.Query.VerifyCertBinding(
+        replayFixture.casRoot.toString,
+        promoted.governedDeltaFinalityCertDigest,
+        promoted.governedDeltaProposalDigest,
+        promoted.governedDeltaManifestDigest,
+      ))
+    assertEquals(classifyScala(scalaCert), "valid")
+
+    val (rustKind, _) = rust(Seq(
+      "verify-cert",
+      "--cas", replayFixture.casRoot.toString,
+      "--cert", promoted.governedDeltaFinalityCertDigest.hex,
+      "--proposal", promoted.governedDeltaProposalDigest.hex,
+      "--manifest", promoted.governedDeltaManifestDigest.hex,
+    ))
+    assertEquals(rustKind, "valid")
