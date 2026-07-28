@@ -555,3 +555,25 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(a.replayEvidenceG1, b.replayEvidenceG1)
     assertEquals(a.digest, b.digest)
     assertEquals(a.digest.hex, expectedFoundationDigest)
+
+  test("PR34 promoted foundation reconstructs G1 independently in Scala and Rust"):
+    assume(cargoAvailable, "cargo not on PATH")
+
+    val replayFixture = buildFixture()
+    val promoted = buildPromotedFoundation()
+
+    assertEquals(promoted.successorPackage, replayFixture.resolveDigestG1)
+    assertEquals(promoted.federationId, replayFixture.federationId)
+    assertEquals(promoted.genesisState, replayFixture.genesisState)
+
+    val (rustResolveG1Kind, rustResolveG1Evidence) =
+      rust(Seq("resolve", "--cas", replayFixture.casRoot.toString, "--digest", replayFixture.resolveDigestG1.hex))
+    val (rustReplayKind, rustReplayEvidence) =
+      rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString,
+        "--federation-id", replayFixture.federationId.hex,
+        "--genesis-state", replayFixture.genesisState.hex))
+
+    assertEquals(rustResolveG1Kind, "valid")
+    assertEquals(rustReplayKind, "valid")
+    assertEquals(rustResolveG1Evidence, Some(promoted.resolveEvidenceG1.hex))
+    assertEquals(rustReplayEvidence, Some(promoted.replayEvidenceG1.hex))

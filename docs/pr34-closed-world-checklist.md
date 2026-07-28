@@ -116,7 +116,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 - [ ] Represent remaining trusted host choices as constituted artifacts.
 - [ ] Define/extend change languages for those newly constituted choices.
 - [ ] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
-- [ ] Reconstruct `G_{n+1}` independently in Scala and Rust.
+- [x] Reconstruct `G_{n+1}` independently in Scala and Rust.
 - [ ] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
 - [ ] Remove obsolete scaffolding from `Cairn_n` after promotion.
 

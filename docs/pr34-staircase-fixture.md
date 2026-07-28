@@ -91,6 +91,8 @@ The CKC parity suite includes all required staircase assertions:
 - deterministic cert fixture digest freeze,
 - deterministic governed `delta0` digest freeze,
 - deterministic promoted-foundation handoff digest freeze,
+- explicit Scala/Rust evidence parity for `G1` reconstruction against the
+  promoted foundation handoff payload,
 - independent audit of the governed `G0 -> G1` transition.
 
 ## Failure interpretation
