@@ -1032,6 +1032,29 @@ def ofKernelResult : KernelResult → Verdict Value
 def hasArtifact (Sigma : Context) (d : Digest) : Bool :=
   (Sigma.artifacts.get? d).isSome
 
+def hasArtifactKind (Sigma : Context) (d : Digest) (expected : String) : Bool :=
+  match Sigma.artifacts.get? d with
+  | some a =>
+      match a.kind with
+      | .other name => name == expected
+      | .proposal => expected == "proposal"
+      | .certificate => expected == "certificate"
+      | .replicaManifest => expected == "replica-manifest"
+  | none => false
+
+def requireArtifactKind
+    (Sigma : Context)
+    (d : Digest)
+    (expected : String)
+    (label : String) : Option String :=
+  if hasArtifact Sigma d then
+    if hasArtifactKind Sigma d expected then
+      none
+    else
+      some s!"{label} is not of expected kind '{expected}'"
+  else
+    none
+
 structure TransitionEvidence where
   inputDigest : Digest
   changeDigest : Digest
@@ -1076,6 +1099,23 @@ def deriveApplyChange
     }
     .valid (out, ev) s!"applyChange@{K.kernelId}:{out}"
 
+def deriveLanguageAt
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef) : Verdict Value :=
+  let needed := [L.digest, L.machine.digest]
+  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  if !missing.isEmpty then
+    .missing missing
+  else
+    match requireArtifactKind Sigma L.machine.digest "generic-machine" "language machine",
+          requireArtifactKind Sigma L.digest "language" "language artifact" with
+    | some e, _ => .invalid e
+    | _, some e => .invalid e
+    | none, none =>
+        .valid (.artifact { digest := L.digest, kind := .other "language" })
+          s!"language@{K.kernelId}:{L.digest}"
+
 theorem applyChange_semantic_determinism
     (Sigma : Context)
     (K : KernelConstitution)
@@ -1106,18 +1146,27 @@ def deriveAccept
   else if B.maxSteps == 0 then
     .exhausted "max_steps 0: accept unavailable"
   else
-    let policyDigest := s!"policy({K.kernelId},{rho.digest})"
-    let decisionDigest := s!"accept({policyDigest},{authority},{claim},{proof})"
-    let ev : AcceptanceEvidence := {
-      constitutionDigest := rho.digest
-      authorityDigest := authority
-      claimDigest := claim
-      proofDigest := proof
-      policyDigest := policyDigest
-      decisionDigest := decisionDigest
-      resourceUse := 1
-    }
-    .valid (claim, ev) s!"accept@{K.kernelId}:{decisionDigest}"
+    match requireArtifactKind Sigma rho.digest "acceptance-constitution" "acceptance constitution",
+          requireArtifactKind Sigma authority "authority" "authority artifact",
+          requireArtifactKind Sigma claim "claim" "claim artifact",
+          requireArtifactKind Sigma proof "proof" "proof artifact" with
+    | some e, _, _, _ => .invalid e
+    | _, some e, _, _ => .invalid e
+    | _, _, some e, _ => .invalid e
+    | _, _, _, some e => .invalid e
+    | none, none, none, none =>
+        let policyDigest := s!"policy({K.kernelId},{rho.digest})"
+        let decisionDigest := s!"accept({policyDigest},{authority},{claim},{proof})"
+        let ev : AcceptanceEvidence := {
+          constitutionDigest := rho.digest
+          authorityDigest := authority
+          claimDigest := claim
+          proofDigest := proof
+          policyDigest := policyDigest
+          decisionDigest := decisionDigest
+          resourceUse := 1
+        }
+        .valid (claim, ev) s!"accept@{K.kernelId}:{decisionDigest}"
 
 theorem accept_semantic_determinism
     (Sigma : Context)
@@ -1148,12 +1197,7 @@ def deriveJudgment
   | .replayHistory federationId genesisState =>
       ofKernelResult (derive Sigma K B (.replayHistory "" federationId genesisState))
   | .languageAt L =>
-      let needed := [L.digest, L.machine.digest]
-      let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
-      if !missing.isEmpty then
-        .missing missing
-      else
-        .valid (.artifact { digest := L.digest, kind := .other "language" }) s!"language@{K.kernelId}:{L.digest}"
+      deriveLanguageAt Sigma K L
   | .freeChangeLanguage L =>
       let w := FreeChange K L
       let needed := [L.digest, L.machine.digest]
