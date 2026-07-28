@@ -1500,6 +1500,49 @@ theorem judgment_result_deterministic
 
 end CKC
 
+def parsedKindToArtifactKind (kind : String) : ArtifactKind :=
+  if kind == "federation-proposal" then
+    .proposal
+  else if kind == "certificate" then
+    .certificate
+  else if kind == "replica-set-manifest" then
+    .replicaManifest
+  else
+    .other kind
+
+def contextForResolve (digest : Digest) (artifact : ParsedArtifact) : Context :=
+  let a : Artifact := {
+    digest := digest
+    kind := parsedKindToArtifactKind artifact.kind
+  }
+  {
+    artifacts := (∅ : Std.HashMap Digest Artifact).insert digest a
+    certs := {}
+    history := []
+  }
+
+def contextForVerifyCert
+    (cert : Digest)
+    (proposal : Digest)
+    (manifest : Digest)
+    (certView : CertView) : Context :=
+  let proposalArtifact : Artifact := { digest := proposal, kind := .proposal }
+  let manifestArtifact : Artifact := { digest := manifest, kind := .replicaManifest }
+  let certProjection : CertificateProjection := {
+    cert := cert
+    proposal := certView.proposal
+    manifest := manifest
+    federationId := certView.federationId
+    epoch := Int.toNat certView.epoch
+  }
+  {
+    artifacts :=
+      ((∅ : Std.HashMap Digest Artifact).insert proposal proposalArtifact)
+        |>.insert manifest manifestArtifact
+    certs := (∅ : Std.HashMap Digest CertificateProjection).insert cert certProjection
+    history := []
+  }
+
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
   let mkValid := fun (q : Query) (v : Value) => KernelResult.valid v (evidenceOf constitution q v)
   match query with
@@ -1512,16 +1555,8 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
           else
             pure (KernelResult.invalid e)
       | .ok a =>
-          let k : ArtifactKind :=
-            if a.kind == "federation-proposal" then
-              .proposal
-            else if a.kind == "certificate" then
-              .certificate
-            else if a.kind == "replica-set-manifest" then
-              .replicaManifest
-            else
-              .other a.kind
-          pure (mkValid query (.artifact { digest := digest, kind := k }))
+          let ctx := contextForResolve digest a
+          pure (derive ctx constitution budget query)
   | .verifyCertBinding casRoot cert proposal manifest =>
       match ← verifyRuntimeDependenciesIO with
       | .error e =>
@@ -1589,7 +1624,8 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                           else if certView.federationId != proposalView.federationId then
                             pure (KernelResult.invalid "certificate federationId projection does not match proposal")
                           else
-                            pure (mkValid query (.certBinding cert proposal manifest))
+                            let ctx := contextForVerifyCert cert proposal manifest certView
+                            pure (derive ctx constitution budget query)
             | .error e, _, _ =>
                 pure (KernelResult.invalid e)
             | _, .error e, _ =>
