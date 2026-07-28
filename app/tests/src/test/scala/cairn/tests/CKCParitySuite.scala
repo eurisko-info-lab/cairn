@@ -286,3 +286,22 @@ class CKCParitySuite extends munit.FunSuite:
     ))._1
     assertEquals(rustMismatch, "invalid")
     assertEquals(leanMismatch, "invalid")
+
+    val badSuccessor = Digest.of(Canon.CStr("pr34-stair-bad-successor"))
+    val rustSuccessorMismatch = rust(Seq(
+      "staircase-check",
+      "--g0", g0.hex,
+      "--g1", g1.hex,
+      "--delta", delta.hex,
+      "--link-successor", badSuccessor.hex,
+    ))._1
+    val leanSuccessorMismatch = lean(Seq(
+      "staircase-check",
+      g0.hex,
+      g1.hex,
+      delta.hex,
+      g0.hex,
+      badSuccessor.hex,
+    ))._1
+    assertEquals(rustSuccessorMismatch, "invalid")
+    assertEquals(leanSuccessorMismatch, "invalid")
