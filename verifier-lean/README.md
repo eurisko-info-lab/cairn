@@ -54,6 +54,5 @@ lake exe verifier-lean replay-history /path/to/node-root <federation-id> <genesi
   replicas, membership of commit replicas in authority ids, and quorum
   threshold on certificate commits. It also checks manifest digest binding
   (`cert.replicaSet` must equal SHA-256 of the manifest body encoding).
-- Current limitation: digest binding currently uses a stable textual fallback
-  encoder for manifest-body bytes; exact binary canonical byte parity with
-  `verifier-rust/` encoding and full signature verification are still pending.
+- Current limitation: signature verification parity with `verifier-rust/`
+  is still pending.

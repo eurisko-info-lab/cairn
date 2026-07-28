@@ -155,20 +155,6 @@ def canonKind : Canon → String
   | .map _ => "map"
   | .tag _ _ => "tag"
 
-  partial def canonToStableString : Canon → String
-    | .int n => s!"I({n})"
-    | .str s => s!"S({s})"
-    | .bytes bs => s!"B({bs.size})"
-    | .list xs =>
-      let body := String.intercalate "," (xs.map canonToStableString)
-      s!"L[{body}]"
-    | .map kvs =>
-      let sorted := kvs.mergeSort (fun a b => a.fst < b.fst)
-      let body := String.intercalate "," (sorted.map (fun kv => s!"{kv.fst}:{canonToStableString kv.snd}"))
-      "M{" ++ body ++ "}"
-    | .tag tag v =>
-      s!"T({tag},{canonToStableString v})"
-
 def readU8 (bs : ByteArray) (i : Nat) : Except String (UInt8 × Nat) :=
   if _h : i < bs.size then
     .ok (bs.get! i, i + 1)
@@ -468,10 +454,73 @@ def verifyCertQuorum (cert : CertView) (manifest : ManifestView) : Except String
     else
       pure ()
 
-def encodeCanon (c : Canon) : ByteArray :=
-  -- NOTE: stable textual fallback encoding.
-  -- Full binary-canonical byte parity can replace this once native encoder lands.
-  (canonToStableString c).toUTF8
+def appendBytes (acc extra : ByteArray) : ByteArray :=
+  extra.foldl (fun out b => out.push b) acc
+
+def putI32 (out : ByteArray) (v : Int) : ByteArray :=
+  let u : Nat :=
+    if v < 0 then
+      Int.toNat (v + Int.ofNat 4294967296)
+    else
+      Int.toNat v
+  out
+    |>.push (UInt8.ofNat ((u >>> 24) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 16) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 8) &&& 0xFF))
+    |>.push (UInt8.ofNat (u &&& 0xFF))
+
+def putI64 (out : ByteArray) (v : Int) : ByteArray :=
+  let u : Nat :=
+    if v < 0 then
+      Int.toNat (v + Int.ofNat 18446744073709551616)
+    else
+      Int.toNat v
+  out
+    |>.push (UInt8.ofNat ((u >>> 56) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 48) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 40) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 32) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 24) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 16) &&& 0xFF))
+    |>.push (UInt8.ofNat ((u >>> 8) &&& 0xFF))
+    |>.push (UInt8.ofNat (u &&& 0xFF))
+
+def putString (out : ByteArray) (s : String) : ByteArray :=
+  let b := s.toUTF8
+  let out := putI32 out (Int.ofNat b.size)
+  appendBytes out b
+
+mutual
+  partial def encodeCanon : Canon → ByteArray
+    | .int v =>
+        putI64 (ByteArray.empty.push (UInt8.ofNat 73)) v
+    | .str s =>
+        putString (ByteArray.empty.push (UInt8.ofNat 83)) s
+    | .bytes bs =>
+        let out := putI32 (ByteArray.empty.push (UInt8.ofNat 66)) (Int.ofNat bs.size)
+        appendBytes out bs
+    | .list xs =>
+        let out := putI32 (ByteArray.empty.push (UInt8.ofNat 76)) (Int.ofNat xs.length)
+        appendBytes out (encodeCanonList xs)
+    | .map kvs =>
+        let sorted := kvs.mergeSort (fun a b => a.fst < b.fst)
+        let out := putI32 (ByteArray.empty.push (UInt8.ofNat 77)) (Int.ofNat sorted.length)
+        appendBytes out (encodeMapEntries sorted)
+    | .tag tag value =>
+        let out := putString (ByteArray.empty.push (UInt8.ofNat 84)) tag
+        appendBytes out (encodeCanon value)
+
+  partial def encodeCanonList : List Canon → ByteArray
+    | [] => ByteArray.empty
+    | x :: xs =>
+        appendBytes (encodeCanon x) (encodeCanonList xs)
+
+  partial def encodeMapEntries : List (String × Canon) → ByteArray
+    | [] => ByteArray.empty
+    | (k, v) :: rest =>
+        let head := appendBytes (putString ByteArray.empty k) (encodeCanon v)
+        appendBytes head (encodeMapEntries rest)
+end
 
 def sha256HexOfBytes (bytes : ByteArray) : IO (Except String Digest) := do
   let tmpPath := System.FilePath.mk "/tmp" / s!"cairn-lean-hash-{bytes.size}.bin"
