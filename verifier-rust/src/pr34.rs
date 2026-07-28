@@ -177,6 +177,76 @@ impl Pr34VerdictEnvelope {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Pr34SuccessorLink {
+    pub predecessor_package: Digest,
+    pub successor_package: Digest,
+    pub upgrade_delta: Digest,
+}
+
+impl Pr34SuccessorLink {
+    pub fn canon(&self) -> Canon {
+        Canon::Tag(
+            "pr34-successor-link-v1".to_owned(),
+            Box::new(Canon::Map(vec![
+                (
+                    "predecessorPackage".to_owned(),
+                    Canon::Str(self.predecessor_package.hex()),
+                ),
+                (
+                    "successorPackage".to_owned(),
+                    Canon::Str(self.successor_package.hex()),
+                ),
+                ("upgradeDelta".to_owned(), Canon::Str(self.upgrade_delta.hex())),
+            ])),
+        )
+    }
+
+    pub fn from_canon(c: &Canon) -> Result<Self> {
+        let body = c.expect_tag("pr34-successor-link-v1")?;
+        Ok(Self {
+            predecessor_package: Digest::parse(body.field("predecessorPackage")?.as_str()?)?,
+            successor_package: Digest::parse(body.field("successorPackage")?.as_str()?)?,
+            upgrade_delta: Digest::parse(body.field("upgradeDelta")?.as_str()?)?,
+        })
+    }
+}
+
+pub fn validate_two_step(
+    g0: &Pr34VerdictEnvelope,
+    g1: &Pr34VerdictEnvelope,
+    link: &Pr34SuccessorLink,
+) -> Result<()> {
+    if g0.verdict_class != Pr34VerdictClass::Valid {
+        bail!("g0 verdict is not valid");
+    }
+    if g1.verdict_class != Pr34VerdictClass::Valid {
+        bail!("g1 verdict is not valid");
+    }
+    if g0.graph_package != link.predecessor_package {
+        bail!("g0 package does not match successor link predecessor");
+    }
+    if g1.graph_package != link.successor_package {
+        bail!("g1 package does not match successor link successor");
+    }
+    if g0.state.is_none() {
+        bail!("g0 valid verdict is missing state");
+    }
+    if g1.state.is_none() {
+        bail!("g1 valid verdict is missing state");
+    }
+    if g0.evidence.is_none() {
+        bail!("g0 valid verdict is missing evidence");
+    }
+    if g1.evidence.is_none() {
+        bail!("g1 valid verdict is missing evidence");
+    }
+    if link.predecessor_package == link.successor_package {
+        bail!("successor package must differ from predecessor package");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +315,84 @@ mod tests {
             ])),
         );
         assert!(Pr34VerdictEnvelope::from_canon(&bad).is_err());
+    }
+
+    #[test]
+    fn successor_link_round_trip() {
+        let link = Pr34SuccessorLink {
+            predecessor_package: d("g0"),
+            successor_package: d("g1"),
+            upgrade_delta: d("delta"),
+        };
+        let round = Pr34SuccessorLink::from_canon(&link.canon()).unwrap();
+        assert_eq!(round, link);
+    }
+
+    #[test]
+    fn staircase_validator_accepts_valid_chain() {
+        let g0 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k0"),
+            graph_package: d("g0"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s0")),
+            evidence: Some(d("e0")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let g1 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k1"),
+            graph_package: d("g1"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s1")),
+            evidence: Some(d("e1")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let link = Pr34SuccessorLink {
+            predecessor_package: d("g0"),
+            successor_package: d("g1"),
+            upgrade_delta: d("delta"),
+        };
+        assert!(validate_two_step(&g0, &g1, &link).is_ok());
+    }
+
+    #[test]
+    fn staircase_validator_rejects_invalid_successor() {
+        let g0 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k0"),
+            graph_package: d("g0"),
+            verdict_class: Pr34VerdictClass::Valid,
+            state: Some(d("s0")),
+            evidence: Some(d("e0")),
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let g1 = Pr34VerdictEnvelope {
+            kernel_constitution: d("k1"),
+            graph_package: d("g1"),
+            verdict_class: Pr34VerdictClass::Invalid,
+            state: None,
+            evidence: None,
+            resource_use: Pr34ResourceUse {
+                steps: 1,
+                bytes_read: 1,
+                wall_micros: 1,
+            },
+        };
+        let link = Pr34SuccessorLink {
+            predecessor_package: d("g0"),
+            successor_package: d("g1"),
+            upgrade_delta: d("delta"),
+        };
+        assert!(validate_two_step(&g0, &g1, &link).is_err());
     }
 }
