@@ -107,7 +107,8 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
       (`delta0 : G0 -> G1`) under accepted/finalized governance.
 - [x] Require both Scala and Rust to reconstruct `G1` to the same canonical
       verdict/state as a second-generation gate.
-- [ ] Record `G0 -> G1` as a permanent conformance fixture and tutorial step.
+- [x] Record `G0 -> G1` as a permanent conformance fixture and tutorial step
+      in [docs/pr34-staircase-fixture.md](pr34-staircase-fixture.md).
 
 ### I. Foundation handoff discipline
 
@@ -209,7 +210,7 @@ Required contents:
       also pinned to golden digests in `CKCParitySuite`.
 - [x] Successor-world fixture (`G1`) is validated as an independent
       reconstruction gate with governed finalized delta.
-- [~] Successor-world tutorial/conformance publication still to be written as
-      a permanent `G0 -> G1` fixture walkthrough.
+- [x] Successor-world tutorial/conformance publication is now documented as a
+      permanent `G0 -> G1` fixture walkthrough.
 - [ ] Foundation handoff (`Meaning_n -> Foundation_{n+1}`) is specified here,
       but still needs first concrete promoted step artifact set.

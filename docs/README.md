@@ -34,6 +34,7 @@ documents in order if the project is new to you; use the rest as references.
 | [Agreement](agreement.md) | Lean/HVM agreement evidence versus checked proof evidence |
 | [Rosetta](rosetta.md) | Host-language projections and their obligations |
 | [Lowering](lowering.md) | Tree and interaction-net execution paths |
+| [PR34 staircase fixture](pr34-staircase-fixture.md) | Permanent `G0 -> G1` conformance walkthrough and promotion gate |
 
 ## Change Cairn
 
