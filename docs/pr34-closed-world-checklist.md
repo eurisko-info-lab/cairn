@@ -220,3 +220,5 @@ Required contents:
       predecessor/successor/delta fields via execution context).
 - [~] Legacy synthetic staircase parity path is being reduced in favor of
       slab-driven checks while preserving Rust/Lean malformed-link parity.
+- [~] Standalone successor-world fixture audit path has been consolidated into
+      promoted-slab staircase gates to reduce duplicate scaffold assertions.

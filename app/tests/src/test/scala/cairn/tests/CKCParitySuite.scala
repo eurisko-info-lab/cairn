@@ -521,15 +521,6 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustMalformedOverride, "invalid")
     assertEquals(leanMalformedOverride, "invalid")
 
-  test("PR34 successor world fixture is independently auditable"):
-    val replayFixture = buildFixture()
-    val node = Node(replayFixture.nodeRoot, EffectContexts.forLedger())
-    val verified = FederationHistory
-      .auditPublishedTransition(node, node.cas, replayFixture.governedDeltaG0ToG1, replayFixture.federationId)
-      .fold(e => fail(e), identity)
-    assertEquals(verified.transition.before, replayFixture.resolveDigestG0)
-    assertEquals(verified.transition.after, replayFixture.resolveDigestG1)
-
   test("PR34 staircase fixture digests are reproducible"):
     val a = buildFixture()
     val b = buildFixture()
