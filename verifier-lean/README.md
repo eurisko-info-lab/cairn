@@ -45,6 +45,10 @@ lake exe verifier-lean replay-history /path/to/node-root <federation-id> <genesi
   enforces certificate/proposal projection consistency (`transition`, `state`,
   `previousState`, `epoch`, `replicaSet`, `federationId`) plus manifest-tag
   validation.
+- Replay upgrade: `replay-history` now semantically traverses chain blocks,
+  extracts `publish-artifact` / `record-certificate` events, replays
+  federation transitions in order, checks finality anchoring, validates state
+  and proposal/certificate consistency, and enforces epoch monotonicity.
 - Current limitation: Lean implementation does not yet decode canonical artifact
-  bodies for full replay parity with `verifier-rust/` (for example full block /
-  transition traversal and finality-anchor replay checks).
+  bodies for full replay parity with `verifier-rust/` (for example signature/
+  quorum verification and exact replica-manifest digest binding).
