@@ -67,6 +67,67 @@ inductive KernelResult where
   | exhausted (limit : String)
   deriving Repr, BEq, DecidableEq
 
+namespace CKC
+
+/-- Protocol identity is defined by digest equality. -/
+def ProtocolIdentity (a b : Digest) : Prop :=
+  a = b
+
+/-- Cryptographic collision resistance remains an explicit external assumption. -/
+def CollisionResistanceAssumption : Prop :=
+  True
+
+structure GenericMachineRef where
+  digest : Digest
+  deriving Repr, BEq, DecidableEq
+
+structure LanguageRef where
+  digest : Digest
+  machine : GenericMachineRef
+  deriving Repr, BEq, DecidableEq
+
+structure AcceptanceConstitutionRef where
+  digest : Digest
+  deriving Repr, BEq, DecidableEq
+
+structure FreeChangeWitness where
+  source : LanguageRef
+  result : LanguageRef
+  kernelId : String
+  deriving Repr, BEq, DecidableEq
+
+/-- Free-change is indexed by the active kernel constitution. -/
+def FreeChange (K : KernelConstitution) (L : LanguageRef) : FreeChangeWitness :=
+  let d := s!"delta({K.kernelId},{L.digest})"
+  let out : LanguageRef := { digest := d, machine := L.machine }
+  { source := L, result := out, kernelId := K.kernelId }
+
+theorem freeChange_preserves_machine (K : KernelConstitution) (L : LanguageRef) :
+    (FreeChange K L).result.machine = L.machine := by
+  rfl
+
+inductive Judgment where
+  | resolve (digest : Digest)
+  | languageAt (language : LanguageRef)
+  | freeChangeLanguage (language : LanguageRef)
+  | applyChange (language : LanguageRef) (stateDigest : Digest) (changeDigest : Digest)
+  | accept
+      (rho : AcceptanceConstitutionRef)
+      (authority : Digest)
+      (claim : Digest)
+      (proof : Digest)
+  | replayHistory (federationId : Digest) (genesisState : Digest)
+  deriving Repr, BEq, DecidableEq
+
+inductive Verdict (α : Type) where
+  | valid (value : α) (evidence : Digest)
+  | invalid (error : String)
+  | missing (closure : List Digest)
+  | exhausted (limit : String)
+  deriving Repr, BEq, DecidableEq
+
+end CKC
+
 structure Context where
   artifacts : Std.HashMap Digest Artifact
   certs : Std.HashMap Digest CertificateProjection
@@ -902,6 +963,67 @@ def derive (ctx : Context) (constitution : KernelConstitution) (budget : Budget)
   match evaluated with
   | .ok value => .valid value (evidenceOf constitution query value)
   | .error e => classifyError e
+
+namespace CKC
+
+/-- Executable judgment relation: `Sigma;K;B ⊢ q ⇓ r`. -/
+def Derives
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (q : Query)
+    (r : KernelResult) : Prop :=
+  derive Sigma K B q = r
+
+/-- Value-level form of the CKC judgment. -/
+def DerivesValue
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (q : Query)
+    (v : Value) : Prop :=
+  ∃ evidence, Derives Sigma K B q (.valid v evidence)
+
+/-- Executable correspondence (left-to-right and right-to-left by definition). -/
+theorem kernelVerify_iff_derives
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (q : Query)
+    (r : KernelResult) :
+    derive Sigma K B q = r ↔ Derives Sigma K B q r := by
+  rfl
+
+/-- Result determinism: one query under one closure/constitution/budget has one result. -/
+theorem result_deterministic
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (q : Query)
+    (r1 r2 : KernelResult)
+    (h1 : Derives Sigma K B q r1)
+    (h2 : Derives Sigma K B q r2) :
+    r1 = r2 := by
+  unfold Derives at h1 h2
+  exact h1.symm.trans h2
+
+/-- Semantic determinism for successful derivations. -/
+theorem valid_deterministic
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (q : Query)
+    (v1 v2 : Value)
+    (e1 e2 : Digest)
+    (h1 : Derives Sigma K B q (.valid v1 e1))
+    (h2 : Derives Sigma K B q (.valid v2 e2)) :
+    v1 = v2 ∧ e1 = e2 := by
+  have hr : (.valid v1 e1 : KernelResult) = .valid v2 e2 :=
+    result_deterministic Sigma K B q (.valid v1 e1) (.valid v2 e2) h1 h2
+  cases hr
+  exact ⟨rfl, rfl⟩
+
+end CKC
 
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
   let mkValid := fun (q : Query) (v : Value) => KernelResult.valid v (evidenceOf constitution q v)
