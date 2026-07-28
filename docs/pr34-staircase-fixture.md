@@ -73,6 +73,15 @@ And it now freezes one governed reconstruction policy choice:
 
 - replay max-steps profile used for promoted `G1` replay evidence.
 
+The promoted handoff also freezes the successor world's reconstructed state:
+
+- final `S_{n+1}` digest,
+- final epoch,
+- verified transition count.
+
+That means the next foundation step can consume the handoff payload directly
+instead of re-deriving the successor state from ambient host policy.
+
 ## Conformance procedure
 
 Run these checks from repository root:

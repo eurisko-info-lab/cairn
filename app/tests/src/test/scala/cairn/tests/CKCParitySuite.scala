@@ -98,6 +98,9 @@ class CKCParitySuite extends munit.FunSuite:
       acceptanceDigest: Digest,
       federationId: Digest,
       genesisState: Digest,
+      finalStateDigest: Digest,
+      finalEpoch: Long,
+      verifiedTransitions: Int,
       manifestDigest: Digest,
       cert1Digest: Digest,
       cert2Digest: Digest,
@@ -121,6 +124,9 @@ class CKCParitySuite extends munit.FunSuite:
       "acceptanceDigest" -> Canon.CStr(acceptanceDigest.hex),
       "federationId" -> Canon.CStr(federationId.hex),
       "genesisState" -> Canon.CStr(genesisState.hex),
+      "finalStateDigest" -> Canon.CStr(finalStateDigest.hex),
+      "finalEpoch" -> Canon.CInt(finalEpoch),
+      "verifiedTransitions" -> Canon.CInt(verifiedTransitions),
       "manifestDigest" -> Canon.CStr(manifestDigest.hex),
       "cert1Digest" -> Canon.CStr(cert1Digest.hex),
       "cert2Digest" -> Canon.CStr(cert2Digest.hex),
@@ -275,7 +281,10 @@ class CKCParitySuite extends munit.FunSuite:
     val replayBudget = CKC.Budget(maxSteps = scalaBudget.maxSteps)
     val replayG1 = CKC.derive(scalaConstitution, replayBudget,
       CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState))
+    val replayReportValue = replayReport(replayG1)
+
     PromotedFoundation(
+
       kernelId = scalaConstitution.kernelId,
       replayMaxSteps = replayBudget.maxSteps,
       languageDigest = replayFixture.languageDigest,
@@ -292,6 +301,9 @@ class CKCParitySuite extends munit.FunSuite:
       federationId = replayFixture.federationId,
       genesisState = replayFixture.genesisState,
       manifestDigest = certFixture.manifestDigest,
+      finalStateDigest = replayReportValue.finalState,
+      finalEpoch = replayReportValue.finalEpoch,
+      verifiedTransitions = replayReportValue.verifiedTransitions,
       cert1Digest = certFixture.cert1.digest,
       cert2Digest = certFixture.cert2.digest,
       resolveEvidenceG0 = validEvidence(resolveG0),
@@ -349,6 +361,10 @@ class CKCParitySuite extends munit.FunSuite:
   private def validEvidence(result: CKC.KernelResult): Digest = result match
     case CKC.KernelResult.Valid(_, evidence) => evidence
     case other => fail(s"expected valid result with evidence, got $other")
+
+  private def replayReport(result: CKC.KernelResult): CKC.HistoryReport = result match
+    case CKC.KernelResult.Valid(CKC.Value.ReplayedState(report), _) => report
+    case other => fail(s"expected replay report, got $other")
 
   test("PR34 parity: real corpus agrees on resolve, cert binding, replay, and verdict classes"):
     assume(cargoAvailable, "cargo not on PATH")
@@ -584,7 +600,7 @@ class CKCParitySuite extends munit.FunSuite:
   test("PR34 first promoted foundation artifact set is reproducible"):
     val a = buildPromotedFoundation()
     val b = buildPromotedFoundation()
-    val expectedFoundationDigest = "ac246b2e3ee2a3e704cc02d4b01e6d41cf70295f31f569f118016ab4849bd3f4"
+    val expectedFoundationDigest = "063114ddd638aa642ecb84eb8e674657253e9d688a63915900462266cfe051ba"
     assertEquals(a.kernelId, b.kernelId)
     assertEquals(a.replayMaxSteps, b.replayMaxSteps)
     assertEquals(a.languageDigest, b.languageDigest)

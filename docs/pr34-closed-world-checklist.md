@@ -113,11 +113,11 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 ### I. Foundation handoff discipline
 
 - [x] Freeze `Cairn_n` step artifacts and canonical verdicts before upgrades.
-- [~] Represent remaining trusted host choices as constituted artifacts.
+- [x] Represent remaining trusted host choices as constituted artifacts.
 - [ ] Define/extend change languages for those newly constituted choices.
 - [ ] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
 - [x] Reconstruct `G_{n+1}` independently in Scala and Rust.
-- [ ] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
+- [x] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
 - [ ] Remove obsolete scaffolding from `Cairn_n` after promotion.
 
 ## Minimal world fixture
