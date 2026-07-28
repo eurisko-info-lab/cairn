@@ -321,3 +321,21 @@ class CKCParitySuite extends munit.FunSuite:
     ))._1
     assertEquals(rustMalformed, "invalid")
     assertEquals(leanMalformed, "invalid")
+
+    val rustMalformedOverride = rust(Seq(
+      "staircase-check",
+      "--g0", g0.hex,
+      "--g1", g1.hex,
+      "--delta", delta.hex,
+      "--link-successor", malformedDigest,
+    ))._1
+    val leanMalformedOverride = lean(Seq(
+      "staircase-check",
+      g0.hex,
+      g1.hex,
+      delta.hex,
+      g0.hex,
+      malformedDigest,
+    ))._1
+    assertEquals(rustMalformedOverride, "invalid")
+    assertEquals(leanMalformedOverride, "invalid")
