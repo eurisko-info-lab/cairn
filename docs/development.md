@@ -37,6 +37,8 @@ and Lean CKC façades must agree on a real corpus spanning canonical resolution,
 closure traversal, free-change witness validation, real change application,
 proof and acceptance evaluation, native repository replay, proposal/certificate
 verification, federation history reconstruction, and all four verdict classes.
+The execution checklist and commit-slice plan are tracked in
+[docs/pr34-closed-world-checklist.md](pr34-closed-world-checklist.md).
 
 ## Lean verifier (PR34 companion)
 

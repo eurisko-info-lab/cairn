@@ -88,7 +88,7 @@ remaining gaps.
 | PR31 | Atomic federation | ✅ |
 | PR32 | Canonical replayable federation history | ✅ |
 | PR33 | Real multi-process federation | ✅ |
-| PR34 | Independent full-state verifier | ⬜ |
+| PR34 | Independent full-state verifier | 🔶 |
 | PR35 | Retention constitutions and semantic archives | ⬜ |
 | PR36 | Federated production SDS Studio | ⬜ |
 | PR37 | Cairn 1.0 protocol and security freeze | ⬜ |
@@ -300,6 +300,9 @@ canonical bytes rather than comparing recorded outcome digests, producing its
 own `VerifiedFederation`. This is also where PR29's conformance evidence
 becomes real independent execution rather than recorded matching digests.
 
+Execution checklist and commit slices:
+[docs/pr34-closed-world-checklist.md](docs/pr34-closed-world-checklist.md).
+
 Implementation has begun under `verifier-rust/` as an independent Rust crate with
 canonical decode, CAS digest checks, replica-set seal verification,
 certificate/proposal binding verification, and ledger-anchored federation
@@ -307,13 +310,27 @@ history replay verification; deeper full-runtime semantic replay extends from
 that foundation. A companion Lean implementation in `verifier-lean/` mirrors
 the same CKC judgment structure for independent executable checking.
 
-PR34 is complete only when `ScalaCKC(Σ, K, q) = RustCKC(Σ, K, q) = LeanCKC(Σ, K, q)`
-over a real corpus that covers canonical resolution, language and machine
-closure, free-change witness validation, real change application, proof and
-acceptance evaluation, native repository replay, proposal and certificate
-verification, federation history reconstruction, and all four verdict classes.
-The current foundation covers federation semantics and the shared CKC shape,
-but the full cross-implementation identity corpus still needs to be widened.
+PR34 is complete only when the package contains both (1) one universal
+determinism/uniqueness result for replay under a fixed canonical history and
+constitution, and (2) one substantial inhabited end-to-end world that exercises
+change, acceptance, repository replay, federation finality, retention, and
+reconstruction. This is intentionally stronger than a single successful run but
+does not require uniqueness among all conceivable valid histories.
+
+The proof obligations are:
+
+- replay determinism for a fixed finalized history (`Replay_K(H)` has one result);
+- finality safety at each federation position (no two finalized successors for
+  the same slot under the quorum model);
+- exact canonical verdict identity between independent executable
+  interpretations:
+  `Canon(ScalaCKC(B)) == Canon(RustCKC(B))` for shared canonical input `B`.
+
+Lean defines and proves the semantic relation and safety properties; Scala is
+the production implementation; Rust is the independent executable
+interpretation used for reconstruction parity. The current foundation covers
+federation semantics and the shared CKC shape, but the full cross-implementation
+identity corpus still needs to be widened to that closed minimal world.
 
 #### PR35 — Retention constitutions and semantic archives
 

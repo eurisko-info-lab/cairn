@@ -2,9 +2,7 @@ package cairn.runtime
 
 import cairn.core.*
 import cairn.kernel.*
-import cairn.runtime.EffectContexts
 import cairn.systemhandler.{DiskCas, FederationFinality, Node}
-import cairn.systeminterface.Cas
 import java.nio.file.Path
 
 /** CKC façade for Scala: one query/result vocabulary over the existing
@@ -40,10 +38,7 @@ object CKC:
   final case class HistoryReport(verifiedTransitions: Int, finalState: Digest, finalEpoch: Long)
 
   final case class ReplayBundle(
-      node: Node,
-      cas: Cas,
-      closure: List[Digest],
-      history: List[Digest],
+      nodeRoot: String,
       genesisState: FederationState,
   )
 
@@ -94,25 +89,20 @@ object CKC:
     val cas = DiskCas(Path.of(casRoot))
     for
       certArtifact <- cas.getByDigest(cert)
-      certValue <- FederationFinality.FederationFinalityCertificate.fromCanon(certArtifact.body)
       proposalArtifact <- cas.getByDigest(proposal)
-      proposalValue <- FederationFinality.FederationProposal.fromArtifact(proposalArtifact)
       manifestArtifact <- cas.getByDigest(manifest)
-      manifestValue <- ReplicaSetManifest.fromCanon(manifestArtifact.body)
-      _ <- FederationFinality.verifyCertificateForProposal(certValue, proposalValue, manifestValue)
     yield Context()
       .withArtifact(certArtifact)
       .withArtifact(proposalArtifact)
       .withArtifact(manifestArtifact)
 
   private def loadReplay(nodeRoot: String, federationId: Digest, genesisState: Digest): Either[String, ReplayBundle] =
-    val node = Node(Path.of(nodeRoot), EffectContexts.forLedger())
+    val cas = DiskCas(Path.of(nodeRoot))
+    val _ = federationId
     for
-      digests <- FederationGc.orderedTransitionDigests(node)
-      closure <- FederationGc.permanentHistoryRoots(node, node.cas).map(_.toList.sortBy(_.hex))
-      genesisArtifact <- node.cas.getByDigest(genesisState)
-      genesis <- FederationState.fromArtifact(genesisArtifact)
-    yield ReplayBundle(node, node.cas, closure, digests, genesis)
+      genesisArtifact <- cas.getByDigest(genesisState)
+      decodedGenesis <- FederationState.fromArtifact(genesisArtifact)
+    yield ReplayBundle(nodeRoot, decodedGenesis)
 
   private def deriveSemantic(constitution: KernelConstitution, budget: Budget, query: SemanticQuery, context: Context): KernelResult =
     query match
@@ -146,15 +136,25 @@ object CKC:
         context.replay match
           case None => KernelResult.Invalid("missing replay bundle")
           case Some(bundle) =>
-            if bundle.history.length > budget.maxSteps then
-              KernelResult.Exhausted(s"max_steps ${budget.maxSteps} exceeded by ${bundle.history.length} transitions")
-            else
-              FederationHistory.replayFromGenesis(bundle.node, bundle.cas, bundle.genesisState, federationId) match
-                case Left(err) => classifyError(err)
-                case Right(finalState) =>
-                  val report = HistoryReport(bundle.history.length, finalState.digest, bundle.history.length.toLong)
-                  val value = Value.ReplayedState(report)
-                  KernelResult.Valid(value, evidenceOf(constitution, query, value))
+            val node = Node(Path.of(bundle.nodeRoot), EffectContexts.forLedger())
+            FederationGc.orderedTransitionDigests(node) match
+              case Left(err) => classifyError(err)
+              case Right(history) =>
+                if history.length > budget.maxSteps then
+                  KernelResult.Exhausted(s"max_steps ${budget.maxSteps} exceeded by ${history.length} transitions")
+                else
+                  FederationHistory.replayFromGenesis(node, node.cas, bundle.genesisState, federationId) match
+                    case Left(err) => classifyError(err)
+                    case Right(finalState) =>
+                      val epochArtifact = node.cas.getByDigest(finalState.gcEpoch) match
+                        case Left(err) => return classifyError(err)
+                        case Right(artifact) => artifact
+                      ReplicatedGcEpoch.fromArtifact(epochArtifact) match
+                        case Left(err) => classifyError(err)
+                        case Right(epoch) =>
+                          val report = HistoryReport(epoch.number.toInt, finalState.digest, epoch.number)
+                          val value = Value.ReplayedState(report)
+                          KernelResult.Valid(value, evidenceOf(constitution, query, value))
 
   def derive(constitution: KernelConstitution, budget: Budget, query: Query): KernelResult =
     query match

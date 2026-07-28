@@ -638,7 +638,7 @@ def sha256HexOfBytes (bytes : ByteArray) : IO (Except String Digest) := do
   try
     IO.FS.writeBinFile tmpPath bytes
     let out ← IO.Process.output {
-      cmd := "sha256sum"
+      cmd := "/usr/bin/sha256sum"
       args := #[tmpPath.toString]
       stdin := .null
       stderr := .piped
@@ -897,25 +897,48 @@ def isMissingCasError (e : String) : Bool :=
 def reprStr {α : Type} [Repr α] (x : α) : String :=
   toString (repr x)
 
-def fnvPrime : UInt64 := 1099511628211
+def queryCanon : SemanticQuery → Canon
+  | .resolve digest => .tag "resolve" (.str digest)
+  | .verifyCertBinding cert proposal manifest => .tag "verify-cert-binding" (.map [
+      ("cert", .str cert),
+      ("proposal", .str proposal),
+      ("manifest", .str manifest)
+    ])
+  | .replayHistory federationId genesisState => .tag "replay-history" (.map [
+      ("federationId", .str federationId),
+      ("genesisState", .str genesisState)
+    ])
 
-def fnvOffset : UInt64 := 14695981039346656037
+def valueCanon : Value → Canon
+  | .artifact artifact => .tag "artifact" (.str artifact.digest)
+  | .certBinding cert proposal manifest => .tag "cert-binding" (.map [
+      ("cert", .str cert),
+      ("proposal", .str proposal),
+      ("manifest", .str manifest)
+    ])
+  | .replayedState report => .tag "replayed-state" (.map [
+      ("verifiedTransitions", .int (Int.ofNat report.verifiedTransitions)),
+      ("finalState", .str report.finalState),
+      ("finalEpoch", .int (Int.ofNat report.finalEpoch))
+    ])
 
-def fnv1a (s : String) : UInt64 :=
-  s.toUTF8.data.foldl
-    (fun h b => (h ^^^ UInt64.ofNat b.toNat) * fnvPrime)
-    fnvOffset
+def evidenceBytes (constitution : KernelConstitution) (query : SemanticQuery) (value : Value) : ByteArray :=
+  encodeCanon (.map [
+    ("kernelId", .str constitution.kernelId),
+    ("query", queryCanon query),
+    ("value", valueCanon value)
+  ])
 
 def evidenceOf (constitution : KernelConstitution) (query : SemanticQuery) (value : Value) : Digest :=
-  let payload :=
-    constitution.kernelId ++ "|" ++ reprStr query ++ "|" ++ reprStr value
-  toString (fnv1a payload)
+  toString (hashBytes64 (evidenceBytes constitution query value))
+
+def evidenceOfIO (constitution : KernelConstitution) (query : SemanticQuery) (value : Value) : IO (Except String Digest) :=
+  sha256HexOfBytes (evidenceBytes constitution query value)
 
 def classifyError (err : String) : KernelResult :=
-  if err.startsWith "kernel exhausted:" then
-    KernelResult.exhausted (((err.drop 17).trimAscii).toString)
-  else
-    KernelResult.invalid err
+  if err.startsWith "kernel exhausted:" then KernelResult.exhausted (((err.drop 17).trimAscii).toString)
+  else if err.contains "not in CAS" then KernelResult.missing (extractHex64Tokens err)
+  else KernelResult.invalid err
 
 def missingClosureForHistory (ctx : Context) (xs : List Transition) : List Digest :=
   let one := fun (t : Transition) =>
@@ -1824,6 +1847,13 @@ def loadReplayHistoryBundleIO
       return .ok (replayBundleForHistory transitions)
 
 def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Query) : IO KernelResult := do
+  let finalize (result : KernelResult) : IO KernelResult := do
+    match result with
+    | .valid value _ =>
+        match ← evidenceOfIO constitution (toSemanticQuery query) value with
+        | .ok evidence => pure (.valid value evidence)
+        | .error e => pure (.invalid e)
+    | other => pure other
   match query with
   | .resolve casRoot digest =>
       let root := System.FilePath.mk casRoot
@@ -1835,7 +1865,7 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
             pure (KernelResult.invalid e)
       | .ok a =>
           let ctx := contextForResolve digest a
-          pure (derive ctx constitution budget (toSemanticQuery query))
+          finalize (derive ctx constitution budget (toSemanticQuery query))
   | .verifyCertBinding casRoot cert proposal manifest =>
       match ← verifyRuntimeDependenciesIO with
       | .error e =>
@@ -1904,7 +1934,7 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
                             pure (KernelResult.invalid "certificate federationId projection does not match proposal")
                           else
                             let ctx := contextForVerifyCert cert proposal manifest certView
-                            pure (derive ctx constitution budget (toSemanticQuery query))
+                            finalize (derive ctx constitution budget (toSemanticQuery query))
             | .error e, _, _ =>
                 pure (KernelResult.invalid e)
             | _, .error e, _ =>
@@ -1924,7 +1954,7 @@ def deriveIO (constitution : KernelConstitution) (budget : Budget) (query : Quer
       | .ok _ => pure ()
       match ← loadReplayHistoryBundleIO nodeRoot federationId genesisState with
       | .error r => pure r
-      | .ok bundle => pure (derive bundle.context constitution budget (toSemanticQuery query))
+      | .ok bundle => finalize (derive bundle.context constitution budget (toSemanticQuery query))
 
 def KernelResult.isValid : KernelResult → Bool
   | .valid _ _ => true

@@ -211,7 +211,7 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustResolveKind, "valid")
     assertEquals(leanResolveKind, "valid")
     assertEquals(scalaResolve(validResolve), rustResolveEvidence)
-    assert(leanResolveEvidence.nonEmpty)
+    assertEquals(leanResolveEvidence, scalaResolve(validResolve))
 
     val missingDigest = Digest.of(Canon.CStr("ckc-parity-missing-resolve"))
     assertEquals(classifyScala(scalaRun(CKC.Query.Resolve(replayFixture.casRoot.toString, missingDigest))), "missing")
@@ -234,13 +234,16 @@ class CKCParitySuite extends munit.FunSuite:
     val (leanReplayKind, leanReplayEvidence) = lean(Seq("replay-history", replayFixture.nodeRoot.toString, replayFixture.federationId.hex, replayFixture.genesisState.hex))
     assertEquals(rustReplayKind, "valid")
     assertEquals(leanReplayKind, "valid")
-    assert(rustReplayEvidence.nonEmpty)
-    assert(leanReplayEvidence.nonEmpty)
+    assertEquals(rustReplayEvidence, scalaResolve(validReplay))
+    assertEquals(leanReplayEvidence, scalaResolve(validReplay))
+    validReplay match
+      case CKC.KernelResult.Valid(CKC.Value.ReplayedState(report), _) => assertEquals(report.finalEpoch, 2L)
+      case other => fail(s"expected replay state, got $other")
 
     val exhaustedReplay = scalaRun(CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, replayFixture.federationId, replayFixture.genesisState), CKC.Budget(maxSteps = 0))
     assertEquals(classifyScala(exhaustedReplay), "exhausted")
     assertEquals(rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString, "--federation-id", replayFixture.federationId.hex, "--genesis-state", replayFixture.genesisState.hex, "--max-steps", "0"))._1, "exhausted")
-    assert(lean(Seq("--max-steps", "0", "replay-history", replayFixture.nodeRoot.toString, replayFixture.federationId.hex, replayFixture.genesisState.hex))._1.nonEmpty)
+    assertEquals(lean(Seq("--max-steps", "0", "replay-history", replayFixture.nodeRoot.toString, replayFixture.federationId.hex, replayFixture.genesisState.hex))._1, "exhausted")
 
     val wrongReplay = scalaRun(CKC.Query.ReplayHistory(replayFixture.nodeRoot.toString, Digest.of(Canon.CStr("ckc-parity-wrong-federation")), replayFixture.genesisState))
     assertEquals(classifyScala(wrongReplay), "invalid")
