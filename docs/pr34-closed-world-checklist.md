@@ -23,6 +23,27 @@ Authority comes from finality selection plus replay determinism.
 Canonical wire schema for the current scaffold:
 [docs/pr34-envelope-schema.md](pr34-envelope-schema.md).
 
+## Current external blocker
+
+As of commit `7dbbc5fddcdec16aff07d73bb6bd68f7d6bae2f6`, Stratum bootstrap
+completion is blocked on missing top-level Cairn command surface.
+
+Required commands not exposed at that commit:
+
+- `verify-application`
+- `verify-foundation`
+- `derive`
+- `export-closure`
+- `import-closure`
+
+Reported evidence is captured in `s0-bootstrap-surface-report.md`
+(tracked outside this repository).
+
+Unblock options:
+
+1. Expose the required bootstrap command surface in Cairn and repin Stratum.
+2. Repin Stratum to a Cairn revision that already exposes this surface.
+
 ## Core obligations
 
 1. Replay determinism on fixed finalized history

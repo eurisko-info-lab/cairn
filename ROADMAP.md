@@ -362,6 +362,13 @@ The proof obligations are:
   interpretations:
   `Canon(ScalaCKC(B)) == Canon(RustCKC(B))` for shared canonical input `B`.
 
+Current external blocker (Stratum bootstrap): at commit
+`7dbbc5fddcdec16aff07d73bb6bd68f7d6bae2f6`, the top-level commands
+`verify-application`, `verify-foundation`, `derive`, `export-closure`, and
+`import-closure` are not exposed. Stratum completion is blocked pending either
+command-surface exposure in Cairn or Stratum repinning to a revision that
+already provides it.
+
 Lean defines and proves the semantic relation and safety properties; Scala is
 the production implementation; Rust is the independent executable
 interpretation used for reconstruction parity. The current foundation covers
