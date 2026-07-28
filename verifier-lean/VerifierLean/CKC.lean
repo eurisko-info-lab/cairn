@@ -1156,6 +1156,36 @@ def deriveFreeChangeLanguage
         }
         .valid (w.result.digest, ev) s!"freeChange@{K.kernelId}:{w.result.digest}"
 
+theorem languageAt_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (L : LanguageRef)
+    (v1 v2 : Value)
+    (w1 w2 : Digest)
+    (h1 : deriveLanguageAt Sigma K L = .valid v1 w1)
+    (h2 : deriveLanguageAt Sigma K L = .valid v2 w2) :
+    v1 = v2 ∧ w1 = w2 := by
+  have h : (.valid v1 w1 : Verdict Value) = .valid v2 w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl⟩
+
+theorem freeChange_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (L : LanguageRef)
+    (d1 d2 : Digest)
+    (e1 e2 : FreeChangeEvidence)
+    (w1 w2 : Digest)
+    (h1 : deriveFreeChangeLanguage Sigma K B L = .valid (d1, e1) w1)
+    (h2 : deriveFreeChangeLanguage Sigma K B L = .valid (d2, e2) w2) :
+    d1 = d2 ∧ e1 = e2 ∧ w1 = w2 := by
+  have h : (.valid (d1, e1) w1 : Verdict (Digest × FreeChangeEvidence)) = .valid (d2, e2) w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl, rfl⟩
+
 theorem applyChange_semantic_determinism
     (Sigma : Context)
     (K : KernelConstitution)
