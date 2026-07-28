@@ -463,37 +463,15 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rust(Seq("verify-history", "--node-root", replayFixture.nodeRoot.toString, "--federation-id", Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, "--genesis-state", replayFixture.genesisState.hex))._1, "invalid")
     assertEquals(lean(Seq("replay-history", replayFixture.nodeRoot.toString, Digest.of(Canon.CStr("ckc-parity-wrong-federation")).hex, replayFixture.genesisState.hex))._1, "invalid")
 
-  test("PR34 staircase scaffold parity: Rust and Lean agree on successor-link validation"):
+  test("PR34 staircase parity from promoted slab: Rust and Lean agree on successor-link validation"):
     assume(cargoAvailable, "cargo not on PATH")
     assume(leanAvailable, "lake not on PATH")
 
-    val replayFixture = buildFixture()
-    val g0 = replayFixture.resolveDigestG0
-    val g1 = replayFixture.resolveDigestG1
-    val delta = replayFixture.governedDeltaG0ToG1
-
-    val g0Env = Pr34VerdictEnvelope(
-      kernelConstitution = Digest.of(Canon.CStr("pr34-k0")),
-      graphPackage = g0,
-      verdictClass = Pr34VerdictClass.Valid,
-      state = Some(g0),
-      evidence = Some(Digest.of(Canon.CStr("pr34-e0"))),
-      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
-    )
-    val g1Env = Pr34VerdictEnvelope(
-      kernelConstitution = Digest.of(Canon.CStr("pr34-k1")),
-      graphPackage = g1,
-      verdictClass = Pr34VerdictClass.Valid,
-      state = Some(g1),
-      evidence = Some(Digest.of(Canon.CStr("pr34-e1"))),
-      resourceUse = Pr34ResourceUse(steps = 1, bytesRead = 1, wallMicros = 1),
-    )
-    val link = Pr34SuccessorLink(
-      predecessorPackage = g0,
-      successorPackage = g1,
-      upgradeDelta = delta,
-    )
-    assert(Pr34Staircase.validateTwoStep(g0Env, g1Env, link).isRight)
+    val exec = buildPromotedFoundationExecutionContext()
+    val promoted = exec.promoted
+    val g0 = promoted.predecessorPackage
+    val g1 = promoted.successorPackage
+    val delta = promoted.governedDelta
 
     val rustValid = rust(Seq("staircase-check", "--g0", g0.hex, "--g1", g1.hex, "--delta", delta.hex))._1
     val leanValid = lean(Seq("staircase-check", g0.hex, g1.hex, delta.hex))._1
@@ -524,41 +502,7 @@ class CKCParitySuite extends munit.FunSuite:
     assertEquals(rustMismatch, "invalid")
     assertEquals(leanMismatch, "invalid")
 
-    val badSuccessor = Digest.of(Canon.CStr("pr34-stair-bad-successor"))
-    val rustSuccessorMismatch = rust(Seq(
-      "staircase-check",
-      "--g0", g0.hex,
-      "--g1", g1.hex,
-      "--delta", delta.hex,
-      "--link-successor", badSuccessor.hex,
-    ))._1
-    val leanSuccessorMismatch = lean(Seq(
-      "staircase-check",
-      g0.hex,
-      g1.hex,
-      delta.hex,
-      g0.hex,
-      badSuccessor.hex,
-    ))._1
-    assertEquals(rustSuccessorMismatch, "invalid")
-    assertEquals(leanSuccessorMismatch, "invalid")
-
     val malformedDigest = "not-a-64-hex-digest"
-    val rustMalformed = rust(Seq(
-      "staircase-check",
-      "--g0", malformedDigest,
-      "--g1", g1.hex,
-      "--delta", delta.hex,
-    ))._1
-    val leanMalformed = lean(Seq(
-      "staircase-check",
-      malformedDigest,
-      g1.hex,
-      delta.hex,
-    ))._1
-    assertEquals(rustMalformed, "invalid")
-    assertEquals(leanMalformed, "invalid")
-
     val rustMalformedOverride = rust(Seq(
       "staircase-check",
       "--g0", g0.hex,

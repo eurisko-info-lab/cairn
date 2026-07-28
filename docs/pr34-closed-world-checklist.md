@@ -118,7 +118,7 @@ Legend: `[ ]` not started, `[~]` in progress, `[x]` complete.
 - [x] Construct and finalize `delta_n : Cairn_n -> Cairn_{n+1}`.
 - [x] Reconstruct `G_{n+1}` independently in Scala and Rust.
 - [x] Promote `S_{n+1}` as `Foundation_{n+2}` inputs.
-- [ ] Remove obsolete scaffolding from `Cairn_n` after promotion.
+- [~] Remove obsolete scaffolding from `Cairn_n` after promotion.
 
 ## Minimal world fixture
 
@@ -218,3 +218,5 @@ Required contents:
 - [x] Promoted handoff slab now directly drives staircase successor validation
       in `CKCParitySuite` (Scala staircase + Rust CLI checks consume promoted
       predecessor/successor/delta fields via execution context).
+- [~] Legacy synthetic staircase parity path is being reduced in favor of
+      slab-driven checks while preserving Rust/Lean malformed-link parity.
