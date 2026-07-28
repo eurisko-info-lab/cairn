@@ -1041,6 +1041,16 @@ structure TransitionEvidence where
   resourceUse : Nat
   deriving Repr, BEq, DecidableEq
 
+structure AcceptanceEvidence where
+  constitutionDigest : Digest
+  authorityDigest : Digest
+  claimDigest : Digest
+  proofDigest : Digest
+  policyDigest : Digest
+  decisionDigest : Digest
+  resourceUse : Nat
+  deriving Repr, BEq, DecidableEq
+
 def deriveApplyChange
     (Sigma : Context)
     (K : KernelConstitution)
@@ -1083,6 +1093,49 @@ theorem applyChange_semantic_determinism
   cases h
   exact ⟨rfl, rfl, rfl⟩
 
+def deriveAccept
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest) : Verdict (Digest × AcceptanceEvidence) :=
+  let needed := [rho.digest, authority, claim, proof]
+  let missing := needed.filter (fun d => !(hasArtifact Sigma d)) |>.eraseDups
+  if !missing.isEmpty then
+    .missing missing
+  else if B.maxSteps == 0 then
+    .exhausted "max_steps 0: accept unavailable"
+  else
+    let policyDigest := s!"policy({K.kernelId},{rho.digest})"
+    let decisionDigest := s!"accept({policyDigest},{authority},{claim},{proof})"
+    let ev : AcceptanceEvidence := {
+      constitutionDigest := rho.digest
+      authorityDigest := authority
+      claimDigest := claim
+      proofDigest := proof
+      policyDigest := policyDigest
+      decisionDigest := decisionDigest
+      resourceUse := 1
+    }
+    .valid (claim, ev) s!"accept@{K.kernelId}:{decisionDigest}"
+
+theorem accept_semantic_determinism
+    (Sigma : Context)
+    (K : KernelConstitution)
+    (B : Budget)
+    (rho : AcceptanceConstitutionRef)
+    (authority claim proof : Digest)
+    (c1 c2 : Digest)
+    (e1 e2 : AcceptanceEvidence)
+    (w1 w2 : Digest)
+    (h1 : deriveAccept Sigma K B rho authority claim proof = .valid (c1, e1) w1)
+    (h2 : deriveAccept Sigma K B rho authority claim proof = .valid (c2, e2) w2) :
+    c1 = c2 ∧ e1 = e2 ∧ w1 = w2 := by
+  have h : (.valid (c1, e1) w1 : Verdict (Digest × AcceptanceEvidence)) = .valid (c2, e2) w2 :=
+    h1.symm.trans h2
+  cases h
+  exact ⟨rfl, rfl, rfl⟩
+
 /-- Unified executable CKC judgment facade over all specialized judgment forms. -/
 def deriveJudgment
     (Sigma : Context)
@@ -1117,8 +1170,13 @@ def deriveJudgment
       | .invalid e => .invalid e
       | .missing m => .missing m
       | .exhausted u => .exhausted u
-  | .accept _ _ _ _ =>
-      .invalid "accept judgment not yet wired to constitution evaluator"
+    | .accept rho authority claim proof =>
+      match deriveAccept Sigma K B rho authority claim proof with
+      | .valid (acceptedClaim, _) witness =>
+        .valid (.artifact { digest := acceptedClaim, kind := .other "accepted-claim" }) witness
+      | .invalid e => .invalid e
+      | .missing m => .missing m
+      | .exhausted u => .exhausted u
 
 def DerivesJudgment
     (Sigma : Context)
@@ -1159,6 +1217,21 @@ theorem deriveJudgment_apply_corresponds
       | .missing m => .missing m
       | .exhausted u => .exhausted u := by
   rfl
+
+    theorem deriveJudgment_accept_corresponds
+      (Sigma : Context)
+      (K : KernelConstitution)
+      (B : Budget)
+      (rho : AcceptanceConstitutionRef)
+      (authority claim proof : Digest) :
+      deriveJudgment Sigma K B (.accept rho authority claim proof) =
+        match deriveAccept Sigma K B rho authority claim proof with
+        | .valid (acceptedClaim, _) witness =>
+          .valid (.artifact { digest := acceptedClaim, kind := .other "accepted-claim" }) witness
+        | .invalid e => .invalid e
+        | .missing m => .missing m
+        | .exhausted u => .exhausted u := by
+      rfl
 
 theorem judgment_result_deterministic
     (Sigma : Context)
