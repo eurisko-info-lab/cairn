@@ -121,15 +121,17 @@ class Phase8Suite extends munit.FunSuite:
       }.toMap
 
   test("Charb dispositions pin source sha256 and SOURCES.md counts match ledger"):
-    assertEquals(dispositionHashes.size, 85)
+    val expectedCount = expectedDispositions.size
+    assertEquals(dispositionHashes.size, expectedCount)
     assert(dispositionHashes.values.forall(_.matches("[0-9a-f]{64}")), "expected sha256 hex")
     val src = readTranscriptSource(
       List("transcripts/SOURCES.md", "../transcripts/SOURCES.md"),
       "SOURCES.md missing")
     val counts = expectedDispositions.values.groupBy(identity).view.mapValues(_.size).toMap
+    val deferredCount = counts.getOrElse("deferred", 0)
     assert(src.contains(s"| Rich / thin runnable | ${counts("runnable")} |"), src)
     assert(src.contains(s"| **Porcelain-promoted** | ${counts("porcelain")} |"), src)
-    assert(src.contains(s"| Still `deferred` | ${counts("deferred")} |"), src)
+    assert(src.contains(s"| Still `deferred` | $deferredCount |"), src)
 
   test("all Charb YAML ports under transcripts/charb/ run"):
     val dirCandidates =
@@ -140,7 +142,8 @@ class Phase8Suite extends munit.FunSuite:
       java.nio.file.Files.list(dir).iterator().asScala
         .filter(p => p.getFileName.toString.endsWith(".cairn"))
         .toList.sortBy(_.getFileName.toString)
-    assertEquals(files.length, 85, s"expected 85 Charb ports, found ${files.length}")
+    val expectedCount = expectedDispositions.size
+    assertEquals(files.length, expectedCount, s"expected $expectedCount Charb ports, found ${files.length}")
     var deferred = 0
     var runnable = 0
     var porcelain = 0
@@ -180,7 +183,7 @@ class Phase8Suite extends munit.FunSuite:
             case None =>
               fail(s"missing pinned disposition for $name (regenerate dispositions.tsv)")
         case Left(e) => fail(s"${f.getFileName}: $e")
-    assertEquals(runnable + porcelain + deferred, 85)
+    assertEquals(runnable + porcelain + deferred, expectedCount)
     assertEquals(deferred, expectedDispositions.values.count(_ == "deferred"))
     assertEquals(porcelain, expectedDispositions.values.count(_ == "porcelain"))
     assertEquals(runnable, expectedDispositions.values.count(_ == "runnable"))

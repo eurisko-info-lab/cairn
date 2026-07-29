@@ -61,12 +61,11 @@ steps use), `Sync.compare` (mirror), and `Provenance.index` joined with
 `Branches.list`/`load` (object/run/commit) — not new engines, just names nobody
 had given them yet.
 
-## Still deferred (5)
+## Removed from Charb transcript suite (5)
 
-§8 out of scope or no engine yet — these need a genuinely new domain concept,
-not just a listing over something that exists: work-market (chain-work-scan/
--adjudication/-reward — no "work request" or reputation-scoring concept
-anywhere), stake registry, consensus-economics-phase1 (the ledger is append-only
-quorum publication, not stake-weighted consensus).
+These themes are intentionally omitted from the repository's Charb transcript
+suite because they are outside the current Cairn product scope: work-market
+(`chain-work-scan` / `chain-work-adjudication` / `chain-work-reward`),
+`stake-registry`, and `consensus-economics-phase1`.
 Regenerate with `python3 scripts/gen-charb-transcripts.py --source DIR` (then `--update-docs`).
 plumbing.

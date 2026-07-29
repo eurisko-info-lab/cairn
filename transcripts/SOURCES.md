@@ -17,17 +17,17 @@ CAIRN-PROMPT §7: *Transcripts are CI.*
 | `pki` / `law` / `sds-surface.cairn` | GRANITE Phase 8 | domain surfaces + free ΔL |
 | `minitt` / `leancore` / `unisoncore-surface.cairn` | CAIRN-PROMPT §2c | hosted-language surfaces |
 
-## Full Charb suite (`transcripts/charb/` — **85**/85)
+## Curated Charb suite (`transcripts/charb/` — **80**/80)
 
-Every `*-workflow.yaml` under a Charb transcripts checkout (pass `--source`)
-has a Cairn port. Counts below are **generated** from
+The Charb import now keeps only useful/runnable parity themes in this
+repository. Counts below are **generated** from
 `transcripts/charb/dispositions.tsv` — do not hand-edit.
 
 | Kind | Count | Mechanism |
 | --- | --- | --- |
 | Rich / thin runnable | 44 | publish/fetch, gossip, PKI, `expectfail` |
 | **Porcelain-promoted** | 36 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
-| Still `deferred` | 5 | §8 out of scope or no plumbing yet |
+| Still `deferred` | 0 | non-useful themes removed from this suite |
 
 Deferred-theme prioritization and promotion paths are tracked in
 [docs/charb-gap-report.md](../docs/charb-gap-report.md).
