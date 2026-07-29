@@ -26,8 +26,11 @@ has a Cairn port. Counts below are **generated** from
 | Kind | Count | Mechanism |
 | --- | --- | --- |
 | Rich / thin runnable | 44 | publish/fetch, gossip, PKI, `expectfail` |
-| **Porcelain-promoted** | 33 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
-| Still `deferred` | 8 | §8 out of scope or no plumbing yet |
+| **Porcelain-promoted** | 36 | `porcelain THEME ;` → `Plumbing.charbTheme` ([porcelain.md](../docs/porcelain.md)) |
+| Still `deferred` | 5 | §8 out of scope or no plumbing yet |
+
+Deferred-theme prioritization and promotion paths are tracked in
+[docs/charb-gap-report.md](../docs/charb-gap-report.md).
 
 Regenerate: `python3 scripts/gen-charb-transcripts.py --source DIR`
 (or `--pin-only` to refresh dispositions while preserving source hashes;

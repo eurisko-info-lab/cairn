@@ -48,6 +48,12 @@ Use MVP for the shortest language/change/proof/publication path. MAX adds
 runtime-loaded language text, path edits, queries, three-node gossip, and a host
 projection. The other top-level transcripts isolate specific domains.
 
+Transcript-driven test foundation:
+
+- `transcripts/test-manifest.tsv` lists curated transcripts that must execute in CI.
+- `expect-summary "..." ;` can be used inside a transcript to assert prior
+  step summaries (for example, requiring `published main` after `publish`).
+
 ## Artifact-only applications
 
 Given a source CAS and a root digest:

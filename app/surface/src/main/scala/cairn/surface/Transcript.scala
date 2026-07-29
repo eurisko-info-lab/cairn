@@ -56,7 +56,7 @@ object Transcript:
       keywords = List("transcript", "lang", "roundtrip", "eval", "expect",
         "delta", "claim", "publish", "fetch", "node", "on", "from", "to",
         "gossip", "port", "expect-tests-pass", "query", "expectfail", "load-language",
-        "deferred", "porcelain", "fork-from", "trunk", "of", "refer"),
+        "deferred", "porcelain", "fork-from", "trunk", "of", "refer", "expect-summary"),
       puncts = List("{", "}", ";", ","),
       lineComment = Some("--"),
       identContExtra = "_'-"),
@@ -81,6 +81,7 @@ object Transcript:
         ConstructorSpec("gossip", List(Elem.Tok("gossip"), Elem.SepBy1(Elem.NameLeaf, ","), Elem.Tok(";"))),
         ConstructorSpec("port", List(Elem.Tok("port"), Elem.NameLeaf, Elem.Tok("expect-tests-pass"), Elem.Tok(";"))),
         ConstructorSpec("query", List(Elem.Tok("query"), Elem.StrLeaf, Elem.Tok("expect"), Elem.NumLeaf, Elem.Tok(";"))),
+        ConstructorSpec("expectSummary", List(Elem.Tok("expect-summary"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("deferred", List(Elem.Tok("deferred"), Elem.StrLeaf, Elem.Tok(";"))),
         ConstructorSpec("porcelain", List(Elem.Tok("porcelain"), Elem.NameLeaf, Elem.Tok(";"))),
         ConstructorSpec("forkTrunk", List(
@@ -123,6 +124,8 @@ object Transcript:
       PrintRule("query", List(
         PrintSeg.Lit("query"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space,
         PrintSeg.Lit("expect"), PrintSeg.Space, PrintSeg.Field(1), PrintSeg.Space, PrintSeg.Lit(";"))),
+      PrintRule("expectSummary", List(
+        PrintSeg.Lit("expect-summary"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("deferred", List(
         PrintSeg.Lit("deferred"), PrintSeg.Space, PrintSeg.StrField(0), PrintSeg.Space, PrintSeg.Lit(";"))),
       PrintRule("porcelain", List(
@@ -434,6 +437,10 @@ object Transcript:
             _ <- if res.hits.length == expected.toInt then Right(())
                  else Left(s"query '$qsrc' returned ${res.hits.length} hits, expected $expected")
           yield ok(s"query ok: $qsrc => ${res.hits.length}")
+        case Cst.Node("expectSummary", List(Cst.Leaf(needle))) =>
+          val seen = log.result().map(_.summary)
+          if seen.exists(_.contains(needle)) then Right(())
+          else Left(s"expect-summary failed: '$needle' not found in prior step summaries")
         case Cst.Node("expectfail", List(Cst.Leaf(substring), inner)) =>
           runStep(inner) match
             case Left(err) if err.contains(substring) =>

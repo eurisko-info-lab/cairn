@@ -23,6 +23,23 @@ object Plumbing:
       replay: ReplayStore,
   )
 
+  /** Minimal deterministic mempool model for Phase-3 transcript parity.
+    *
+    * `seen` blocks duplicate/replay candidates by signed-tx digest across the
+    * lifetime of this model instance; `pending` holds txs waiting to append.
+    */
+  private final case class MempoolState(
+      pending: Vector[(Digest, SignedTx)] = Vector.empty,
+      seen: Set[Digest] = Set.empty,
+  ):
+    def enqueue(tx: SignedTx): Either[String, MempoolState] =
+      val id = Digest.of(tx.canon)
+      if seen.contains(id) then Left(s"duplicate tx ${id.short}")
+      else Right(copy(pending = pending :+ (id -> tx), seen = seen + id))
+
+    def drain: (List[SignedTx], MempoolState) =
+      (pending.map(_._2).toList, copy(pending = Vector.empty))
+
   def chainStatus(node: Node, authorities: Map[String, Vector[Byte]]): Either[String, String] =
     for
       digs <- Right(node.chainDigests)
@@ -224,6 +241,169 @@ object Plumbing:
          |$commits""".stripMargin
     }
 
+  /** Phase-3 mempool parity: pending queue, duplicate rejection, append, clear.
+    *
+    * This is intentionally narrow and deterministic so transcript assertions can
+    * verify pre-append visibility, duplicate prevention, and post-append drain.
+    */
+  def networkMempoolPhase3(node: Node): Either[String, String] =
+    val authority = Keypair.dev("mempool-authority")
+    val ledgerAuth = Map(authority.name -> authority.publicBytes)
+    for
+      st <- node.state(ledgerAuth)
+      _ <-
+        if st.identities.contains(authority.name) then Right(())
+        else
+          node.append(authority, ledgerAuth,
+            List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes)))).map(_ => ())
+      stAfterBootstrap <- node.state(ledgerAuth)
+      suffix = stAfterBootstrap.identities.size
+      txA = authority.signTx(Tx.RegisterIdentity(s"mempool-user-a-$suffix", authority.publicBytes))
+      txB = authority.signTx(Tx.RegisterIdentity(s"mempool-user-b-$suffix", authority.publicBytes))
+      s1 <- MempoolState().enqueue(txA)
+      dupRejected = s1.enqueue(txA).isLeft
+      s2 <- s1.enqueue(txB)
+      pendingBefore = s2.pending.size
+      (batch, drained) = s2.drain
+      _ <- node.append(authority, ledgerAuth, batch)
+      pendingAfter = drained.pending.size
+      replayRejected = drained.enqueue(txA).isLeft
+      chainHeight = node.chainDigests.size
+    yield
+      s"""network mempool phase3:
+         |  mempool pending-before=$pendingBefore
+         |  mempool duplicate-rejected=$dupRejected
+         |  mempool replay-rejected=$replayRejected
+         |  mempool appended=${batch.length}
+         |  mempool pending-after=$pendingAfter
+         |  chain-height=$chainHeight""".stripMargin
+
+  /** Compliance registry parity: publish canonical compliance reports and
+    * compute a deterministic drift summary against the current branch policy.
+    */
+  def complianceRegistry(node: Node): Either[String, String] =
+    val authority = Keypair.dev("compliance-authority")
+    val ledgerAuth = Map(authority.name -> authority.publicBytes)
+    def put(artifact: Artifact): Either[String, Unit] =
+      CasEffects.put(node.cas, artifact, node.ctx).left.map {
+        case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+        case cairn.systeminterface.Cas.Error.Io(m)      => m
+      }.map(_ => ())
+    for
+      st <- node.state(ledgerAuth)
+      _ <-
+        if st.identities.contains(authority.name) then Right(())
+        else
+          node.append(authority, ledgerAuth,
+            List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes)))).map(_ => ())
+      chainSeed = node.chainDigests.size
+      policyCurrent = Cst.Leaf(s"compliance-policy-current-$chainSeed")
+      policyLegacy = Cst.Leaf(s"compliance-policy-legacy-$chainSeed")
+      _ <- node.append(authority, ledgerAuth, List(authority.signTx(Tx.SetPolicy("compliance", policyCurrent))))
+      policyDigestCurrent = Digest.of(Cst.toCanon(policyCurrent))
+      policyDigestLegacy = Digest.of(Cst.toCanon(policyLegacy))
+      reportOk = Artifact(ArtifactKind.AuditReport, Canon.cmap(
+        "kind" -> Canon.CStr("compliance-report"),
+        "scope" -> Canon.CStr("branch:compliance"),
+        "policyDigest" -> Canon.CStr(policyDigestCurrent.hex),
+        "status" -> Canon.CStr("pass"),
+        "note" -> Canon.CStr("current policy")))
+      reportDrift = Artifact(ArtifactKind.AuditReport, Canon.cmap(
+        "kind" -> Canon.CStr("compliance-report"),
+        "scope" -> Canon.CStr("branch:compliance"),
+        "policyDigest" -> Canon.CStr(policyDigestLegacy.hex),
+        "status" -> Canon.CStr("pass"),
+        "note" -> Canon.CStr("stale policy")))
+      _ <- put(reportOk)
+      _ <- put(reportDrift)
+      _ <- node.append(authority, ledgerAuth, List(
+        authority.signTx(Tx.PublishArtifact(reportOk.key)),
+        authority.signTx(Tx.PublishArtifact(reportDrift.key))))
+      driftCount = List(reportOk, reportDrift).count { artifact =>
+        artifact.body.field("policyDigest").asStr != policyDigestCurrent.hex
+      }
+      total = 2
+      aligned = total - driftCount
+      chainHeight = node.chainDigests.size
+    yield
+      s"""compliance registry:
+         |  current-policy=${policyDigestCurrent.short}
+         |  reports total=$total aligned=$aligned drifted=$driftCount
+         |  report aligned=${reportOk.digest.short}
+         |  report drifted=${reportDrift.digest.short}
+         |  chain-height=$chainHeight""".stripMargin
+
+  /** Dependency lock evidence registry parity: publish manifest+lock+evidence
+    * artifacts and verify digest bindings deterministically.
+    */
+  def depsLockEvidenceRegistry(node: Node): Either[String, String] =
+    val authority = Keypair.dev("deps-evidence-authority")
+    val ledgerAuth = Map(authority.name -> authority.publicBytes)
+    def put(artifact: Artifact): Either[String, Unit] =
+      CasEffects.put(node.cas, artifact, node.ctx).left.map {
+        case cairn.systeminterface.Cas.Error.Missing(d) => s"blob ${d.short} not in CAS"
+        case cairn.systeminterface.Cas.Error.Io(m)      => m
+      }.map(_ => ())
+    for
+      st <- node.state(ledgerAuth)
+      _ <-
+        if st.identities.contains(authority.name) then Right(())
+        else
+          node.append(authority, ledgerAuth,
+            List(authority.signTx(Tx.RegisterIdentity(authority.name, authority.publicBytes)))).map(_ => ())
+      nonce = node.chainDigests.size
+      manifest = Artifact(ArtifactKind.Source, Canon.cmap(
+        "kind" -> Canon.CStr("dependency-manifest"),
+        "name" -> Canon.CStr(s"deps-$nonce"),
+        "packages" -> Canon.CList(List(
+          Canon.cmap("name" -> Canon.CStr("org.example.alpha"), "version" -> Canon.CStr("1.2.3")),
+          Canon.cmap("name" -> Canon.CStr("org.example.beta"), "version" -> Canon.CStr("4.5.6"))))))
+      lock = Artifact(ArtifactKind.Source, Canon.cmap(
+        "kind" -> Canon.CStr("dependency-lock"),
+        "manifestDigest" -> Canon.CStr(manifest.digest.hex),
+        "entries" -> Canon.CList(List(
+          Canon.cmap("name" -> Canon.CStr("org.example.alpha"), "resolved" -> Canon.CStr("sha256:alpha")),
+          Canon.cmap("name" -> Canon.CStr("org.example.beta"), "resolved" -> Canon.CStr("sha256:beta"))))))
+      evidenceOk = Artifact(ArtifactKind.Provenance, Canon.cmap(
+        "kind" -> Canon.CStr("deps-lock-evidence"),
+        "manifestDigest" -> Canon.CStr(manifest.digest.hex),
+        "lockDigest" -> Canon.CStr(lock.digest.hex),
+        "status" -> Canon.CStr("verified")))
+      staleLockDigest = Digest.of(Canon.CStr(s"stale-lock-$nonce"))
+      evidenceDrift = Artifact(ArtifactKind.Provenance, Canon.cmap(
+        "kind" -> Canon.CStr("deps-lock-evidence"),
+        "manifestDigest" -> Canon.CStr(manifest.digest.hex),
+        "lockDigest" -> Canon.CStr(staleLockDigest.hex),
+        "status" -> Canon.CStr("verified")))
+      _ <- put(manifest)
+      _ <- put(lock)
+      _ <- put(evidenceOk)
+      _ <- put(evidenceDrift)
+      _ <- node.append(authority, ledgerAuth, List(
+        authority.signTx(Tx.PublishArtifact(manifest.key)),
+        authority.signTx(Tx.PublishArtifact(lock.key)),
+        authority.signTx(Tx.PublishArtifact(evidenceOk.key)),
+        authority.signTx(Tx.PublishArtifact(evidenceDrift.key))))
+      alignedOk =
+        evidenceOk.body.field("manifestDigest").asStr == manifest.digest.hex &&
+          evidenceOk.body.field("lockDigest").asStr == lock.digest.hex &&
+          lock.body.field("manifestDigest").asStr == manifest.digest.hex
+      alignedDrift =
+        evidenceDrift.body.field("manifestDigest").asStr == manifest.digest.hex &&
+          evidenceDrift.body.field("lockDigest").asStr == lock.digest.hex &&
+          lock.body.field("manifestDigest").asStr == manifest.digest.hex
+      aligned = List(alignedOk, alignedDrift).count(identity)
+      drifted = 2 - aligned
+      chainHeight = node.chainDigests.size
+    yield
+      s"""deps-lock-evidence registry:
+         |  manifest=${manifest.digest.short}
+         |  lock=${lock.digest.short}
+         |  evidence total=2 aligned=$aligned drifted=$drifted
+         |  evidence aligned=${evidenceOk.digest.short}
+         |  evidence drifted=${evidenceDrift.digest.short}
+         |  chain-height=$chainHeight""".stripMargin
+
   /** Map a deferred Charb theme name onto porcelain/plumbing that exists today. */
   def charbTheme(name: String, env: Env): Either[String, String] =
     name match
@@ -267,6 +447,12 @@ object Plumbing:
         yield st + "\n" + a
       case "tx-state-phase2" =>
         txState(env.node, env.authorities)
+      case "network-mempool-phase3" =>
+        networkMempoolPhase3(env.node)
+      case "compliance-registry" =>
+        complianceRegistry(env.node)
+      case "deps-lock-evidence-registry" =>
+        depsLockEvidenceRegistry(env.node)
       case "incentive-positive" =>
         Right(
           "porcelain incentive-positive: revocation plumbing exists; " +

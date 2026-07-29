@@ -3,7 +3,10 @@
 -- Source-sha256: 2f977865b0402999c28aa9c0a8876ceff0c47831db411a685665dce56728ac74
 -- Source-revision: f1c8dbdf387595ae5505e8ef0090c05fd595aa70
 -- Description: Phase 3 networking/mempool command coverage
--- Deferred: needs new plumbing or stays §8 out of scope.
 transcript network-mempool-phase3 {
-  deferred "Charb/Marble CLI: Phase 3 networking/mempool command coverage — §8 out of scope or no Cairn plumbing yet (see docs/porcelain.md)" ;
+  porcelain network-mempool-phase3 ;
+  expect-summary "mempool pending-before=2" ;
+  expect-summary "mempool duplicate-rejected=true" ;
+  expect-summary "mempool replay-rejected=true" ;
+  expect-summary "mempool pending-after=0" ;
 }

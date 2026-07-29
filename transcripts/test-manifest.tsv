@@ -1,0 +1,16 @@
+# Transcript test manifest
+# Format: <relative transcript path>
+transcripts/mvp.cairn
+transcripts/repository-workflow.cairn
+transcripts/chain-sync.cairn
+transcripts/pki-surface.cairn
+transcripts/law-surface.cairn
+transcripts/sds-surface.cairn
+transcripts/e2e-path.cairn
+transcripts/chain-divergence.cairn
+transcripts/patch-conflict.cairn
+transcripts/multi-language.cairn
+transcripts/minitt-surface.cairn
+transcripts/leancore-surface.cairn
+transcripts/unisoncore-surface.cairn
+transcripts/sds-domain-journey.cairn

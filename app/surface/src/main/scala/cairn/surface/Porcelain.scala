@@ -47,6 +47,9 @@ object Porcelain:
     "governance-supplychain",
     "mirror-registry",
     "object-run-commit-registry",
+    "network-mempool-phase3",
+    "compliance-registry",
+    "deps-lock-evidence-registry",
   )
 
   def env(

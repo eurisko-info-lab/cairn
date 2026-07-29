@@ -11,5 +11,7 @@ transcript mvp {
   delta "{ rename id to ident footprint [] ; }" ;
   claim id_true "((fun x : Bool . x) true)" expect "true" ;
   publish main ;
+  expect-summary "published main" ;
   fetch main ;
+  expect-summary "fetched main" ;
 }
